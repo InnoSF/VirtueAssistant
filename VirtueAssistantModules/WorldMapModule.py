@@ -30,8 +30,7 @@ def _module_worldmap():
             if self.loaded: return
             self.loaded = True
             for k, v in Kit.codec_load(Kit.get_var(ATLAS_ON_KEY)).items(): self.on[k] = v != "0"
-            try: text = str(API.GetPersistentVar(ATLAS_PLACED_KEY, "", API.PersistentVar.Global) or "")
-            except Exception: text = ""
+            text = str(API.GetPersistentVar(ATLAS_PLACED_KEY, "", API.PersistentVar.Global) or "")
             for line in text.split("\n"):
                 p = line.split("|")
                 if len(p) == 5 and p[0].startswith(ATLAS_PREFIX):
@@ -71,12 +70,11 @@ def _module_worldmap():
             self.next_check = now + 0.25; ops = 0
             for name in list(self.placed):
                 if ops >= ATLAS_OPS: break
-                if self.want.get(name) != self.placed[name]:
-                    safe(lambda: API.RemoveMapMarker(name)); del self.placed[name]; ops += 1
+                if self.want.get(name) != self.placed[name]: API.RemoveMapMarker(name); del self.placed[name]; ops += 1
             for name, v in self.want.items():
                 if ops >= ATLAS_OPS: break
                 if name not in self.placed:
-                    safe(lambda: API.AddMapMarker(name, v[0], v[1], v[2], v[3])); self.placed[name] = v; ops += 1
+                    API.AddMapMarker(name, v[0], v[1], v[2], v[3]); self.placed[name] = v; ops += 1
             self.synced = self.want == self.placed; self._save()
         def thread_work(self):
             if not self.strip_pending and not self.loose: return
@@ -86,7 +84,7 @@ def _module_worldmap():
                 self.strip_pending = False; self.synced = self.want == self.placed
             if self.loose:
                 if is_open:
-                    for name in list(self.loose): safe(lambda: API.RemoveMapMarker(name))
+                    for name in list(self.loose): API.RemoveMapMarker(name)
                 else: self._strip_file()
                 self.loose.clear()
         def _save(self):
@@ -97,27 +95,21 @@ def _module_worldmap():
             self.items.clear(); self.want = {}; self.strip_pending = False
             if not self.placed and not self.loose: self.synced = True; return
             if self.map_open(True):
-                for name in list(self.placed) + list(self.loose): safe(lambda: API.RemoveMapMarker(name))
+                for name in list(self.placed) + list(self.loose): API.RemoveMapMarker(name)
                 self.placed.clear()
             elif self._strip_file(): self.placed.clear()
             self.loose.clear(); self.synced = not self.placed; self._save()
         def _strip_file(self):
-            try: exe = str(Tz.get(None, "ExecutablePath", Tz.T("ClassicUO.CUOEnviroment")))
-            except Exception:
-                try: exe = os.path.dirname(str(API.GetType().Assembly.Location))
-                except Exception: return False
-            folder = os.path.join(exe, "Data", "Client")
-            if not os.path.isdir(folder): return False
-            path = os.path.join(folder, "userMarkers.usr")
-            if not os.path.exists(path): return True
             try:
+                exe = str(Tz.get(None, "ExecutablePath", Tz.T("ClassicUO.CUOEnviroment")))
+                folder = os.path.join(exe, "Data", "Client")
+                if not os.path.isdir(folder): return False
+                path = os.path.join(folder, "userMarkers.usr")
+                if not os.path.exists(path): return True
                 import io
                 with io.open(path, "r", encoding="utf-8-sig") as f: lines = f.read().splitlines()
-                keep = []
-                for line in lines:
-                    p = line.split(",")
-                    if len(p) > 3 and (p[3] in self.placed or p[3] in self.loose): continue
-                    keep.append(line)
+                gone = set(self.placed) | self.loose
+                keep = [ln for ln in lines if len(ln.split(",")) < 4 or ln.split(",")[3] not in gone]
                 if len(keep) != len(lines):
                     with io.open(path, "w", encoding="utf-8") as f: f.write(u"".join(l + u"\n" for l in keep))
                 return True
@@ -129,10 +121,9 @@ def _module_worldmap():
     def atlas_page(owner):
         def draw(f, x, y):
             ATLAS_BOX[owner] = Kit.add_check(f.g, "Show %s on TazUO's World Map" % dict(ATLAS_OWNERS).get(owner, owner),
-                                             x + 12, y, ATLAS.is_on(owner), "Puts markers named \"%s...\" on TazUO's "
-                                             "World Map while it is open; they come off when this is unticked or the "
-                                             "part stops" % ATLAS_PREFIX)
-        return "TAZUO'S WORLD MAP  (while it is open)", (("custom", 26, draw),), {"sh": 66}
+                                             x + 12, y, ATLAS.is_on(owner), "Markers named \"%s...\" while the map is "
+                                             "open; removed when unticked or the part stops" % ATLAS_PREFIX)
+        return "TAZUO'S WORLD MAP  (while open)", (("custom", 26, draw),), {"sh": 66}
     def with_atlas(api, owner):
         old_poll, old_closed, old_stop = api["poll_config"], api["config_closed"], api["stop"]
         def poll():
@@ -152,28 +143,7 @@ def _module_worldmap():
         text = str(text or "")
         if not text or text[0] in "[(\"'" or text.startswith(JOURNAL_NAMES): return text
         return text[0].lower() + text[1:]
-    def read_checks(c, d, keys):
-        hit = []
-        for k in keys:
-            try: on = bool(c[k].IsChecked)
-            except Exception: continue
-            if on != d[k]: d[k] = on; hit.append(k)
-        return hit
     def list_h(rows, row_h): return 2 * Kit.MARGIN + 30 + 2 * Kit.GAP + 36 + 30 + rows * row_h + 8
-    def open_window(st, win, pos_key, mini, full, at, title, key, queue, close_tip=None):
-        w, h = mini if st["minimized"] else full; x, y = Kit.load_pos(pos_key, at, (w, h))
-        if Kit.is_open(win["g"]): x, y = win["g"].GetX(), win["g"].GetY()
-        old, win["g"] = win["g"], None; store, c, g = ({}, {}), {}, G.CreateGump(True, True)
-        if st["minimized"]:
-            c["status"] = Kit.mini_bar(g, store, w, h, title, key, queue("toggle_min"), close_tip=close_tip)
-        else:
-            Kit.add_window_frame(g, w, h)
-            Kit.title_bar(g, store, w, title, key, queue("toggle_min"), queue("to_bar"), queue("settings"),
-                          close_tip=close_tip)
-        return g, store, c, w, h, x, y, old
-    def show_window(g, x, y, w, h, st, win, disposed, pos_key, **parts):
-        Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], disposed(g),
-                        lambda: Kit.save_pos(pos_key, win["g"]), win, dict(parts, g=g))
     def row_clicker(rows_of, k, field, act, queue, lo=-1e9):
         def handler(*args):
             rows = rows_of()
@@ -283,7 +253,6 @@ def _module_worldmap():
                     with self.cond: self.q.clear(); self.cond.notify()
         class MapConnection(object):
             kind = "own"; owns_position = True; server_relays_ping = True; OFF, HANDSHAKE, LOGIN, READY = range(4)
-            STATE_NAMES = ["OFF", "HANDSHAKE", "LOGIN", "READY"]
             def __init__(self, host, port, user, password):
                 self.host, self.port, self.user, self.password = host, port, user, password
                 self.t = self.gave_up = self.connecting = self.sender = None; self.state = self.OFF
@@ -293,47 +262,38 @@ def _module_worldmap():
             def close(self):
                 if self.connecting is not None:
                     pend, self.connecting = self.connecting, None; pend["abandon"] = True
-                    if pend["done"] and pend["t"] is not None: safe(lambda: pend["t"].close())
-                if self.sender is not None: safe(self.sender.stop); self.sender = None
+                    if pend["done"] and pend["t"] is not None: pend["t"].close()
+                if self.sender is not None: self.sender.stop(); self.sender = None
                 if self.t: self.t.close()
                 self.t = None; self.state = self.OFF; self.buf = bytearray()
             def _drop(self, events, kind, detail, retry_in):
                 was = self.state; self.close(); now = time.time()
-                self._debug(events, "dropped in state %s: %s %s" % (self.STATE_NAMES[was], kind, detail))
                 if was == self.LOGIN and kind == "eof":
                     self.login_failures += 1
                     if self.login_failures >= 3:
-                        self.gave_up = ("The map server closed the connection during login 3 "
-                                        "times. Check the map username and password (World Map "
-                                        "settings page). If they are right, tick Print debug lines on the Modules tab.")
+                        self.gave_up = "Login refused 3 times. Check the map username and password."
                         events.append(("status", self.gave_up, True)); return
-                    events.append(("status", "The server closed the connection during login "
-                                             "(usually a wrong username or password). Retrying in "
-                                             "%d seconds." % retry_in, True))
+                    events.append(("status", "Login refused (wrong username or password?). Retrying in %d s."
+                                   % retry_in, True))
                 elif was == self.LOGIN:
-                    events.append(("status", "Problem while logging in (%s). Retrying in %d "
-                                             "seconds." % (detail, retry_in), True))
+                    events.append(("status", "Login problem (%s). Retrying in %d s." % (detail, retry_in), True))
                 elif was == self.READY:
                     if kind == "eof" and now - self.ready_since < 6:
-                        why = ("Logged in, but the server dropped the connection right away. Is "
-                               "this map account also logged in somewhere else (Enhanced Map, for example)?")
-                    elif kind == "eof": why = "Lost connection to the map server."
+                        why = "Dropped right after login. Is this map account logged in elsewhere (Enhanced Map)?"
+                    elif kind == "eof": why = "Lost the map server."
                     else: why = "Connection problem (%s)." % detail
                     self.kicks = [k for k in self.kicks if now - k < 300] + [now]
                     if len(self.kicks) >= 4:
-                        self.gave_up = ("Kept getting disconnected. Is this map account also "
-                                        "logged in somewhere else (Enhanced Map, for example)? "
-                                        "Use a separate account, then click Reconnect.")
+                        self.gave_up = ("Kept getting dropped. Is this map account logged in elsewhere (Enhanced "
+                                        "Map)? Use a separate account, then click Reconnect.")
                         events.append(("status", self.gave_up, True)); return
-                    events.append(("status", "%s Reconnecting in %d seconds." % (why, retry_in), True))
+                    events.append(("status", "%s Reconnecting in %d s." % (why, retry_in), True))
                 else:
-                    what = {"eof": "The server closed the connection",
-                            "timeout": "The server didn't answer"}.get(kind, "Connection problem")
-                    events.append(("status", "%s (%s). Retrying in %d seconds."
+                    what = {"eof": "Server closed the connection",
+                            "timeout": "Server didn't answer"}.get(kind, "Connection problem")
+                    events.append(("status", "%s (%s). Retrying in %d s."
                                    % (what, detail or "handshake", retry_in), False))
                 self.next_try = now + retry_in
-            def _debug(self, events, text):
-                if HOST.debug: events.append(("status", "[debug] " + text, True))
             def reset(self):
                 self.close(); self.gave_up = None; self.login_failures = self.next_try = 0; self.kicks = []
                 self.backoff = 3
@@ -369,13 +329,12 @@ def _module_worldmap():
                         self.t = pend["t"]
                     except Exception as e:
                         self.backoff = min(self.backoff * 2, 60)
-                        events.append(("status", "Can't reach the map server at %s:%d (%s). " "Retrying in %d seconds."
+                        events.append(("status", "Can't reach the map server at %s:%d (%s). Retrying in %d s."
                                        % (self.host, self.port, short_error(e), self.backoff),
                                        not self.unreachable_reported))
                         self.unreachable_reported = True; self.next_try = now + self.backoff; return events
                     self.state = self.HANDSHAKE; self.state_since = now; self.buf = bytearray()
-                    try: self.sender = Sender(self.t)
-                    except Exception: self.sender = None
+                    self.sender = Sender(self.t)
                     self.send(packet(0x2B, b"\x00")); events.append(("status", "Connecting...", False))
                 closed = None; snd = self.sender
                 if snd is not None and snd.error is not None:
@@ -383,7 +342,6 @@ def _module_worldmap():
                 try:
                     chunk = self.t.recv() if self.t else b""
                     if chunk:
-                        if HOST.debug: self._debug(events, "received %d bytes" % len(chunk))
                         self.buf.extend(chunk)
                         if len(self.buf) > 1 << 20: raise IOError("too much data")
                 except EOFError: closed = ("eof", "")
@@ -393,11 +351,8 @@ def _module_worldmap():
                     if size < 3: self._drop(events, "garbled", "bad packet size", 10); return events
                     if len(self.buf) < size: break
                     data = bytes(self.buf[:size]); del self.buf[:size]
-                    if HOST.debug:
-                        self._debug(events, "packet 0x%02X (%d bytes) in state %s"
-                                    % (pid, size, self.STATE_NAMES[self.state]))
                     try: self._handle(pid, data, events)
-                    except ValueError as e: self._debug(events, "skipped malformed packet 0x%02X: %s" % (pid, e))
+                    except ValueError: pass
                 if closed and self.t is not None:
                     self._drop(events, closed[0], closed[1], 30 if self.state == self.LOGIN else 10); return events
                 if (self.t is not None and self.state in (self.HANDSHAKE, self.LOGIN) and now - self.state_since > 15):
@@ -407,8 +362,6 @@ def _module_worldmap():
                 r = Reader(data)
                 if pid == 0x2B and self.state == self.HANDSHAKE:
                     self.state = self.LOGIN; self.state_since = time.time()
-                    self._debug(events, "handshake ok (server protocol "
-                                        "%d), sending login for '%s'" % (r.u8(), self.user))
                     self.send(pk_login(self.user, self.password))
                 elif pid == 0x1F and self.state == self.LOGIN:
                     if r.u8() == 1:
@@ -433,19 +386,14 @@ def _module_worldmap():
                 inst = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
                 stat = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
                 mtype = API.GetType().Assembly.GetType("ClassicUO.Game.Managers.EnhancedMap.EnhancedMapManager")
-                if mtype is None: raise LookupError("this TazUO has no built-in Enhanced Map")
                 p_instance = mtype.GetProperty("Instance", stat)
                 self._p_connected = mtype.GetProperty("IsConnected", inst)
                 self._p_config = mtype.GetProperty("Config", stat)
                 self._m_reconnect = mtype.GetMethod("Reconnect", inst); f_client = mtype.GetField("_client", inst)
-                if None in (p_instance, self._p_connected, self._p_config, f_client):
-                    raise LookupError("TazUO's Enhanced Map internals have changed")
                 self._asm = API.GetType().Assembly; self._manager = p_instance.GetValue(None)
                 self._client = f_client.GetValue(self._manager); ctype = self._client.GetType()
                 self._f_connection = ctype.GetField("_connection", inst)
                 self._m_send = ctype.GetMethod("SendRaw", inst); self._f_onframe = ctype.GetField("OnFrame", inst)
-                if None in (self._f_connection, self._m_send, self._f_onframe):
-                    raise LookupError("TazUO's Enhanced Map internals have changed")
                 try: self._handler, self._queue = self._make_handler()
                 except Exception:
                     self._queue = ConcurrentQueue[object](); queue = self._queue
@@ -512,8 +460,7 @@ def _module_worldmap():
                 if conn is None: return
                 buf = self._Array[self._Byte]([int(b) for b in bytearray(data)])
                 self._m_send.Invoke(self._client, self._Array[object]([conn, buf]))
-            def reconnect(self):
-                if self._m_reconnect is not None: self._m_reconnect.Invoke(self._manager, None)
+            def reconnect(self): self._m_reconnect.Invoke(self._manager, None)
             def frames(self):
                 out = []
                 for _ in range(200):
@@ -529,13 +476,10 @@ def _module_worldmap():
                 stat = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static; asm = API.GetType().Assembly
                 mouse = asm.GetType("ClassicUO.Input.Mouse"); selected = asm.GetType("ClassicUO.Game.SelectedObject")
                 ui = asm.GetType("ClassicUO.Game.Managers.UIManager")
-                if None in (mouse, selected, ui): raise LookupError("TazUO's mouse internals have changed")
                 self._pos = mouse.GetField("Position", stat); self._mclick = mouse.GetField("MClickPosition", stat)
                 self._mdown = mouse.GetProperty("MButtonPressed", stat); self._mdown_get = None
                 self._over_world = ui.GetProperty("IsMouseOverWorld", stat)
                 self._object = selected.GetField("Object", stat)
-                if None in (self._pos, self._mclick, self._mdown, self._over_world, self._object):
-                    raise LookupError("TazUO's mouse internals have changed")
             def middle_down(self):
                 get = self._mdown_get
                 if get is None: get = self._mdown_get = self._mdown.GetValue
@@ -554,13 +498,9 @@ def _module_worldmap():
                 self.bridge = bridge; self.bridge.hook(); self.was_connected = None; self.drops = []
                 self.unhooked_for_drops = self.server_relays_ping = False
             @property
-            def ready(self):
-                try: return self.bridge.is_connected()
-                except Exception: return False
+            def ready(self): return self.bridge.is_connected()
             @property
-            def name(self):
-                try: return (self.bridge.config() or {}).get("user", "")
-                except Exception: return ""
+            def name(self): return (self.bridge.config() or {}).get("user", "")
             def poll(self):
                 events = []; connected = self.ready
                 if connected != self.was_connected:
@@ -580,9 +520,7 @@ def _module_worldmap():
                                                      "TazUO will reconnect.", True))
                     else: events.append(("status", "Waiting for TazUO's Enhanced Map to connect...", False))
                     self.was_connected = connected
-                try: frames = self.bridge.frames()
-                except Exception: frames = []
-                for pid, payload in frames:
+                for pid, payload in self.bridge.frames():
                     if pid == 0x33: self.server_relays_ping = True
                     try: events.append(parse_ping(pid, Reader(payload, 0)))
                     except ValueError: pass
@@ -632,10 +570,7 @@ def _module_worldmap():
                 now = time.time(); p = Ping(x, y, m, t, now, auto); self.pings.append(p)
                 if len(self.pings) > 12: self._expire(next((q for q in self.pings[:-1] if q.auto), self.pings[0]))
                 label, hue, _, mapcolor = TYPE_INFO[t]; px, py, pm, serial = self.player()
-                if pm == m and px > 0:
-                    dist = max(abs(x - px), abs(y - py))
-                    where = ("on you" if dist == 0 else "%d tiles %s" % (dist, Kit.compass(x - px, y - py)))
-                else: where = "on %s" % facet_name(m)
+                where = Kit.where_text(x - px, y - py, "on you") if pm == m and px > 0 else "on %s" % facet_name(m)
                 who = (who or "You") if local else sender
                 say("%s pinged %s %s (%d, %d, %s)." % ("you" if who == "You" else who, label, where, x, y,
                                                        facet_name(m)), hue)
@@ -646,20 +581,18 @@ def _module_worldmap():
                 if not local and serial: API.HeadMsg("%s: %s %s" % (sender, label, where), serial, hue)
                 if pm == m:
                     key = (x, y, m); self.marked[key] = self.marked.get(key, 0) + 1; p.marked = True
-                    safe(lambda: API.MarkTile(x, y, hue, m))
+                    API.MarkTile(x, y, hue, m)
                     if (not auto and px > 0 and x > 0 and y > 0 and max(abs(x - px), abs(y - py)) > 2):
-                        try: API.TrackingArrow(x, y, ARROW_ID); self.arrow_for = p
-                        except Exception: pass
+                        API.TrackingArrow(x, y, ARROW_ID); self.arrow_for = p
                 name = ("%s: %s %s" % (who, label, time.strftime("%H:%M:%S"))).replace(",", " ")
                 if ATLAS.map_open(True):
-                    try: API.AddMapMarker(name, x, y, m, mapcolor); self.markers.append((now + 60, name))
-                    except Exception: pass
+                    API.AddMapMarker(name, x, y, m, mapcolor); self.markers.append((now + 60, name))
                     if len(self.markers) > MARKERS_CAP:
                         ATLAS.loose.update([n for _, n in self.markers[:-MARKERS_CAP]]); del self.markers[:-MARKERS_CAP]
                 self._play_sound(t, now)
             def _play_sound(self, t, now):
                 if not OPT["sounds"] or now - self.last_sound < 0.3: return
-                self.last_sound = now; safe(lambda: API.PlaySound(PING_SOUNDS[t]))
+                self.last_sound = now; API.PlaySound(PING_SOUNDS[t])
             def update(self):
                 if not self.pings and not self.markers: return
                 now = time.time(); pm = None; stay = OPT["ping_secs"]
@@ -669,13 +602,10 @@ def _module_worldmap():
                     if pm is None: pm = self.player()[2]
                     if p.map == pm:
                         p.next_pulse = now + self.PULSE; _, hue, gfx, _ = TYPE_INFO[p.type]
-                        try:
-                            API.CreateEffect(gfx, type=API.EffectType.FixedXYZ, hue=hue,
-                                                  sourceX=p.x, sourceY=p.y, duration=self.PULSE)
-                        except Exception: pass
+                        API.CreateEffect(gfx, type=API.EffectType.FixedXYZ, hue=hue, sourceX=p.x, sourceY=p.y,
+                                         duration=self.PULSE)
                 if self.markers and now >= self.markers[0][0] and self._map_ready(now) and ATLAS.map_open(True):
-                    while self.markers and now >= self.markers[0][0]:
-                        name = self.markers.pop(0)[1]; safe(lambda: API.RemoveMapMarker(name))
+                    while self.markers and now >= self.markers[0][0]: API.RemoveMapMarker(self.markers.pop(0)[1])
             def _map_ready(self, now):
                 if now >= self.map_at or self.map_at - now > 2.0:
                     self.map_at = now + 1.0
@@ -687,7 +617,7 @@ def _module_worldmap():
                 if p in self.pings: self.pings.remove(p)
                 if p.marked:
                     key = (p.x, p.y, p.map); left = self.marked.get(key, 1) - 1
-                    if left <= 0: self.marked.pop(key, None); safe(lambda: API.RemoveMarkedTile(p.x, p.y, p.map))
+                    if left <= 0: self.marked.pop(key, None); API.RemoveMarkedTile(p.x, p.y, p.map)
                     else: self.marked[key] = left
                     p.marked = False
                 if self.arrow_for is p: self.arrow_off()
@@ -697,18 +627,15 @@ def _module_worldmap():
                 return a.entry
             def arrow_to(self, e): API.TrackingArrow(e.x, e.y, ARROW_ID); self.arrow_for = e
             def arrow_off(self):
-                if self.arrow_for is not None: safe(lambda: API.TrackingArrow(-1, -1, ARROW_ID)); self.arrow_for = None
+                if self.arrow_for is not None: API.TrackingArrow(-1, -1, ARROW_ID); self.arrow_for = None
             def clear(self):
-                for p in list(self.pings):
-                    try: self._expire(p)
-                    except Exception:
-                        if p in self.pings: self.pings.remove(p)
+                for p in list(self.pings): self._expire(p)
                 if self.markers:
                     names = [n for _, n in self.markers]
                     if ATLAS.map_open(True):
-                        for name in names: safe(lambda: API.RemoveMapMarker(name))
+                        for name in names: API.RemoveMapMarker(name)
                     else: ATLAS.loose.update(names)
-                self.markers = []; safe(lambda: API.TrackingArrow(-1, -1, ARROW_ID))
+                self.markers = []; API.TrackingArrow(-1, -1, ARROW_ID)
         class Settings(object):
             def __init__(self):
                 scope = API.PersistentVar.Server
@@ -732,46 +659,37 @@ def _module_worldmap():
         HIST_EMPTY = "No pings yet. Send one with a ping button, a hotkey or the wheel drag."
         class HistoryWindow(object):
             def __init__(self, app):
-                self.app = app
-                self.st = {"g": None, "shutting": False, "minimized": False, "docked": False, "queue": []}
-                self.queue = Kit.queuer(self.st); self.c, self.store, self.rows = {}, ({}, {}), []
-                self.page, self.next_draw = 0, 0.0; self.drawn = self.drawn_pos = None
+                self.app = app; self.page, self.next_draw = 0, 0.0; self.drawn = self.drawn_pos = None
+                self.st = {"g": None, "shutting": False, "minimized": False, "docked": False, "queue": [], "c": {},
+                           "store": ({}, {}), "rows": []}
+                self.wnd = Kit.Window(HIST_DOCK, HIST_TITLE, self.st, self.st, self.build, HIST_POS_KEY,
+                                      default=(260, 160), mini=(HIST_MINI_W, HIST_MINI_H), icon=0x14EB, lock=False,
+                                      owner=False, close_tip="Close", clear={"c": {}, "rows": []})
+                self.queue = self.wnd.queue
             def start(self):
                 st = self.st; st["shutting"] = False
-                st["minimized"] = Kit.load_min(HIST_MIN_KEY) or bool(safe(lambda: HOST.dock_wanted(HIST_DOCK), False))
-                safe(lambda: HOST.dock_add(HIST_DOCK, Kit.dock_hooks(
-                    HIST_TITLE, 0x14EB, st, st, self.queue("redraw"), scale=True)))
+                st["minimized"] = Kit.load_min(HIST_MIN_KEY) or HOST.dock_wanted(HIST_DOCK); self.wnd.dock(scale=True)
                 if Kit.get_var(HIST_OPEN_KEY, "0") == "1": self.build()
             def toggle_open(self):
                 st = self.st
                 if st["g"] is not None and not (st["minimized"] or st["docked"]): self.close(); return
-                st["minimized"] = st["docked"] = False; safe(lambda: HOST.dock_forget(HIST_DOCK))
+                st["minimized"] = st["docked"] = False; HOST.dock_forget(HIST_DOCK)
                 Kit.save_min(HIST_MIN_KEY, False); Kit.put_var(HIST_OPEN_KEY, "1"); self.build()
             def close(self):
-                st = self.st; g = st["g"]
-                if g is None: return
-                Kit.save_pos(HIST_POS_KEY, g); st["g"], st["docked"] = None, False
-                safe(lambda: HOST.dock_forget(HIST_DOCK)); Kit.put_var(HIST_OPEN_KEY, "0"); self.c, self.rows = {}, []
-                Kit.dispose(g)
-            def shutdown(self):
-                st = self.st; st["shutting"] = True; safe(lambda: HOST.dock_remove(HIST_DOCK)); g = st["g"]
-                if g is not None:
-                    Kit.save_pos(HIST_POS_KEY, g); Kit.save_min(HIST_MIN_KEY, st["minimized"] and not st["docked"])
-                    st["g"] = None; self.c, self.rows = {}, []; Kit.dispose(g)
-            def _disposed(self, g):
-                def handler(*args):
-                    if self.st["g"] is g and not self.st["shutting"]: self.st["g"] = None; self.c, self.rows = {}, []
-                return handler
-            def build(self):
                 st = self.st
-                g, store, c, w, h, x, y, old = open_window(st, st, HIST_POS_KEY, (HIST_MINI_W, HIST_MINI_H),
-                    (560, list_h(HISTORY_ROWS, HIST_ROW_H)), (260, 160), HIST_TITLE, HIST_DOCK, self.queue, "Close")
-                rows = []
+                if st["g"] is None: return
+                self.wnd.close(); st["docked"] = False; HOST.dock_forget(HIST_DOCK); Kit.put_var(HIST_OPEN_KEY, "0")
+            def shutdown(self):
+                st = self.st; st["shutting"] = True; HOST.dock_remove(HIST_DOCK)
+                if st["g"] is not None:
+                    Kit.save_min(HIST_MIN_KEY, st["minimized"] and not st["docked"]); self.wnd.close()
+            def build(self):
+                st = self.st; g, store, c = self.wnd.begin(560, list_h(HISTORY_ROWS, HIST_ROW_H)); rows = []
                 if not st["minimized"]:
-                    M = Kit.MARGIN; IW = w - 2 * M; yt = M + 30 + Kit.GAP; Kit.add_section(g, M, yt, IW, 36)
-                    bx = M + 12
+                    self.wnd.frame(g); M = Kit.MARGIN; IW = 560 - 2 * M; yt = M + 30 + Kit.GAP
+                    Kit.add_section(g, M, yt, IW, 36); bx = M + 12
                     Kit.art_button(g, store, "clear", Kit.ART_CLOSE, bx, yt + 7, "Clear",
-                                   "Empty the history (the pings on screen stay)", on_click=self.queue("clear"))
+                                   "Empty the history (pings on screen stay)", on_click=self.queue("clear"))
                     bx += 35 + Kit.text_w("Clear") + 16
                     Kit.art_button(g, store, "arrow_off", Kit.ART_CLOSE, bx, yt + 7, "Arrow off",
                                    "Take the tracking arrow down", on_click=self.queue("arrow_off"))
@@ -787,28 +705,23 @@ def _module_worldmap():
                     Kit.add_label(g, "Where", cx, yl + 6, Kit.HUE_TITLE); c["where_w"] = M + IW - 12 - cx
                     for k in range(HISTORY_ROWS):
                         ry = yl + 30 + k * HIST_ROW_H
-                        r = {"val": None, "prev": None, "changed": 0.0, "tip": None, "vis": True, "sig": None}
-                        r["labels"] = [Kit.add_label(g, "", xx, ry + 3, Kit.HUE_TEXT) for xx, _ in xs]
-                        r["where"] = Kit.add_label(g, "", cx, ry + 3, Kit.HUE_INFO); r["widths"] = [cw for _, cw in xs]
+                        r = {"val": None, "prev": None, "changed": 0.0, "tip": None, "vis": True, "sig": None,
+                             "labels": [Kit.add_label(g, "", xx, ry + 3, Kit.HUE_TEXT) for xx, _ in xs],
+                             "where": Kit.add_label(g, "", cx, ry + 3, Kit.HUE_INFO), "widths": [cw for _, cw in xs]}
                         r["catch"] = Kit.catcher(g, M + 6, ry, IW - 12, HIST_ROW_H,
                                                  Kit.row_clicker(r, self.queue, "arrow"), HIST_TIP)
                         rows.append(r)
-                self.c, self.store, self.rows = c, store, rows
-                show_window(g, x, y, w, h, st, st, self._disposed, HIST_POS_KEY); self.drawn = None; self.refresh()
-                Kit.dispose(old)
+                self.wnd.end(g, {"rows": rows}); self.drawn = None; self.refresh()
             def tick(self):
                 st = self.st
-                if st["g"] is not None and Kit.was_clicked(self.store, "close"): self.close(); return
+                if st["g"] is not None and Kit.was_clicked(st["store"], "close"): self.close(); return
                 q = st["queue"]
                 while q:
                     a = q.pop(0); kind = a[0] if isinstance(a, tuple) else a
                     if kind == "toggle_min":
-                        st["minimized"] = not st["minimized"]; st["docked"] = False
-                        safe(lambda: HOST.dock_forget(HIST_DOCK)); Kit.save_min(HIST_MIN_KEY, st["minimized"])
-                        if st["g"] is not None: self.build()
-                    elif kind == "to_bar": safe(lambda: HOST.dock_to_bar(HIST_DOCK, HIST_TITLE))
-                    elif kind == "redraw":
-                        if st["g"] is not None: self.build()
+                        st["minimized"] = not st["minimized"]; st["docked"] = False; HOST.dock_forget(HIST_DOCK)
+                        Kit.save_min(HIST_MIN_KEY, st["minimized"])
+                    elif kind == "to_bar": HOST.dock_to_bar(HIST_DOCK, HIST_TITLE)
                     elif kind == "settings": HOST.show_settings("pings")
                     elif kind == "page": self.page = max(0, self.page + a[1]); self.next_draw = 0.0
                     elif kind == "clear":
@@ -816,6 +729,7 @@ def _module_worldmap():
                     elif kind == "arrow_off": self.app.display.arrow_off()
                     elif kind == "arrow": self.arrow(a[1])
                     elif kind == "follow": self.follow(a[1])
+                    if kind in ("toggle_min", "redraw") and st["g"] is not None: self.build()
                 if st["g"] is None or (st["minimized"] and st["docked"]): return
                 self.refresh()
             def entry(self, seq): return next((e for e in self.app.display.history if e.seq == seq), None)
@@ -825,10 +739,7 @@ def _module_worldmap():
                 if disp.arrow_entry() is e: disp.arrow_off(); return
                 pm = disp.player()[2]
                 if pm != e.map: say("that ping is on %s; you are on %s." % (facet_name(e.map), facet_name(pm))); return
-                try: disp.arrow_to(e)
-                except Exception as ex:
-                    say("couldn't show the tracking arrow (%s)." % short_error(ex), Kit.HUE_BAD); return
-                say("tracking arrow on %s's %s (%d, %d)." % (e.who, label_of(e.type), e.x, e.y))
+                disp.arrow_to(e); say("tracking arrow on %s's %s (%d, %d)." % (e.who, label_of(e.type), e.x, e.y))
             def follow(self, seq):
                 e = self.entry(seq)
                 if e is None: return
@@ -840,31 +751,23 @@ def _module_worldmap():
                 low = str(name or "").strip().lower()
                 if not low: return 0
                 best, bd = 0, None
-                try: mobs = list(API.GetAllMobiles() or [])
-                except Exception: mobs = []
-                for m in mobs:
-                    try:
-                        if str(m.Name or "").strip().lower() != low: continue
-                        d = int(m.Distance)
-                        if bd is None or d < bd: best, bd = int(m.Serial), d
-                    except Exception: continue
+                for m in API.GetAllMobiles() or ():
+                    if str(m.Name or "").strip().lower() != low: continue
+                    d = int(m.Distance)
+                    if bd is None or d < bd: best, bd = int(m.Serial), d
                 return best
             def where_text(self, e, px, py, pm):
                 spot = "(%d, %d)" % (e.x, e.y)
-                if pm == e.map and px > 0:
-                    dist = max(abs(e.x - px), abs(e.y - py))
-                    if dist == 0: return "here " + spot
-                    return "%d tile%s %s  %s" % (dist, "" if dist == 1 else "s", Kit.compass(e.x - px, e.y - py), spot)
-                return "%s %s" % (facet_name(e.map), spot)
+                if pm != e.map or px <= 0: return "%s %s" % (facet_name(e.map), spot)
+                return "%s  %s" % (Kit.where_text(e.x - px, e.y - py, "here"), spot)
             def refresh(self):
-                st = self.st; disp = self.app.display; hist = disp.history; c = self.c
+                st = self.st; disp = self.app.display; hist = disp.history; c = st["c"]
                 if st["minimized"]:
                     if self.drawn == disp.hist_ver: return
                     self.drawn = disp.hist_ver
                     if hist:
                         e = hist[-1]
-                        txt = "%s: %d ping%s, last %s %s" % (HIST_TITLE, len(hist), "" if len(hist) == 1 else "s",
-                                                            label_of(e.type), e.who)
+                        txt = "%s: %s, last %s %s" % (HIST_TITLE, Kit.count(len(hist), "ping"), label_of(e.type), e.who)
                     else: txt = "%s: no pings yet" % HIST_TITLE
                     if c.get("status") is not None: Kit.set_text(c["status"], Kit.fit(txt, HIST_MINI_W - 90))
                     return
@@ -873,12 +776,12 @@ def _module_worldmap():
                 pos = disp.player()[:3] if hist else (0, 0, -1)
                 if sig == self.drawn and pos == self.drawn_pos: self.next_draw = now + 1.0; return
                 self.drawn, self.next_draw, self.drawn_pos = sig, now + 1.0, pos; n = len(hist)
-                per = max(1, len(self.rows)); pages = max(1, (n + per - 1) // per)
+                per = max(1, len(st["rows"])); pages = max(1, (n + per - 1) // per)
                 self.page = max(0, min(pages - 1, self.page))
                 if c.get("pg") is not None:
                     Kit.set_text(c["pg"], ("%d/%d" % (self.page + 1, pages)) if pages > 1 else "")
                 px, py, pm = pos; first = n - 1 - self.page * per; where_w = c.get("where_w", 200)
-                for k, r in enumerate(self.rows):
+                for k, r in enumerate(st["rows"]):
                     i = first - k
                     if i < 0:
                         Kit.row_set(r, None, now); r["sig"] = None
@@ -903,10 +806,7 @@ def _module_worldmap():
                 want = ("first" if only_first else on)
                 if r["vis"] == want: return
                 r["vis"] = want; parts = r["labels"] + [r["where"], r["catch"]]
-                for j, ctl in enumerate(parts):
-                    v = on and (not only_first or j == 0)
-                    try: ctl.IsVisible = v
-                    except Exception: pass
+                for j, ctl in enumerate(parts): Kit.set(ctl, "IsVisible", on and (not only_first or j == 0))
         class PingApp(object):
             def __init__(self):
                 self.mouse = self.gesture = self.guide = self.bridge = self.bridge_error = self.conn = None
@@ -923,12 +823,12 @@ def _module_worldmap():
                 if also_journal: say(journal_case(text))
             def _queue_ping(self, t):
                 def fn(*args):
-                    if bool(safe(lambda: HOST.typing(), False)): return
-                    self.pending.append(("target", t))
+                    if HOST.typing(): return
+                    self.pending.append(("target", t)); HOST.poke()
                 return fn
             def save_setup(self):
                 if self.conn and self.conn.kind == "tazuo":
-                    self.set_status("Saved. TazUO's Enhanced Map login is on, so Map Pings keeps using that."); return
+                    self.set_status("Saved; TazUO's Enhanced Map login is on, so that stays in use."); return
                 if self.conn: self.conn.close(); self.conn = None
                 self.choose_link()
             def apply_options(self):
@@ -946,11 +846,7 @@ def _module_worldmap():
                     except Exception as e: self.bridge = None; self.bridge_error = short_error(e)
                 return self.bridge
             def tazuo_available(self):
-                b = self.get_bridge()
-                if b is None: return False
-                try: cfg = b.config()
-                except Exception: return False
-                return bool(cfg and cfg["configured"])
+                b = self.get_bridge(); return b is not None and bool((b.config() or {}).get("configured"))
             def choose_link(self, announce=True):
                 mode = (OPT["connection"] or "auto").lower(); current = self.conn.kind if self.conn else None
                 if mode in ("auto", "tazuo") and self.tazuo_available():
@@ -971,8 +867,7 @@ def _module_worldmap():
                 if self.settings.complete: self.connect()
                 elif announce:
                     if mode == "auto" and self.get_bridge() is not None:
-                        self.set_status("Turn on Enhanced Map in TazUO, or enter a separate map "
-                                        "login (World Map settings page).")
+                        self.set_status("Turn on Enhanced Map in TazUO, or enter a map login (World Map settings).")
                     else: self.set_status("Enter your map server details to start."); self.inbox.append(("open_setup",))
             def send_ping(self, x, y, m, t):
                 now = time.time()
@@ -996,8 +891,8 @@ def _module_worldmap():
                     self.set_status(note, also_journal=not auto or self.status_text != note)
             AIM_SECONDS = 10
             def target_ping(self, t):
-                say("target a spot for %s (target yourself for where you stand)." % label_of(t)); self.aim = None
-                tm = safe(Picker._tm)
+                say("target a spot for %s (yourself: where you stand)." % label_of(t)); self.aim = None
+                tm = Picker._tm()
                 if tm is not None:
                     aim = {"t": t, "fired": False, "spot": None, "d": None, "tm": tm,
                            "until": time.time() + self.AIM_SECONDS}
@@ -1005,20 +900,17 @@ def _module_worldmap():
                     try:
                         from System import Action; aim["d"] = Action[object](got)
                         tm.SetTargeting(aim["d"], Picker.CURSOR_TARGET, Picker.neutral); self.aim = aim
-                        safe(lambda: HOST.claim_cursor("pings", self.AIM_SECONDS)); return
+                        HOST.claim_cursor("pings", self.AIM_SECONDS); return
                     except Exception: pass
                 self.jobs.append(("aim", t))
             def poll_aim(self):
                 aim = self.aim
                 if aim is None: return
                 if not aim["fired"]:
-                    tm = aim["tm"]; ours = False
-                    if tm is not None:
-                        try: ours = bool(tm.IsCurrentTargetingAction(aim["d"]))
-                        except Exception: ours = False
+                    ours = bool(aim["tm"].IsCurrentTargetingAction(aim["d"]))
                     if ours and time.time() < aim["until"]: return
                     self.aim = None; HOST.release_cursor("pings")
-                    if ours: safe(lambda: tm.CancelTarget())
+                    if ours: aim["tm"].CancelTarget()
                     return
                 self.aim = None; HOST.release_cursor("pings"); self.aimed(aim["t"], aim["spot"])
             def aimed(self, t, spot):
@@ -1027,9 +919,9 @@ def _module_worldmap():
                 if x <= 0 or y <= 0: return
                 self.send_ping(x, y, int(API.GetMap()), t)
             def drop_aim(self):
-                aim, self.aim = self.aim, None; safe(lambda: HOST.release_cursor("pings"))
-                tm = safe(Picker._tm) if aim is not None else None
-                if tm is None or aim["fired"]: return
+                aim, self.aim = self.aim, None; HOST.release_cursor("pings")
+                if aim is None or aim["fired"]: return
+                tm = aim["tm"]
                 def cancel():
                     if tm.IsCurrentTargetingAction(aim["d"]): tm.CancelTarget()
                 safe(lambda: Kit.on_client(cancel, fallback=False))
@@ -1053,15 +945,13 @@ def _module_worldmap():
                     return
                 if ((pos != self.last_pos and now - self.last_pos_sent >= 1.0) or now - self.last_pos_sent >= 10):
                     flag = 0
-                    try:
-                        if p.IsDead: flag = 4
-                        elif p.IsPoisoned: flag = 1
-                        elif p.IsYellowHits: flag = 2
-                        elif p.IsParalyzed: flag = 3
-                        elif p.IsHidden: flag = 5
-                        stats = (int(p.Hits), int(p.Stamina), int(p.Mana), int(p.HitsMax),
-                                 int(p.StaminaMax), int(p.ManaMax))
-                    except Exception: stats = (0, 0, 0, 0, 0, 0)
+                    if p.IsDead: flag = 4
+                    elif p.IsPoisoned: flag = 1
+                    elif p.IsYellowHits: flag = 2
+                    elif p.IsParalyzed: flag = 3
+                    elif p.IsHidden: flag = 5
+                    stats = (int(p.Hits), int(p.Stamina), int(p.Mana), int(p.HitsMax), int(p.StaminaMax),
+                             int(p.ManaMax))
                     self.outbox.append(pk_player_data(pos, stats, flag, 0xFFFFD700))
                     self.last_pos, self.last_pos_sent = pos, now
             def handle(self, ev):
@@ -1128,8 +1018,7 @@ def _module_worldmap():
                 try: self.mouse = TazUOMouse()
                 except Exception as e:
                     self.mouse = None
-                    say("mouse-wheel pings aren't available (%s): use the ping buttons or the hotkeys."
-                        % short_error(e))
+                    say("mouse-wheel pings unavailable (%s): use the ping buttons or hotkeys." % short_error(e))
             @staticmethod
             def drag_direction(dx, dy):
                 if max(abs(dx), abs(dy)) < OPT["drag"]: return None
@@ -1138,17 +1027,14 @@ def _module_worldmap():
             def poll_gesture(self):
                 m = self.mouse
                 if m is None: return
-                try: down = m.middle_down()
-                except Exception: return
+                down = m.middle_down()
                 if down and self.gesture is None:
-                    try: tile = m.tile_under_mouse(); start = m.position(m._mclick)
-                    except Exception: tile, start = None, (0, 0)
+                    tile = m.tile_under_mouse(); start = m.position(m._mclick)
                     self.gesture = {"tile": tile, "start": start, "dir": None, "map": int(API.GetMap())}
                     if tile is not None: self.show_guide(start)
                 elif down and self.gesture is not None:
                     if self.gesture["tile"] is None: return
-                    try: x, y = m.position()
-                    except Exception: return
+                    x, y = m.position()
                     d = self.drag_direction(x - self.gesture["start"][0], y - self.gesture["start"][1])
                     if d != self.gesture["dir"]: self.gesture["dir"] = d; self.update_guide(d)
                 elif not down and self.gesture is not None:
@@ -1156,28 +1042,21 @@ def _module_worldmap():
                     if g["tile"] is not None and t is not None: self.send_ping(g["tile"][0], g["tile"][1], g["map"], t)
             def show_guide(self, center):
                 self.close_guide()
-                try:
-                    G = API.Gumps; w, h = 180, 104; gump = G.CreateGump(False, False); scale = Kit.render_scale() or 1.0
-                    cx, cy = int(round(center[0] / scale)), int(round(center[1] / scale))
-                    Kit.place(gump, cx - w // 2, cy - h // 2, w, h); Kit.add_window_frame(gump, w, h, corners=False)
-                    Kit.add_section(gump, 6, 6, w - 12, h - 12)
-                    spots = {"up": (58, 9), "right": (110, 43), "down": (58, 77), "left": (11, 43)}
-                    self.guide_labels = {}
-                    for d, (lx, ly) in spots.items():
-                        t = GESTURE[d]; lab = G.CreateGumpLabel(label_of(t), 946); lab.SetRect(lx, ly, 70, 18)
-                        gump.Add(lab); self.guide_labels[d] = (lab, t)
-                    plus = G.CreateGumpLabel("+", 53); plus.SetRect(w // 2 - 3, h // 2 - 9, 10, 18); gump.Add(plus)
-                    G.AddGump(gump); safe(lambda: SNAP.skip_gump(gump)); self.guide = gump
-                except Exception: self.guide = None
+                w, h = 180, 104; gump = G.CreateGump(False, False); scale = Kit.render_scale() or 1.0
+                cx, cy = int(round(center[0] / scale)), int(round(center[1] / scale))
+                Kit.place(gump, cx - w // 2, cy - h // 2, w, h); Kit.add_window_frame(gump, w, h, corners=False)
+                Kit.add_section(gump, 6, 6, w - 12, h - 12)
+                for d, (lx, ly) in (("up", (58, 9)), ("right", (110, 43)), ("down", (58, 77)), ("left", (11, 43))):
+                    t = GESTURE[d]; lab = G.CreateGumpLabel(label_of(t), Kit.HUE_INFO); lab.SetRect(lx, ly, 70, 18)
+                    gump.Add(lab); self.guide_labels[d] = (lab, t)
+                plus = G.CreateGumpLabel("+", Kit.HUE_TITLE); plus.SetRect(w // 2 - 3, h // 2 - 9, 10, 18)
+                gump.Add(plus)
+                G.AddGump(gump); SNAP.skip_gump(gump); self.guide = gump
             def update_guide(self, chosen):
                 for d, (lab, t) in self.guide_labels.items():
-                    try:
-                        lab.Text = "[" + label_of(t) + "]" if d == chosen else label_of(t)
-                        lab.Hue = TYPE_INFO[t][1] if d == chosen else 946
-                    except Exception: pass
-            def close_guide(self):
-                if self.guide is not None: safe(lambda: self.guide.Dispose())
-                self.guide, self.guide_labels = None, {}
+                    lab.Text = "[" + label_of(t) + "]" if d == chosen else label_of(t)
+                    lab.Hue = TYPE_INFO[t][1] if d == chosen else 946
+            def close_guide(self): Kit.dispose(self.guide); self.guide, self.guide_labels = None, {}
             def register_hotkeys(self):
                 self.unregister_hotkeys()
                 for key, combo in HOTKEYS.items():
@@ -1187,11 +1066,10 @@ def _module_worldmap():
                             say("can't use '%s' as the %s hotkey." % (combo, label_of(TYPE_KEYS[key])), Kit.HUE_BAD)
                             continue
                         self.hooked.append(combo); HOST.hotkeys_owned[combo] = TITLE
-                        safe(lambda: HOST.hotkey_note(combo, TITLE, "%s ping" % label_of(TYPE_KEYS[key])))
+                        HOST.hotkey_note(combo, TITLE, "%s ping" % label_of(TYPE_KEYS[key]))
             def unregister_hotkeys(self):
                 for combo in self.hooked:
-                    safe(lambda: API.OnHotKey(combo)); HOST.hotkeys_owned.pop(combo, None)
-                    safe(lambda: HOST.hotkey_drop(combo, TITLE))
+                    API.OnHotKey(combo); HOST.hotkeys_owned.pop(combo, None); HOST.hotkey_drop(combo, TITLE)
                 self.hooked = []
             def shutdown(self):
                 if self._shut: return
@@ -1200,7 +1078,7 @@ def _module_worldmap():
                 if self.conn: self.conn.close()
             def start(self):
                 self.init_mouse(); self.register_hotkeys(); self.history.start()
-                say("on; its ping buttons are on the World Map settings page.", Kit.HUE_GOOD); self.choose_link()
+                say("on; ping buttons are on the World Map settings page.", Kit.HUE_GOOD); self.choose_link()
                 self.next_link_check = time.time() + 5
         OPT_KEY = VAR_PREFIX + "options"
         CONNECTIONS = [("auto", "TazUO's map if on, else my login"), ("tazuo", "Only TazUO's Enhanced Map"),
@@ -1223,32 +1101,28 @@ def _module_worldmap():
             data += ";ping_secs=%d;drag=%d" % (int(OPT["ping_secs"]), int(OPT["drag"])); Kit.put_var(OPT_KEY, data)
         def _queue_app(action):
             if APP["app"] is not None: APP["app"].pending.append(action)
-        page = {"fields": None}; H_SEND, H_LOGIN, H_OPT, H_KEYS = 116, 160, 124, 70
-        PING_TIP = "Send a %s ping where you next target: a spot, an item or a person"
-        KEY_TIP = "The key for a %s ping, for example CTRL+1, F9 or SHIFT+F2 (blank = none)"
-        LOGIN_TIPS = {"host": "The map server's address (a host name or an IP address)",
-                      "port": "The map server's port (a number; %d by default)" % DEFAULT_PORT,
-                      "user": "Your login name on the map server",
-                      "pass": "Your map server password; kept in plain text in the client's saved "
-                              "variables on this PC, like Enhanced Map's own"}
+        page = {"f": None}; H_SEND, H_LOGIN, H_KEYS = 116, 160, 70
+        PING_TIP = "Send a %s ping on the spot, item or person you target"
+        KEY_TIP = "Key for a %s ping, like CTRL+1, F9 or SHIFT+F2 (blank = none)"
+        LOGIN_TIPS = {"host": "Map server address (host name or IP)", "port": "Map server port (default %d)"
+                      % DEFAULT_PORT, "user": "Your map server login name",
+                      "pass": "Map server password; saved in plain text on this PC, like Enhanced Map's"}
         def _page_action(action):
             def fn(*args): _queue_app(action)
             return fn
-        def config_height(w): return H_SEND + Kit.GAP + H_LOGIN + Kit.GAP + H_OPT + Kit.GAP + H_KEYS
-        def build_send(g, x, y, w, store):
-            Kit.add_section(g, x, y, w, H_SEND, "SEND A PING  (or a hotkey, or the mouse-wheel drag)"); bx = x + 12
+        def draw_send(f, x, y):
+            g, store, w = f.g, f.store, f.w; bx = x + 12
             for t in (LOOK, DANGER, GO, HELP):
                 label, hue = TYPE_INFO[t][:2]; cap = label + "..."
                 Kit.art_button(g, store, "ping%d" % t, Kit.ART_PLAY, bx, y + 28, cap, PING_TIP % label,
                                hue=hue, on_click=_page_action(("target", t)))
                 bx += 35 + Kit.text_w(cap) + 16
-            Kit.art_button(g, store, "recon", Kit.ART_PLAY, x + 12, y + 58, "Reconnect",
-                           "Connect to the map server again (TazUO's Enhanced Map or the separate login)",
+            Kit.art_button(g, store, "recon", Kit.ART_PLAY, x + 12, y + 58, "Reconnect", "Reconnect to the map server",
                            on_click=_page_action(("reconnect",)))
             hx = x + 12 + 35 + Kit.text_w("Reconnect") + 16
             Kit.art_button(g, store, "history", Kit.ART_PAGE, hx, y + 58, "History",
-                           "Open the ping history window: recent pings, yours and other people's "
-                           "(click again to close it)", on_click=_page_action(("history",)))
+                           "Open or close the window of recent pings, yours and others'",
+                           on_click=_page_action(("history",)))
             gx = hx + 35 + Kit.text_w("History") + 16; app = APP["app"]
             if app is not None:
                 Kit.add_label(g, Kit.fit("Wheel drag: up Look, right Danger, down Go, left Help", x + w - 12 - gx),
@@ -1257,69 +1131,58 @@ def _module_worldmap():
             if app is not None:
                 app.status_label, app.status_w = lbl, w - 24
                 Kit.set_text(lbl, Kit.fit(app.status_text or "Starting...", w - 24))
-        def build_config(g, x, y, w):
-            store = ({}, {}); build_send(g, x, y, w, store); y = y + H_SEND + Kit.GAP; st = Settings()
-            Kit.add_section(g, x, y, w, H_LOGIN, "SEPARATE MAP LOGIN  (when TazUO's Enhanced Map is off)"); fields = {}
-            col = (w - 36) // 2
+        def draw_login(f, x, y):
+            g, w = f.g, f.w; st = Settings(); col = (w - 36) // 2; page["fields"] = fields = {}
             for i, (key, caption, value) in enumerate((
                     ("host", "Server address:", st.host), ("port", "Port:", str(st.port)),
                     ("user", "Map username:", st.user), ("pass", "Map password:", st.password))):
                 fx = x + 12 + (i % 2) * (col + 12); fy = y + 30 + (i // 2) * 48; Kit.add_label(g, caption, fx, fy)
                 fields[key] = Kit.with_tip(Kit.add_textbox(g, value, fx + 2, fy + 20, col - 8, numbers=key == "port"),
                                            LOGIN_TIPS[key])
-            Kit.art_button(g, store, "save", Kit.ART_OK, x + 12, y + 128, "Save and connect",
-                           "Save the four fields on this PC and connect with them")
-            page["login"] = Kit.add_label(g, Kit.fit("Saved on this PC in plain text (the "
-                                                      "password shows while typing).", w - 236),
-                                           x + 220, y + 131, Kit.HUE_INFO)
-            yo = y + H_LOGIN + Kit.GAP; Kit.add_section(g, x, yo, w, H_OPT, "OPTIONS")
-            checks = {"sounds": Kit.add_check(g, "Play a sound for each ping", x + 12, yo + 32, OPT["sounds"],
-                                        "Play the ping's sound when a ping shows, yours and other people's"),
-                "gesture": Kit.add_check(g, "Ping with a mouse-wheel drag", x + 312, yo + 32, OPT["gesture"],
-                                         "Hold the mouse wheel over a spot and drag: up Look "
-                                         "here, right Danger!, down Go here, left Need help"),
-                "share": Kit.add_check(g, "Show me on guildmates' maps", x + 12, yo + 58, OPT["share"],
-                                       "Send your position to the map server (separate login "
-                                       "only; TazUO's Enhanced Map does this itself)"),}
-            nums = {}; ny = yo + 86
-            for k, cap, nx, unit, tip in (("ping_secs", "Ping stays:", x + 12, "s",
-                     "Seconds a ping's marker and pulse stay on screen (%d-%d)"),
-                    ("drag", "Drag distance:", x + 312, "px",
-                     "Pixels the mouse-wheel drag must go before a direction counts (%d-%d)")):
-                Kit.add_label(g, cap, nx, ny + 3); bx = nx + Kit.text_w(cap) + 8
-                nums[k] = Kit.with_tip(Kit.add_textbox(g, str(OPT[k]), bx, ny, 44), tip % OPT_LIMITS[k])
-                Kit.add_label(g, unit, bx + 50, ny + 3, Kit.HUE_INFO)
-            yk = yo + H_OPT + Kit.GAP; Kit.add_section(g, x, yk, w, H_KEYS, "HOTKEYS  (blank = none)"); keys = {}
-            kx = x + 12
+            Kit.art_button(g, f.store, "save", Kit.ART_OK, x + 12, y + 128, "Save and connect",
+                           "Save the four fields on this PC and connect")
+            page["login"] = Kit.add_label(g, Kit.fit("Saved on this PC in plain text (password shows while typing).",
+                                                     w - 236), x + 220, y + 131, Kit.HUE_INFO)
+        def draw_keys(f, x, y):
+            kx = x + 12; page["keys"] = keys = {}
             for k in HOTKEY_ORDER:
-                cap = k.capitalize() + ":"; Kit.add_label(g, cap, kx, yk + 36)
-                keys[k] = Kit.with_tip(Kit.add_textbox(g, HOTKEYS[k], kx + Kit.text_w(cap) + 8, yk + 33, 84,
+                cap = k.capitalize() + ":"; Kit.add_label(f.g, cap, kx, y + 36)
+                keys[k] = Kit.with_tip(Kit.add_textbox(f.g, HOTKEYS[k], kx + Kit.text_w(cap) + 8, y + 33, 84,
                                                        numbers=False), KEY_TIP % label_of(TYPE_KEYS[k]))
                 kx += Kit.text_w(cap) + 8 + 84 + 16
+        NUM = {"lgap": 8, "fw": 44, "ugap": 6}
+        PAGE = (("SEND A PING  (or a hotkey or wheel drag)", (("custom", 0, draw_send),), {"sh": H_SEND, "top": 0}),
+                ("MAP LOGIN  (when TazUO's Enhanced Map is off)", (("custom", 0, draw_login),),
+                 {"sh": H_LOGIN, "top": 0}), ("OPTIONS", (
+                    ("check", "sounds", "Play a sound for each ping", "For your pings and others'", {"stay": True}),
+                    ("check", "gesture", "Ping with a mouse-wheel drag", "Hold the wheel on a spot and drag: up Look "
+                     "here, right Danger!, down Go here, left Need help", {"dx": 312}),
+                    ("check", "share", "Show me on guildmates' maps", "Sends your position (map login only; TazUO's "
+                     "Enhanced Map does its own)", {"stay": True}), ("gap", 28),
+                    ("num", "ping_secs", "Ping stays:", "How long a ping's marker and pulse stay", "s",
+                     OPT_LIMITS["ping_secs"][0], OPT_LIMITS["ping_secs"][1], dict(NUM, stay=True)),
+                    ("num", "drag", "Drag distance:", "Pixels the wheel drag must move to count", "px",
+                     OPT_LIMITS["drag"][0], OPT_LIMITS["drag"][1], dict(NUM, dx=312))), {"top": 32}),
+                ("HOTKEYS  (blank = none)", (("custom", 0, draw_keys),), {"sh": H_KEYS, "top": 0}))
+        def config_height(w): return Kit.Form.height(PAGE, w)
+        def build_config(g, x, y, w):
+            f = Kit.Form(g, x, y, w, OPT, PAGE); yo = y + H_SEND + H_LOGIN + 2 * Kit.GAP
             Kit.add_label(g, "Connection:", x + 312, yo + 60)
             idx = CONN_CODES.index(OPT["connection"]) if OPT["connection"] in CONN_CODES else 0
             dd = G.CreateDropDown(190, [c[1] for c in CONNECTIONS], idx); dd.SetPos(x + 414, yo + 56); g.Add(dd)
-            Kit.with_tip(dd, "Which map connection to use: TazUO's Enhanced Map while it is on, or the separate login "
-                             "above")
-            page.update({"fields": fields, "checks": checks, "dd": dd, "store": store,
-                         "seen": dict(OPT), "keys": keys, "seen_keys": dict(HOTKEYS), "nums": nums, "next_read": 0.0})
+            Kit.with_tip(dd, "TazUO's Enhanced Map while it is on, or the login above")
+            page.update({"f": f, "dd": dd, "seen_keys": dict(HOTKEYS), "next_read": 0.0})
         def poll_config(force=False):
-            if page["fields"] is None: return
-            if Kit.was_clicked(page["store"], "save"): _save_login()
+            f = page["f"]
+            if f is None: return
+            if Kit.was_clicked(f.store, "save"): _save_login()
             now = time.time()
-            if not force and now < page.get("next_read", 0.0): return
-            page["next_read"] = now + 0.2
-            for k, cb in page["checks"].items():
-                try: OPT[k] = bool(cb.IsChecked)
-                except Exception: pass
+            if not force and now < page["next_read"]: return
+            page["next_read"] = now + 0.2; new = f.read()
             try: i = int(page["dd"].GetSelectedIndex())
-            except Exception: i = None
-            if i is not None and 0 <= i < len(CONNECTIONS): OPT["connection"] = CONNECTIONS[i][0]
-            for k, tb in (page.get("nums") or {}).items():
-                try: txt = str(tb.Text or "").strip()
-                except Exception: continue
-                if txt.isdigit(): lo, hi = OPT_LIMITS[k]; OPT[k] = max(lo, min(hi, int(txt)))
-            if OPT != page["seen"]: page["seen"] = dict(OPT); save_options(); _queue_app(("options",))
+            except Exception: i = -1
+            if 0 <= i < len(CONNECTIONS): new["connection"] = CONNECTIONS[i][0]
+            if new != OPT: OPT.update(new); save_options(); _queue_app(("options",))
             new = {}
             for k, tb in page["keys"].items():
                 try: new[k] = _norm_key(tb.Text)
@@ -1349,23 +1212,20 @@ def _module_worldmap():
         def config_closed():
             poll_config(True); app = APP["app"]
             if app is not None and app.status_label is page.get("status"): app.status_label = None
-            page.update({"fields": None, "checks": None, "dd": None, "status": None, "keys": None,
-                         "nums": None, "login": None})
-        APP = {"app": None}
+            page.update({"f": None, "dd": None, "status": None, "keys": None, "fields": None, "login": None})
+        APP = {"app": None}; cleanup = Kit.Cleanup()
         def _offer_ping(x, y, m=None, kind="danger", who=None):
             app = APP["app"]
             if app is None or app._shut: return False
-            if m is None:
-                try: m = int(API.GetMap())
-                except Exception: return False
+            if m is None: m = API.GetMap()
             return app.send_auto(int(x), int(y), int(m), TYPE_KEYS.get(kind, DANGER), who)
-        def _start(): APP["app"] = PingApp(); APP["app"].start(); HOST.services["pings.send"] = _offer_ping
+        def _start(): APP["app"] = PingApp(); APP["app"].start(); cleanup.service("pings.send", _offer_ping)
         def _tick():
             if APP["app"] is not None: APP["app"].step()
         def _thread_tick():
             if APP["app"] is not None: APP["app"].thread_step()
         def _stop():
-            HOST.services.pop("pings.send", None); app, APP["app"] = APP["app"], None
+            cleanup.close(); app, APP["app"] = APP["app"], None
             if app is not None: app.shutdown()
         def _interval():
             app = APP["app"]
@@ -1374,11 +1234,10 @@ def _module_worldmap():
             if app.aim is not None or app.pending or app.inbox or app.jobs or app.outbox: return 0.05
             return 0.1
         load_options()
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "interval": _interval,
+        return {"start": _start, "tick": _tick, "stop": _stop, "interval": _interval,
                   "client_tick": True, "thread_tick": _thread_tick,
                   "config_height": config_height, "build_config": build_config,
                   "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
     def _part_corpse():
         KEY = "corpserun"; TITLE = "Corpse"; SETTINGS_KEY = "CorpseRun_settings"; CORPSE_KEY = "CorpseRun_corpse"
         POS_KEY = "CorpseRun_pos"; MIN_KEY = "CorpseRun_min"; ARROW_ID = 0x434F5250; CORPSE_GRAPHIC = 0x2006
@@ -1389,16 +1248,16 @@ def _module_worldmap():
         HAIR_FIRST, HAIR_LAST = 0x203B, 0x204D; PING_TRY = 15.0; W = 420; MINI_W, MINI_H = 280, 46; BODY_H = 128
         H = Kit.MARGIN + 30 + Kit.GAP + BODY_H + Kit.MARGIN
         settings = {"arrow": True, "restore": True, "ping": False, "decay": DEFAULT_DECAY_MIN,
-                    "bones": DEFAULT_BONES_MIN, "say": False}
+                    "bones": DEFAULT_BONES_MIN}
         st = {"body": 0, "body_at": 0.0, "note_until": 0.0, "name": "", "drawn": None, "drawn_c": None}
-        win = {"g": None, "c": {}, "store": ({}, {})}; page = {"c": None, "typed": {}}
+        win = {"g": None, "c": {}, "store": ({}, {})}; typed = {}; cleanup = Kit.Cleanup()
         NUMS = {"decay": (MIN_LO, MIN_HI), "bones": (MIN_LO, MIN_HI)}
         def load_settings():
             Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
             if (settings["decay"], settings["bones"]) == (7, 7):
                 settings["decay"], settings["bones"] = DEFAULT_DECAY_MIN, DEFAULT_BONES_MIN
         def save_settings():
-            Kit.kv_save(SETTINGS_KEY, ";", settings, ("arrow", "restore", "ping", "decay", "bones", "say"), NUMS)
+            Kit.kv_save(SETTINGS_KEY, ";", settings, ("arrow", "restore", "ping", "decay", "bones"), NUMS)
         def load_rec():
             p = Kit.get_var(CORPSE_KEY).split("|")
             if len(p) < 8 or p[0] != "1": return None
@@ -1422,57 +1281,40 @@ def _module_worldmap():
             return 60.0 * (settings["decay"] + settings["bones"]) - (now - r["died"])
         def clock(secs): secs = max(0, int(secs)); return "%d:%02d" % (secs // 60, secs % 60)
         item_of = Kit.find_item; held_item = Kit.held_item
-        def cursor_up():
-            try:
-                if HOST.cursor_busy(KEY): return True
-            except Exception: pass
-            try: return bool(API.HasTarget())
-            except Exception: return False
+        def cursor_up(): return bool(HOST.cursor_busy(KEY)) or bool(API.HasTarget())
         def is_hair(it):
-            try: g = int(it.Graphic)
-            except Exception: return False
-            if HAIR_FIRST <= g <= HAIR_LAST: return True
-            try: d = it.GetItemData(); return d is not None and int(d.Layer) in (11, 16)
-            except Exception: return False
+            if HAIR_FIRST <= int(it.Graphic) <= HAIR_LAST: return True
+            d = it.GetItemData(); return d is not None and int(d.Layer) in (11, 16)
         def weight_of(it):
-            try: d = it.GetItemData(); w = int(d.Weight) if d is not None else 0
-            except Exception: w = 0
-            if w >= 255: w = 0
-            try: n = int(it.Amount or 1)
-            except Exception: n = 1
-            total = w * max(1, n)
-            try:
-                if it.IsContainer:
-                    for x in (API.ItemsInContainer(int(it.Serial), True) or []):
-                        try:
-                            d = x.GetItemData(); xw = int(d.Weight) if d is not None else 0
-                            if xw < 255: total += xw * max(1, int(x.Amount or 1))
-                        except Exception: continue
-            except Exception: pass
+            d = it.GetItemData(); w = int(d.Weight) if d is not None else 0
+            total = (0 if w >= 255 else w) * max(1, int(it.Amount or 1))
+            if it.IsContainer:
+                for x in API.ItemsInContainer(int(it.Serial), True) or ():
+                    d = x.GetItemData(); xw = int(d.Weight) if d is not None else 0
+                    if xw < 255: total += xw * max(1, int(x.Amount or 1))
             return total
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
+        queue = Kit.queuer(st)
         def build_window():
-            g, store, c, w, h, x, y, old = open_window(st, win, POS_KEY, (MINI_W, MINI_H), (W, H), (220, 220), TITLE,
-                                                       KEY, queue)
+            g, store, c = wnd.begin(W, H)
             if not st["minimized"]:
-                M = Kit.MARGIN; IW = w - 2 * M; yb = M + 30 + Kit.GAP
-                Kit.add_section(g, M, yb, IW, BODY_H, "YOUR CORPSE  (where, and how long it lasts)")
+                wnd.frame(g); M = Kit.MARGIN; IW = W - 2 * M; yb = M + 30 + Kit.GAP
+                Kit.add_section(g, M, yb, IW, BODY_H, "YOUR CORPSE  (where, how long it lasts)")
                 c["where"] = Kit.add_label(g, "", M + 12, yb + 28, Kit.HUE_TEXT)
                 c["decay"] = Kit.add_label(g, "", M + 12, yb + 48, Kit.HUE_INFO)
                 c["info"] = Kit.add_label(g, "", M + 12, yb + 68, Kit.HUE_INFO); by = yb + 92; xb = M + 10
                 c["go"] = Kit.art_button(g, store, "go", Kit.ART_PLAY, xb, by, "Get my things",
-                                         "Open your corpse and move your things back into your "
-                                         "backpack one at a time (stand next to it). Click again "
-                                         "to stop.", on_click=queue("go"))
+                                         "Move your things from your corpse to your backpack one by one (stand "
+                                         "beside it; click again to stop)", on_click=queue("go"))
                 xb += 35 + max(Kit.text_w("Get my things"), Kit.text_w("Stop")) + 14
                 Kit.art_button(g, store, "help", Kit.ART_PLAY, xb, by, "Ping for help",
-                               "Send a Need help map ping on your corpse to your guild (needs "
-                               "World Map > Map Pings on)", on_click=queue("help"))
+                               "Send your guild a Need help ping on your corpse (needs World Map > Map Pings)",
+                               on_click=queue("help"))
                 xb += 35 + Kit.text_w("Ping for help") + 14
                 Kit.art_button(g, store, "forget", Kit.ART_CLOSE, xb, by, "Forget",
                                "Forget this corpse and take its arrow down", on_click=queue("forget"))
-            show_window(g, x, y, w, h, st, win, on_disposed, POS_KEY, c=c, store=store); st["lbl_at"] = 0.0
-            Kit.dispose(old)
+            wnd.end(g); st["lbl_at"] = 0.0
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (220, 220), (MINI_W, MINI_H), 0x0ECA,
+                         cleanup, lock=False, clear={"c": {}})
         def show_full():
             if not st["minimized"] and not st["docked"]: return
             st["minimized"], st["docked"] = False, False; HOST.dock_forget(KEY); Kit.save_min(MIN_KEY, False)
@@ -1484,9 +1326,7 @@ def _module_worldmap():
                 info = st["note"] if st["note"] and now < st["note_until"] else \
                     ("Find a healer or a resurrection." if dead else "When you die, this window shows the way back.")
                 return ("No corpse to find.", Kit.HUE_TEXT, "", Kit.HUE_INFO, info, TITLE + ": none")
-            left = remaining(now)
-            try: mx, my = int(me.X), int(me.Y)
-            except Exception: mx, my, mm = r["x"], r["y"], r["facet"]
+            left = remaining(now); mx, my = int(me.X), int(me.Y)
             if not r["spot"]: where, mini = "Looking for your corpse round you...", "looking"
             elif mm != r["facet"]:
                 where = "On %s, at %d, %d" % (Kit.facet_name(r["facet"]), r["x"], r["y"])
@@ -1536,38 +1376,29 @@ def _module_worldmap():
         def arrow_tick(me, mm):
             r = st["rec"]; want = None
             if settings["arrow"] and r is not None and r["spot"] and mm == r["facet"]:
-                try: d = max(abs(int(me.X) - r["x"]), abs(int(me.Y) - r["y"]))
-                except Exception: d = REACH + 1
-                if d > REACH: want = (r["x"], r["y"])
+                if max(abs(int(me.X) - r["x"]), abs(int(me.Y) - r["y"])) > REACH: want = (r["x"], r["y"])
             if want == st["arrow"]: return
             if want is None: clear_arrow()
-            else:
-                try: API.TrackingArrow(want[0], want[1], ARROW_ID); st["arrow"] = want
-                except Exception: st["arrow"] = None
+            else: API.TrackingArrow(want[0], want[1], ARROW_ID); st["arrow"] = want
         def clear_arrow():
-            if st["arrow"] is not None: st["arrow"] = None; safe(lambda: API.TrackingArrow(-1, -1, ARROW_ID))
+            if st["arrow"] is not None: st["arrow"] = None; API.TrackingArrow(-1, -1, ARROW_ID)
         def on_death(me, now, at_start=False):
             if st["job"] is not None: stop_job("you died")
-            try: x, y, m = int(me.X), int(me.Y), int(API.GetMap())
-            except Exception: return
-            st["name"] = str(safe(lambda: me.Name, "") or "")
+            x, y, m = int(me.X), int(me.Y), int(API.GetMap()); st["name"] = str(me.Name or "")
             st["rec"] = {"serial": 0, "x": x, "y": y, "facet": m, "died": now, "body": st["body"],
                          "spot": not at_start, "exact": not at_start}
             st["seek_until"], st["seek_at"] = now + FIND_SECS, now
             st["gone_since"], st["warned"], st["maybe"] = None, False, None; st["refused"] = set(); save_rec()
             if at_start: say("you are a ghost: looking for your corpse round you.")
             else:
-                say("you died at %d, %d (%s). Your corpse turns to bones in %d minute%s and is "
-                    "gone %d minute%s later." % (x, y, Kit.facet_name(m), settings["decay"],
-                                                 "" if settings["decay"] == 1 else "s", settings["bones"],
-                                                 "" if settings["bones"] == 1 else "s"), Kit.HUE_BAD)
+                say("you died at %d, %d (%s). Bones in %s, gone %s later." % (
+                    x, y, Kit.facet_name(m), Kit.count(settings["decay"], "minute"),
+                    Kit.count(settings["bones"], "minute")), Kit.HUE_BAD)
                 if settings["ping"]: st["ping"] = (x, y, m, now + PING_TRY)
             if settings["restore"]: show_full()
         CORPSE_PREFIXES = ("a corpse of ", "corpse of ", "the remains of ", "remains of "); NAME_LOW = ["", ""]
         def mine(it, strict=False, graphic=CORPSE_GRAPHIC):
-            r = st["rec"]; body = r["body"] if r is not None else 0
-            try: amt = int(it.Amount or 0)
-            except Exception: amt = 0
+            r = st["rec"]; body = r["body"] if r is not None else 0; amt = int(it.Amount or 0)
             if body and amt and amt != body: return 0
             bones = BONES_FIRST <= graphic <= BONES_LAST
             if bones and (not amt or (not body and amt not in HUMAN_BODIES)): return 0
@@ -1575,12 +1406,7 @@ def _module_worldmap():
             if nm != NAME_LOW[0]: NAME_LOW[0], NAME_LOW[1] = nm, nm.strip().lower()
             me_name = NAME_LOW[1]
             if not me_name: return loose
-            try: n = str(it.Name or "")
-            except Exception: n = ""
-            if not n:
-                try: n = str(it.NameAndProps(False) or "")
-                except Exception: n = ""
-            n = n.strip().lower(); owner = None
+            n = (str(it.Name or "") or str(it.NameAndProps(False) or "")).strip().lower(); owner = None
             for p in CORPSE_PREFIXES:
                 if n.startswith(p): owner = n[len(p):].strip(); break
             if owner is None:
@@ -1589,10 +1415,8 @@ def _module_worldmap():
             return 2 if owner == me_name else 0
         def scan_corpses(items, gr, strict, cx, cy, lim, acc):
             need = 2 if strict else 1
-            for it in items:
-                try: s, ix, iy = int(it.Serial), int(it.X), int(it.Y)
-                except Exception: continue
-                d = max(abs(ix - cx), abs(iy - cy))
+            for it in items or ():
+                s, ix, iy = int(it.Serial), int(it.X), int(it.Y); d = max(abs(ix - cx), abs(iy - cy))
                 if d > lim: continue
                 m = mine(it, strict, gr)
                 if not m: continue
@@ -1600,19 +1424,13 @@ def _module_worldmap():
                 if b is None or d < b[0] or (d == b[0] and s > b[1]): acc[i] = e
         def find_corpse(me):
             r = st["rec"]; strict = not r["spot"]
-            if r["spot"]: cx, cy, lim = r["x"], r["y"], 3
-            else:
-                try: cx, cy, lim = int(me.X), int(me.Y), SEEK_RANGE
-                except Exception: return None, None
-            try: items = API.GetItemsOnGround(SEEK_RANGE, CORPSE_GRAPHIC) or ()
-            except Exception: items = ()
-            acc = [None, None]; scan_corpses(items, CORPSE_GRAPHIC, strict, cx, cy, lim, acc); best, maybe = acc
+            cx, cy, lim = (r["x"], r["y"], 3) if r["spot"] else (int(me.X), int(me.Y), SEEK_RANGE); acc = [None, None]
+            scan_corpses(API.GetItemsOnGround(SEEK_RANGE, CORPSE_GRAPHIC), CORPSE_GRAPHIC, strict, cx, cy, lim, acc)
+            best, maybe = acc
             if best is None:
                 acc = [None, None]
                 for gr in range(BONES_FIRST, BONES_LAST + 1):
-                    try: items = API.GetItemsOnGround(SEEK_RANGE, gr)
-                    except Exception: continue
-                    if items: scan_corpses(items, gr, strict, cx, cy, lim, acc)
+                    scan_corpses(API.GetItemsOnGround(SEEK_RANGE, gr), gr, strict, cx, cy, lim, acc)
                 best, m2 = acc
                 if m2 is not None and (maybe is None or m2[0] < maybe[0]): maybe = m2
             return (None if best is None else best[1:]), (None if maybe is None else maybe[1:])
@@ -1628,9 +1446,7 @@ def _module_worldmap():
             st["maybe"] = None; r["serial"], r["x"], r["y"], r["spot"] = mb[0], mb[1], mb[2], True; save_rec()
             note("The corpse at %d, %d is taken as yours." % (mb[1], mb[2]))
         def corpse_tick(me, now, mm):
-            r = st["rec"]; left = remaining(now)
-            try: dist = max(abs(int(me.X) - r["x"]), abs(int(me.Y) - r["y"]))
-            except Exception: dist = 1 << 20
+            r = st["rec"]; left = remaining(now); dist = max(abs(int(me.X) - r["x"]), abs(int(me.Y) - r["y"]))
             if not r["serial"]:
                 near = r["spot"] and mm == r["facet"] and dist <= 12
                 offered = not r["spot"] and st["maybe"] is not None; seeking = now < st["seek_until"]
@@ -1646,12 +1462,9 @@ def _module_worldmap():
             elif now >= st["item_at"] or st["item_at"] - now > ITEM_EVERY:
                 st["item_at"] = now + ITEM_EVERY; it = item_of(r["serial"])
                 if it is not None:
-                    st["gone_since"] = None
-                    try:
-                        ix, iy = int(it.X), int(it.Y)
-                        if ((ix or iy) and (ix, iy) != (r["x"], r["y"]) and not int(it.Container or 0)):
-                            r["x"], r["y"] = ix, iy; save_rec()
-                    except Exception: pass
+                    st["gone_since"] = None; ix, iy = int(it.X), int(it.Y)
+                    if (ix or iy) and (ix, iy) != (r["x"], r["y"]) and not int(it.Container or 0):
+                        r["x"], r["y"] = ix, iy; save_rec()
                 elif mm == r["facet"] and st["job"] is None and dist <= 12:
                     if st["gone_since"] is None: st["gone_since"] = now
                     elif now - st["gone_since"] >= 6.0:
@@ -1659,11 +1472,9 @@ def _module_worldmap():
                 else: st["gone_since"] = None
             if left <= 60 and not st["warned"] and left > 0:
                 st["warned"] = True
-                try:
-                    dist = Kit.where_text(r["x"] - int(me.X), r["y"] - int(me.Y)) \
-                        if mm == r["facet"] else "on " + Kit.facet_name(r["facet"])
-                except Exception: dist = "at %d, %d" % (r["x"], r["y"])
-                HOST.alert(ALERT_DECAY, "Your corpse decays in under a minute (%s)" % dist, "warn")
+                where = Kit.where_text(r["x"] - int(me.X), r["y"] - int(me.Y)) if mm == r["facet"] else \
+                    "on " + Kit.facet_name(r["facet"])
+                HOST.alert(ALERT_DECAY, "Corpse decays in under a minute (%s)" % where, "warn")
             if left <= -DECAYED_GRACE and item_of(r["serial"]) is None: forget("your corpse has decayed.")
         def ping_tick(now):
             p = st["ping"]
@@ -1684,46 +1495,34 @@ def _module_worldmap():
             if not r["serial"]: note("Your corpse hasn't been seen yet: go to %d, %d." % (r["x"], r["y"])); return
             it = item_of(r["serial"])
             if it is None: note("Your corpse isn't in view yet (%d, %d)." % (r["x"], r["y"])); return
-            try: d = max(abs(int(it.X) - int(me.X)), abs(int(it.Y) - int(me.Y)))
-            except Exception: d = REACH + 1
-            if d > REACH:
-                note("Walk up to your corpse first (%s)."
-                     % Kit.where_text(int(it.X) - int(me.X), int(it.Y) - int(me.Y)))
-                return
-            pack = safe(lambda: int(API.Backpack), 0) or 0
+            dx, dy = int(it.X) - int(me.X), int(it.Y) - int(me.Y)
+            if max(abs(dx), abs(dy)) > REACH:
+                note("Walk up to your corpse first (%s)." % Kit.where_text(dx, dy)); return
+            pack = int(API.Backpack or 0)
             if not pack: note("No backpack to put things in."); return
             if cursor_up(): note("A target cursor is up: finish or cancel it first."); return
             if held_item(): note("You are holding an item: put it down first."); return
             st["job"] = {"phase": "open", "corpse": r["serial"], "pack": pack, "at": now + 1.0,
                          "until": now + 3.0, "plan": [], "i": 0, "tried": set(), "waits": {},
                          "move": None, "check": None, "sent_at": 0.0, "last": 0, "rechecks": 0,
-                         "hold": 0.0, "moved": 0, "refused": 0, "streak": 0, "why": None,
-                         "replans": 0, "jr": Journal.reader() if settings["say"] else None}
+                         "hold": 0.0, "moved": 0, "refused": 0, "streak": 0, "why": None, "replans": 0}
             API.UseObject(r["serial"]); st["note"] = ""; st["lbl_at"] = 0.0
         def make_plan(j):
-            try: items = API.ItemsInContainer(j["corpse"], False) or []
-            except Exception: items = []
             plan = []
-            for it in items:
+            for it in API.ItemsInContainer(j["corpse"], False) or ():
                 if len(plan) >= PLAN_CAP: break
-                try: s = int(it.Serial)
-                except Exception: continue
-                if s in j["tried"] or s in st["refused"] or is_hair(it): continue
-                plan.append(s)
+                s = int(it.Serial)
+                if s not in j["tried"] and s not in st["refused"] and not is_hair(it): plan.append(s)
             return plan
         def job_tick(me, now):
             j = st["job"]
-            if j["jr"] is not None:
-                for ln in j["jr"].new():
-                    if ln.text and not ln.text.startswith(TITLE + ":"): say("reply: " + ln.text.strip())
             if j["why"]: stop_job(j["why"]); return
             if j["move"] is not None: return
             if st["was_dead"]: stop_job("you died"); return
             it = item_of(j["corpse"])
             if it is None: stop_job("your corpse is gone from view"); return
-            try: d = max(abs(int(it.X) - int(me.X)), abs(int(it.Y) - int(me.Y)))
-            except Exception: d = 0
-            if d > REACH: stop_job("you walked away from your corpse"); return
+            if max(abs(int(it.X) - int(me.X)), abs(int(it.Y) - int(me.Y))) > REACH:
+                stop_job("you walked away from your corpse"); return
             if j["check"] is not None and (now < j["at"] or not check_move(j, now)): return
             if j["phase"] == "open":
                 if now < j["at"]: return
@@ -1740,11 +1539,8 @@ def _module_worldmap():
                 s = plan[j["i"]]; j["i"] += 1
                 if s in j["tried"]: continue
                 x = item_of(s)
-                try:
-                    if x is None or int(x.Container or 0) != j["corpse"]: continue
-                except Exception: continue
-                try: wmax = int(me.WeightMax or 0); wnow = int(me.Weight or 0)
-                except Exception: wmax = wnow = 0
+                if x is None or int(x.Container or 0) != j["corpse"]: continue
+                wmax, wnow = int(me.WeightMax or 0), int(me.Weight or 0)
                 if wmax > 0 and (wnow >= wmax or wnow + weight_of(x) > wmax):
                     stop_job("the next item would put you over your weight limit (%d / %d stones)" % (wnow, wmax))
                     return
@@ -1754,9 +1550,7 @@ def _module_worldmap():
                 if more: j["plan"], j["i"] = more, 0; return
             finish_job()
         def check_move(j, now):
-            s = j["check"]; it = item_of(s)
-            try: where = int(it.Container or 0) if it is not None else None
-            except Exception: where = None
+            s = j["check"]; it = item_of(s); where = int(it.Container or 0) if it is not None else None
             if where is None and j["rechecks"] < MOVE_RECHECK:
                 j["rechecks"] += 1; j["at"] = now + MOVE_GAP * 0.5; return False
             if where != j["corpse"]: j["moved"] += 1; j["streak"] = j["rechecks"] = 0; j["check"] = None; return True
@@ -1792,10 +1586,10 @@ def _module_worldmap():
             if item_of(j["corpse"]) is not None: left = make_plan({"corpse": j["corpse"], "tried": set()})
             n_ref = len(st["refused"])
             if j["moved"] == 0 and not j["refused"] and not left:
-                forget("nothing left in your corpse%s." % ((" but %d item%s the server refused (take %s by hand)"
-                     % (n_ref, "" if n_ref == 1 else "s", "it" if n_ref == 1 else "them")) if n_ref else ""))
+                forget("nothing left in your corpse%s." % ((" but %s the server refused (take %s by hand)"
+                     % (Kit.count(n_ref, "item"), "it" if n_ref == 1 else "them")) if n_ref else ""))
                 return
-            msg = "%d item%s back in your backpack" % (j["moved"], "" if j["moved"] == 1 else "s")
+            msg = "%s back in your backpack" % Kit.count(j["moved"], "item")
             if j["refused"]:
                 msg += ", %d refused (left in your corpse: take %s by hand)" % (
                     j["refused"], "it" if j["refused"] == 1 else "them")
@@ -1810,52 +1604,37 @@ def _module_worldmap():
             if user: say("stopped (%d moved)." % j["moved"])
             elif why: say("stopped: %s (%d moved)." % (why, j["moved"]), Kit.HUE_BAD)
             st["lbl_at"] = 0.0
-        MOVE_HINT = ("Moves one item every %.1f s and stops when you click Stop, raise a target "
-                     "cursor, pick something up, walk away or would go over your weight limit." % MOVE_GAP)
+        MOVE_HINT = ("One item every %.1f s; stops on Stop, a target cursor, picking something up, walking away or "
+                     "going over your weight limit." % MOVE_GAP)
         def page_table(w):
             t1 = "Corpse to bones:"
-            return (("WHEN YOU DIE  (the arrow, this window, a ping)", (
-                        ("check", "arrow", "Point the tracking arrow at your corpse", "Shows a tracking arrow of its "
-                         "own to the corpse (other arrows are left alone); it hides when you stand beside it"),
+            return (("WHEN YOU DIE", (
+                        ("check", "arrow", "Point the tracking arrow at your corpse", "Its own arrow (others are left "
+                         "alone); hidden when you stand beside it"),
                         ("check", "restore", "Open the Corpse window when you die, even minimized or folded",
-                         "The window comes back full size when you die"),
+                         "It comes back full size"),
                         ("check", "ping", "Send a Need help map ping on your corpse when you die",
-                         "Your guild sees a Need help ping where you died (needs World Map > Map Pings on). Off at "
-                         "first: it tells them where you are")), {"pad": 4}), ("DECAY  (minutes; the shard's times)", (
-                        ("num", "decay", t1, "Minutes from your death until the corpse turns to bones", None, MIN_LO,
-                         MIN_HI, {"stay": True}),
-                        ("num", "bones", "Bones gone after:", "Minutes the bones (your things still in them) last "
-                         "before they decay", None, MIN_LO, MIN_HI, {"dx": Kit.text_w(t1) + 86})),
-                     {"ldy": 4, "fw": 40, "pad": 8}),
+                         "Your guild sees where you died (needs World Map > Map Pings); off at first, as it shows "
+                         "where you are")), {"pad": 4}), ("DECAY  (minutes; the shard's times)", (
+                        ("num", "decay", t1, "Minutes from death until bones", None, MIN_LO, MIN_HI, {"stay": True}),
+                        ("num", "bones", "Bones gone after:", "Minutes the bones (with your things) last", None, MIN_LO,
+                         MIN_HI, {"dx": Kit.text_w(t1) + 86})), {"ldy": 4, "fw": 40, "pad": 8}),
                     ("GET MY THINGS  (one item at a time)", [("note", ln) for ln in Kit.wrap(MOVE_HINT, w - 28)]),
-                    atlas_page("corpse"),
-                    ("DEBUG  (for checking the shard's texts)", (("check", "say", "Print the shard's replies in the "
-                     "journal", "While Get my things runs, every journal line is repeated as \"%s: reply: ...\", for "
-                     "checking the shard's texts" % TITLE),)))
-        def config_height(w): return Kit.Form.height(page_table(w), w)
-        def build_config(g, x, y, w): page["c"] = Kit.Form(g, x, y, w, settings, page_table(w)).c
-        def poll_config(force=False):
-            c = page["c"]
-            if c is None: return
-            changed = False; now = time.time()
-            try:
-                for k in ("arrow", "restore", "ping", "say"):
-                    v = bool(c[k].IsChecked)
-                    if v != settings[k]: settings[k], changed = v, True
-                for k in ("decay", "bones"):
-                    txt = str(c[k].Text or "").strip(); t = page["typed"].get(k)
-                    if t is None or t[0] != txt:
-                        page["typed"][k] = (txt, now)
-                        if not force: continue
-                    elif not force and now - t[1] < 1.0: continue
-                    if txt.isdigit():
-                        v = max(MIN_LO, min(MIN_HI, int(txt)))
-                        if v != settings[k]: settings[k], changed = v, True; st["warned"] = False
-            except Exception: page["c"] = None; return
-            if changed:
-                save_settings(); st["lbl_at"] = 0.0
-                if not settings["arrow"]: clear_arrow()
-        def config_closed(): poll_config(True); page["c"] = None; page["typed"] = {}
+                    atlas_page("corpse"))
+        def settle(f, new):
+            now = time.time()
+            for k in ("decay", "bones"):
+                try: txt = str(f.c[k].Text or "").strip()
+                except Exception: continue
+                t = typed.get(k)
+                if t is None or t[0] != txt: typed[k] = (txt, now)
+                if not cfg.force and (t is None or t[0] != txt or now - t[1] < 1.0): new[k] = settings[k]
+        def on_change(old, new):
+            if (new["decay"], new["bones"]) != (old["decay"], old["bones"]): st["warned"] = False
+            st["lbl_at"] = 0.0
+            if not new["arrow"]: clear_arrow()
+        cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=settle, final=True)
+        def config_closed(): cfg.closed(); typed.clear()
         def rebase(d):
             for k in ("body_at", "seek_until", "seek_at", "look_at", "item_at", "lbl_at", "note_until"):
                 st[k] = st[k] + d
@@ -1871,16 +1650,14 @@ def _module_worldmap():
             st.update({"shutting": False, "docked": False, "queue": [], "job": None, "arrow": None, "refused": set(),
                        "ping": None, "was_dead": None, "seek_until": 0.0, "seek_at": 0.0,
                        "look_at": 0.0, "gone_since": None, "item_at": 0.0, "lbl_at": 0.0, "note": "",
-                       "last_now": None, "atlas": False, "maybe": None, "minimized": Kit.load_min(MIN_KEY)
-                       or bool(safe(lambda: HOST.dock_wanted(KEY), False))})
+                       "last_now": None, "atlas": False, "maybe": None, "minimized": wnd.start_min()})
             load_settings(); st["rec"] = load_rec(); st["warned"] = False
             if st["rec"] is not None and remaining(time.time()) <= -DECAYED_GRACE: st["rec"] = None; save_rec()
             if st["rec"] is not None and not st["rec"]["spot"]: st["seek_until"] = time.time() + FIND_SECS
-            safe(lambda: HOST.alert_kind(ALERT_DECAY, "Corpse about to decay", 0x1EA)); build_window()
-            HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x0ECA, st, win, queue("redraw"), scale=True))
+            HOST.alert_kind(ALERT_DECAY, "Corpse about to decay", 0x1EA); build_window(); wnd.dock(scale=True)
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time(); last, st["last_now"] = st["last_now"], now
             if last is not None and now < last - 2.0: rebase(now - last)
             me = HOST.me()
@@ -1899,29 +1676,21 @@ def _module_worldmap():
                 elif action == "forget":
                     if st["rec"] is None: note("No corpse remembered.")
                     else: forget("forgot your corpse.")
-                else: Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY)
+                else: wnd.action(action)
             if me is None: return
-            try: dead = bool(me.IsDead)
-            except Exception: return
-            was = st["was_dead"]; st["was_dead"] = dead
+            dead = bool(me.IsDead); was = st["was_dead"]; st["was_dead"] = dead
             if was is None:
                 if dead and st["rec"] is None: on_death(me, now, at_start=True)
             elif dead and not was: on_death(me, now)
             elif was and not dead and st["rec"] is not None:
                 r = st["rec"]
                 if r["spot"]:
-                    try: wt = Kit.where_text(r["x"] - int(me.X), r["y"] - int(me.Y))
-                    except Exception: wt = "at %d, %d" % (r["x"], r["y"])
-                    say("you are alive. Your corpse is %s: click Get my things beside it." % wt, Kit.HUE_GOOD)
+                    say("you are alive. Your corpse is %s: click Get my things beside it."
+                        % Kit.where_text(r["x"] - int(me.X), r["y"] - int(me.Y)), Kit.HUE_GOOD)
                 st["lbl_at"] = 0.0
             if not dead and now >= st["body_at"]:
-                st["body_at"] = now + 2.0
-                try: st["body"] = int(me.Graphic); st["name"] = str(me.Name or "") or st["name"]
-                except Exception: pass
-            mm = None
-            if st["rec"] is not None or st["arrow"] is not None:
-                try: mm = int(API.GetMap())
-                except Exception: mm = -1
+                st["body_at"] = now + 2.0; st["body"] = int(me.Graphic); st["name"] = str(me.Name or "") or st["name"]
+            mm = int(API.GetMap()) if st["rec"] is not None or st["arrow"] is not None else None
             if st["rec"] is not None: corpse_tick(me, now, mm)
             if st["job"] is not None: job_tick(me, now)
             if st["ping"] is not None: ping_tick(now)
@@ -1938,14 +1707,11 @@ def _module_worldmap():
         def _interval(): return 0.1 if st["job"] is not None else 0.25
         def _thread_wanted(): j = st["job"]; return j is not None and j["move"] is not None
         def _stop():
-            st["shutting"] = True; st["job"] = st["ping"] = None; HOST.dock_remove(KEY); clear_arrow()
-            Kit.save_pos(POS_KEY, win["g"]); Kit.save_min(MIN_KEY, st["minimized"]); save_settings()
-            g, win["g"] = win["g"], None; win["c"] = {}; Kit.dispose(g)
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
+            st["shutting"] = True; st["job"] = st["ping"] = None; clear_arrow(); save_settings(); cleanup.close()
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
                   "thread_wanted": _thread_wanted, "interval": _interval,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+                  "config_height": cfg.height, "build_config": cfg.build,
+                  "poll_config": cfg.poll, "config_closed": config_closed}
     def _part_maps():
         KEY = "treasure"; TITLE = "Treasure Maps"; SETTINGS_KEY = "TreasureHunter_settings"
         MAPS_KEY = "TreasureHunter_maps"; POS_KEY = "TreasureHunter_pos"; MIN_KEY = "TreasureHunter_min"
@@ -1957,22 +1723,19 @@ def _module_worldmap():
         J_DONE = "this treasure hunt has already been completed"
         J_ESTIMATE = re.compile(r"believe this is somewhere near (\d+) and (\d+)"); TAZ_SCALE = 300.0; SCAN_EVERY = 1.0
         LOOK_FOR = 6.0; LOOK_EVERY = 0.25; USED_KEEP = 8.0; SAVE_EVERY = 5.0; MAX_MAPS = 60; PING_TRY_FOR = 6.0
-        PING_RETRY = 0.5
-        LOOK_TIP = ("Point the tracking arrow at this map's spot (click again: back to the nearest map)")
+        PING_RETRY = 0.5; LOOK_TIP = "Point the tracking arrow at this map's spot (again: back to the nearest map)"
         LOOK_TIP_ON = "Send the tracking arrow back to the nearest map's spot"
-        LOOK_TIP_MAN = ("Point the tracking arrow at this map's spot (click again: take the tracking arrow down)")
-        PING_TIP = "Send a Go here map ping on this map's spot (needs World Map > Map Pings on)"
-        EMPTY_TEXT = "No treasure maps in your pack. Put one in it and double-click it once."
-        settings = {"auto": True, "undecoded": True, "done": False, "say": False}
+        LOOK_TIP_MAN = "Point the tracking arrow at this map's spot (again: take it down)"
+        PING_TIP = "Send a Go here ping on this map's spot (needs World Map > Map Pings)"
+        EMPTY_TEXT = "No treasure maps in your pack: put one in and double-click it once."
+        DUG_TIP = "This treasure has been dug up"; settings = {"auto": True, "undecoded": True, "done": False}
         st = {"next_look": 0.0, "dirty": False, "next_save": 0.0, "list_ver": 0, "me": (0, 0, -1), "hooked": False,
               "tm_at": 0.0, "tm_serial": 0, "hidden": 0, "in_pack": frozenset()}
         spots = {}; parsed = {}; TEXT_EVERY = 5.0; TEXT_ALL = [False]; asked = set(); read_gumps = {}
-        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; page = {"c": None}; JR = {"rd": None}
-        bank_st = {"at": 0.0, "items": []}
-        def say(text, hue=None):
-            safe(lambda: API.SysMsg("%s: %s" % (TITLE, text), Kit.HUE_INFO if hue is None else hue))
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; JR = {"rd": None}; cleanup = Kit.Cleanup()
+        bank_st = {"at": 0.0, "items": []}; say = Kit.sayer(TITLE)
         def level_name(lvl): return LEVEL_NAMES[lvl] if 0 <= lvl < len(LEVEL_NAMES) else "Treasure map"
-        def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ("auto", "undecoded", "done", "say"))
+        def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ("auto", "undecoded", "done"))
         def load_maps():
             spots.clear(); cut = time.time() - 60 * 86400
             for part in Kit.get_var(MAPS_KEY).split(";"):
@@ -2007,26 +1770,20 @@ def _module_worldmap():
             hit = parsed.get(serial)
             if now is not None and hit is not None and now < hit[2] <= now + TEXT_EVERY: return hit[1]
             if now is None: now = time.time()
-            try: text = str(API.ItemNameAndProps(serial, False) or "")
-            except Exception: text = ""
-            again = now + TEXT_EVERY
+            text = str(API.ItemNameAndProps(serial, False) or ""); again = now + TEXT_EVERY
             if not text.strip():
-                again = 0.0
-                try: text = str(it.Name or "")
-                except Exception: text = ""
+                again = 0.0; text = str(it.Name or "")
                 if serial not in asked:
                     asked.add(serial)
                     if len(asked) > 500: asked.clear()
-                    safe(lambda: API.RequestOPLData([serial]))
+                    API.RequestOPLData([serial])
             if hit is not None and hit[0] == text: parsed[serial] = (text, hit[1], again); return hit[1]
             info = parse(text)
             if len(parsed) > 300: parsed.clear()
             parsed[serial] = (text, info, again); return info
         def solve(est, end, p, size):
-            try: est = int(est)
-            except Exception: return None, None
-            try: end, p, size = int(end), float(p), float(size)
-            except Exception: return est, None
+            if None in (end, p, size): return est, None
+            p, size = float(p), float(size)
             if size <= 0 or p < 0 or p > size: return est, None
             k = 1.0 - p / TAZ_SCALE; start = None
             if abs(k) >= 0.001:
@@ -2039,13 +1796,9 @@ def _module_worldmap():
             return int(start + (p + 0.5) * (end - start) / size), scale
         def axis(est, end, p, size, scale=None):
             spot = solve(est, end, p, size)[0]
-            if spot is None and scale:
-                try: return int(int(end) - (float(size) - float(p) - 0.5) * scale), False
-                except Exception: pass
-            if spot is None:
-                try: return int(est), True
-                except Exception: return None, True
-            return spot, False
+            if spot is not None: return spot, False
+            if scale and None not in (end, p, size): return int(end - (float(size) - float(p) - 0.5) * scale), False
+            return est, True
         def num(obj, name):
             v = Typing._get(obj, name)
             if v is None: return None
@@ -2059,9 +1812,7 @@ def _module_worldmap():
             n = 0
             try:
                 for g in gumps:
-                    try:
-                        if str(g.GetType().Name) != "MapGump": continue
-                    except Exception: continue
+                    if str(g.GetType().Name) != "MapGump": continue
                     r = read_gump(g)
                     if r is None: return None
                     n += r
@@ -2089,27 +1840,15 @@ def _module_worldmap():
             if len(read_gumps) > 50: read_gumps.clear()
             read_gumps[serial] = g; sx = solve(est_x, end_x, px, size_w)[1]; sy = solve(est_y, end_y, py, size_h)[1]
             x, ax = axis(est_x, end_x, px, size_w, sy); y, ay = axis(est_y, end_y, py, size_h, sx)
-            if settings["say"]:
-                say("map window %X: pin %s,%s on %sx%s, far edge %s,%s, TazUO's estimate %d,%d, "
-                    "facet field %s -> %s,%s" % (serial, px, py, size_w, size_h, end_x, end_y, est_x, est_y, mf, x, y))
             if x is None or y is None or x <= 0 or y <= 0: return 0
             record(serial, x, y, mf if mf is not None and mf > 0 else -1, ax or ay); return 1
         def record(serial, x, y, mf, approx=False):
-            info = {}
-            try:
-                it = API.FindItem(serial)
-                if it is not None: info = info_of(serial, it)
-            except Exception: info = {}
-            now = time.time()
+            it = API.FindItem(serial); info = info_of(serial, it) if it is not None else {}; now = time.time()
             hinted = 0 <= now - st["tm_at"] <= LOOK_FOR and (st["tm_serial"] == serial
                 or (not st["tm_serial"] and now - st["tm_at"] <= 1.5))
-            if not (info.get("tm") or serial in spots or hinted):
-                if settings["say"]: say("map %X has a pin but isn't a treasure map: left out." % serial)
-                return False
+            if not (info.get("tm") or serial in spots or hinted): return False
             f = mf if mf >= 0 else info.get("f", -1)
-            if f < 0:
-                try: f = int(API.GetMap())
-                except Exception: f = st["me"][2] if st["me"][2] >= 0 else 0
+            if f < 0: f = int(API.GetMap())
             old = spots.get(serial); lvl = info.get("lvl", -1)
             if lvl < 0 and old is not None: lvl = old["lvl"]
             rec = {"x": int(x), "y": int(y), "f": int(f), "lvl": lvl,
@@ -2118,11 +1857,9 @@ def _module_worldmap():
             same = (old is not None and (old["x"], old["y"], old["f"]) == (rec["x"], rec["y"], rec["f"]))
             spots[serial] = rec; cap_spots(); st["dirty"] = True; st["next_scan"] = 0.0
             if not same:
-                st["arrow_off"] = False; mx, my, mf2 = st["me"]; where = ""
-                if mf2 == rec["f"] and mx > 0:
-                    d = max(abs(rec["x"] - mx), abs(rec["y"] - my))
-                    where = ", %d tile%s %s" % (d, "" if d == 1 else "s",
-                                                Kit.compass(rec["x"] - mx, rec["y"] - my) or "here")
+                st["arrow_off"] = False; mx, my, mf2 = st["me"]
+                where = (", " + Kit.where_text(rec["x"] - mx, rec["y"] - my, "here")) if mf2 == rec["f"] and mx > 0 \
+                    else ""
                 say("%s map%s: dig at %s%d, %d in %s%s." % (
                     level_name(lvl).lower(), (" (level %d)" % lvl) if lvl >= 0 else "",
                     "about " if rec["approx"] else "", rec["x"], rec["y"], Kit.facet_name(rec["f"]), where),
@@ -2136,15 +1873,12 @@ def _module_worldmap():
                 except Exception: continue
                 if s > 0 and len(st["used"]) < 20: st["used"].append(s)
                 return
-        def hook_events():
-            if st["hooked"]: return
-            st["hooked"] = True; safe(lambda: API.Events.ObjectUsed(on_used))
+        def hook_events(): Kit.hook_once(st, "hooked", ("ObjectUsed", on_used))
         def handle_used(now):
             used, st["used"] = st["used"], []
             for s in used:
-                try: it = API.FindItem(s); g = int(it.Graphic) if it is not None else 0
-                except Exception: g = 0
-                if g in MAP_GRAPHICS: st["last_map"] = (s, now); arm_look(now)
+                it = API.FindItem(s)
+                if it is not None and int(it.Graphic) in MAP_GRAPHICS: st["last_map"] = (s, now); arm_look(now)
         def handle_journal(now):
             rd = JR["rd"]
             if rd is None: return
@@ -2160,9 +1894,7 @@ def _module_worldmap():
                 if name and name != "system": continue
                 if kind == 1:
                     m = J_ESTIMATE.search(low)
-                    if m:
-                        st["est"] = (int(m.group(1)), int(m.group(2)), now); arm_look(now)
-                        if settings["say"]: say("TazUO's estimate line: %s, %s" % (m.group(1), m.group(2)))
+                    if m: st["est"] = (int(m.group(1)), int(m.group(2)), now); arm_look(now)
                 elif kind == 2:
                     s, t = st["last_map"]; st["tm_at"] = now
                     st["tm_serial"] = s if s and 0 <= now - t <= USED_KEEP else 0; TEXT_ALL[0] = True; arm_look(now)
@@ -2190,25 +1922,13 @@ def _module_worldmap():
             try: me = API.Player; mx, my = int(me.X), int(me.Y); fac = int(API.GetMap())
             except Exception: return
             st["me"] = (mx, my, fac)
-            try: bps = int(API.Backpack or 0)
-            except Exception: bps = 0
-            if not bps: st["in_pack"] = None; return
-            found = []
-            try: deep = HOST.pack_items(True, 0.5)
-            except Exception: deep = []
-            for it in deep or ():
-                try:
-                    if int(it.Graphic) in MAP_GRAPHICS: found.append(it)
-                except Exception: continue
-            bank = bank_maps(now); banked = set()
-            for it in bank:
-                try: banked.add(int(it.Serial))
-                except Exception: continue
+            if not int(API.Backpack or 0): st["in_pack"] = None; return
+            found = [it for it in HOST.pack_items(True, 0.5) if int(it.Graphic) in MAP_GRAPHICS]
+            bank = bank_maps(now); banked = set([int(it.Serial) for it in bank])
             found.extend(bank); out, seen = [], set(); hidden = 0; day = int(time.time())
             tnow = None if TEXT_ALL[0] else time.time(); TEXT_ALL[0] = False
             for it in found:
-                try: s = int(it.Serial)
-                except Exception: continue
+                s = int(it.Serial)
                 if s in seen: continue
                 seen.add(s)
                 if len(out) >= 100: continue
@@ -2244,14 +1964,10 @@ def _module_worldmap():
             if sig != st["list_sig"]: st["list_sig"] = sig; st["list_ver"] += 1
         def bank_maps(now):
             if now - bank_st["at"] < 5.0 and now >= bank_st["at"]: return bank_st["items"]
-            bank_st["at"] = now; bank_st["items"] = []
-            try:
-                b = int(API.Bank or 0)
-                if not b or not bank_open(b): return []
-                items = API.ItemsInContainer(b, True) or []
-                for it in list(items)[:2000]:
-                    if int(it.Graphic) in MAP_GRAPHICS: bank_st["items"].append(it)
-            except Exception: pass
+            b = int(API.Bank or 0); bank_st["at"] = now; bank_st["items"] = []
+            if b and bank_open(b):
+                bank_st["items"] = [it for it in list(API.ItemsInContainer(b, True) or [])[:2000]
+                                    if int(it.Graphic) in MAP_GRAPHICS]
             return bank_st["items"]
         def bank_open(bank):
             try:
@@ -2261,38 +1977,33 @@ def _module_worldmap():
             return False
         def dig_tiles(keep):
             want = set((int(e["x"]), int(e["y"]), int(e["f"])) for e in keep)
-            for t in st["dig_tiles"] - want: safe(lambda: API.RemoveMarkedTile(t[0], t[1], t[2]))
-            for t in want - st["dig_tiles"]: safe(lambda: API.MarkTile(t[0], t[1], 0x0035, t[2]))
+            for t in st["dig_tiles"] - want: API.RemoveMarkedTile(t[0], t[1], t[2])
+            for t in want - st["dig_tiles"]: API.MarkTile(t[0], t[1], 0x0035, t[2])
             st["dig_tiles"] = want
         def sort_key(e): return (e["group"], e["dist"] if e["dist"] is not None else 0, e["lvl"], e["serial"])
         def atlas_publish():
             keep = [e for e in st["list"] if not (e["x"] is None or e["done"] or e["f"] < 0)]
             sig = tuple((e["serial"], e["x"], e["y"], e["f"], e["lvl"]) for e in keep)
             if sig == st["atlas_sig"]: return
-            st["atlas_sig"] = sig; dig_tiles(keep); items = {}
-            for e in keep:
-                name = atlas_name(("Dig L%d #%04X" % (e["lvl"], e["serial"] & 0xFFFF)) if e["lvl"] >= 0
-                                  else ("Dig #%04X" % (e["serial"] & 0xFFFF)))
-                items[name] = (int(e["x"]), int(e["y"]), int(e["f"]), "yellow")
-            ATLAS.set("maps", items)
+            st["atlas_sig"] = sig; dig_tiles(keep)
+            ATLAS.set("maps", {atlas_name(("Dig L%d #%04X" % (e["lvl"], e["serial"] & 0xFFFF)) if e["lvl"] >= 0
+                                          else ("Dig #%04X" % (e["serial"] & 0xFFFF))):
+                               (int(e["x"]), int(e["y"]), int(e["f"]), "yellow") for e in keep})
         def where_of(e, fac):
             if e["x"] is not None:
                 spot = ("about (%d, %d)" if e.get("approx") else "(%d, %d)") % (e["x"], e["y"])
-                if e["done"]: return "dug up  " + spot, Kit.HUE_INFO, "This treasure has been dug up"
+                if e["done"]: return "dug up  " + spot, Kit.HUE_INFO, DUG_TIP
                 if e["f"] == fac:
                     d = e["dist"]
                     if d == 0: return "here  " + spot, Kit.HUE_GOOD, LOOK_TIP
-                    return ("%d tile%s %s  %s" % (d, "" if d == 1 else "s", e["dir"], spot), Kit.HUE_TEXT, LOOK_TIP)
+                    return ("%s %s  %s" % (Kit.count(d, "tile"), e["dir"], spot), Kit.HUE_TEXT, LOOK_TIP)
                 return ("in %s  %s" % (Kit.facet_name(e["f"]), spot), Kit.HUE_INFO,
                         "This map's spot is in %s; you are in %s" % (Kit.facet_name(e["f"]), Kit.facet_name(fac)))
-            if e["done"]: return "dug up", Kit.HUE_INFO, "This treasure has been dug up"
+            if e["done"]: return "dug up", Kit.HUE_INFO, DUG_TIP
             if e["dec"]:
-                return ("open the map once to read its spot", Kit.HUE_INFO,
-                        "Double-click the map once: its dig spot is read from it")
-            if e["dec"] is None:
-                return ("open the map to read it", Kit.HUE_INFO,
-                        "Double-click the map: a decoded map's spot is read from it")
-            return ("not decoded yet", Kit.HUE_INFO, "Not decoded yet: double-click the map to decode it (Cartography)")
+                return "open the map once to read its spot", Kit.HUE_INFO, "Double-click the map once to read it"
+            if e["dec"] is None: return "open the map to read it", Kit.HUE_INFO, "Double-click the map to read it"
+            return "not decoded yet", Kit.HUE_INFO, "Double-click the map to decode it (Cartography)"
         def entry(serial): return next((e for e in st["list"] if e["serial"] == serial), None)
         def arrow_target():
             if st["arrow_off"]: return None
@@ -2308,10 +2019,8 @@ def _module_worldmap():
         def update_arrow(force_off=False, force=False):
             want = None if force_off else arrow_target(); cur = st["arrow"]
             if not force and (want[:2] if want else None) == (cur[:2] if cur else None): st["arrow"] = want; return
-            try:
-                if want is None: API.TrackingArrow(-1, -1, ARROW_ID)
-                else: API.TrackingArrow(want[0], want[1], ARROW_ID); st["arrow_at"] = time.time()
-            except Exception: pass
+            if want is None: API.TrackingArrow(-1, -1, ARROW_ID)
+            else: API.TrackingArrow(want[0], want[1], ARROW_ID); st["arrow_at"] = time.time()
             st["arrow"] = want
         def arrow_closed(now):
             if st["arrow"] is None: return
@@ -2319,13 +2028,11 @@ def _module_worldmap():
             if age < 0: st["arrow_at"] = now; return
             if age < 1.5 or arrow_open(): return
             st["arrow"], st["arrow_off"], st["pin"] = None, True, 0
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
+        queue = Kit.queuer(st)
         def build_window():
-            g, store, c, w, h, x, y, old = open_window(st, win, POS_KEY, (MINI_W, MINI_H), (560, list_h(ROWS, ROW_H)),
-                                                       (240, 180), TITLE, KEY, queue)
-            rows = []
+            g, store, c = wnd.begin(560, list_h(ROWS, ROW_H)); rows = []
             if not st["minimized"]:
-                M = Kit.MARGIN; IW = w - 2 * M; yt = M + 30 + Kit.GAP; Kit.add_section(g, M, yt, IW, 36)
+                wnd.frame(g); M = Kit.MARGIN; IW = 560 - 2 * M; yt = M + 30 + Kit.GAP; Kit.add_section(g, M, yt, IW, 36)
                 right = M + IW - 8
                 Kit.art_button(g, store, "pg_dn", Kit.ART_MIN, right - 22, yt + 8, None,
                                "Next page", on_click=queue(("page", 1)))
@@ -2349,22 +2056,20 @@ def _module_worldmap():
                 c["empty_w"] = x_ping - 8 - x_lvl
                 for k in range(ROWS):
                     ry = yl + 30 + k * ROW_H
-                    r = {"serial": 0, "prev": (0, 0.0), "sig": None, "tip": None, "pvis": True}
-                    r["lvl"] = Kit.add_label(g, "", x_lvl, ry + 3, Kit.HUE_TITLE)
-                    r["name"] = Kit.add_label(g, "", x_name, ry + 3, Kit.HUE_TEXT)
-                    r["where"] = Kit.add_label(g, "", x_where, ry + 3, Kit.HUE_INFO)
+                    r = {"serial": 0, "prev": (0, 0.0), "sig": None, "tip": None, "pvis": True,
+                         "lvl": Kit.add_label(g, "", x_lvl, ry + 3, Kit.HUE_TITLE),
+                         "name": Kit.add_label(g, "", x_name, ry + 3, Kit.HUE_TEXT),
+                         "where": Kit.add_label(g, "", x_where, ry + 3, Kit.HUE_INFO)}
                     r["catch"] = Kit.catcher(g, M + 6, ry, x_ping - 4 - (M + 6), ROW_H,
                                              row_clicker(lambda: win["rows"], k, "serial", "row", queue, 0), LOOK_TIP)
                     r["ping"] = Kit.art_button(g, store, "ping%d" % k, Kit.ART_PLAY, x_ping, ry + 1, None, PING_TIP,
                                                on_click=row_clicker(lambda: win["rows"], k, "serial", "ping", queue, 0))
                     rows.append(r)
-            show_window(g, x, y, w, h, st, win, on_disposed, POS_KEY, c=c, store=store, rows=rows); st["drawn"] = None
-            refresh(); Kit.dispose(old)
+            wnd.end(g, {"rows": rows}); st["drawn"] = None; refresh()
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (240, 180), (MINI_W, MINI_H), 0x14EB,
+                         cleanup, lock=False, clear={"rows": []}, docked_min=True)
         def show(ctl, r, key, on):
-            if r[key] != on:
-                r[key] = on
-                try: ctl.IsVisible = on
-                except Exception: pass
+            if r[key] != on: r[key] = on; Kit.set(ctl, "IsVisible", on)
         def refresh():
             g = win["g"]
             if g is None or (st["minimized"] and st["docked"]): return
@@ -2372,10 +2077,9 @@ def _module_worldmap():
             sig = (st["list_ver"], st["page"], arrow, st["pin"], st["minimized"])
             if sig == st["drawn"]: return
             st["drawn"] = sig; c = win["c"]; lst = st["list"]; near = next((e for e in lst if e["group"] == 0), None)
-            n = len(lst); maps = "%d map%s" % (n, "" if n == 1 else "s")
+            n = len(lst); maps = Kit.count(n, "map")
             if near is not None:
-                d = near["dist"]
-                part = ("here" if d == 0 else "%d tile%s %s" % (d, "" if d == 1 else "s", near["dir"]))
+                d = near["dist"]; part = ("here" if d == 0 else "%s %s" % (Kit.count(d, "tile"), near["dir"]))
                 status = "%s, nearest %s" % (maps, part); mini = "%s, %s" % (maps, part)
             elif n: status = mini = "%s, no spot on this facet" % maps
             elif st["hidden"]:
@@ -2460,46 +2164,31 @@ def _module_worldmap():
             if here is None: say("your backpack isn't known yet; nothing was forgotten."); return
             gone = [s for s in spots if s not in here]
             for s in gone: del spots[s]
-            st["dirty"] = True
-            say("forgot %d spot%s of maps not in your pack." % (len(gone), "" if len(gone) == 1 else "s"))
+            st["dirty"] = True; say("forgot %s of maps not in your pack." % Kit.count(len(gone), "spot"))
         def draw_spots(f, x, y):
-            Kit.add_label(f.g, "%d spot%s remembered" % (len(spots), "" if len(spots) == 1 else "s"), x + 12, y + 4,
-                          Kit.HUE_INFO)
+            Kit.add_label(f.g, "%s remembered" % Kit.count(len(spots), "spot"), x + 12, y + 4, Kit.HUE_INFO)
             Kit.art_button(f.g, f.store, "forget", Kit.ART_CLOSE, x + f.w - 12 - (35 + Kit.text_w("Forget lost maps")),
-                           y, "Forget lost maps", "Forget the dig spots of every map that isn't in your backpack now",
+                           y, "Forget lost maps", "Forget the spots of maps not in your backpack",
                            on_click=queue("forget"))
-        PAGE = (("WINDOW  (open a decoded map once to read its spot)", (
+        PAGE = (("WINDOW  (open a decoded map once to read it)", (
                     ("check", "auto", "Point the tracking arrow at the nearest map's spot",
-                     "With no map picked, the tracking arrow points at the nearest dig spot on your facet"),
-                    ("check", "undecoded", "List maps not decoded yet",
-                     "Shows the maps still to be decoded (Cartography) in the window's list"),
-                    ("check", "done", "List maps already dug up",
-                     "Shows the maps whose treasure has been dug up in the window's list"))),
-                ("SAVED SPOTS", (("custom", 24, draw_spots),), {"sh": 64}), atlas_page("maps"),
-                ("DEBUG  (for checking the shard's texts)", (("check", "say", "Print what is read from each map in the "
-                 "journal", "Prints the map window's pin, size and bounds and TazUO's estimate line, for checking the "
-                 "spots against the shard"),)))
-        def config_height(w): return Kit.Form.height(PAGE, w)
-        def build_config(g, x, y, w): page["c"] = Kit.Form(g, x, y, w, settings, PAGE).c
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            if read_checks(c, settings, ("auto", "undecoded", "done", "say")):
-                save_settings(); st["next_scan"] = 0.0; st["drawn"] = None
-        def config_closed(): page["c"] = None
+                     "With no map picked, the arrow points at the nearest spot on your facet"),
+                    ("check", "undecoded", "List maps not decoded yet", "Maps still to decode (Cartography)"),
+                    ("check", "done", "List maps already dug up", "Maps whose treasure is dug up"))),
+                ("SAVED SPOTS", (("custom", 24, draw_spots),), {"sh": 64}), atlas_page("maps"))
+        def on_change(old, new): st["next_scan"] = 0.0; st["drawn"] = None
+        cfg = Kit.Page(settings, PAGE, save_settings, on_change)
         def _start():
             st.update({"shutting": False, "active": True, "docked": False, "queue": [], "used": [],
-                       "minimized": Kit.load_min(MIN_KEY) or bool(safe(lambda: HOST.dock_wanted(KEY), False)),
-                       "list": [], "list_sig": None, "next_scan": 0.0, "arrow": None, "pin": 0, "arrow_at": 0.0,
-                       "arrow_off": False, "ping": None, "est": None, "look_until": 0.0,
+                       "minimized": wnd.start_min(), "list": [], "list_sig": None, "next_scan": 0.0, "arrow": None,
+                       "pin": 0, "arrow_at": 0.0, "arrow_off": False, "ping": None, "est": None, "look_until": 0.0,
                        "last_map": (0, 0.0), "drawn": None, "page": 0, "atlas_ver": None,
                        "atlas_sig": None, "dig_tiles": set()})
             Kit.kv_load(SETTINGS_KEY, ";", settings); load_maps(); read_gumps.clear(); JR["rd"] = Journal.reader()
-            hook_events(); scan(time.time()); build_window()
-            HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x14EB, st, win, queue("redraw"), scale=True)); update_arrow()
+            hook_events(); scan(time.time()); build_window(); wnd.dock(scale=True); update_arrow()
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time()
             if st["used"]: handle_used(now)
             handle_journal(now); look_step(now); q = st["queue"]
@@ -2517,8 +2206,8 @@ def _module_worldmap():
                     update_arrow(force=True)
                     if st["arrow"] is None: say("no decoded map with a spot on this facet.")
                 elif kind == "arrow_off": st["pin"], st["arrow_off"] = 0, True; update_arrow()
-                elif kind == "forget": forget_others(); safe(lambda: HOST.refresh_settings(KEY))
-                else: Kit.win_action(kind, st, KEY, TITLE, build_window, MIN_KEY)
+                elif kind == "forget": forget_others(); HOST.refresh_settings(KEY)
+                else: wnd.action(kind)
                 if win["g"] is None: return
             if not (now < st["next_scan"] <= now + SCAN_EVERY):
                 st["next_scan"] = now + SCAN_EVERY; scan(now); arrow_closed(now); update_arrow()
@@ -2528,18 +2217,13 @@ def _module_worldmap():
                 st["next_save"] = now + SAVE_EVERY; save_maps()
             refresh()
         def _stop():
-            st["shutting"] = True; st["active"] = False; HOST.dock_remove(KEY)
-            if st["arrow"] is not None: update_arrow(force_off=True)
-            Kit.save_pos(POS_KEY, win["g"]); Kit.save_min(MIN_KEY, st["minimized"] and not st["docked"])
-            save_settings()
+            st["shutting"] = True; st["active"] = False; update_arrow(force_off=True); save_settings()
             if st["dirty"]: save_maps()
-            JR["rd"] = None; dig_tiles(()); st["used"], st["queue"], st["ping"] = [], [], None
-            g, win["g"] = win["g"], None; win["rows"] = []; Kit.dispose(g)
+            JR["rd"] = None; dig_tiles(()); st["used"], st["queue"], st["ping"] = [], [], None; cleanup.close()
         def _interval(): return 0.1 if st["look_until"] > time.time() else 0.2
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "interval": _interval,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "interval": _interval,
+                  "config_height": cfg.height, "build_config": cfg.build, "poll_config": cfg.poll,
+                  "config_closed": cfg.closed}
     def _part_dry():
         KEY = "harvest"; TITLE = "Ore Tracker"; KINDS = ("ore", "wood", "fish", "sand")
         KIND_NAME = {"ore": "Ore", "wood": "Wood", "fish": "Fish", "sand": "Sand"}
@@ -2558,20 +2242,21 @@ def _module_worldmap():
         RESPAWN = {"ore": (10, 20), "wood": (20, 30), "fish": (10, 20), "sand": (10, 20)}; GUARDED_RESPAWN_X = 3
         REACH = {"ore": 3, "wood": 3, "fish": 5, "sand": 3}; FIRST_MAX = 300; ROWS = 8; WEIGHT_WARN = 0.85
         WEIGHT_RED = 0.95; WEIGHT_MAX_BASE, WEIGHT_MAX_PER_STR = 40, 3.5; WEIGHT_EVERY = 0.5
-        WEIGHT_HUE_OK, WEIGHT_HUE_WARN = 0, 0x0035; WEIGHT_ALERT = "harvest.weight"; DRAW_EVERY = 1.0
+        WEIGHT_ALERT = "harvest.weight"; DRAW_EVERY = 1.0
         EXPIRE_EVERY = 1.0; ARROW_ID = 0x48525654; PING_TRY = 6.0; SAVE_EVERY = 5.0; SETTINGS_KEY = "Harvest_settings"
         SPOTS_KEY = "Harvest_spots"; POS_KEY = "Harvest_pos"; MIN_KEY = "Harvest_min"; W = 440; MINI_W, MINI_H = 340, 46
         ROW_H = 24
         FACING = {"north": (0, -1), "northeast": (1, -1), "east": (1, 0), "southeast": (1, 1),
                   "south": (0, 1), "southwest": (-1, 1), "west": (-1, 0), "northwest": (-1, -1)}
-        ROW_TIP = "Click: put the tracking arrow on it (click again to take it down)"
-        PING_TIP = ("Send a Look here map ping on this spot, so others know it is dry (needs World Map > Map Pings on)")
-        EMPTY_TEXT = "No dry spots yet. When the shard says a spot has run out, it goes here."
+        ROW_TIP = "Put the tracking arrow on it (again: take it down)"
+        PING_TIP = "Send a Look here ping on this spot so others know it is dry (needs World Map > Map Pings)"
+        EMPTY_TEXT = "No dry spots yet: spots the shard says ran out show here."
         SECS_MAX = 60.0 * GUARDED_RESPAWN_X * max(hi for _, hi in RESPAWN.values())
-        settings = {"ore": True, "wood": True, "fish": True, "sand": True, "alert": True, "keep": True, "say": False}
+        settings = {"ore": True, "wood": True, "fish": True, "sand": True, "alert": True, "keep": True}
         st = {"rd": None, "ver": 0, "mini_key": None, "w_key": None, "arrow_at": 0.0}; spots = {}; first = {}
-        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; page = {"c": None}; jobs = []; say = Kit.sayer(TITLE)
-        def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, KINDS + ("alert", "keep", "say"))
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; jobs = []; say = Kit.sayer(TITLE)
+        cleanup = Kit.Cleanup()
+        def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, KINDS + ("alert", "keep"))
         def spots_text():
             return ";".join("%s,%d,%d,%d,%d,%d,%d" % (e["kind"], e["m"], e["x"], e["y"], int(e["lo"]), int(e["hi"]),
                                                       1 if e["about"] else 0) for e in spots.values())
@@ -2599,8 +2284,7 @@ def _module_worldmap():
             spots[key] = {"kind": kind, "m": m, "x": x, "y": y, "lo": lo, "hi": hi, "at": now,
                           "about": about, "key": key}
             if st["arrow"] == key and old is not None and (old["x"], old["y"]) != (x, y):
-                try: API.TrackingArrow(x, y, ARROW_ID); st["arrow_at"] = now
-                except Exception: pass
+                API.TrackingArrow(x, y, ARROW_ID); st["arrow_at"] = now
             if len(spots) > 60:
                 drop = None
                 for k, e in spots.items():
@@ -2609,7 +2293,7 @@ def _module_worldmap():
                     del spots[drop]
                     if st["arrow"] == drop: arrow_off()
             return key
-        def respawn_x(): return GUARDED_RESPAWN_X if safe(lambda: HOST.guarded(), None) is True else 1
+        def respawn_x(): return GUARDED_RESPAWN_X if HOST.guarded() is True else 1
         def note_dry(kind, x, y, m, about, now):
             key = bank_of(kind, m, x, y); lo_m, hi_m = RESPAWN[kind]; x3 = respawn_x()
             lo_m, hi_m = lo_m * x3, hi_m * x3; f = first.pop(key, None)
@@ -2647,25 +2331,16 @@ def _module_worldmap():
             p = st["ping"]
             if p is not None: p[3] += d
             if spots: spots_changed()
-        def clear_spots():
-            if st["arrow"] is not None: arrow_off()
-            spots.clear(); spots_changed()
         def read_me():
-            try:
-                p = API.Player
-                if p is None: return None
-                me = (int(p.X), int(p.Y), int(API.GetMap()))
-            except Exception: return None
+            p = API.Player
+            if p is None: return None
+            me = (int(p.X), int(p.Y), int(API.GetMap()))
             if me[0] <= 0 and me[1] <= 0: return None
             st["me"] = me; return me
         def target_tile(kind, me):
-            px, py = me[0], me[1]
-            try: p = API.LastTargetPos; x, y = int(p.X), int(p.Y)
-            except Exception: x = y = -1
+            px, py = me[0], me[1]; p = API.LastTargetPos; x, y = int(p.X), int(p.Y)
             if 0 < x < 0xFFFF and 0 < y < 0xFFFF and max(abs(x - px), abs(y - py)) <= REACH[kind]: return x, y, False
-            try: d = str(API.Player.Direction or "").strip().lower()
-            except Exception: d = ""
-            dx, dy = FACING.get(d, (0, 0)); return px + dx, py + dy, True
+            dx, dy = FACING.get(str(API.Player.Direction or "").strip().lower(), (0, 0)); return px + dx, py + dy, True
         def line_kind(low):
             k = DRY_TEXTS.get(low)
             if k is not None: return "dry", k
@@ -2679,48 +2354,36 @@ def _module_worldmap():
             rd = st["rd"]
             if rd is None: return
             for ln in rd.new():
-                low = ln.low.strip(); hit = line_kind(low)
-                if hit is None: continue
-                what, kind = hit; spk = (ln.name or "").strip()
-                if spk.lower() not in SHARD_SPEAKERS:
-                    if settings["say"]: say("not the shard's line: %s said \"%s\"." % (spk, ln.text))
-                    continue
+                hit = line_kind(ln.low.strip())
+                if hit is None or (ln.name or "").strip().lower() not in SHARD_SPEAKERS: continue
+                what, kind = hit
                 if what == "dry" and not settings[kind]: continue
                 me = read_me()
                 if me is None: continue
                 x, y, about = target_tile(kind, me)
-                if settings["say"]:
-                    say("%s line from \"%s\" (\"%s\"): %s spot %d, %d%s." % (what, spk or "no speaker", ln.text,
-                        KIND_NAME[kind].lower(), x, y, " (about: the tile in front of you)" if about else ""))
                 if what == "dry": note_dry(kind, x, y, me[2], about, now)
                 else: note_back(kind, x, y, me[2], what == "got", now)
-        def character_alerts():
-            try: s = HOST.by_key.get("character"); return s is not None and bool(s.running)
-            except Exception: return False
+        def character_alerts(): s = HOST.by_key.get("character"); return s is not None and bool(s.running)
         def read_weight(now):
             if now < st["w_at"] and st["w_at"] - now <= WEIGHT_EVERY: return
             st["w_at"] = now + WEIGHT_EVERY
             if not settings["alert"] and (win["g"] is None or (st["minimized"] and st["docked"])): return
-            try:
-                p = API.Player; wt, wmax = int(p.Weight), int(p.WeightMax)
-                strength = int(p.Strength) if wmax <= 0 else 0
-            except Exception: return
+            p = API.Player
+            if p is None: return
+            wt, wmax = int(p.Weight), int(p.WeightMax); strength = int(p.Strength) if wmax <= 0 else 0
             if wmax <= 0 and strength > 0: wmax = int(WEIGHT_MAX_BASE + WEIGHT_MAX_PER_STR * strength)
             frac = (float(wt) / wmax) if wmax > 0 else -1.0; st["weight"] = (wt, wmax, frac)
             if frac >= WEIGHT_RED:
                 if st["w_armed"]:
                     raised = True
                     if settings["alert"] and not character_alerts():
-                        try:
-                            raised = HOST.alert(WEIGHT_ALERT, "Weight %d/%d (%d%%): nearly "
-                                                "overloaded. Unload before you harvest more."
-                                                % (wt, wmax, int(frac * 100)), level="warn", who="weight") is not False
-                        except Exception: raised = True
+                        raised = HOST.alert(WEIGHT_ALERT, "Weight %d/%d (%d%%): nearly overloaded"
+                                            % (wt, wmax, int(frac * 100)), level="warn", who="weight") is not False
                     if raised: st["w_armed"] = False
             elif 0 <= frac < 0.92: st["w_armed"] = True
         def arrow_off():
             if st["arrow"] is None: return
-            st["arrow"] = None; st["ver"] += 1; safe(lambda: API.TrackingArrow(-1, -1, ARROW_ID))
+            st["arrow"] = None; st["ver"] += 1; API.TrackingArrow(-1, -1, ARROW_ID)
         def arrow_to(key):
             e = spots.get(key)
             if e is None: return
@@ -2728,9 +2391,7 @@ def _module_worldmap():
             me = read_me() or st["me"]
             if me is not None and me[2] != e["m"]:
                 say("that spot is in %s; you are in %s." % (Kit.facet_name(e["m"]), Kit.facet_name(me[2]))); return
-            try: API.TrackingArrow(e["x"], e["y"], ARROW_ID)
-            except Exception as ex: say("couldn't show the tracking arrow (%s)." % ex, Kit.HUE_BAD); return
-            st["arrow"], st["arrow_at"] = key, time.time(); st["ver"] += 1
+            API.TrackingArrow(e["x"], e["y"], ARROW_ID); st["arrow"], st["arrow_at"] = key, time.time(); st["ver"] += 1
         def ping_spot(key):
             e = spots.get(key)
             if e is None: return
@@ -2765,9 +2426,7 @@ def _module_worldmap():
             if me is None: return "(%d, %d)" % (e["x"], e["y"])
             if me[2] != e["m"]: return "in %s" % Kit.facet_name(e["m"])
             if bank_of(e["kind"], me[2], me[0], me[1]) == e["key"]: return "here"
-            dx, dy = e["x"] - me[0], e["y"] - me[1]; dist = max(abs(dx), abs(dy))
-            return "%s%d tile%s %s" % ("about " if e["about"] else "", dist, "" if dist == 1 else "s",
-                                       Kit.compass(dx, dy))
+            return ("about " if e["about"] else "") + Kit.where_text(e["x"] - me[0], e["y"] - me[1])
         def back_text(e, now):
             if now < e["lo"]: return "back in %s-%s" % (mins(e["lo"] - now), mins(e["hi"] - now)), Kit.HUE_BAD
             return "back within %s" % mins(e["hi"] - now), Kit.HUE_TITLE
@@ -2779,25 +2438,21 @@ def _module_worldmap():
             else: back = "back by %s at the latest" % when
             return "%s ran dry at %d, %d%s: the %dx%d block from %d, %d, %s.  %s" % (
                 KIND_NAME[e["kind"]], e["x"], e["y"], " (about: the tile in front of you)" if e["about"] else "",
-                bw, bh, x0, y0, back, "Click: take the tracking arrow down" if on else ROW_TIP)
+                bw, bh, x0, y0, back, "Take the tracking arrow down" if on else ROW_TIP)
         def shown_spots(): return [e for e in spots.values() if settings[e["kind"]]]
         def _by_place(t): return (t[0], t[1])
         def atlas_publish():
-            items = {}
-            for e in sorted(shown_spots(), key=lambda e: -e["at"])[:15]:
-                name = atlas_name("%s dry %d %d" % (KIND_NAME[e["kind"]], e["x"], e["y"]))
-                items[name] = (int(e["x"]), int(e["y"]), int(e["m"]), "blue")
-            ATLAS.set("dry", items)
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win); LIST_H = 74 + ROWS * ROW_H + 22
+            ATLAS.set("dry", {atlas_name("%s dry %d %d" % (KIND_NAME[e["kind"]], e["x"], e["y"])):
+                              (int(e["x"]), int(e["y"]), int(e["m"]), "blue")
+                              for e in sorted(shown_spots(), key=lambda e: -e["at"])[:15]})
+        queue = Kit.queuer(st); LIST_H = 74 + ROWS * ROW_H + 22
         def build_window():
-            M = Kit.MARGIN
-            g, store, c, w, h, x, y, old = open_window(st, win, POS_KEY, (MINI_W, MINI_H),
-                (W, M + 30 + Kit.GAP + 46 + Kit.GAP + 36 + Kit.GAP + LIST_H + M), (260, 220), TITLE, KEY, queue)
+            M = Kit.MARGIN; g, store, c = wnd.begin(W, M + 30 + Kit.GAP + 46 + Kit.GAP + 36 + Kit.GAP + LIST_H + M)
             rows = []
             if not st["minimized"]:
-                IW = w - 2 * M; yw = M + 30 + Kit.GAP; Kit.add_section(g, M, yw, IW, 46, "WEIGHT")
+                wnd.frame(g); IW = W - 2 * M; yw = M + 30 + Kit.GAP; Kit.add_section(g, M, yw, IW, 46, "WEIGHT")
                 c["wtext"] = Kit.add_label(g, "", M + 20 + Kit.text_w("WEIGHT"), yw + 6, Kit.HUE_TEXT)
-                build_weight_bar(g, c, M + 12, yw + 28, IW - 24); yt = yw + 46 + Kit.GAP
+                Kit.weight_bar(g, c, M + 12, yw + 28, IW - 24); yt = yw + 46 + Kit.GAP
                 Kit.add_section(g, M, yt, IW, 36); bx = M + 12
                 Kit.art_button(g, store, "clear", Kit.ART_CLOSE, bx, yt + 7, "Clear",
                                "Empty the list of dry spots", on_click=queue("clear"))
@@ -2821,27 +2476,14 @@ def _module_worldmap():
                                                on_click=row_clicker(lambda: win["rows"], k, "key", "ping", queue))
                     r["pbtn"] = store[0].get("ping%d" % k); rows.append(r)
                 c["more"] = Kit.add_label(g, "", M + 12, yh + 22 + ROWS * ROW_H + 2, Kit.HUE_INFO)
-            show_window(g, x, y, w, h, st, win, on_disposed, POS_KEY, c=c, store=store, rows=rows)
+            wnd.end(g, {"rows": rows})
             st["drawn"] = st["mini_drawn"] = st["wdrawn"] = None; st["draw_at"] = 0.0; refresh(time.time())
-            Kit.dispose(old)
-        def build_weight_bar(g, c, bx, by, bw):
-            lw, lh = Kit.pic_size(Kit.LINE_RED); fh = max(4, min(11, Kit.pic_size(Kit.LINE_BLUE)[1] or lh or 9))
-            if lw > 0: Kit.add_tiled(g, Kit.LINE_RED, bx, by, bw, fh, hue=946)
-            else: Kit.add_tiled(g, Kit.SECTION_TILE, bx, by, bw, fh, 1.0)
-            fills = {}
-            for kind, art, hue in (("ok", Kit.LINE_POISON, WEIGHT_HUE_OK), ("warn", Kit.LINE_BLUE, WEIGHT_HUE_WARN),
-                                   ("red", Kit.LINE_RED, 0)):
-                f = Kit.add_tiled(g, art, bx, by, 1, fh, hue=hue)
-                if f is not None: safe(lambda f=f: setattr(f, "IsVisible", False)); fills[kind] = f
-            c["wfills"] = fills; c["wbar_w"] = bw
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (260, 220), (MINI_W, MINI_H), 0x0E86,
+                         cleanup, lock=False, clear={"rows": [], "c": {}}, docked_min=True)
         def show_row(r, on):
             if r["vis"] == on: return
             r["vis"] = on
-            for n in ("where", "back", "catch", "pbtn", "plbl"):
-                ctl = r.get(n)
-                if ctl is not None:
-                    try: ctl.IsVisible = on
-                    except Exception: pass
+            for n in ("where", "back", "catch", "pbtn", "plbl"): Kit.set(r.get(n), "IsVisible", on)
             if not on: Kit.set_text(r["kind"], "")
         def refresh(now):
             g = win["g"]
@@ -2854,9 +2496,8 @@ def _module_worldmap():
                 n = st["count"][1]; mkey = (n, wt)
                 if st["mini_drawn"] is not None and mkey == st["mini_key"]: return
                 st["mini_key"] = mkey
-                txt = "%s: %s, %d dry spot%s" % (
-                    TITLE, ("weight %d%%" % int(wt[2] * 100)) if wt and wt[2] >= 0 else "weight ?",
-                    n, "" if n == 1 else "s")
+                txt = "%s: %s, %s" % (TITLE, ("weight %d%%" % int(wt[2] * 100)) if wt and wt[2] >= 0 else "weight ?",
+                    Kit.count(n, "dry spot"))
                 if txt != st["mini_drawn"]:
                     st["mini_drawn"] = txt; lbl = c.get("status")
                     if lbl is not None:
@@ -2894,10 +2535,7 @@ def _module_worldmap():
                 Kit.set_text(r["where"], Kit.fit(("> " if on else "") + where, 124),
                              Kit.HUE_TITLE if on else Kit.HUE_TEXT)
                 Kit.set_text(r["back"], Kit.fit(back, back_w), bhue); tip = (key, on, e["lo"], e["hi"])
-                if tip != r["tip"]:
-                    r["tip"] = tip
-                    try: r["catch"].SetTooltip(row_tip(e, on))
-                    except Exception: pass
+                if tip != r["tip"]: r["tip"] = tip; Kit.with_tip(r["catch"], row_tip(e, on))
             more = len(listed) - len(win["rows"])
             Kit.set_text(c["more"], ("+%d farther" % more) if more > 0 else "", Kit.HUE_INFO)
         def draw_weight():
@@ -2906,71 +2544,57 @@ def _module_worldmap():
             st["w_key"] = wt; fills = c.get("wfills")
             if wt is None or wt[2] < 0: text, kind, width = "not known yet", None, 0
             else:
-                frac = wt[2]; text = "%d / %d stones (%d%%)" % (wt[0], wt[1], int(frac * 100))
-                kind = "red" if frac >= WEIGHT_RED else ("warn" if frac >= WEIGHT_WARN else "ok")
-                bw = c.get("wbar_w", 100); width = max(1, min(bw, int(round(bw * min(1.0, frac)))))
+                text = "%d / %d stones (%d%%)" % (wt[0], wt[1], int(wt[2] * 100))
+                kind, width = Kit.weight_level(wt[2], c.get("wbar_w", 100))
             sig = (text, kind, width)
             if sig == st["wdrawn"]: return
             st["wdrawn"] = sig; hue = {"red": Kit.HUE_BAD, "warn": Kit.HUE_TITLE}.get(kind, Kit.HUE_TEXT)
             if c.get("wtext") is not None: Kit.set_text(c["wtext"], text, hue)
-            for k, f in (fills or {}).items():
-                try:
-                    if k == kind: Kit.ui_w(f, width)
-                    f.IsVisible = k == kind
-                except Exception: pass
-        RESPAWN_NOTE = ("Back in: ore and sand 10-20 min, wood 20-30, fish 10-20, counted from "
-                        "the block's first harvest (3x as long in guarded towns).")
+            Kit.weight_show(fills or {}, kind, width)
+        RESPAWN_NOTE = ("Back in: ore and sand 10-20 min, wood 20-30, fish 10-20, from the block's first harvest (3x "
+                        "as long in guarded towns).")
         def kind_caption(kind): return "%s (%s)" % (KIND_NAME[kind], KIND_SKILL[kind])
         def kind_cols(w):
             widest = max(Kit.text_w(kind_caption(k)) for k in KINDS); return 2 if widest + 30 <= (w - 24) // 2 else 1
         def page_table(w):
             cols, half = kind_cols(w), (w - 24) // 2
-            return (("WHAT TO WATCH", [("check", k, kind_caption(k), "List the spots where the shard says the %s has "
-                                        "run out" % KIND_NAME[k].lower(), {"dx": 12 + (i % cols) * half,
+            return (("WHAT TO WATCH", [("check", k, kind_caption(k), "List spots where the %s ran out"
+                                        % KIND_NAME[k].lower(), {"dx": 12 + (i % cols) * half,
                                         "stay": i % cols < cols - 1}) for i, k in enumerate(KINDS)] + [("gap", 6),
                         ("check", "keep", "Keep the list when Virtue Assistant stops (per character)",
-                         "Unticked: the list starts empty at every start"), ("gap", 2)] + [("note", ln) for ln in
+                         "Unticked: it starts empty each time"), ("gap", 2)] + [("note", ln) for ln in
                         ["Unticked kinds are hidden, not forgotten."] + Kit.wrap(RESPAWN_NOTE, w - 28)], {"top": 32}),
                     ("WEIGHT  (yellow at %d%%, red at %d%%)" % (int(WEIGHT_WARN * 100), int(WEIGHT_RED * 100)), (
-                        ("check", "alert", "Alert as you cross the red line", "One alert each time you cross %d%% of "
-                         "your maximum weight (sound: Settings > Alerts); quiet while Inventory > Paperdoll is on, "
-                         "which has its own" % int(WEIGHT_RED * 100)),), {"top": 32, "pad": 4}), atlas_page("dry"),
-                    ("DEBUG  (for checking the shard's texts)", (("check", "say", "Print each harvest line read in the "
-                     "journal", "Prints every harvest line this part reads, with its speaker and the spot it took, for "
-                     "checking the shard's wording"),)))
-        def config_height(w): return Kit.Form.height(page_table(w), w)
-        def build_config(g, x, y, w): page["c"] = Kit.Form(g, x, y, w, settings, page_table(w)).c
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            hit = read_checks(c, settings, ("ore", "wood", "fish", "sand", "keep", "alert", "say"))
-            if "keep" in hit: st["save_due"] = True
-            if "alert" in hit and settings["alert"]: st["w_armed"] = True
-            if hit: save_settings(); st["drawn"] = st["mini_drawn"] = None
-        def config_closed(): page["c"] = None
+                        ("check", "alert", "Alert as you cross the red line", "Once each time you pass %d%% of your "
+                         "maximum weight; quiet while Inventory > Paperdoll is on (it has its own)"
+                         % int(WEIGHT_RED * 100)),), {"top": 32, "pad": 4}), atlas_page("dry"))
+        def on_change(old, new):
+            if new["keep"] != old["keep"]: st["save_due"] = True
+            if new["alert"] and not old["alert"]: st["w_armed"] = True
+            st["drawn"] = st["mini_drawn"] = None
+        cfg = Kit.Page(settings, page_table, save_settings, on_change)
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "drawn": None,
                        "mini_drawn": None, "wdrawn": None, "arrow": None, "ping": None,
                        "w_armed": True, "weight": None, "w_at": 0.0, "draw_at": 0.0,
                        "expire_at": 0.0, "save_due": False, "save_at": 0.0, "me": None,
-                       "count": (None, 0), "last_now": None, "atlas": None, "minimized": Kit.load_min(MIN_KEY)
-                       or bool(safe(lambda: HOST.dock_wanted(KEY), False))})
+                       "count": (None, 0), "last_now": None, "atlas": None, "minimized": wnd.start_min()})
             del jobs[:]; first.clear(); Kit.kv_load(SETTINGS_KEY, ";", settings); load_spots()
-            st["rd"] = Journal.reader(); safe(lambda: HOST.alert_kind(WEIGHT_ALERT, "Weight near the limit", 0x04A))
-            read_me(); build_window(); HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x0E86, st, win, queue("redraw")))
+            st["rd"] = Journal.reader(); HOST.alert_kind(WEIGHT_ALERT, "Weight near the limit", 0x04A)
+            read_me(); build_window(); wnd.dock()
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time(); last, st["last_now"] = st["last_now"], now
             if last is not None and now < last - 2.0: rebase(now - last)
             q = st["queue"]
             while q:
                 action = q.pop(0); kind = action[0] if isinstance(action, tuple) else action
-                if action == "clear": clear_spots()
+                if action == "clear": arrow_off(); spots.clear(); spots_changed()
                 elif action == "arrow_off": arrow_off()
                 elif kind == "arrow": arrow_to(action[1])
                 elif kind == "ping": ping_spot(action[1])
-                else: Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY)
+                else: wnd.action(action)
                 if win["g"] is None: return
             read_journal(now)
             if now >= st["expire_at"] or st["expire_at"] - now > EXPIRE_EVERY:
@@ -2984,16 +2608,11 @@ def _module_worldmap():
             while jobs and not st["shutting"]: jobs.pop(0)()
         def _thread_wanted(): return bool(jobs)
         def _stop():
-            st["shutting"] = True; HOST.dock_remove(KEY)
-            if st["arrow"] is not None: arrow_off()
-            st["ping"] = st["rd"] = None; del jobs[:]; Kit.save_pos(POS_KEY, win["g"])
-            Kit.save_min(MIN_KEY, st["minimized"] and not st["docked"]); save_settings()
-            Kit.put_var(SPOTS_KEY, spots_text() if settings["keep"] else ""); st["save_due"] = False
-            g, win["g"], win["rows"], win["c"] = win["g"], None, [], {}; Kit.dispose(g)
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-                  "thread_wanted": _thread_wanted, "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+            st["shutting"] = True; arrow_off(); st["ping"] = st["rd"] = None; del jobs[:]; save_settings()
+            Kit.put_var(SPOTS_KEY, spots_text() if settings["keep"] else ""); st["save_due"] = False; cleanup.close()
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
+                  "thread_wanted": _thread_wanted, "config_height": cfg.height, "build_config": cfg.build,
+                  "poll_config": cfg.poll, "config_closed": cfg.closed}
     def _part_traps():
         KEY = "traphl"; TITLE = "Traps & Fields"; SETTINGS_KEY = "TrapHL_settings"; POS_KEY = "TrapHL_pos"
         VIEW_KEY = "TrapHL_view"; H = Kit.MARGIN + 30 + Kit.GAP + 40 + Kit.MARGIN; MINI_W, MINI_H = 320, 46
@@ -3003,8 +2622,7 @@ def _module_worldmap():
         FIELDS_KEY = "TrapHL_fields"
         FIELD_RANGES = (("fire", 0x398C, 0x399F), ("poison", 0x3914, 0x3929),
                         ("paralyze", 0x3967, 0x398A), ("energy", 0x3946, 0x3964))
-        FIELD_LOOKUP = (0x398C, 0x3996, 0x3915, 0x3922, 0x3967, 0x3979, 0x3946, 0x3956); FIELD_HUE = 0x0035
-        PARALYZE_HUE = 0x0481
+        FIELD_HUE = 0x0035; PARALYZE_HUE = 0x0481
         FIELD_WORDS = {"fire": ("Fire field", Kit.HUE_TITLE), "poison": ("Poison field", Kit.HUE_TITLE),
                        "energy": ("Energy field", Kit.HUE_TITLE), "paralyze": ("Paralyze field!", Kit.HUE_BAD)}
         FIELD_SAY_NEAR = 3; ALERT_TRAP = "traphl.trap"
@@ -3012,8 +2630,8 @@ def _module_worldmap():
         settings = {"range": 14, "cycle": 2.0, "pulse": True,
                     "green": HUE_GREEN, "red": HUE_RED, "by_name": True, "graphics": list(DEFAULT_GRAPHICS),
                     "ping": True, "fields": True, "field_hue": FIELD_HUE, "para_hue": PARALYZE_HUE, "field_say": False}
-        st = {}; win = {"g": None, "c": {}, "store": ({}, {})}; page = {"c": None, "gfx_typed": None, "gfx_since": 0.0}
-        say = Kit.sayer(TITLE)
+        st = {}; win = {"g": None, "c": {}, "store": ({}, {})}; page = {"f": None, "gfx_typed": None, "gfx_since": 0.0}
+        say = Kit.sayer(TITLE); cleanup = Kit.Cleanup()
         def load_settings():
             p = Kit.get_var(SETTINGS_KEY).split("|")
             if len(p) < 7: return
@@ -3048,96 +2666,17 @@ def _module_worldmap():
             return out
         def graphics_text(): return ", ".join("0x%04X" % g for g in settings["graphics"])
         def load_view():
-            raw = Kit.get_var(VIEW_KEY); v = dict(p.split("=", 1) for p in raw.split(";") if "=" in p)
-            st["minimized"] = v.get("min") == "1"; st["paused"] = v.get("paused") == "1"
-            st["say_graphics"] = v.get("say") == "1"; st["view_saved"] = raw
+            raw = Kit.get_var(VIEW_KEY); v = Kit.codec_load(raw)
+            st["minimized"] = v.get("min") == "1"; st["paused"] = v.get("paused") == "1"; st["view_saved"] = raw
         def save_view():
-            data = "min=%d;paused=%d;say=%d" % (int(bool(st["minimized"])), int(bool(st["paused"])),
-                                                int(bool(st["say_graphics"])))
+            data = "min=%d;paused=%d" % (int(bool(st["minimized"])), int(bool(st["paused"])))
             if data != st.get("view_saved"): st["view_saved"] = data; Kit.put_var(VIEW_KEY, data)
-        _hue_setters = {}; _ent_member = {}
-        def _member_value(m, item):
-            return m.GetValue(item, None) if hasattr(m, "GetIndexParameters") else m.GetValue(item)
-        def _clr_entity(item):
-            m = _ent_member.get(type(item))
-            if m is not None:
-                try:
-                    v = _member_value(m, item)
-                    if v is not None and v is not item: return v
-                except Exception: pass
-            try:
-                import clr; from System.Reflection import BindingFlags
-                flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                t = clr.GetClrType(type(item))
-                while t is not None:
-                    for m in list(t.GetProperties(flags)) + list(t.GetFields(flags)):
-                        try: v = _member_value(m, item)
-                        except Exception: continue
-                        if v is None or v is item: continue
-                        vt = v.GetType()
-                        if (vt.GetProperty("Hue") is not None and vt.GetProperty("Serial") is not None):
-                            _ent_member[type(item)] = m; return v
-                    t = t.BaseType
-            except Exception: pass
-            return None
-        def set_hue(item, hue):
-            hue = int(hue) & 0xFFFF; tn = type(item).__name__; way = _hue_setters.get(tn)
-            if way == "none": return False
-            for w in ((way,) if way is not None else _HUE_WAYS):
-                if _HUE_SET[w](item, hue): _hue_setters[tn] = w; return True
-            if way is None: _hue_setters[tn] = "none"
-            return False
-        def _hue_by_method(item, hue):
-            fn = getattr(item, "SetHue", None)
-            if fn is None: return False
-            try: fn(hue); return True
-            except Exception: return False
-        def _hue_by_attr(item, hue):
-            try: item.Hue = hue; return int(item.Hue) == hue
-            except Exception: return False
-        def _hue_by_clr(item, hue):
-            ent = _clr_entity(item)
-            if ent is None: return False
-            try: ent.Hue = hue; return True
-            except Exception: return False
-        _HUE_WAYS = ("method", "attr", "clr")
-        _HUE_SET = {"method": _hue_by_method, "attr": _hue_by_attr, "clr": _hue_by_clr}
-        def int_of(item, name):
-            try: return int(getattr(item, name) or 0)
-            except Exception: return 0
-        def get_hue(item):
-            try: return int(item.Hue or 0)
-            except Exception: return 0
-        def xy_of(item): return int_of(item, "X"), int_of(item, "Y")
-        scan_how = {"ground": None, "form": None}; ANY_CONTAINER = 0xFFFFFFFF
-        FTA_FORMS = (lambda g, r: API.FindTypeAll(g, ANY_CONTAINER, r, 0xFFFF),
-                     lambda g, r: API.FindTypeAll(g, 0, r, 0xFFFF), lambda g, r: API.FindTypeAll(g, ANY_CONTAINER, r),
-                     lambda g, r: API.FindTypeAll(g, 0, r))
+        def set_hue(item, hue): item.Hue = int(hue) & 0xFFFF
+        def get_hue(item): return int(item.Hue or 0)
+        def xy_of(item): return int(item.X), int(item.Y)
         verdicts = {}; VERDICT_SIG = {"gfx": None, "wanted": frozenset(), "by_name": None, "fields": None}
-        SKIP_SCAN = False
-        def ground_all(rng):
-            if scan_how["ground"] is False: return None
-            try: res = API.GetItemsOnGround(rng)
-            except Exception:
-                if scan_how["ground"] is None: scan_how["ground"] = False; return None
-                return SKIP_SCAN
-            scan_how["ground"] = True; return res if res is not None else ()
-        def ground_items_of(graphic, rng):
-            form = scan_how["form"]
-            for k in ((form,) if form is not None else range(len(FTA_FORMS))):
-                try: res = FTA_FORMS[k](graphic, rng)
-                except Exception: continue
-                scan_how["form"] = k; return [i for i in (res or []) if is_on_ground(i)]
-            return []
-        def is_on_ground(item):
-            try: cont = int(item.Container or 0)
-            except Exception: cont = 0
-            if cont and cont not in (0, 0xFFFFFFFF, -1): return False
-            try: rp = int(item.RootContainer or 0); return not rp or rp == int(item.Serial)
-            except Exception: return True
         def named_trap(it):
-            try: name = str(it.Name or "").lower()
-            except Exception: name = ""
+            name = str(it.Name or "").lower()
             if not name: return None
             return "trap" in name and "scroll" not in name and "kit" not in name
         def verdict_sig():
@@ -3147,43 +2686,24 @@ def _module_worldmap():
                 sig["by_name"], sig["fields"] = settings["by_name"], settings["fields"]; verdicts.clear()
             return sig["wanted"]
         def scan():
-            rng = int(settings["range"]); st["atlas_map"] = None; found = {}; ffound = {}; items = ground_all(rng)
-            if items is SKIP_SCAN: return
-            st["scans"] += 1; check_hues = st["scans"] % 3 == 0
-            field_gfx = FIELD_GFX if settings["fields"] else NO_FIELDS
-            if items is None:
-                for gfx in settings["graphics"]:
-                    for it in ground_items_of(gfx, rng):
-                        try: found[int(it.Serial)] = it
-                        except Exception: pass
-                if field_gfx:
-                    for gfx in FIELD_LOOKUP:
-                        if gfx in settings["graphics"]: continue
-                        for it in ground_items_of(gfx, rng):
-                            try:
-                                s_ = int(it.Serial)
-                                if s_ not in found: ffound[s_] = it
-                            except Exception: pass
-            else:
-                wanted = verdict_sig(); by_name = settings["by_name"]; scans = st["scans"]; old = verdicts; seen = {}
-                for it in items:
-                    try:
-                        serial = int(it.Serial); g = int(it.Graphic); v = old.get(serial)
-                        if v is not None and v[0] == g and (not v[2] or scans < v[2]): kind = v[1]; seen[serial] = v
-                        else:
-                            retry = 0
-                            if g in wanted: kind = 1
-                            elif by_name and g not in field_gfx:
-                                named = named_trap(it)
-                                if named is None: kind, retry = 0, scans + 5
-                                else: kind = 1 if named else 0
-                            else: kind = 2 if g in field_gfx else 0
-                            seen[serial] = (g, kind, retry)
-                        if kind == 1: found[serial] = it
-                        elif kind == 2: ffound[serial] = it
-                    except Exception: continue
-                verdicts.clear(); verdicts.update(seen)
-            tracked = st["tracked"]; new_traps = []
+            rng = int(settings["range"]); st["atlas_map"] = None; found = {}; ffound = {}; st["scans"] += 1
+            scans = st["scans"]; check_hues = scans % 3 == 0; field_gfx = FIELD_GFX if settings["fields"] else NO_FIELDS
+            wanted = verdict_sig(); by_name = settings["by_name"]; old = verdicts; seen = {}
+            for it in API.GetItemsOnGround(rng) or ():
+                serial = int(it.Serial); g = int(it.Graphic); v = old.get(serial)
+                if v is not None and v[0] == g and (not v[2] or scans < v[2]): kind = v[1]; seen[serial] = v
+                else:
+                    retry = 0
+                    if g in wanted: kind = 1
+                    elif by_name and g not in field_gfx:
+                        named = named_trap(it)
+                        if named is None: kind, retry = 0, scans + 5
+                        else: kind = 1 if named else 0
+                    else: kind = 2 if g in field_gfx else 0
+                    seen[serial] = (g, kind, retry)
+                if kind == 1: found[serial] = it
+                elif kind == 2: ffound[serial] = it
+            verdicts.clear(); verdicts.update(seen); tracked = st["tracked"]; new_traps = []
             for serial, it in found.items():
                 rec = tracked.get(serial)
                 if rec is None:
@@ -3193,63 +2713,48 @@ def _module_worldmap():
                     set_hue(it, settings["green"]); atlas_seen(it)
                     if settings["ping"] and serial not in st["pinged"]: st["ping_wait"].append(serial)
                     if serial not in st["alerted"]: new_traps.append(it)
-                    if st["say_graphics"]:
-                        say("trap 0x%04X (serial 0x%X) at %d, %d." % (int_of(it, "Graphic"), serial, int_of(it, "X"),
-                                                                    int_of(it, "Y")))
                 else:
                     rec["item"] = it
                     if check_hues and get_hue(it) != rec["set"]: set_hue(it, rec["set"])
             gone = [s for s in tracked if s not in found]
-            for serial in gone: restore(serial)
+            for serial in gone: put_back(serial, tracked.pop(serial))
             if gone and st["ping_wait"]: st["ping_wait"] = [s for s in st["ping_wait"] if s in tracked]
             if new_traps: alert_new_traps(new_traps)
             if ffound or st["fields"]: scan_fields(ffound, check_hues)
         def atlas_seen(it):
             x, y = xy_of(it)
             if x <= 0 or y <= 0: return
-            if st["atlas_map"] is None:
-                try: st["atlas_map"] = int(API.GetMap())
-                except Exception: return
+            if st["atlas_map"] is None: st["atlas_map"] = int(API.GetMap())
             spot = (x, y, st["atlas_map"]); seen = st["atlas_traps"]
             if spot in seen: return
             seen.append(spot)
             if len(seen) > 20: del seen[0]
             st["atlas_ver"] += 1
         def atlas_publish():
-            items = {}
-            for x, y, m in st["atlas_traps"]: items[atlas_name("Trap %d %d" % (x, y))] = (x, y, m, "red")
-            ATLAS.set("traps", items)
+            ATLAS.set("traps", {atlas_name("Trap %d %d" % (x, y)): (x, y, m, "red") for x, y, m in st["atlas_traps"]})
         DIRS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
         def where(dx, dy):
             d = max(abs(dx), abs(dy))
             if d == 0: return "under you"
             a = math.degrees(math.atan2(dx, -dy)) % 360.0
-            return "%d tile%s %s" % (d, "" if d == 1 else "s", DIRS[int((a + 22.5) // 45.0) % 8])
+            return "%s %s" % (Kit.count(d, "tile"), DIRS[int((a + 22.5) // 45.0) % 8])
         def alert_new_traps(its):
             alerted = st["alerted"]
             if len(alerted) + len(its) > 5000: alerted.clear()
-            for it in its: safe(lambda: alerted.add(int(it.Serial)))
-            p = API.Player
-            try: px, py = int(p.X), int(p.Y)
-            except Exception: px = py = None
-            best, best_d, bdx, bdy = None, None, 0, 0
-            if px is not None:
-                for it in its:
-                    try: dx, dy = int(it.X) - px, int(it.Y) - py
-                    except Exception: continue
-                    d = max(abs(dx), abs(dy))
-                    if best_d is None or d < best_d: best, best_d, bdx, bdy = it, d, dx, dy
-            w = where(bdx, bdy) if best is not None else ""
-            if len(its) == 1: text = "A trap %s" % w if w else "A trap in range"
-            else: text = "%d new traps in range%s" % (len(its), " (nearest %s)" % w if w else "")
-            safe(lambda: HOST.alert(ALERT_TRAP, text, who=int((best if best is not None else its[0]).Serial)))
+            p = API.Player; px, py = int(p.X), int(p.Y); best, best_d, bdx, bdy = None, None, 0, 0
+            for it in its:
+                alerted.add(int(it.Serial)); dx, dy = int(it.X) - px, int(it.Y) - py; d = max(abs(dx), abs(dy))
+                if best_d is None or d < best_d: best, best_d, bdx, bdy = it, d, dx, dy
+            w = where(bdx, bdy)
+            text = "A trap %s" % w if len(its) == 1 else "%d new traps in range (nearest %s)" % (len(its), w)
+            HOST.alert(ALERT_TRAP, text, who=int(best.Serial))
         def field_hue(kind): return settings["para_hue"] if kind == "paralyze" else settings["field_hue"]
         def scan_fields(ffound, check_hues):
             fields = st["fields"]; said_now = []
             for serial, it in ffound.items():
                 rec = fields.get(serial)
                 if rec is None:
-                    kind = FIELD_GFX.get(int_of(it, "Graphic"))
+                    kind = FIELD_GFX.get(int(it.Graphic))
                     if kind is None: continue
                     want = field_hue(kind); orig = get_hue(it)
                     if orig and orig in (settings["field_hue"], settings["para_hue"]): orig = 0
@@ -3263,9 +2768,8 @@ def _module_worldmap():
             for serial in [s_ for s_ in fields if s_ not in ffound]: restore_field(serial)
             if said_now: say_fields(said_now)
         def say_fields(recs):
-            now = time.time(); said = [e for e in st["field_said"] if now - e[3] < 10.0]; spots = []
-            for rec in recs: it = rec["item"]; x, y = xy_of(it); spots.append((x, y, rec["kind"], it))
-            spots.sort(key=lambda e: (e[0], e[1]))
+            now = time.time(); said = [e for e in st["field_said"] if now - e[3] < 10.0]
+            spots = sorted([xy_of(rec["item"]) + (rec["kind"], rec["item"]) for rec in recs], key=_by_place)
             for x, y, kind, it in spots:
                 dup = False
                 for k, sx, sy, t in said:
@@ -3273,21 +2777,15 @@ def _module_worldmap():
                         dup = True; break
                 said.append((kind, x, y, now))
                 if dup: continue
-                text, hue = FIELD_WORDS.get(kind, ("Field", Kit.HUE_TITLE))
-                safe(lambda: API.HeadMsg(text, int(it.Serial), hue))
+                text, hue = FIELD_WORDS.get(kind, ("Field", Kit.HUE_TITLE)); API.HeadMsg(text, int(it.Serial), hue)
             st["field_said"] = said[-20:]
+        def _by_place(e): return (e[0], e[1])
         def restore_field(serial):
             rec = st["fields"].pop(serial, None)
             if rec is not None and rec["set"]: put_back(serial, rec)
-        def restore(serial):
-            rec = st["tracked"].pop(serial, None)
-            if rec is not None: put_back(serial, rec)
-        def put_back(serial, rec):
-            try: it = API.FindItem(serial) or rec["item"]
-            except Exception: it = rec["item"]
-            if it is not None: set_hue(it, rec["orig"])
+        def put_back(serial, rec): set_hue(API.FindItem(serial) or rec["item"], rec["orig"])
         def restore_all():
-            for serial in list(st["tracked"]): restore(serial)
+            for serial in list(st["tracked"]): put_back(serial, st["tracked"].pop(serial))
             for serial in list(st["fields"]): restore_field(serial)
         def pulse():
             if not st["tracked"]: return
@@ -3315,9 +2813,7 @@ def _module_worldmap():
                 if rec is None or serial in st["pinged"]: wait.pop(0); continue
                 x, y = xy_of(rec["item"])
                 if x <= 0 or y <= 0: wait.pop(0); continue
-                if m is None:
-                    try: m = int(API.GetMap())
-                    except Exception: return
+                if m is None: m = int(API.GetMap())
                 spot = (m, x, y)
                 if spot in st["pinged_spots"]: mark_pinged(serial, None); wait.pop(0); continue
                 try: ok = svc(x, y, m, "danger", "You (trap)")
@@ -3332,12 +2828,10 @@ def _module_worldmap():
         def ping_again():
             st["pinged"].clear(); st["pinged_spots"].clear(); st["ping_sent"] = 0; st["ping_wait"] = list(st["tracked"])
             n = len(st["ping_wait"])
-            if st["paused"]:
-                msg = ("paused: untick Pause highlighting on the World Map settings page to find and ping traps.")
-            elif n == 0: msg = "no traps in range to ping; each trap will be pinged when next found."
-            elif ping_service() is None:
-                msg = ("%d trap%s to ping once World Map > Map Pings is on." % (n, "" if n == 1 else "s"))
-            else: msg = "pinging %d trap%s." % (n, "" if n == 1 else "s")
+            if st["paused"]: msg = "paused: untick Pause highlighting (World Map settings) to ping traps."
+            elif n == 0: msg = "no traps in range; each is pinged when next found."
+            elif ping_service() is None: msg = ("%s to ping once World Map > Map Pings is on." % Kit.count(n, "trap"))
+            else: msg = "pinging %s." % Kit.count(n, "trap")
             say(msg); st["ping_noted"] = False; refresh()
         def ping_status():
             n = len(st["ping_wait"])
@@ -3345,49 +2839,40 @@ def _module_worldmap():
             if not settings["ping"]: return "auto-ping off", Kit.HUE_INFO
             if st["ping_svc"] is None: return "World Map > Map Pings is off", Kit.HUE_BAD
             return "%d sent" % st["ping_sent"], Kit.HUE_GOOD
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
-        SAY_TIP = ("Prints each new trap's graphic id and where it is, for checking and extending "
-                   "the graphics list; untick to stop")
-        PING_TIP = ("Send a Danger! map ping on every highlighted trap now, and let each be "
-                    "pinged once more when next found (needs World Map > Map Pings on)")
+        queue = Kit.queuer(st)
+        PING_TIP = ("Send a Danger! ping on every highlighted trap now; each is pinged again when next found (needs "
+                    "World Map > Map Pings)")
         PING_CAP = "Ping traps on screen"
         def build_window():
-            g, store, c, w, h, x, y, old = open_window(st, win, POS_KEY, (MINI_W, MINI_H), (320, H), (200, 200), TITLE,
-                                                       KEY, queue)
+            g, store, c = wnd.begin(320, H)
             if not st["minimized"]:
-                M = Kit.MARGIN; yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, w - 2 * M, h - yb - M)
+                wnd.frame(g); M = Kit.MARGIN; yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, 320 - 2 * M, H - yb - M)
                 Kit.art_button(g, store, "ping", Kit.ART_CIRCLE, M + 12, yb + 12, PING_CAP,
                                PING_TIP, on_click=queue("ping_again"))
-            show_window(g, x, y, w, h, st, win, on_disposed, POS_KEY, c=c, store=store); refresh(); save_view()
-            Kit.dispose(old)
+            wnd.end(g); refresh(); save_view()
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, None, (200, 200), (MINI_W, MINI_H), 0x113C,
+                         cleanup, lock=False)
         def refresh():
             c = win["c"]; n = len(st["tracked"]); nf = len(st["fields"])
             if st["paused"]: text, hue = "Paused", Kit.HUE_INFO
             elif n == 0 and nf == 0: text, hue = "No traps in range", Kit.HUE_INFO
-            elif nf == 0: text, hue = "Highlighting %d trap%s" % (n, "" if n == 1 else "s"), Kit.HUE_GOOD
-            elif n == 0: text, hue = "Highlighting %d field%s" % (nf, "" if nf == 1 else "s"), Kit.HUE_GOOD
-            else:
-                text, hue = "Highlighting %d trap%s, %d field%s" % (
-                    n, "" if n == 1 else "s", nf, "" if nf == 1 else "s"), Kit.HUE_GOOD
+            elif nf == 0: text, hue = "Highlighting %s" % Kit.count(n, "trap"), Kit.HUE_GOOD
+            elif n == 0: text, hue = "Highlighting %s" % Kit.count(nf, "field"), Kit.HUE_GOOD
+            else: text, hue = "Highlighting %s, %s" % (Kit.count(n, "trap"), Kit.count(nf, "field")), Kit.HUE_GOOD
             if c.get("status") is not None:
                 Kit.set_text(c["status"], Kit.fit("%s: %s" % (TITLE, journal_case(text)), MINI_W - 90), hue)
-            sc = page["c"]
-            if sc is not None and sc.get("say") is not None:
-                try:
-                    if bool(sc["say"].IsChecked) != bool(st["say_graphics"]):
-                        sc["say"].SetIsChecked(bool(st["say_graphics"]))
-                except Exception: pass
-            if sc is not None and sc.get("now") is not None:
-                Kit.set_text(sc["now"], text, hue); ptext, phue = ping_status()
-                Kit.set_text(sc["now_ping"], "Pings: " + ptext, phue)
-                if st["pause_want"] is None:
-                    try:
-                        if bool(sc["paused"].IsChecked) != bool(st["paused"]):
-                            sc["paused"].SetIsChecked(bool(st["paused"]))
-                    except Exception: pass
+            f = page["f"]
+            if f is None: return
+            Kit.set_text(f.c["now"], text, hue); ptext, phue = ping_status()
+            Kit.set_text(f.c["now_ping"], "Pings: " + ptext, phue)
+            if st["pause_want"] is None and bool(f.c["paused"].IsChecked) != bool(st["paused"]):
+                f.c["paused"].SetIsChecked(bool(st["paused"]))
         def draw_status(f, x, y):
             f.c["now"] = Kit.add_label(f.g, "", x + 12, y, Kit.HUE_GOOD)
             f.c["now_ping"] = Kit.add_label(f.g, "", x + 12 + f.w // 2, y, Kit.HUE_INFO)
+        def draw_paused(f, x, y):
+            f.c["paused"] = Kit.add_check(f.g, "Pause highlighting (the hues are put back)", x + 12, y, st["paused"],
+                                          "Stops the scan and puts every hue back")
         def draw_cycle(f, x, y):
             Kit.add_label(f.g, "Pulse cycle:", x + 12, y + 4); cyc = int(round(settings["cycle"] * 10))
             f.c["cycle"] = Kit.with_tip(Kit.add_slider(f.g, x + 120, y + 2, 160, 5, 100, cyc),
@@ -3395,98 +2880,57 @@ def _module_worldmap():
             f.c["cycle_v"] = Kit.add_label(f.g, "%.1f s" % settings["cycle"], x + 290, y + 4, Kit.HUE_INFO)
         def draw_graphics(f, x, y):
             f.c["graphics"] = Kit.with_tip(Kit.add_textbox(f.g, graphics_text(), x + 12, y, f.w - 28, numbers=False),
-                                           "Item graphics counted as traps, in hex (0x1103, 1103 and 0x11AC all do), "
-                                           "separated by commas. Applied once you stop typing.")
-        LEFT = {"lw": 98, "fw": 60, "stay": True}
-        PAGE = (("STATUS  (the window has %s)" % PING_CAP, (("custom", 24, draw_status),
-                    ("check", "paused", "Pause highlighting (the hues are put back)", "Stops the scan and gives every "
-                     "trap and field its own hue back; untick to highlight again")), {"pad": 4}),
-                ("TRAPS  (hues are client hue numbers)", (
-                    ("slider", "range", "Scan range:", "Tiles round you looked at for traps, once a second (1-30)",
+                                           "Trap item graphics in hex (0x1103 or 1103), comma separated; applied "
+                                           "when you stop typing")
+        LEFT = {"lw": 98, "fw": 60, "stay": True, "clamp": False}
+        PAGE = (("STATUS  (the window has %s)" % PING_CAP, (("custom", 24, draw_status), ("custom", 26, draw_paused)),
+                 {"pad": 4}), ("TRAPS  (hues are client hue numbers)", (
+                    ("slider", "range", "Scan range:", "Tiles round you scanned once a second (1-30)",
                      1, 30, {"lw": 98, "ldy": 4, "sw": 160, "ugap": 10, "vfmt": "%d tiles"}),
                     ("custom", 29, draw_cycle),
-                    ("num", "green", "Green hue:", "The hue traps are held at (client hue 1-%d; %d is the default "
-                     "green)" % (HUE_MAX, HUE_GREEN), None, 1, HUE_MAX, LEFT),
-                    ("num", "red", "Red hue:", "The hue of the pulse (client hue 1-%d; %d is the default red)"
-                     % (HUE_MAX, HUE_RED), None, 1, HUE_MAX, {"dx": 200, "lw": 70, "fw": 60, "h": 29}),
+                    ("num", "green", "Green hue:", "Hue traps are held at (1-%d; default %d)" % (HUE_MAX, HUE_GREEN),
+                     None, 1, HUE_MAX, LEFT),
+                    ("num", "red", "Red hue:", "Hue of the pulse (1-%d; default %d)" % (HUE_MAX, HUE_RED), None, 1,
+                     HUE_MAX, {"dx": 200, "lw": 70, "fw": 60, "h": 29, "clamp": False}),
                     ("check", "pulse", "Pulse red once per cycle (unticked: steady green)",
-                     "Flashes every highlighted trap red for a beat once per cycle")), {"top": 32, "pad": 2}),
+                     "Flashes each highlighted trap red for a beat")), {"top": 32, "pad": 2}),
                 ("TRAP GRAPHICS  (hex ids, comma separated)", (("custom", 30, draw_graphics),
-                    ("check", "by_name", "Also highlight ground items the client names 'trap'", "Catches traps whose "
-                     "art id isn't in the list (the client knows a name only after a tooltip or a single click)")),
-                 {"top": 32, "pad": 8}),
+                    ("check", "by_name", "Also highlight ground items the client names 'trap'", "For traps not in the "
+                     "list (the client knows a name only after a tooltip or click)")), {"top": 32, "pad": 8}),
                 ("TRAP PINGS  (needs World Map > Map Pings)", (("check", "ping", "Send a Danger! map ping on each "
-                  "new trap, once per trap", "A Danger! map ping on each new trap's tile, for you and your guildmates. "
-                  "Once per trap: \"%s\" on the window pings them all again." % PING_CAP),), {"top": 32, "pad": 4}),
-                ("MAGIC FIELDS  (client hue numbers, 0 = leave as is)", (
-                    ("check", "fields", "Highlight magic fields: fire, poison, energy, paralyze", "Recolour field "
-                     "items on the ground (client-side only, like the traps); paralyze fields get a hue of their own",
-                     {"h": 29}),
-                    ("num", "field_hue", "Field hue:", "The hue of fire, poison and energy fields (client hue 0-%d; 0 "
-                     "leaves them as they are; %d by default)" % (HUE_MAX, FIELD_HUE), None, 0, HUE_MAX, LEFT),
-                    ("num", "para_hue", "Paralyze hue:", "The hue of paralyze fields, the ones that matter most in a "
-                     "fight (client hue 0-%d; 0 leaves them as they are; %d by default)" % (HUE_MAX, PARALYZE_HUE),
-                     None, 0, HUE_MAX, {"dx": 200, "lgap": 12, "fw": 60, "h": 29}),
+                  "new trap, once per trap", "For you and your guildmates; \"%s\" on the window pings them all again"
+                  % PING_CAP),), {"top": 32, "pad": 4}), ("MAGIC FIELDS  (client hue numbers, 0 = leave as is)", (
+                    ("check", "fields", "Highlight magic fields: fire, poison, energy, paralyze",
+                     "Client-side recolour, like the traps; paralyze fields get their own hue", {"h": 29}),
+                    ("num", "field_hue", "Field hue:", "Hue of fire, poison and energy fields (0-%d, 0 = as is; "
+                     "default %d)" % (HUE_MAX, FIELD_HUE), None, 0, HUE_MAX, LEFT),
+                    ("num", "para_hue", "Paralyze hue:", "Hue of paralyze fields (0-%d, 0 = as is; default %d)"
+                     % (HUE_MAX, PARALYZE_HUE), None, 0, HUE_MAX, {"dx": 200, "lgap": 12, "fw": 60, "h": 29,
+                                                                    "clamp": False}),
                     ("check", "field_say", "Show an overhead text when a field appears",
                      "Names each new field above it once (\"Fire field\", \"Paralyze field!\")")),
-                 {"top": 32, "pad": 2}), atlas_page("traps"),
-                ("DEBUG  (for checking the shard's traps)", (("check", "say", "Print each new trap's graphic id in the "
-                 "journal", SAY_TIP),)))
+                 {"top": 32, "pad": 2}), atlas_page("traps"))
+        def config_height(w): return Kit.Form.height(PAGE, w)
         def build_config(g, x, y, w):
-            page["c"] = Kit.Form(g, x, y, w, dict(settings, paused=st["paused"], say=st["say_graphics"]), PAGE).c
-            page["gfx_typed"], page["gfx_applied"] = None, graphics_text()
-            page["fhues"] = (str(settings["field_hue"]), str(settings["para_hue"])); refresh()
-        def _slider_value(s, default):
-            try: v = s.Value
-            except Exception: v = None
-            if v is None:
-                try: v = s.GetValue()
-                except Exception: v = default
-            try: return int(v)
-            except Exception: return default
+            page["f"] = Kit.Form(g, x, y, w, settings, PAGE)
+            page["gfx_typed"], page["gfx_applied"] = None, graphics_text(); refresh()
         def poll_config():
-            c = page["c"]
-            if c is None: return
-            changed = False; rng = max(1, min(30, _slider_value(c["range"], settings["range"])))
-            if rng != settings["range"]:
-                settings["range"] = rng; Kit.set_text(c["range_lbl"], "%d tiles" % rng); changed = True
-            cyc = max(5, min(100, _slider_value(c["cycle"], int(settings["cycle"] * 10)))) / 10.0
-            if abs(cyc - settings["cycle"]) > 0.01:
-                settings["cycle"] = cyc; Kit.set_text(c["cycle_v"], "%.1f s" % cyc); changed = True
-            for key in ("green", "red"):
-                v = Kit.read_int(c[key], settings[key])
-                if 1 <= v <= HUE_MAX and v != settings[key]: settings[key] = v; changed = True
-            hit = read_checks(c, settings, ("pulse", "by_name", "ping"))
-            if "ping" in hit:
-                st["ping_wait"] = [sr for sr in st["tracked"] if sr not in st["pinged"]] if settings["ping"] else []
-            if hit: changed = True
-            cur = st["paused"] if st["pause_want"] is None else st["pause_want"]
-            try: pz = bool(c["paused"].IsChecked)
-            except Exception: pz = cur
-            if pz != cur: st["pause_want"] = pz
-            try: say = bool(c["say"].IsChecked)
-            except Exception: say = bool(st["say_graphics"])
-            if say != st["say_graphics"]: st["say_graphics"] = say; save_view(); refresh()
-            try: typed = str(c["graphics"].Text or "")
-            except Exception: typed = str(graphics_text() or "")
-            now = time.time()
+            f = page["f"]
+            if f is None: return
+            new = f.read(); c = f.c; now = time.time()
+            try: typed = str(c["graphics"].Text or ""); cyc = int(c["cycle"].Value); pz = bool(c["paused"].IsChecked)
+            except Exception: return
+            cyc = max(5, min(100, cyc)) / 10.0
+            if abs(cyc - settings["cycle"]) > 0.01: new["cycle"] = cyc; Kit.set_text(c["cycle_v"], "%.1f s" % cyc)
             if typed != page["gfx_typed"]: page["gfx_typed"], page["gfx_since"] = typed, now
-            elif now - page["gfx_since"] >= 0.7 and typed != page.get("gfx_applied"):
-                page["gfx_applied"] = typed; gl = parse_graphics(typed)
-                if gl and gl != settings["graphics"]: settings["graphics"] = gl; changed = True
-            if changed: save_settings(); st["last_scan"] = 0.0; refresh()
-            if poll_fields(c): save_fields(); st["last_scan"] = 0.0
-        def poll_fields(c):
-            changed = bool(read_checks(c, settings, ("fields", "field_say")))
-            try: texts = (str(c["field_hue"].Text).strip(), str(c["para_hue"].Text).strip())
-            except Exception: return changed
-            if texts != page.get("fhues"):
-                page["fhues"] = texts
-                for key, t in zip(("field_hue", "para_hue"), texts):
-                    if t.isdigit() and 0 <= int(t) <= HUE_MAX and int(t) != settings[key]:
-                        settings[key] = int(t); changed = True
-            return changed
-        def config_closed(): page["c"] = None; page["gfx_typed"] = None
+            elif now - page["gfx_since"] >= 0.7 and typed != page["gfx_applied"]:
+                page["gfx_applied"] = typed; new["graphics"] = parse_graphics(typed) or settings["graphics"]
+            if pz != (st["paused"] if st["pause_want"] is None else st["pause_want"]): st["pause_want"] = pz
+            if new["ping"] != settings["ping"]:
+                st["ping_wait"] = [sr for sr in st["tracked"] if sr not in st["pinged"]] if new["ping"] else []
+            if new == settings: return
+            settings.update(new); st["last_scan"] = 0.0; save_settings(); save_fields(); refresh()
+        def config_closed(): page["f"] = None; page["gfx_typed"] = None
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "last_scan": 0.0,
                        "scans": 0, "tracked": {}, "pinged": set(), "pinged_spots": set(),
@@ -3494,12 +2938,12 @@ def _module_worldmap():
                        "ping_svc": ping_service(), "ping_next": 0.0, "fields": {}, "field_said": [], "alerted": set(),
                        "atlas_traps": [], "atlas_ver": 0, "atlas_done": -1, "atlas_map": None, "pause_want": None})
             verdicts.clear(); load_settings(); load_fields()
-            safe(lambda: HOST.alert_kind(ALERT_TRAP, "New trap in range", 0x1EF)); load_view()
+            HOST.alert_kind(ALERT_TRAP, "New trap in range", 0x1EF); load_view()
             if HOST.dock_wanted(KEY): st["minimized"] = True
-            build_window(); HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x113C, st, win, queue("redraw"), scale=True))
+            build_window(); wnd.dock(scale=True)
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             want = st["pause_want"]
             if want is not None:
                 st["pause_want"] = None
@@ -3511,7 +2955,7 @@ def _module_worldmap():
             while st["queue"]:
                 action = st["queue"].pop(0)
                 if action == "ping_again": ping_again()
-                else: Kit.win_action(action, st, KEY, TITLE, build_window)
+                else: wnd.action(action)
             if st["paused"]: return
             now = time.time()
             if now - st["last_scan"] >= 1.0:
@@ -3522,13 +2966,9 @@ def _module_worldmap():
                     refresh()
                 if st["atlas_ver"] != st["atlas_done"]: st["atlas_done"] = st["atlas_ver"]; atlas_publish()
             send_pings(); pulse()
-        def _stop():
-            st["shutting"] = True; HOST.dock_remove(KEY); restore_all(); Kit.save_pos(POS_KEY, win["g"])
-            save_settings(); g, win["g"] = win["g"], None; Kit.dispose(g)
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
-                  "config_height": lambda w: Kit.Form.height(PAGE, w), "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+        def _stop(): st["shutting"] = True; restore_all(); save_settings(); cleanup.close()
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": config_height,
+                  "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed}
     PARTS = (("pings", _part_pings, 0.05, "pings"),
         ("corpse", lambda: with_atlas(_part_corpse(), "corpse"), 0.25, "corpserun"),
         ("maps", lambda: with_atlas(_part_maps(), "maps"), 0.2, "treasure"),
@@ -3555,19 +2995,16 @@ def _module_worldmap():
     return MODULE
 
 
-if "HOST" in globals() and hasattr(globals()["HOST"], "add"):
-    HOST.add("worldmap", "World Map", "Guild pings, your corpse, dig spots, dry spots and traps",
-             _module_worldmap, 0.05, category="The world", parts=(("pings", "Map Pings",
-                  "Send and receive guild pings on your Enhanced Map", False, ("pings",)), ("corpse", "Corpse",
-                  "An arrow to your corpse, its decay time, Get my things", False, ("corpserun",)),
-                 ("maps", "Treasure Maps", "The dig spots of your decoded treasure maps", False, ("treasure",)),
-                 ("dry", "Ore Tracker", "Your weight, and the ore, wood, fish and sand that ran dry", False,
-                  ("harvest",)), ("traps", "Traps & Fields",
-                  "Traps and magic fields recoloured so you see them", False, ("traphl",)),),
-             aliases=('Map Pings', 'Corpse Run', 'Treasure Hunter', 'Harvest Helper', 'Dry spots',
-                      'Ore Tracker', 'Trap Highlight', 'Enhanced Map', 'tracking arrow', 'ping',
-                      'corpse', 'dig spot', 'weight bar', 'TazUO World Map'))
-else:
+if "HOST" not in globals():
     import API
-    API.SysMsg("World Map is a Virtue Assistant module and can't run on its own. "
-               "Run Virtue Assistant instead; it loads this file.", 33)
+    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("worldmap", "World Map", "Pings, corpse, dig and dry spots, traps",
+         _module_worldmap, 0.05, category="The world", parts=(
+             ("pings", "Map Pings", "Guild pings on your Enhanced Map", False, ("pings",)),
+             ("corpse", "Corpse", "Arrow, decay time and Get my things", False, ("corpserun",)),
+             ("maps", "Treasure Maps", "Dig spots of your decoded maps", False, ("treasure",)),
+             ("dry", "Ore Tracker", "Your weight and spots that ran dry", False, ("harvest",)),
+             ("traps", "Traps & Fields", "Traps and magic fields recoloured", False, ("traphl",)),),
+         aliases=('Map Pings', 'Corpse Run', 'Treasure Hunter', 'Harvest Helper', 'Dry spots',
+                  'Ore Tracker', 'Trap Highlight', 'Enhanced Map', 'tracking arrow', 'ping',
+                  'corpse', 'dig spot', 'weight bar', 'TazUO World Map'))

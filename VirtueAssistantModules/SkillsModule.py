@@ -8,23 +8,23 @@ def _module_skills():
                 API.SysMsg("%s: %s written to %s." % (title, what, path), Kit.HUE_GOOD)
             except Exception as ex: API.SysMsg("%s: couldn't write %s (%s)." % (title, path, ex), Kit.HUE_BAD)
     def _part_window():
+        say = Kit.sayer(TITLE)
         SETTINGS_KEY = "Skills_settings"; POS_KEY = "Skills_pos"; MARKS_KEY = "Skills_marks"
         LOCKSETS_KEY = "Skills_locksets"; SESSION_KEY = "Skills_session"; SESSION_STALE_H = 6; TOTAL_CAP_DEFAULT = 7000
         VANILLA = ("StandardSkillsGump", "SkillGumpAdvanced"); DOCK_ICON = 0x13E3; ROW_H = 22; SEARCH_W = 110
         BAR_W = 56; BAR_GROW = 120; RESIZE_SETTLE = 0.35; MIN_IW = 380; ZONE_NAME_MIN = 60
         ZONE_DROPS = ("bar", "gain", "cap", "real"); ZONE_FIELD_MIN = 80; ZONE_MIN_ROWS = 2; ZONE_LOG_MIN = 2
-        TOTAL_TIP = "Real values added up, against the total cap (set it on the settings page)"
-        LOCK_BTNS = (("all_up", "All up", "Set every skill in the list to go up"),
-                     ("all_down", "All down", "Set every skill in the list to go down "
-                                              "(click twice: it can lower many skills)"),
-                     ("all_locked", "All locked", "Lock every skill in the list"),
-                     ("lock_capped", "Lock capped", "Lock every skill that is at its cap"))
+        TOTAL_TIP = "Real values added up, against the total cap (settings page)"
+        LOCK_BTNS = (("all_up", "All up", "Set every listed skill to go up"),
+                     ("all_down", "All down", "Set every listed skill to go down (click twice)"),
+                     ("all_locked", "All locked", "Lock every listed skill"),
+                     ("lock_capped", "Lock capped", "Lock every skill at its cap"))
         MINI_W, MINI_H = 280, 46
-        DETAIL_BTNS = {"use": (Kit.ART_PLAY, "Use", "Use this skill now", "use"),
-                       "button": (Kit.ART_PAGE, "Make button", "Make the client's floating button for this skill "
-                                  "(double-clicking it in the list does the same)", "mkbutton"),
-                       "pin": (Kit.ART_OK, "Pin", "Keep this skill at the top of the list (again to let it go)", "pin"),
-                       "nextgrp": (Kit.ART_PAGE, "Next group", "Move this skill into the next skill group", "nextgrp")}
+        DETAIL_BTNS = {"use": (Kit.ART_PLAY, "Use", "Use this skill", "use"),
+                       "button": (Kit.ART_PAGE, "Make button", "Make its floating client button (or double-click "
+                                  "it in the list)", "mkbutton"),
+                       "pin": (Kit.ART_OK, "Pin", "Keep it at the top of the list (again to unpin)", "pin"),
+                       "nextgrp": (Kit.ART_PAGE, "Next group", "Move it to the next skill group", "nextgrp")}
         LOG_KEEP = 200; MAX_LOCKSETS = 10; GEM = (0x0837, 0x0838, 0x0838); LOCK_ART = (0x0983, 0x0985, 0x082C)
         GROUP_OPEN, GROUP_SHUT = 0x0826, 0x0827; LINE_GREEN = 0x0808; BAR_BG_HUE = 946; DIM_HUE = 946
         SEL_COLOR, SEL_ALPHA = "#D8B048", 0.16; GROUP_COLOR, GROUP_ALPHA = "#FFFFFF", 0.07; ARM_SECS = 4.0
@@ -143,18 +143,14 @@ def _module_skills():
             out = {}
             for name, rows in TIPS.items():
                 lst, lo = [], 0
-                for hi, text in rows or []:
-                    try: hi10 = int(round(float(hi) * 10))
-                    except (TypeError, ValueError): continue
-                    if hi10 <= lo or not text: continue
-                    lst.append((hi10, "%g-%g" % (lo / 10.0, hi10 / 10.0), str(text))); lo = hi10
-                if lst: out[str(name).lower()] = lst
+                for hi, text in rows: lst.append((hi * 10, "%g-%g" % (lo / 10.0, hi), text)); lo = hi * 10
+                out[name.lower()] = lst
             return out
         TIP_TABLE = tip_table(); settings = dict(DEFAULTS); marks = {"pins": set(), "targets": {}}; locksets = []
         stat_tgt = [0, 0, 0]
         st = {"sel": None, "last_click": (None, 0.0), "arm": {}, "search": "", "pc": {}, "save_at": 0.0, "to_write": [],
-              "ver": 0, "no_resize_told": False, "preview": False}
-        win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "rowmap": {}}; page = {"c": None, "sync": False}
+              "ver": 0, "preview": False}
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "rowmap": {}}; page = {"sync": False, "skip": False}
         UIC = {}; REF = {"world": None, "player": None, "how": ""}
         SK = {"objs": [], "names": [], "click": [], "collide": [], "n": 0, "cur": [], "low": [], "full": True, "rr": 0}
         STATS = {"cur": [0, 0, 0], "locks": [0, 0, 0], "cap": 0, "prev": [0, 0, 0]}
@@ -175,18 +171,9 @@ def _module_skills():
         def drawn_at(): return fitst["k"], fitst["full"]
         sess = {"start": 0.0, "base": {}, "stats": None, "seen": 0.0}
         def load_settings():
-            for k, v in Kit.codec_load(Kit.get_var(SETTINGS_KEY)).items():
-                if k not in DEFAULTS: continue
-                d = DEFAULTS[k]
-                if isinstance(d, bool): settings[k] = v == "1"
-                elif isinstance(d, int):
-                    try: lo, hi = LIMITS.get(k, (-10 ** 9, 10 ** 9)); settings[k] = max(lo, min(hi, int(v)))
-                    except ValueError: pass
-                else: settings[k] = v
+            Kit.kv_load(SETTINGS_KEY, ";", settings, LIMITS, ("sort",))
             if settings["sort"] not in SORTS: settings["sort"] = "name"
-        def save_settings():
-            Kit.put_var(SETTINGS_KEY, ";".join("%s=%s" % (k, int(settings[k]) if isinstance(settings[k], bool)
-                                                          else settings[k]) for k in DEFAULTS))
+        def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, DEFAULTS, LIMITS, ("sort",))
         def load_marks():
             marks["pins"], marks["targets"] = set(), {}
             for part in Kit.get_var(MARKS_KEY).split(";"):
@@ -212,7 +199,6 @@ def _module_skills():
             for k in range(3):
                 try: stat_tgt[k] = max(0, min(STAT_TARGET_MAX, int(p[k])))
                 except (IndexError, ValueError): stat_tgt[k] = 0
-        def save_stat_targets(): Kit.put_var(STAT_TARGETS_KEY, ",".join(str(v) for v in stat_tgt))
         def load_session():
             p = Kit.get_var(SESSION_KEY).split("|"); now = time.time()
             sess.update({"start": now, "base": {}, "stats": None, "seen": now})
@@ -239,29 +225,10 @@ def _module_skills():
             if any(STATS["cur"]): sess["stats"] = list(STATS["cur"])
             st["gains"], st["log"] = {}, []; save_session()
         def save_pos(): Kit.save_pos(POS_KEY, win["g"])
-        def find_world():
-            w = safe(lambda: Tz.get(None, "Instance", Tz.T("ClassicUO.Game.World")))
-            if w is None: w = safe(lambda: Typing._get(None, "World", Tz.T("ClassicUO.Game.Managers.UIManager")))
-            if w is None: w = safe(lambda: Typing._get(API, "World"))
-            return w
-        LOCK_BY_NAME = {"Up": 0, "Down": 1, "Locked": 2}; LKC = {"int": True}
-        def lock_int(v):
-            if LKC["int"]:
-                try: return max(0, min(2, int(v)))
-                except Exception:
-                    n = LOCK_BY_NAME.get(str(v))
-                    if n is not None: LKC["int"] = False; return n
-                    return 0
-            n = LOCK_BY_NAME.get(str(v))
-            if n is not None: return n
-            try: return max(0, min(2, int(v)))
-            except Exception: return 0
+        def find_world(): return Typing._get(None, "Instance", Client._type("ClassicUO.Game.World"))
         def load_skill_objects(objs, how):
-            names, click = [], []
-            for s in objs:
-                names.append(str(safe(lambda s=s: s.Name, "") or "?"))
-                click.append(bool(safe(lambda s=s: s.IsClickable, False)))
-            low = [n.lower() for n in names]
+            names = [str(safe(lambda s=s: s.Name, "") or "?") for s in objs]
+            click = [bool(safe(lambda s=s: s.IsClickable, False)) for s in objs]; low = [n.lower() for n in names]
             collide = [any(low[i] in low[j] for j in range(i)) for i in range(len(low))]
             SK.update({"objs": objs, "names": names, "click": click, "collide": collide,
                        "n": len(objs), "low": low, "full": True})
@@ -271,10 +238,9 @@ def _module_skills():
             now = time.time()
             if not force and now < st["ref_at"]: return SK["n"] > 0
             st["ref_at"] = now + 3.0; world = find_world()
-            player = safe(lambda: Typing._get(world, "Player")) if world is not None else None
+            player = Typing._get(world, "Player") if world is not None else None
             if player is not None:
-                arr = safe(lambda: Typing._get(player, "Skills"))
-                objs = safe(lambda: [s for s in arr], None) if arr is not None else None
+                arr = Typing._get(player, "Skills"); objs = list(arr) if arr is not None else None
                 if objs:
                     same = REF["player"] is not None and REF["player"] is player and len(objs) == SK["n"]
                     relog = REF["player"] is not None and not same; REF.update({"world": world, "player": player})
@@ -286,8 +252,8 @@ def _module_skills():
             if SK["n"] == 0 or REF["how"] != "api":
                 objs = []
                 for name in FALLBACK_NAMES:
-                    s = safe(lambda name=name: API.GetSkill(name))
-                    if s is not None and str(safe(lambda: s.Name, "")) == name: objs.append(s)
+                    s = API.GetSkill(name)
+                    if s is not None and str(s.Name) == name: objs.append(s)
                 if objs: load_skill_objects(objs, "api")
             return SK["n"] > 0
         RR_N = 15
@@ -302,25 +268,18 @@ def _module_skills():
                 except Exception: continue
                 c = cur[i]
                 if full or b != c[0] or v != c[1] or (i - rr) % n < RR_N:
-                    try: cp = _int(s.CapFixed); lk = lock_int(s.Lock)
+                    try: cp = _int(s.CapFixed); lk = _int(s.Lock)
                     except Exception: continue
                     if b != c[0] or v != c[1] or cp != c[2] or lk != c[3]: changed[i] = c; cur[i] = [b, v, cp, lk]
             return changed
         def read_stats():
-            cur, locks, cap = STATS["cur"], STATS["locks"], STATS["cap"]; p = REF["player"]; done = False
+            cur, locks, cap = STATS["cur"], STATS["locks"], STATS["cap"]; p = REF["player"]
+            if p is None: p = API.Player
             if p is not None:
                 try:
                     cur = [int(p.Strength), int(p.Dexterity), int(p.Intelligence)]
-                    locks = [lock_int(p.StrLock), lock_int(p.DexLock), lock_int(p.IntLock)]; cap = int(p.StatsCap)
-                    done = True
+                    locks = [int(p.StrLock), int(p.DexLock), int(p.IntLock)]; cap = int(p.StatsCap)
                 except Exception: pass
-            if not done:
-                pl = safe(lambda: API.Player)
-                if pl is not None:
-                    cur = [int(safe(lambda a=a: getattr(pl, a), 0) or 0)
-                           for a in ("Strength", "Dexterity", "Intelligence")]
-                    locks = [lock_int(safe(lambda a=a: getattr(pl, a), 0)) for a in ("StrLock", "DexLock", "IntLock")]
-                    cap = int(safe(lambda: pl.StatsCap, 0) or 0)
             if st["stat_pending"]:
                 now = time.time(); locks = list(locks)
                 for k, (lk, until) in list(st["stat_pending"].items()):
@@ -330,19 +289,18 @@ def _module_skills():
             STATS["prev"] = STATS["cur"]; STATS["cur"], STATS["locks"], STATS["cap"] = cur, locks, cap; return True
         def skills_loaded(): return any(c[2] > 0 for c in SK["cur"])
         def group_mgr():
-            w = REF["world"] or find_world()
-            return safe(lambda: Typing._get(w, "SkillsGroupManager")) if w is not None else None
+            w = REF["world"] or find_world(); return Typing._get(w, "SkillsGroupManager") if w is not None else None
         def groups_wanted():
-            if page["c"] is not None: return True
+            if cfg.f is not None: return True
             if win["g"] is None or not win["c"] or st["minimized"] or st["docked"]: return False
             return settings["groups"] or (st["sel"] is not None and settings["sec_detail"])
         def read_groups(force=False):
             now = time.time()
             if not force and (now < st["grp_at"] or not groups_wanted()): return
-            st["grp_at"] = now + (1.0 if page["c"] is not None or settings["groups"] else GRP_DETAIL_EVERY)
-            mgr = group_mgr(); lst = safe(lambda: Typing._get(mgr, "Groups")) if mgr is not None else None; out = []
+            st["grp_at"] = now + (1.0 if cfg.f is not None or settings["groups"] else GRP_DETAIL_EVERY)
+            mgr = group_mgr(); lst = Typing._get(mgr, "Groups") if mgr is not None else None; out = []
             if lst is not None:
-                for g in safe(lambda: list(lst), []) or []:
+                for g in list(lst):
                     try:
                         n = int(g.Count); members = [int(g.GetSkill(k)) for k in range(n)]
                         out.append({"obj": g, "name": str(g.Name or ""), "members": [m for m in members if m < SK["n"]],
@@ -360,15 +318,11 @@ def _module_skills():
             mgr = group_mgr()
             if mgr is not None: safe(lambda: mgr.Save())
             read_groups(True)
-        def as_byte(v):
-            try: import System; return System.Byte(v)
-            except Exception: return v
         def ga_call(name, args): return Tz.call(None, name, args, Tz.T("ClassicUO.Game.GameActions"))
         def set_lock(i, v):
             if i is None or i >= SK["n"] or SK["cur"][i][3] == v: return
-            name = SK["names"][i]; done = False
-            if not SK["collide"][i]: done = safe(lambda: (API.SetSkillLock(name, LOCK_WORD[v]), True)[1], False)
-            if not done:
+            if not SK["collide"][i]: API.SetSkillLock(SK["names"][i], LOCK_WORD[v])
+            else:
                 try:
                     import System; ga_call("ChangeSkillLockStatus", [System.UInt16(i), System.Byte(v)])
                     lt = Tz.T("ClassicUO.Game.Data.Lock"); Tz.put(SK["objs"][i], "Lock", System.Enum.ToObject(lt, v))
@@ -377,34 +331,30 @@ def _module_skills():
         def use_skill(i):
             if i is None or i >= SK["n"]: return
             if not SK["click"][i]:
-                API.SysMsg("%s: %s can't be used directly." % (TITLE, SK["names"][i]), Kit.HUE_INFO); return
-            if (not SK["collide"][i] and safe(lambda: (API.UseSkill(SK["names"][i]), True)[1], False)): return
+                say("%s can't be used directly." % SK["names"][i], Kit.HUE_INFO); return
+            if not SK["collide"][i]: API.UseSkill(SK["names"][i]); return
             try: ga_call("UseSkill", [i])
-            except Exception as ex:
-                API.SysMsg("%s: couldn't use %s (%s)." % (TITLE, SK["names"][i], Tz.why(ex)), Kit.HUE_BAD)
+            except Exception as ex: say("couldn't use %s (%s)." % (SK["names"][i], Tz.why(ex)), Kit.HUE_BAD)
         def make_button(i):
             if i is None or i >= SK["n"] or not SK["click"][i]:
-                API.SysMsg("%s: only a usable skill gets a button." % TITLE, Kit.HUE_INFO); return
+                say("only a usable skill gets a button.", Kit.HUE_INFO); return
             try:
                 import System
                 for b in Tz.windows(["SkillButtonGump"]):
-                    if int(safe(lambda b=b: Tz.get(b, "SkillID"), -1)) == i: safe(lambda b=b: b.Dispose())
+                    if int(Tz.get(b, "SkillID")) == i: b.Dispose()
                 t = Tz.T("ClassicUO.Game.UI.Gumps.SkillButtonGump"); world = REF["world"] or find_world(); g = win["g"]
-                x = (safe(lambda: g.GetX(), 200) + safe(lambda: g.GetWidth(), 300) + 10) if Kit.is_open(g) else 200
-                y = safe(lambda: g.GetY(), 200) if Kit.is_open(g) else 200
+                x, y = (g.GetX() + g.GetWidth() + 10, g.GetY()) if Kit.is_open(g) else (200, 200)
                 btn = System.Activator.CreateInstance(t, System.Array[object]([world, SK["objs"][i], x, y]))
                 Tz.call(None, "Add", [btn, True], Tz.T("ClassicUO.Game.Managers.UIManager"))
-                API.SysMsg("%s: %s button placed beside the window; drag it where you like."
-                           % (TITLE, SK["names"][i]), Kit.HUE_GOOD)
-            except Exception as ex: API.SysMsg("%s: couldn't make the button (%s)." % (TITLE, Tz.why(ex)), Kit.HUE_BAD)
+                say("%s button placed beside the window." % SK["names"][i], Kit.HUE_GOOD)
+            except Exception as ex: say("couldn't make the button (%s)." % Tz.why(ex), Kit.HUE_BAD)
         def ask_server():
             world = REF["world"] or find_world(); st["swallow_until"] = time.time() + 6.0; st["asked"] = time.time()
             try: ga_call("OpenSkills", [world]); return True
             except Exception: return False
         def set_stat_lock(k, v):
-            try: API.SetStatLock(("str", "dex", "int")[k], LOCK_WORD[v])
-            except Exception: return False
-            STATS["locks"][k] = v; st["stat_pending"][k] = (v, time.time() + 2.5); return True
+            API.SetStatLock(("str", "dex", "int")[k], LOCK_WORD[v]); STATS["locks"][k] = v
+            st["stat_pending"][k] = (v, time.time() + 2.5)
         def f1(tenths): return "%.1f" % (tenths / 10.0)
         def sgain(i): b = sess["base"].get(i); return 0 if b is None else SK["cur"][i][0] - b
         def total_gain(): return sum(sgain(i) for i in range(SK["n"]))
@@ -441,17 +391,15 @@ def _module_skills():
                 st["log"].append((now, name, d, new[0]))
                 if len(st["log"]) > LOG_KEEP: st["log"] = st["log"][-LOG_KEEP:]
                 if settings["journal"]:
-                    API.SysMsg("%s: %s %s%s (%s, session %+.1f)." % (
-                        TITLE, name, "+" if d > 0 else "-", f1(abs(d)), f1(new[0]),
+                    say("%s %s%s (%s, session %+.1f)." % (name, "+" if d > 0 else "-", f1(abs(d)), f1(new[0]),
                         sgain(i) / 10.0), Kit.HUE_GOOD if d > 0 else Kit.HUE_BAD)
                 for mark, opt, what in ((new[2], "lock_at_cap", "its cap (%s)"),
                                         (marks["targets"].get(i), "lock_at_target", "its target %s")):
                     if d > 0 and mark is not None and old[0] < mark <= new[0]:
                         what = what % f1(mark)
                         if settings[opt] and new[3] == 0:
-                            set_lock(i, 2)
-                            API.SysMsg("%s: %s reached %s and was locked." % (TITLE, name, what), Kit.HUE_GOOD)
-                        else: API.SysMsg("%s: %s reached %s." % (TITLE, name, what), Kit.HUE_GOOD)
+                            set_lock(i, 2); say("%s reached %s and was locked." % (name, what), Kit.HUE_GOOD)
+                        else: say("%s reached %s." % (name, what), Kit.HUE_GOOD)
             if dirty and time.time() >= st["save_at"]: st["save_at"] = time.time() + 15.0; save_session()
         def total_real(): return sum(c[0] for c in SK["cur"])
         def at_total_cap():
@@ -462,9 +410,8 @@ def _module_skills():
             if not settings["cap_warn"]: st["warned_cap"] = False; return
             stuck = at_total_cap()
             if stuck and not st["warned_cap"]:
-                API.SysMsg("%s: you are at the total skill cap (%s) and no skill is set to go "
-                           "down, so nothing can rise. Set one to go down." % (
-                               TITLE, f1(settings["total_cap"])), Kit.HUE_BAD)
+                say("at the total skill cap (%s) and no skill set to go down: nothing can rise."
+                    % f1(settings["total_cap"]), Kit.HUE_BAD)
             st["warned_cap"] = stuck
         def stat_gain(k): base = sess["stats"]; return STATS["cur"][k] - base[k] if base else 0
         def note_stats():
@@ -476,18 +423,17 @@ def _module_skills():
                 if way is None: continue
                 if settings["lock_stat_target"] and STATS["locks"][k] == way:
                     set_stat_lock(k, 2)
-                    API.SysMsg("%s: %s reached its target %d and was locked." % (TITLE, STAT_NAMES[k], t), Kit.HUE_GOOD)
-                else: API.SysMsg("%s: %s reached its target %d." % (TITLE, STAT_NAMES[k], t), Kit.HUE_GOOD)
+                    say("%s reached its target %d and was locked." % (STAT_NAMES[k], t), Kit.HUE_GOOD)
+                else: say("%s reached its target %d." % (STAT_NAMES[k], t), Kit.HUE_GOOD)
         def stat_at_target(k):
             t, v = stat_tgt[k], STATS["cur"][k]
             if t and v == t and settings["lock_stat_target"] and STATS["locks"][k] != 2:
-                set_stat_lock(k, 2)
-                API.SysMsg("%s: %s is at its target %d and was locked." % (TITLE, STAT_NAMES[k], t), Kit.HUE_GOOD)
+                set_stat_lock(k, 2); say("%s is at its target %d and was locked." % (STAT_NAMES[k], t), Kit.HUE_GOOD)
         def stat_tip(k, hrs):
             v = STATS["cur"][k]; lines = ["%s %d" % (STAT_NAMES[k], v)]
             if sess["stats"]: d = stat_gain(k); lines[0] += ": %+d this session (%.1f / hour)" % (d, d / hrs)
             t = stat_tgt[k]
-            if not t: lines.append("No target (click: set one on the settings page)")
+            if not t: lines.append("No target (click: set one in settings)")
             elif v == t: lines.append("Target %d: reached" % t)
             else:
                 lines.append("Target %d: %d to go %s%s" % (t, abs(t - v), "up" if t > v else "down",
@@ -552,15 +498,13 @@ def _module_skills():
                 if last == i and now - t <= 0.6: st["last_click"] = (None, 0.0); st["queue"].append(("button", i))
                 else: st["last_click"] = (i, now); st["queue"].append(("pick", i))
             return handler
-        on_disposed = Kit.disposer(KEY, st, win)
+        on_disposed = Kit.disposer("skills.window", st, win)
         def redraw(): st["rebuild"] = "window"
         def setp(ctrl, attr, value):
             if ctrl is None: return
             k = (ctrl, attr)
-            try:
-                if UIC.get(k) == value: return
-                UIC[k] = value
-            except TypeError: pass
+            if UIC.get(k) == value: return
+            UIC[k] = value
             try:
                 zk = fitst["k"]
                 if attr == "Width": Kit.ui_w(ctrl, value if zk == 1.0 else int(round(value * zk)))
@@ -569,9 +513,7 @@ def _module_skills():
                     else: ctrl.SetPos(int(round(value[0] * zk)), int(round(value[1] * zk)))
                 else: setattr(ctrl, attr, value)
             except Exception: pass
-        def remember(ctrl, attr, value):
-            try: UIC[(ctrl, attr)] = value
-            except TypeError: pass
+        def remember(ctrl, attr, value): UIC[(ctrl, attr)] = value
         def cap_w(caption): return 35 + Kit.text_w(caption)
         def metrics(IW=None, zone=False):
             m = st["m"]
@@ -585,24 +527,22 @@ def _module_skills():
                 short = (m["sa_w"] + 16) - IW
                 if short > 0:
                     cut = min(short, m["name_w"] - ZONE_NAME_MIN)
-                    if cut > 0:
-                        m["name_w"] -= cut
-                        for key in ("real_x", "val_x", "cap_x", "bar_x", "gain_x", "lock_x"):
-                            if m[key] is not None: m[key] -= cut
-                        m["row_w"] = m["lock_x"] + m["lock_w"] + 6; m["sa_w"] = m["row_w"] + 16; m["cut"] = True
+                    if cut > 0: widen(m, -cut); m["cut"] = True
                 m["drop"] = tuple(drop)
             m["zone"] = zone; extra = max(0, IW - (m["sa_w"] + 16)) if IW else 0
             if extra:
                 bar_extra = min(BAR_GROW, extra * 2 // 5) if m["bar_x"] is not None else 0
-                name_extra = extra - bar_extra; m["name_w"] += name_extra
-                for key in ("real_x", "val_x", "cap_x", "bar_x", "gain_x", "lock_x"):
-                    if m[key] is not None: m[key] += name_extra
                 if bar_extra:
                     m["bar_w"] += bar_extra
                     for key in ("gain_x", "lock_x"):
                         if m[key] is not None and m[key] > m["bar_x"]: m[key] += bar_extra
-                m["row_w"] = m["lock_x"] + m["lock_w"] + 6; m["sa_w"] = m["row_w"] + 16
+                widen(m, extra - bar_extra)
             m["IW"] = IW; st["m"] = m; return m
+        def widen(m, d):
+            m["name_w"] += d
+            for key in ("real_x", "val_x", "cap_x", "bar_x", "gain_x", "lock_x"):
+                if m[key] is not None: m[key] += d
+            m["row_w"] = m["lock_x"] + m["lock_w"] + 6; m["sa_w"] = m["row_w"] + 16
         def natural_metrics(drop=()):
             m = {"cut": False, "drop": ()}; names = SK["names"] or FALLBACK_NAMES
             arrow_w = Kit.pic_size(LOCK_ART[0])[0] or 10; m["arrow_w"] = arrow_w
@@ -635,12 +575,12 @@ def _module_skills():
             if sw: IW = max(min_w - 2 * M, min(IW, sw - 2 * M - 10))
             m = metrics(IW); L = {"IW": IW, "W": IW + 2 * M, "min_w": min_w}; y = M + 30 + GAP
             n_sum = (2 if settings["sec_summary"] else 0) + (1 if settings["sec_stats"] else 0)
-            if n_sum: L["sum"] = (y, 6 + 24 * n_sum + 4); y += L["sum"][1] + GAP
-            L["tool"] = (y, 36); y += 36 + GAP; rows = settings["rows"] if fitst["rows"] is None else fitst["rows"]
-            L["list"] = (y, 26 + rows * ROW_H + 6); y += L["list"][1] + GAP
-            if settings["sec_locks"]: L["locks"] = (y, 36); y += 36 + GAP
-            if settings["sec_detail"]: L["detail"] = (y, 6 + 24 * detail_rows() + 4); y += L["detail"][1] + GAP
-            if settings["sec_log"]: L["log"] = (y, 26 + 20 * settings["log_lines"] + 4); y += L["log"][1] + GAP
+            rows = settings["rows"] if fitst["rows"] is None else fitst["rows"]
+            for key, on, hh in (("sum", n_sum, 6 + 24 * n_sum + 4), ("tool", True, 36),
+                                ("list", True, 26 + rows * ROW_H + 6), ("locks", settings["sec_locks"], 36),
+                                ("detail", settings["sec_detail"], 6 + 24 * detail_rows() + 4),
+                                ("log", settings["sec_log"], 26 + 20 * settings["log_lines"] + 4)):
+                if on: L[key] = (y, hh); y += hh + GAP
             L["H"] = y - GAP + M; L["fixed_h"] = L["H"] - rows * ROW_H; lo = LIMITS["rows"][0]
             L["min_h"] = L["fixed_h"] + lo * ROW_H
             if sh and L["H"] > sh - 10 and rows > lo:
@@ -745,7 +685,7 @@ def _module_skills():
             if c.get(sk) == src: return
             c[sk] = src; shown = Kit.fit(txt, room); Kit.set_text(lbl, shown, hue); cat = c.get(key + "_cat")
             if cat is None: return
-            tip = base or "" if shown == txt else (("%s. %s." % (txt, base)) if base else txt)
+            tip = base or "" if shown == txt else (("%s. %s" % (txt, base)) if base else txt)
             if tip != c.get(key + "_tip"): c[key + "_tip"] = tip; safe(lambda: cat.SetTooltip(tip))
         def plain_plan(L):
             IW = L["IW"]; Z = dict(L, total2=False, sess_own=False, log_n=settings["log_lines"])
@@ -761,9 +701,12 @@ def _module_skills():
             return Z
         def build_zone(g, store, c, Z, k, zone=True):
             M = Kit.MARGIN; IW = Z["IW"]; x0 = M; metrics(IW, zone=zone)
-            def zcut(g, c, key, x, y, w, h=22):
-                if not zone: return
-                c[key + "_cat"] = Kit.catcher(g, x - 2, y - 3, max(8, w + 4), h, lambda: None); c[key + "_tip"] = ""
+            def zlabel(key, x, y, w, hue=None, h=22, dy=0):
+                lbl = Kit.add_label(g, "", x, y, hue)
+                if zone:
+                    c[key + "_cat"] = Kit.catcher(g, x - 2, y + dy - 3, max(8, w + 4), h, lambda: None)
+                    c[key + "_tip"] = ""
+                return lbl
             if "sum" in Z:
                 y0, hh = Z["sum"]; Kit.add_section(g, x0, y0, IW, hh); ry = y0 + 6
                 if settings["sec_summary"]:
@@ -772,12 +715,11 @@ def _module_skills():
                     if zone: c["total_cat"], c["total_tip"] = cat, TOTAL_TIP
                     ry += 24
                     if Z["total2"]: c["total2"] = Kit.add_label(g, "", x0 + 12, ry + 3); ry += 24
-                    rx = x0 + IW - 12 - cap_w("Reset"); c["session"] = Kit.add_label(g, "", x0 + 12, ry + 3)
-                    c["session_w"] = IW - 28 if Z["sess_own"] else rx - x0 - 12 - 6
-                    zcut(g, c, "session", x0 + 12, ry + 3, c["session_w"])
+                    rx = x0 + IW - 12 - cap_w("Reset"); c["session_w"] = IW - 28 if Z["sess_own"] else rx - x0 - 12 - 6
+                    c["session"] = zlabel("session", x0 + 12, ry + 3, c["session_w"])
                     if Z["sess_own"]: ry += 24
                     Kit.art_button(g, store, "newsess", Kit.ART_CLOSE, rx, ry - 1, "Reset",
-                                   "Start a new session: gains count from now", on_click=queue("newsess"))
+                                   "New session: gains count from now", on_click=queue("newsess"))
                     ry += 24
                 if settings["sec_stats"]:
                     slot = Kit.text_w("Int 125 (+25)") + 8; places, (tx, tl) = Z["stats"]; c["stats"] = []
@@ -789,24 +731,21 @@ def _module_skills():
                         pic = Kit.add_pic(g, LOCK_ART[0], x0 + sx + slot, yy + 5)
                         if pic is not None:
                             Kit.on_click(pic, queue(("stat", j)))
-                            safe(lambda pic=pic, nm=nm: pic.SetTooltip(
-                                "Set " + nm + " to go up, down or locked (click for the next)"))
+                            Kit.with_tip(pic, "Click: %s up, down or locked" % nm)
                         c["stats"].append((lbl, pic))
-                    c["stat_total"] = Kit.add_label(g, "", x0 + tx, ry + 24 * tl + 3, Kit.HUE_INFO)
                     c["stat_total_w"] = IW - 4 - tx
-                    zcut(g, c, "stat_total", x0 + tx, ry + 24 * tl + 3, c["stat_total_w"])
+                    c["stat_total"] = zlabel("stat_total", x0 + tx, ry + 24 * tl + 3, c["stat_total_w"], Kit.HUE_INFO)
             y0, hh = Z["tool"]; T = Z["T"]; Kit.add_section(g, x0, y0, IW, hh)
             Kit.add_label(g, "Find:", x0 + 12, y0 + 10)
             c["search"] = Kit.with_tip(Kit.add_textbox(g, st["search"], x0 + T["tx"], y0 + 7, T["field"], numbers=False,
                                                        font=max(8, int(round(16 * k)))), "Type part of a skill name")
-            safe(lambda: c["search"].SetPlaceholder("search")); fx, fl = T["filter"]
+            c["search"].SetPlaceholder("search"); fx, fl = T["filter"]
             c["filter"] = Kit.art_button(g, store, "filter", Kit.ART_PAGE, x0 + fx, y0 + 7 + 28 * fl,
-                                         FILTERS[settings["filter"]][1],
-                                         "Which skills the list shows (click for the next choice)",
+                                         FILTERS[settings["filter"]][1], "Which skills to list (click: next)",
                                          on_click=queue("filter"))
             gx, gl = T["groups"]
             c["groups"] = Kit.add_check(g, "Groups", x0 + gx, y0 + 9 + 28 * gl, settings["groups"],
-                                        "Show the client's skill groups (click a group to fold it)")
+                                        "Show the client's skill groups (click one to fold it)")
             build_list(g, c, x0, Z["list"][0], IW, Z["list"][1], Z["rows"])
             if "locks" in Z:
                 y0, hh = Z["locks"]; Kit.add_section(g, x0, y0, IW, hh)
@@ -815,17 +754,15 @@ def _module_skills():
             if "detail" in Z:
                 y0, hh = Z["detail"]; D = Z["D"]; Kit.add_section(g, x0, y0, IW, hh); ry = y0 + 6
                 aw = max(Kit.pic_size(a)[0] for a in LOCK_ART) or 12; lx = x0 + IW - 12 - 3 * (aw + 10)
-                c["d_name"] = Kit.add_label(g, "", x0 + 12, ry + 3, Kit.HUE_TITLE); c["d_name_w"] = lx - x0 - 12 - 8
-                zcut(g, c, "d_name", x0 + 12, ry + 3, c["d_name_w"]); c["d_locks"] = []
+                c["d_name_w"] = lx - x0 - 12 - 8; c["d_locks"] = []
+                c["d_name"] = zlabel("d_name", x0 + 12, ry + 3, c["d_name_w"], Kit.HUE_TITLE)
                 for v in range(3):
                     p = Kit.add_pic(g, LOCK_ART[v], lx + v * (aw + 10), ry + 5)
                     if p is not None:
-                        Kit.on_click(p, queue(("dlock", v))); safe(lambda p=p, v=v: p.SetTooltip(LOCK_SET[v]))
+                        Kit.on_click(p, queue(("dlock", v))); Kit.with_tip(p, LOCK_SET[v])
                     c["d_locks"].append(p)
-                ry += 24; c["d_lw"] = IW - 28; c["d_l1"] = Kit.add_label(g, "", x0 + 12, ry + 3)
-                zcut(g, c, "d_l1", x0 + 12, ry + 3, c["d_lw"]); ry += 24
-                c["d_l2"] = Kit.add_label(g, "", x0 + 12, ry + 3, Kit.HUE_INFO)
-                zcut(g, c, "d_l2", x0 + 12, ry + 3, c["d_lw"]); ry += 24
+                ry += 24; c["d_lw"] = IW - 28; c["d_l1"] = zlabel("d_l1", x0 + 12, ry + 3, c["d_lw"]); ry += 24
+                c["d_l2"] = zlabel("d_l2", x0 + 12, ry + 3, c["d_lw"], Kit.HUE_INFO); ry += 24
                 if settings["tips"]:
                     c["d_tip"] = Kit.add_label(g, "", x0 + 12, ry + 3, Kit.HUE_TEXT)
                     c["d_tip_cat"] = Kit.catcher(g, x0 + 8, ry, IW - 16, 22, lambda: None,
@@ -834,10 +771,9 @@ def _module_skills():
                 Kit.add_label(g, "Target:", x0 + 12, ry + 3)
                 c["target"] = Kit.with_tip(Kit.add_textbox(g, "", x0 + D["tx"], ry, 56, numbers=False,
                                                            font=max(8, int(round(16 * k)))),
-                                           "Real value this skill stops at (empty = none)")
-                safe(lambda: c["target"].SetPlaceholder("none"))
-                c["d_tgt"] = Kit.add_label(g, "", x0 + D["tgt_x"], ry + 3, Kit.HUE_INFO); c["d_tgt_w"] = D["tgt_w"]
-                zcut(g, c, "d_tgt", x0 + D["tgt_x"], ry + 3, c["d_tgt_w"]); ry += 24
+                                           "Real value to stop at (empty = none)")
+                c["target"].SetPlaceholder("none"); c["d_tgt_w"] = D["tgt_w"]
+                c["d_tgt"] = zlabel("d_tgt", x0 + D["tgt_x"], ry + 3, D["tgt_w"], Kit.HUE_INFO); ry += 24
                 for key, (bx, ln) in ([("pin", (D["pin_x"], -1))] if D["pin_here"] else []) + D["btns"]:
                     art, cap, tip, act = DETAIL_BTNS[key]
                     b = Kit.art_button(g, store, key, art, x0 + bx, ry - 1 + 24 * ln, cap, tip, on_click=queue(act))
@@ -846,12 +782,11 @@ def _module_skills():
                 y0, hh = Z["log"]; Kit.add_section(g, x0, y0, IW, hh, "RECENT GAINS"); c["log"] = []
                 c["log_w"] = IW - 28
                 for j in range(Z["log_n"]):
-                    c["log"].append(Kit.add_label(g, "", x0 + 12, y0 + 26 + 20 * j, Kit.HUE_TEXT))
-                    zcut(g, c, "log%d" % j, x0 + 12, y0 + 26 + 20 * j + 1, c["log_w"], 20)
+                    c["log"].append(zlabel("log%d" % j, x0 + 12, y0 + 26 + 20 * j, c["log_w"], Kit.HUE_TEXT, 20, 1))
         def close_tip():
-            if settings["x_hides"]: return "Close %s (hides it; %s brings it back)" % (
+            if settings["x_hides"]: return "Hide %s (%s brings it back)" % (
                 TITLE, "the client's Skills button" if settings["replace"] else "the Action Bar's Skills button")
-            return "Close %s (turns it off; the Modules tab turns it back on)" % TITLE
+            return Kit.CLOSE_TIP % TITLE
         def _build_window():
             old, win["g"] = win["g"], None; UIC.clear(); st["desc"] = None; st["rebuild"] = None
             if st["hidden"]:
@@ -876,26 +811,18 @@ def _module_skills():
                 c["mini"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"), close_tip=close_tip())
             else:
                 x, y = Kit.clamp(x, y, w, h)
-                try:
-                    g = G.CreateModernGump(x, y, w, h, True, L["min_w"], L["min_h"], on_resized)
-                    safe(lambda: g.SetAlpha(0))
-                except Exception:
-                    g = G.CreateGump(True, True)
-                    if not st["no_resize_told"]:
-                        st["no_resize_told"] = True
-                        API.SysMsg("%s: this client has no resizable windows: set the rows and "
-                                   "the width on the settings page instead of dragging a corner." % TITLE, Kit.HUE_INFO)
-                Kit.add_window_frame(g, w, h, mouse=False); Kit.add_section(g, M, M, IW, 30)
-                Kit.add_label(g, TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE); Kit.note_title(g, M)
+                g = G.CreateModernGump(x, y, w, h, True, L["min_w"], L["min_h"], on_resized)
+                g.SetAlpha(0); Kit.add_window_frame(g, w, h, mouse=False); Kit.add_section(g, M, M, IW, 30)
+                Kit.add_label(g, TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
                 zoned = Kit.zone_up(KEY); x_set = w - M - (10 if zoned else 84 + Kit.DOCK_DX) - cap_w("Settings")
                 if zoned: Kit.catcher(g, M, M, x_set - M - 6, 30, lambda *a: None, None, movable=True)
                 else: Kit.title_catcher(g, M, M, x_set - M - 6, 30, queue("toggle_min"), key=KEY)
-                Kit.art_button(g, store, "settings", Kit.ART_PAGE, x_set, M + 4, "Settings",
-                               "Open the " + TITLE + " settings page", on_click=queue("settings"))
+                Kit.art_button(g, store, "settings", Kit.ART_PAGE, x_set, M + 4, "Settings", Kit.SETTINGS_TIP % TITLE,
+                               on_click=queue("settings"))
                 if not zoned:
                     Kit.dock_button(g, store, w - M - 74, M + 7, on_click=queue("to_bar"))
-                    Kit.art_button(g, store, "min", Kit.ART_MIN, w - M - 74, M + 7, None,
-                                   "Minimize (double-click the title does too)", on_click=queue("toggle_min"))
+                    Kit.art_button(g, store, "min", Kit.ART_MIN, w - M - 74, M + 7, None, Kit.MIN_TIP,
+                                   on_click=queue("toggle_min"))
                     Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, close_tip())
                 build_zone(g, store, c, plain_plan(L), 1.0, False)
             Kit.show_window(g, x, y, w, h, KEY if Z is not None else None, st["docked"], on_disposed(g), save_pos, win,
@@ -905,27 +832,22 @@ def _module_skills():
         def on_resized(*args):
             st["resize_at"] = time.time(); g = win["g"]; L = win.get("L")
             if st["preview"] or L is None or not Kit.is_open(g) or st["minimized"] or st["docked"]: return
-            if fitst["width"] is not None: return
-            try: same = (int(g.GetWidth()), int(g.GetHeight())) == (L["W"], L["H"])
-            except Exception: same = False
-            if not same: st["preview"] = True; safe(lambda: g.SetAlpha(0.55))
+            if fitst["width"] is None and (int(g.GetWidth()), int(g.GetHeight())) != (L["W"], L["H"]):
+                st["preview"] = True; g.SetAlpha(0.55)
         def apply_resize():
             g = win["g"]; L = win.get("L"); st["preview"] = False
             if L is None or not Kit.is_open(g) or st["minimized"] or st["docked"]: return
-            if fitst["width"] is not None: safe(lambda: g.SetAlpha(0)); return
-            try: w, h = int(g.GetWidth()), int(g.GetHeight())
-            except Exception: return
-            lo, hi = LIMITS["rows"]; rows = max(lo, min(hi, (h - L["fixed_h"] + ROW_H // 2) // ROW_H))
-            width = w if w > L["min_w"] else 0
-            if rows == L["rows"] and width == settings["width"] and (w, h) == (L["W"], L["H"]):
-                safe(lambda: g.SetAlpha(0)); return
+            if fitst["width"] is not None: g.SetAlpha(0); return
+            w, h = int(g.GetWidth()), int(g.GetHeight()); lo, hi = LIMITS["rows"]
+            rows = max(lo, min(hi, (h - L["fixed_h"] + ROW_H // 2) // ROW_H)); width = w if w > L["min_w"] else 0
+            if rows == L["rows"] and width == settings["width"] and (w, h) == (L["W"], L["H"]): g.SetAlpha(0); return
             if rows != settings["rows"] or width != settings["width"]:
                 settings["rows"], settings["width"] = rows, width; save_settings(); page["sync"] = True
             st["m"] = None; st["rebuild"] = "window"; touch()
         def build_list(g, c, x0, y0, IW, h, rows):
             m = metrics(); Kit.add_section(g, x0, y0, IW, h); sx = x0 + 8; c["hdr"] = {}
             heads = [("name", "Skill", m["name_x"], "Sort by name"),
-                     ("real", "Real", m["real_x"], "Sort by real value, without item bonuses"),
+                     ("real", "Real", m["real_x"], "Sort by real value without item bonuses"),
                      ("value", "Value", m["val_x"], "Sort by value with bonuses"),
                      ("cap", "Cap", m["cap_x"], "Sort by cap"),
                      ("gain", "Gain", m["gain_x"], "Sort by gain this session")]
@@ -935,15 +857,13 @@ def _module_skills():
                 if cx is None: continue
                 c["hdr"][key] = Kit.add_label(g, text, sx + cx, y0 + 6, Kit.HUE_INFO)
                 Kit.catcher(g, sx + cx - 2, y0 + 3, (nxt[key] or cx + 40) - cx - 2, 20,
-                            queue(("sort", key)), tip + " (click again to reverse)")
+                            queue(("sort", key)), tip + " (again to reverse)")
             lp = Kit.add_pic(g, LOCK_ART[2], sx + m["lock_x"], y0 + 7)
             if lp is not None:
-                Kit.on_click(lp, queue(("sort", "lock")))
-                safe(lambda: lp.SetTooltip("Sort by lock (click again to reverse)"))
+                Kit.on_click(lp, queue(("sort", "lock"))); Kit.with_tip(lp, "Sort by lock (again to reverse)")
             c["hdr"]["lock_pic"] = lp; c["arrow"] = Kit.add_pic(g, LOCK_ART[1], sx, y0 + 8, mouse=False)
-            try: sa = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * ROW_H); g.Add(sa)
-            except Exception: sa = None
-            c["sa"] = sa; c["sa_g"] = g; c["sa_xy"] = (sx, y0 + 26); c["list_rows"] = rows
+            c["sa"] = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * ROW_H); g.Add(c["sa"])
+            c["sa_xy"] = (sx, y0 + 26)
         def move_row(r, y):
             if r["y"] == y: return
             r["y"] = y; zk = fitst["k"]
@@ -967,30 +887,27 @@ def _module_skills():
             if st["desc"] is not None and key == st["desc_key"]: return
             st["desc_key"] = key; desc = descriptors(now)
             if desc == st["desc"]: return
-            st["desc"] = desc; m = metrics()
-            tgt, ox, oy = (c["sa"], 0, 0) if c.get("sa") is not None else (c["sa_g"], c["sa_xy"][0], c["sa_xy"][1])
+            st["desc"] = desc; m = metrics(); tgt = c["sa"]
             made = len(win["rowmap"]) + (0 if "selbox" in c else 1) + (0 if c.get("empty") else 1)
-            limit = len(desc) if c.get("sa") is not None else c.get("list_rows", settings["rows"])
             if "selbox" not in c:
-                c["selbox"] = Kit.add_box(tgt, ox, oy, m["row_w"], ROW_H - 1, SEL_ALPHA, SEL_COLOR)
+                c["selbox"] = Kit.add_box(tgt, 0, 0, m["row_w"], ROW_H - 1, SEL_ALPHA, SEL_COLOR)
                 setp(c["selbox"], "IsVisible", False)
             empty = "" if desc else ("No skill matches; change the search or the filter."
                                      if SK["n"] else "Waiting for the server to send your skills.")
-            if c.get("empty") is None and empty:
-                c["empty"] = Kit.add_label(tgt, empty, ox + m["name_x"], oy + 3, Kit.HUE_INFO)
+            if c.get("empty") is None and empty: c["empty"] = Kit.add_label(tgt, empty, m["name_x"], 3, Kit.HUE_INFO)
             if c.get("empty") is not None: Kit.set_text(c["empty"], empty); setp(c["empty"], "IsVisible", bool(empty))
             rowmap = win["rowmap"]; rows, want, nth = [], set(), {}
-            for n, d in enumerate(desc[:limit]):
-                ry = oy + n * ROW_H; k = (d[0], d[1]); nth[k] = c_k = nth.get(k, -1) + 1; k = (d[0], d[1], c_k)
+            for n, d in enumerate(desc):
+                ry = n * ROW_H; k = (d[0], d[1]); nth[k] = c_k = nth.get(k, -1) + 1; k = (d[0], d[1], c_k)
                 r = rowmap.get(k)
                 if r is None:
-                    r = build_group_row(tgt, ox, ry, d, m) if d[0] == "g" else build_skill_row(tgt, ox, ry, d[1], m)
+                    r = build_group_row(tgt, ry, d, m) if d[0] == "g" else build_skill_row(tgt, ry, d[1], m)
                     rowmap[k] = r
                 else: move_row(r, ry); show_row(r, True)
                 if d[0] == "g": setp(r["arrow"], "Graphic", GROUP_SHUT if d[2] else GROUP_OPEN)
                 want.add(k); rows.append(r)
             for k, r in rowmap.items():
-                if k not in want and not r["hidden"]: show_row(r, False); move_row(r, oy)
+                if k not in want and not r["hidden"]: show_row(r, False); move_row(r, 0)
             win["rows"] = rows
             if fitst["k"] != 1.0 and made != len(rowmap) + (0 if "selbox" in c else 1) + (0 if c.get("empty") else 1):
                 Kit.scale_window(win["g"], fitst["k"])
@@ -998,53 +915,50 @@ def _module_skills():
         def put(r, ctl, x, dy):
             if ctl is not None: r["parts"].append((ctl, x, dy))
             return ctl
-        def build_group_row(tgt, ox, ry, d, m):
+        def build_group_row(tgt, ry, d, m):
             key, shut = d[1], d[2]; r = {"kind": "g", "key": key, "y": ry, "hidden": False, "parts": [], "sig": None}
-            put(r, Kit.add_box(tgt, ox, ry + 1, m["row_w"], ROW_H - 2, GROUP_ALPHA, GROUP_COLOR), ox, 1)
-            r["arrow"] = put(r, Kit.add_pic(tgt, GROUP_SHUT if shut else GROUP_OPEN, ox + 4, ry + 5,
-                                         mouse=False), ox + 4, 5)
+            put(r, Kit.add_box(tgt, 0, ry + 1, m["row_w"], ROW_H - 2, GROUP_ALPHA, GROUP_COLOR), 0, 1)
+            r["arrow"] = put(r, Kit.add_pic(tgt, GROUP_SHUT if shut else GROUP_OPEN, 4, ry + 5, mouse=False), 4, 5)
             remember(r["arrow"], "Graphic", GROUP_SHUT if shut else GROUP_OPEN)
-            r["lbl"] = put(r, Kit.add_label(tgt, "", ox + m["name_x"], ry + 3, Kit.HUE_TITLE), ox + m["name_x"], 3)
-            r["real"] = put(r, Kit.add_label(tgt, "", ox + m["real_x"], ry + 3, Kit.HUE_INFO),
-                            ox + m["real_x"], 3) if m["real_x"] is not None else None
-            r["val"] = put(r, Kit.add_label(tgt, "", ox + m["val_x"], ry + 3, Kit.HUE_INFO), ox + m["val_x"], 3)
-            r["gain"] = put(r, Kit.add_label(tgt, "", ox + m["gain_x"], ry + 3, Kit.HUE_INFO),
-                            ox + m["gain_x"], 3) if m["gain_x"] is not None else None
-            put(r, Kit.catcher(tgt, ox, ry, m["row_w"], ROW_H - 1, queue(("fold", key)),
-                            "Fold or unfold this group"), ox, 0)
+            r["lbl"] = put(r, Kit.add_label(tgt, "", m["name_x"], ry + 3, Kit.HUE_TITLE), m["name_x"], 3)
+            r["real"] = put(r, Kit.add_label(tgt, "", m["real_x"], ry + 3, Kit.HUE_INFO),
+                            m["real_x"], 3) if m["real_x"] is not None else None
+            r["val"] = put(r, Kit.add_label(tgt, "", m["val_x"], ry + 3, Kit.HUE_INFO), m["val_x"], 3)
+            r["gain"] = put(r, Kit.add_label(tgt, "", m["gain_x"], ry + 3, Kit.HUE_INFO),
+                            m["gain_x"], 3) if m["gain_x"] is not None else None
+            put(r, Kit.catcher(tgt, 0, ry, m["row_w"], ROW_H - 1, queue(("fold", key)),
+                            "Fold or unfold this group"), 0, 0)
             return r
-        def build_skill_row(tgt, ox, ry, i, m):
+        def build_skill_row(tgt, ry, i, m):
             r = {"kind": "s", "i": i, "y": ry, "hidden": False, "parts": [], "sig": None}
-            r["name"] = put(r, Kit.add_label(tgt, row_name(i, m), ox + m["name_x"], ry + 3), ox + m["name_x"], 3)
-            r["real"] = put(r, Kit.add_label(tgt, "", ox + m["real_x"], ry + 3), ox + m["real_x"], 3) \
+            r["name"] = put(r, Kit.add_label(tgt, row_name(i, m), m["name_x"], ry + 3), m["name_x"], 3)
+            r["real"] = put(r, Kit.add_label(tgt, "", m["real_x"], ry + 3), m["real_x"], 3) \
                 if m["real_x"] is not None else None
-            r["val"] = put(r, Kit.add_label(tgt, "", ox + m["val_x"], ry + 3), ox + m["val_x"], 3)
-            r["cap"] = put(r, Kit.add_label(tgt, "", ox + m["cap_x"], ry + 3, Kit.HUE_INFO),
-                           ox + m["cap_x"], 3) if m["cap_x"] is not None else None
-            r["gain"] = put(r, Kit.add_label(tgt, "", ox + m["gain_x"], ry + 3, Kit.HUE_GOOD),
-                            ox + m["gain_x"], 3) if m["gain_x"] is not None else None
+            r["val"] = put(r, Kit.add_label(tgt, "", m["val_x"], ry + 3), m["val_x"], 3)
+            r["cap"] = put(r, Kit.add_label(tgt, "", m["cap_x"], ry + 3, Kit.HUE_INFO),
+                           m["cap_x"], 3) if m["cap_x"] is not None else None
+            r["gain"] = put(r, Kit.add_label(tgt, "", m["gain_x"], ry + 3, Kit.HUE_GOOD),
+                            m["gain_x"], 3) if m["gain_x"] is not None else None
             r["bar"] = None
             if m["bar_x"] is not None:
                 bdy = (ROW_H - m["bar_h"]) // 2; by = ry + bdy
                 if Kit.pic_size(Kit.LINE_RED)[0] > 0:
-                    put(r, Kit.add_tiled(tgt, Kit.LINE_RED, ox + m["bar_x"], by, m["bar_w"],
-                                      m["bar_h"], hue=BAR_BG_HUE), ox + m["bar_x"], bdy)
+                    put(r, Kit.add_tiled(tgt, Kit.LINE_RED, m["bar_x"], by, m["bar_w"],
+                                      m["bar_h"], hue=BAR_BG_HUE), m["bar_x"], bdy)
                 else:
-                    put(r, Kit.add_tiled(tgt, Kit.SECTION_TILE, ox + m["bar_x"], by, m["bar_w"],
-                                      m["bar_h"], 1.0), ox + m["bar_x"], bdy)
-                r["bar"] = put(r, Kit.add_tiled(tgt, Kit.LINE_BLUE, ox + m["bar_x"], by, 1, m["bar_h"]),
-                               ox + m["bar_x"], bdy)
+                    put(r, Kit.add_tiled(tgt, Kit.SECTION_TILE, m["bar_x"], by, m["bar_w"],
+                                      m["bar_h"], 1.0), m["bar_x"], bdy)
+                r["bar"] = put(r, Kit.add_tiled(tgt, Kit.LINE_BLUE, m["bar_x"], by, 1, m["bar_h"]), m["bar_x"], bdy)
             tip = "Click: pick it (details below); double-click: its floating button" \
                 if SK["click"][i] else "Click: pick it (details below)"
-            r["cat"] = put(r, Kit.catcher(tgt, ox + m["name_x"] - 2, ry, m["lock_x"] - m["name_x"] - 2,
-                                       ROW_H - 1, row_click(i), tip), ox + m["name_x"] - 2, 0)
+            r["cat"] = put(r, Kit.catcher(tgt, m["name_x"] - 2, ry, m["lock_x"] - m["name_x"] - 2,
+                                       ROW_H - 1, row_click(i), tip), m["name_x"] - 2, 0)
             r["tip0"] = r["cat_tip"] = tip; r["use"] = None
             if SK["click"][i]:
-                b = G.CreateGumpButton("", Kit.HUE_TEXT, GEM[0], GEM[1], GEM[2]); b.SetPos(ox + 4, ry + 6); tgt.Add(b)
-                Kit.on_click(b, queue(("use", i))); safe(lambda: b.SetTooltip("Use " + SK["names"][i]))
-                r["use"] = put(r, b, ox + 4, 6)
-            r["lock"] = put(r, Kit.add_pic(tgt, LOCK_ART[0], ox + m["lock_x"], ry + 4), ox + m["lock_x"], 4)
-            r["tip"] = None
+                b = G.CreateGumpButton("", Kit.HUE_TEXT, GEM[0], GEM[1], GEM[2]); b.SetPos(4, ry + 6); tgt.Add(b)
+                Kit.on_click(b, queue(("use", i))); Kit.with_tip(b, "Use " + SK["names"][i])
+                r["use"] = put(r, b, 4, 6)
+            r["lock"] = put(r, Kit.add_pic(tgt, LOCK_ART[0], m["lock_x"], ry + 4), m["lock_x"], 4); r["tip"] = None
             if r["lock"] is not None:
                 Kit.on_click(r["lock"], queue(("lock", i))); remember(r["lock"], "Graphic", LOCK_ART[0])
             return r
@@ -1061,8 +975,7 @@ def _module_skills():
                     if r["kind"] == "s" and r["i"] == sel: y = r["y"]; break
             if y is None: setp(box, "IsVisible", False)
             else:
-                ox = 0 if win["c"].get("sa") is not None else win["c"]["sa_xy"][0]; setp(box, "Pos", (ox, y))
-                setp(box, "IsVisible", True)
+                setp(box, "Pos", (0, y)); setp(box, "IsVisible", True)
         def name_hue(i, now):
             if st["hl"].get(i, 0) > now: return Kit.HUE_GOOD
             if i in marks["pins"]: return Kit.HUE_TITLE
@@ -1091,17 +1004,11 @@ def _module_skills():
                 if r["lock"] is not None:
                     setp(r["lock"], "Graphic", LOCK_ART[lock])
                     tip = "%s (click: %s)" % (LOCK_TEXT[lock], LOCK_TEXT[(lock + 1) % 3].lower())
-                    if r.get("tip") != tip:
-                        r["tip"] = tip
-                        try: r["lock"].SetTooltip(tip)
-                        except Exception: pass
+                    if r.get("tip") != tip: r["tip"] = tip; Kit.with_tip(r["lock"], tip)
                 if tips_on:
                     tp = tip_for(i)
                     ct = r["tip0"] if tp is None else "%s\n%s %s: %s" % (r["tip0"], SK["names"][i], tp[0], tp[1])
-                    if ct != r["cat_tip"]:
-                        r["cat_tip"] = ct
-                        try: r["cat"].SetTooltip(ct)
-                        except Exception: pass
+                    if ct != r["cat_tip"]: r["cat_tip"] = ct; Kit.with_tip(r["cat"], ct)
                 if r["bar"] is not None:
                     fw = int(bar_w * min(1.0, float(val) / cap)) if cap > 0 else 0; setp(r["bar"], "Width", max(1, fw))
                     setp(r["bar"], "IsVisible", fw > 0)
@@ -1172,8 +1079,8 @@ def _module_skills():
                 if c.get("total2") is not None:
                     sa, sb = Kit.fit(a, IWt), Kit.fit(b, IWt); Kit.set_text(c["total"], sa, hue)
                     Kit.set_text(c["total2"], sb, hue)
-                    tip = TOTAL_TIP if (sa, sb) == (a, b) else "%s. %s." % (txt, TOTAL_TIP)
-                    if tip != c.get("total_tip"): c["total_tip"] = tip; safe(lambda: c["total_cat"].SetTooltip(tip))
+                    tip = TOTAL_TIP if (sa, sb) == (a, b) else "%s. %s" % (txt, TOTAL_TIP)
+                    if tip != c.get("total_tip"): c["total_tip"] = tip; Kit.with_tip(c["total_cat"], tip)
                 else: fit_set(c, "total", txt, IWt, hue, TOTAL_TIP)
             if c.get("session") is not None:
                 tg = total_gain(); hrs = hours_running()
@@ -1242,7 +1149,7 @@ def _module_skills():
             if c.get("d_tip") is not None:
                 tp = tip_for(i)
                 if tp is not None: full, hue = "Tip %s: %s" % tp, Kit.HUE_TEXT
-                else: full, hue = "No tip for this range (TIPS in the Skills file)", Kit.HUE_INFO
+                else: full, hue = "No tip for this range", Kit.HUE_INFO
                 Kit.set_text(c["d_tip"], Kit.fit(full, c["d_lw"]), hue)
                 if full != c["d_tip_full"]: c["d_tip_full"] = full; Kit.with_tip(c["d_tip_cat"], full)
             tgt = marks["targets"].get(i)
@@ -1258,9 +1165,7 @@ def _module_skills():
             c = win["c"]; tb = c.get("target")
             if tb is None: st["tgt_shown"] = None; return
             i = st["sel"]; txt = f1(marks["targets"][i]) if i is not None and i in marks["targets"] else ""
-            try: tb.SetText(txt)
-            except Exception: safe(lambda: setattr(tb, "Text", txt))
-            st["tgt_shown"] = (i, txt)
+            tb.SetText(txt); st["tgt_shown"] = (i, txt)
         def poll_fields(now):
             c = win["c"]; moved = False; sb = c.get("search")
             if sb is not None:
@@ -1305,7 +1210,7 @@ def _module_skills():
             found = safe(lambda: Tz.windows(VANILLA), []) or []
             if not found: return
             VG["sig"] = None
-            for gmp in found: safe(lambda gmp=gmp: gmp.Dispose())
+            for gmp in found: gmp.Dispose()
             if time.time() <= st["swallow_until"]: st["swallow_until"] = 0.0; return
             bring_up()
         def bring_up():
@@ -1314,20 +1219,18 @@ def _module_skills():
                 _build_window()
             else:
                 ctl = Kit.client_control(win["g"])
-                if ctl is not None:
-                    safe(lambda: Tz.call(None, "MakeTopMostGump", [ctl], Tz.T("ClassicUO.Game.Managers.UIManager")))
+                if ctl is not None: Tz.call(None, "MakeTopMostGump", [ctl], Tz.T("ClassicUO.Game.Managers.UIManager"))
         def armed(key, text):
             now = time.time()
             if now - st["arm"].get(key, 0.0) <= ARM_SECS: st["arm"].pop(key, None); return True
-            st["arm"][key] = now; API.SysMsg("%s: %s" % (TITLE, text), Kit.HUE_INFO); return False
+            st["arm"][key] = now; say(text, Kit.HUE_INFO); return False
         def bulk_lock(v, only_capped=False):
             n = 0
             for i in (range(SK["n"]) if only_capped else [d[1] for d in (st["desc"] or []) if d[0] == "s"]):
                 base, _, cap, lock = SK["cur"][i]
                 if only_capped and not (cap and base >= cap): continue
                 if lock != v: set_lock(i, v); n += 1
-            API.SysMsg("%s: %d skill%s %s." % (TITLE, n, "" if n == 1 else "s",
-                                               ("set to go up", "set to go down", "locked")[v]),
+            say("%s %s." % (Kit.count(n, "skill"), ("set to go up", "set to go down", "locked")[v]),
                        Kit.HUE_GOOD if n else Kit.HUE_INFO)
         def apply_lockset(k):
             if k >= len(locksets): return
@@ -1335,8 +1238,7 @@ def _module_skills():
             for i, ch in enumerate(code[:SK["n"]]):
                 v = "udl".find(ch)
                 if v >= 0 and SK["cur"][i][3] != v: set_lock(i, v); n += 1
-            API.SysMsg("%s: lock set \"%s\" put on (%d change%s)." % (
-                TITLE, name, n, "" if n == 1 else "s"), Kit.HUE_GOOD)
+            say("lock set \"%s\" put on (%d change%s)." % (name, n, "" if n == 1 else "s"), Kit.HUE_GOOD)
         def save_lockset(name):
             name = re.sub(r"[|=;]", "", name or "").strip()[:24]
             if not name: name = "Set %d" % (len(locksets) + 1)
@@ -1345,45 +1247,43 @@ def _module_skills():
                 if n.lower() == name.lower(): locksets[k] = (name, code); break
             else:
                 if len(locksets) >= MAX_LOCKSETS:
-                    API.SysMsg("%s: at most %d lock sets: delete one first." % (TITLE, MAX_LOCKSETS), Kit.HUE_BAD)
-                    return
+                    say("at most %d lock sets: delete one first." % MAX_LOCKSETS, Kit.HUE_BAD); return
                 locksets.append((name, code))
-            save_locksets(); API.SysMsg("%s: lock set \"%s\" saved." % (TITLE, name), Kit.HUE_GOOD)
+            save_locksets(); say("lock set \"%s\" saved." % name, Kit.HUE_GOOD)
         def move_to_next_group(i):
             read_groups(True)
             if i is None or not GR["list"]:
-                API.SysMsg("%s: the client's skill groups can't be read." % TITLE, Kit.HUE_BAD); return
+                say("the client's skill groups can't be read.", Kit.HUE_BAD); return
             gi = group_of(i); dst = 0 if gi is None else (gi + 1) % len(GR["list"])
             try:
-                if gi is not None: GR["list"][gi]["obj"].Remove(as_byte(i))
-                GR["list"][dst]["obj"].Add(as_byte(i)); groups_save()
-                API.SysMsg("%s: %s moved to %s." % (TITLE, SK["names"][i], GR["list"][group_of(i) or 0]["name"]),
-                           Kit.HUE_GOOD)
-            except Exception as ex: API.SysMsg("%s: couldn't move it (%s)." % (TITLE, Tz.why(ex)), Kit.HUE_BAD)
+                import System
+                if gi is not None: GR["list"][gi]["obj"].Remove(System.Byte(i))
+                GR["list"][dst]["obj"].Add(System.Byte(i)); groups_save()
+                say("%s moved to %s." % (SK["names"][i], GR["list"][group_of(i) or 0]["name"]), Kit.HUE_GOOD)
+            except Exception as ex: say("couldn't move it (%s)." % Tz.why(ex), Kit.HUE_BAD)
         def group_new():
             mgr = group_mgr()
             try:
                 import System; g = System.Activator.CreateInstance(Tz.T("ClassicUO.Game.Managers.SkillsGroup"))
                 g.Name = "New group"; g.IsMaximized = True; mgr.Add(g); groups_save()
-            except Exception as ex: API.SysMsg("%s: couldn't add a group (%s)." % (TITLE, Tz.why(ex)), Kit.HUE_BAD)
+            except Exception as ex: say("couldn't add a group (%s)." % Tz.why(ex), Kit.HUE_BAD)
         def group_delete(gi):
             read_groups(True)
             if gi <= 0 or gi >= len(GR["list"]): return
             mgr = group_mgr(); name = GR["list"][gi]["name"]
             if safe(lambda: mgr.Remove(GR["list"][gi]["obj"]), False):
                 groups_save()
-                API.SysMsg("%s: group \"%s\" deleted; its skills went to \"%s\"." % (
-                    TITLE, name, GR["list"][0]["name"] if GR["list"] else "the first group"), Kit.HUE_GOOD)
+                say("group \"%s\" deleted; its skills went to \"%s\"." % (
+                    name, GR["list"][0]["name"] if GR["list"] else "the first group"), Kit.HUE_GOOD)
         def group_reset():
             mgr = group_mgr()
             try:
                 mgr.MakeDefault(); groups_save()
-                API.SysMsg("%s: skill groups reset to the default ones." % TITLE, Kit.HUE_GOOD)
-            except Exception as ex: API.SysMsg("%s: couldn't reset the groups (%s)." % (TITLE, Tz.why(ex)), Kit.HUE_BAD)
+                say("skill groups reset to the default ones.", Kit.HUE_GOOD)
+            except Exception as ex: say("couldn't reset the groups (%s)." % Tz.why(ex), Kit.HUE_BAD)
         def export_sheet():
-            serial = int(safe(lambda: API.Player.Serial, 0) or 0); who = str(safe(lambda: API.Player.Name, "") or "")
-            path = Kit.data_path("Skills_%08X.txt" % serial); now = time.time()
-            lines = ["Skill sheet - %s - %s" % (who, time.strftime("%Y-%m-%d %H:%M", time.localtime(now))),
+            p = API.Player; path = Kit.data_path("Skills_%08X.txt" % int(p.Serial)); now = time.time()
+            lines = ["Skill sheet - %s - %s" % (p.Name or "", time.strftime("%Y-%m-%d %H:%M", time.localtime(now))),
                      "Total %s / %s   (with bonuses %s)" % (f1(total_real()), f1(settings["total_cap"]),
                          f1(sum(x[1] for x in SK["cur"]))), "Str %d  Dex %d  Int %d   (stat cap %d)" % (
                          STATS["cur"][0], STATS["cur"][1], STATS["cur"][2], STATS["cap"]),
@@ -1401,17 +1301,16 @@ def _module_skills():
                 if settings["sec_detail"]: read_groups(GR["sig"] is None)
             place_selbox()
         def picked(i):
-            if i is None: API.SysMsg("%s: pick a skill first." % TITLE, Kit.HUE_INFO)
+            if i is None: say("pick a skill first.", Kit.HUE_INFO)
             return i is not None
         def run_action(a, now):
             kind = a[0] if isinstance(a, tuple) else a; arg = a[1] if isinstance(a, tuple) and len(a) > 1 else None
-            sel = st["sel"]
-            if kind == "settings": HOST.show_settings(KEY)
+            sel = st["sel"]; fn = ACTS.get(kind)
+            if fn is not None: fn(arg)
             elif kind == "toggle_min":
                 st["minimized"] = not (st["minimized"] or st["docked"]); st["docked"] = False
                 safe(lambda: HOST.dock_forget(KEY)); settings["minimized"] = st["minimized"]; save_settings()
                 st["rebuild"] = "window"
-            elif kind == "to_bar": safe(lambda: HOST.dock_to_bar(KEY, TITLE))
             elif kind == "filter":
                 settings["filter"] = (settings["filter"] + 1) % len(FILTERS); save_settings()
                 lbl = win["c"].get("filter")
@@ -1420,7 +1319,6 @@ def _module_skills():
                 if settings["sort"] == arg: settings["asc"] = not settings["asc"]
                 else: settings["sort"] = arg; settings["asc"] = arg == "name"
                 save_settings()
-            elif kind == "pick": pick(arg)
             elif kind == "button": pick(arg); make_button(arg)
             elif kind == "mkbutton" and picked(sel): make_button(sel)
             elif kind == "use":
@@ -1428,92 +1326,76 @@ def _module_skills():
                 if picked(i): use_skill(i)
             elif kind == "lock" and arg is not None and arg < SK["n"]: set_lock(arg, (SK["cur"][arg][3] + 1) % 3)
             elif kind == "dlock" and sel is not None: set_lock(sel, arg)
-            elif kind == "stat": set_stat_lock(arg, (STATS["locks"][arg] + 1) % 3)
             elif kind == "fold":
-                if isinstance(arg, int):
-                    g = GR["list"][arg] if arg < len(GR["list"]) else None
-                    if g is not None:
-                        safe(lambda: setattr(g["obj"], "IsMaximized", not g["max"])); g["max"] = not g["max"]
-                else: st["pc"][arg] = not st["pc"].get(arg, False)
+                if not isinstance(arg, int): st["pc"][arg] = not st["pc"].get(arg, False)
+                elif arg < len(GR["list"]): g = GR["list"][arg]; g["obj"].IsMaximized = g["max"] = not g["max"]
             elif kind == "pin" and picked(sel): marks["pins"] ^= {sel}; save_marks()
             elif kind == "nextgrp" and picked(sel): move_to_next_group(sel)
-            elif kind == "all_up": bulk_lock(0)
             elif kind == "all_down":
-                if armed("all_down", "click All down again to set every skill in the list to go down."): bulk_lock(1)
-            elif kind == "all_locked": bulk_lock(2)
-            elif kind == "lock_capped": bulk_lock(2, only_capped=True)
+                if armed("all_down", "click All down again to set every listed skill to go down."): bulk_lock(1)
             elif kind == "newsess":
-                new_session(); API.SysMsg("%s: new session; gains count from now." % TITLE, Kit.HUE_GOOD)
-            elif kind == "export": export_sheet()
+                new_session(); say("new session; gains count from now.", Kit.HUE_GOOD)
             elif kind == "ask":
-                if ask_server(): API.SysMsg("%s: asked the server for your skills." % TITLE, Kit.HUE_INFO)
-                else: API.SysMsg("%s: couldn't ask the server." % TITLE, Kit.HUE_BAD)
-            elif kind == "ls_save": save_lockset(arg)
-            elif kind == "ls_apply": apply_lockset(arg)
+                if ask_server(): say("asked the server for your skills.", Kit.HUE_INFO)
+                else: say("couldn't ask the server.", Kit.HUE_BAD)
             elif kind == "ls_del" and arg < len(locksets):
                 n = locksets.pop(arg)[0]; save_locksets()
-                API.SysMsg("%s: lock set \"%s\" deleted." % (TITLE, n), Kit.HUE_INFO)
-            elif kind == "grp_new": group_new()
-            elif kind == "grp_del": group_delete(arg)
+                say("lock set \"%s\" deleted." % n, Kit.HUE_INFO)
             elif kind == "grp_reset":
-                if armed("grp_reset", "click Reset groups again to put back the default skill groups."):
+                if armed("grp_reset", "click Reset groups again for the default groups."):
                     group_reset(); HOST.refresh_settings(KEY)
-            elif kind == "grp_save": groups_save()
             if kind in ("ls_save", "ls_del", "grp_new", "grp_del"): HOST.refresh_settings(KEY)
-        MAIN_CHECKS = [("replace", "Open this window instead of the client's skills window",
-             "The paperdoll's Skills button, the Skills macro and the Action Bar bring this up"),
-            ("x_hides", "Its Close only hides it (the Modules tab turns Skills off)",
-             "Off: Close turns the Skills module off, as it does in other windows"),
-            ("bars", "Progress bar per skill (value / cap)",
-             "A bar in every row, filled to value / cap (green once the skill is at its cap)"),
-            ("col_cap", "Cap column", "Show each skill's cap in its own column"),
-            ("col_gain", "Session gain column", "Show what each skill gained this session"),
-            ("journal", "A journal line for every gain or loss", "The client may print its own line too (its Options)"),
-            ("lock_at_cap", "Lock a skill when it reaches its cap",
-             "A skill set to go up is locked the moment it reaches its cap"),
-            ("lock_at_target", "Lock a skill when it reaches its target", "Set a target in the window's details part"),
+        ACTS = {"settings": lambda arg: HOST.show_settings(KEY), "to_bar": lambda arg: HOST.dock_to_bar(KEY, TITLE),
+                "pick": pick, "stat": lambda arg: set_stat_lock(arg, (STATS["locks"][arg] + 1) % 3),
+                "all_up": lambda arg: bulk_lock(0), "all_locked": lambda arg: bulk_lock(2),
+                "lock_capped": lambda arg: bulk_lock(2, True), "export": lambda arg: export_sheet(),
+                "ls_save": save_lockset, "ls_apply": apply_lockset, "grp_new": lambda arg: group_new(),
+                "grp_del": group_delete, "grp_save": lambda arg: groups_save()}
+        MAIN_CHECKS = [("replace", "Replace the client's skills window",
+             "The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),
+            ("x_hides", "Close only hides it", "Off: Close turns Skills off"),
+            ("bars", "Progress bar per skill (value / cap)", "Filled to value / cap; green at the cap"),
+            ("col_cap", "Cap column", "Each skill's cap"), ("col_gain", "Session gain column",
+             "What each skill gained this session"),
+            ("journal", "Journal line for each gain or loss", "The client may print its own line too (its Options)"),
+            ("lock_at_cap", "Lock a skill when it reaches its cap", "A rising skill locks the moment it hits its cap"),
+            ("lock_at_target", "Lock a skill when it reaches its target", "Set targets in the window's details"),
             ("cap_warn", "Warn at the total cap when no skill is set to go down",
-             "A journal warning (and a red total) when nothing can rise any more"),
-            ("tips", "Training tips in the details and in each row's tooltip",
-             "A tip for the skill's range, from the TIPS table in the Skills file (classic-era "
-             "advice; edit it for the shard)")]
-        NUM_FIELDS = [("rows", "Rows in the list:", False,
-                       "How many skills the list shows at once (or drag a corner of the window)"),
-                      ("total_cap", "Total skill cap:", True,
-                       "Your shard's total skill cap (In Mani Ylem: check it in game)"),
+             "Journal warning and a red total when nothing can rise"),
+            ("tips", "Training tips in the details and row tooltips", "Classic-era advice for the skill's range")]
+        NUM_FIELDS = [("rows", "Rows in the list:", False, "Skills shown at once (or drag a window corner)"),
+                      ("total_cap", "Total skill cap:", True, "The shard's total skill cap (check it in game)"),
                       ("hl_secs", "Green name after a gain (s):", False,
-                       "Seconds a skill's name stays green after it gained (0 = never)"),
+                       "Seconds a name stays green after a gain (0 = never)"),
                       ("rate_min", "Recent pace over (minutes):", False,
-                       "Minutes the recent gain rate and the time to cap look back over")]
-        SEC_CHECKS = [("sec_summary", "Totals and session", "Total skill points and the session " "line"),
-                      ("sec_stats", "Str / Dex / Int", "Your stats, their lock arrows and the stat cap"),
+                       "Minutes the recent rate and time to cap look back")]
+        SEC_CHECKS = [("sec_summary", "Totals and session", "Total skill points and the session line"),
+                      ("sec_stats", "Str / Dex / Int", "Stats, lock arrows and the stat cap"),
                       ("sec_locks", "Lock buttons", "All up, All down, All locked and Lock capped"),
                       ("sec_detail", "Picked skill details", "Rates, target, pin and the Use button"),
                       ("sec_log", "Recent gains", "The last gains, newest first")]
-        TOOLS_HINT = ("Export writes a skill sheet to a text file in the VirtueAssistantSettings folder.")
-        SIZE_HINT = ("Drag any corner of the Skills window to resize it: its height sets the "
-                     "rows, its width spreads the columns.")
-        STAT_HINT = ("A stat set to go up locks when it rises to its target; one set to go down, "
-                     "when it falls to it. The window's Str / Dex / Int tooltips show the session's gains per hour.")
-        def page_table(w, c=None):
+        TOOLS_HINT = "Export writes a text file to the VirtueAssistantSettings folder."
+        SIZE_HINT = "Drag a window corner: height sets the rows, width spreads the columns."
+        STAT_HINT = ("A stat set to go up locks when it rises to its target, one set to go down when it falls to it. "
+                     "The window's stat tooltips show gains per hour.")
+        def page_table(w):
             read_groups(GR["sig"] is None); ng = len(GR["list"]) if GR["ok"] else 1; half = (w - 24) // 2
             def hint(text, dy): return [("note", line, {"ndy": dy, "h": 18}) for line in Kit.wrap(text, w - 24)]
             def num_field(k, text, dec, tip):
                 def draw(f, x, ry):
-                    g = f.g; lx = x + 12 + max(Kit.text_w(t) for _, t, _, _ in NUM_FIELDS) + 10
+                    g = f.g; c = f.c; lx = x + 12 + max(Kit.text_w(t) for _, t, _, _ in NUM_FIELDS) + 10
                     Kit.add_label(g, text, x + 12, ry + 3); val = f1(settings[k]) if dec else str(settings[k])
-                    c["num"][k] = Kit.with_tip(Kit.add_textbox(g, val, lx, ry, 70, numbers=not dec), tip)
+                    c.setdefault("num", {})[k] = Kit.with_tip(Kit.add_textbox(g, val, lx, ry, 70, numbers=not dec), tip)
                     lo, hi = LIMITS[k]; rng = ("(%s-%s)" % (f1(lo), f1(hi))) if dec else ("(%d-%d)" % (lo, hi))
                     Kit.add_label(g, Kit.fit(rng, x + w - 4 - (lx + 84)), lx + 84, ry + 3, Kit.HUE_INFO)
                     if k == "rows":
                         wx = lx + 84 + Kit.text_w(rng) + 16
                         c["width_v"] = Kit.add_label(g, Kit.fit(width_text(), x + w - 4 - wx), wx, ry + 3, Kit.HUE_INFO)
                         Kit.catcher(g, wx - 2, ry, x + w - 4 - wx, 22, lambda: None,
-                                    "The window's width, set by dragging a corner (natural: as wide as its "
-                                    "columns need)")
+                                    "Window width, set by dragging a corner (natural: as wide as the columns need)")
                 return ("custom", 28, draw)
             def stat_targets(f, x, ry):
-                sx = x + 12; c["stat_tgt"] = []
+                sx = x + 12; c = f.c; c["stat_tgt"] = []
                 for k, nm in enumerate(("Str", "Dex", "Int")):
                     Kit.add_label(f.g, nm + ":", sx, ry + 3); tx = sx + Kit.text_w(nm + ":") + 8
                     shown = str(stat_tgt[k]) if stat_tgt[k] else ""
@@ -1523,10 +1405,10 @@ def _module_skills():
             def lock_sets(f, x, ry):
                 g, store = f.g, f.store; Kit.add_label(g, "Name:", x + 12, ry + 3)
                 nx = x + 12 + Kit.text_w("Name:") + 8; sx = x + w - 12 - cap_w("Save current")
-                c["ls_name"] = Kit.with_tip(Kit.add_textbox(g, "", nx, ry, max(60, sx - nx - 14), numbers=False),
-                                            "Name for the lock set Save current makes (empty = Set 1, Set 2 ...)")
+                f.c["ls_name"] = Kit.with_tip(Kit.add_textbox(g, "", nx, ry, max(60, sx - nx - 14), numbers=False),
+                                              "Name for Save current (empty = Set 1, Set 2 and so on)")
                 Kit.art_button(g, store, "ls_save", Kit.ART_OK, sx, ry - 1, "Save current",
-                               "Save every skill's lock as a set (the same name replaces it)")
+                               "Save every skill's lock as a set (same name replaces it)")
                 ry += 28
                 if not locksets:
                     Kit.add_label(g, "No lock sets yet. Type a name and click Save current.", x + 12, ry + 3,
@@ -1536,27 +1418,26 @@ def _module_skills():
                     ups, downs = code.count("u"), code.count("d")
                     Kit.add_label(g, Kit.fit("%s  (%d up, %d down)" % (name, ups, downs), ax - x - 24), x + 12, ry + 3)
                     Kit.art_button(g, store, "ls_apply_%d" % k, Kit.ART_OK, ax, ry - 1, "Apply",
-                                   "Put this lock set on your skills")
+                                   "Put this set's locks on your skills")
                     Kit.art_button(g, store, "ls_del_%d" % k, Kit.ART_CLOSE, dx, ry - 1, "Delete",
                                    "Delete this lock set")
                     ry += 26
             def groups(f, x, ry):
-                g, store = f.g, f.store; dx = x + w - 12 - cap_w("Delete")
+                g, store = f.g, f.store; dx = x + w - 12 - cap_w("Delete"); f.c["grp"] = []
                 if not GR["ok"]:
                     Kit.add_label(g, "The client's skill groups can't be read.", x + 12, ry + 3, Kit.HUE_BAD); ry += 28
                 for gi, gr in enumerate(GR["list"]):
                     tb = Kit.with_tip(Kit.add_textbox(g, gr["name"], x + 12, ry, 200, numbers=False),
-                                      "The group's name (type to rename it)")
-                    Kit.add_label(g, "%d skill%s" % (len(gr["members"]), "" if len(gr["members"]) == 1
-                                                     else "s"), x + 226, ry + 3, Kit.HUE_INFO)
+                                      "Group name (type to rename)")
+                    Kit.add_label(g, Kit.count(len(gr["members"]), "skill"), x + 226, ry + 3, Kit.HUE_INFO)
                     if gi > 0:
                         Kit.art_button(g, store, "grp_del_%d" % gi, Kit.ART_CLOSE, dx, ry - 1,
                                        "Delete", "Delete this group (its skills go to the first one)")
                     else: Kit.add_label(g, "first group", dx + 35, ry + 3, Kit.HUE_INFO)
-                    c["grp"].append((tb, gi, gr["name"])); ry += 28
+                    f.c["grp"].append((tb, gi, gr["name"])); ry += 28
                 if GR["ok"] and not GR["list"]: ry += 28
                 Kit.art_button(g, store, "grp_new", Kit.ART_OK, x + 12, ry - 1, "New group",
-                               "Add an empty group (the window's Next group button moves skills in)")
+                               "Add an empty group (Next group in the window moves skills in)")
                 Kit.art_button(g, store, "grp_reset", Kit.ART_CLOSE, x + 12 + cap_w("New group") + 16,
                                ry - 1, "Reset groups", "Put back the client's default groups (click twice)")
             lo, hi = LIMITS["log_lines"]; sec = {"ch": 24, "pad": 6}
@@ -1565,23 +1446,18 @@ def _module_skills():
                     ("SECTIONS  (what the window shows)", [("check",) + r + ({"stay": n % 2 == 0 and n < 4,
                      "dx": 12 + (n % 2) * half},) for n, r in enumerate(SEC_CHECKS)] + [("num", "log_lines",
                      "Recent gains lines:", "Lines the Recent gains part shows (%d-%d)" % (lo, hi), None, lo, hi)],
-                     sec), ("STAT TARGETS  (a stat locks when it gets there)", [("custom", 28, stat_targets),
+                     sec), ("STAT TARGETS", [("custom", 28, stat_targets),
                      ("check", "lock_stat_target", "Lock a stat when it reaches its target",
                       "Off: only a journal line when it gets there")] + hint(STAT_HINT, 2), sec),
-                    ("LOCK SETS  (saved up / down / locked layouts)",
-                     (("custom", 28 + max(1, len(locksets)) * 26, lock_sets),), sec),
+                    ("LOCK SETS  (saved locks)", (("custom", 28 + max(1, len(locksets)) * 26, lock_sets),), sec),
                     ("GROUPS  (the client's skill groups)", (("custom", max(1, ng) * 28 + 28, groups),), sec),
                     ("TOOLS", [("buttons", (("export", Kit.ART_PLAY, "Export sheet", "Write every skill's values to a "
-                                             "text file in the VirtueAssistantSettings folder"),
+                                             "file in the VirtueAssistantSettings folder"),
                                             ("ask", Kit.ART_PLAY, "Ask server",
                                              "Ask the server for fresh skill values"),
                                             ("newsess", Kit.ART_PLAY, "New session",
                                              "Start a new session: gains count from now")))] + hint(TOOLS_HINT, 0),
                      dict(sec, bdy=-1, bgap=16)))
-        def config_height(w): return Kit.Form.height(page_table(w), w)
-        def build_config(g, x, y, w):
-            c = {"num": {}, "grp": []}; f = Kit.Form(g, x, y, w, settings, page_table(w, c))
-            c.update({"store": f.store, "f": f}); page["c"] = c
         def width_text():
             if settings["width"]: return "Width: %d px (drag a corner)" % settings["width"]
             return "Width: natural (drag a corner)"
@@ -1590,41 +1466,38 @@ def _module_skills():
             except Exception: txt = ""
             try: v = int(round(float(txt.replace(",", ".")) * 10)) if dec else int(txt); return max(lo, min(hi, v))
             except (ValueError, OverflowError): return default
-        def poll_config():
-            c = page["c"]
-            if c is None: return
+        def page_clicks(f):
+            c = f.c; page["skip"] = page["sync"]
             if page["sync"]:
                 page["sync"] = False; tb = c["num"].get("rows")
-                if tb is not None:
-                    try: tb.SetText(str(settings["rows"]))
-                    except Exception: safe(lambda: setattr(tb, "Text", str(settings["rows"])))
+                if tb is not None: tb.SetText(str(settings["rows"]))
                 if c.get("width_v") is not None: Kit.set_text(c["width_v"], width_text())
                 return
-            new = c["f"].read()
-            for k, ctrl in c["num"].items():
-                lo, hi = LIMITS[k]; new[k] = read_num(ctrl, settings[k], lo, hi, k == "total_cap")
-            if new != settings:
-                relayout = any(new[k] != settings[k] for k in LAYOUT_KEYS); settings.update(new); save_settings()
-                touch()
-                if relayout: st["m"] = None; st["rebuild"] = "window"
-                st["warned_cap"] = False; st["cap_at"] = 0.0
             poll_stat_targets(c, False)
-            for tb, gi, shown in list(c["grp"]):
+            for tb, gi, shown in list(c.get("grp", ())):
                 try: txt = str(tb.Text or "")
                 except Exception: txt = str(shown or "")
                 if txt != shown and gi < len(GR["list"]):
-                    safe(lambda: setattr(GR["list"][gi]["obj"], "Name", txt)); GR["list"][gi]["name"] = txt; touch()
+                    GR["list"][gi]["obj"].Name = GR["list"][gi]["name"] = txt; touch()
                     c["grp"] = [(t, g2, txt if g2 == gi else s) for t, g2, s in c["grp"]]
                     st["grp_dirty_at"] = time.time()
-            store = c["store"]
+            store = f.store
             for key in list(store[0].keys()):
                 if not Kit.was_clicked(store, key): continue
-                if key == "ls_save":
-                    name = str(safe(lambda: c["ls_name"].Text, "") or ""); st["queue"].append(("ls_save", name))
+                if key == "ls_save": st["queue"].append(("ls_save", str(c["ls_name"].Text or "")))
                 elif key.startswith(("ls_apply_", "ls_del_", "grp_del_")):
                     kind, _, n = key.rpartition("_"); st["queue"].append((kind, int(n)))
                 else: st["queue"].append((key,))
                 HOST.poke()
+        def page_adjust(f, new):
+            if page["skip"]: new.update(settings); return
+            for k, ctrl in f.c["num"].items():
+                lo, hi = LIMITS[k]; new[k] = read_num(ctrl, settings[k], lo, hi, k == "total_cap")
+        def page_changed(old, new):
+            touch()
+            if any(new[k] != old[k] for k in LAYOUT_KEYS): st["m"] = None; st["rebuild"] = "window"
+            st["warned_cap"] = False; st["cap_at"] = 0.0
+        cfg = Kit.Page(settings, page_table, save_settings, page_changed, adjust=page_adjust, clicks=page_clicks)
         STAT_SETTLE = 0.8
         def poll_stat_targets(c, final):
             now = time.time()
@@ -1638,10 +1511,12 @@ def _module_skills():
                 e[1] = txt
                 if txt and not txt.isdigit(): continue
                 v = max(0, min(STAT_TARGET_MAX, int(txt))) if txt else 0
-                if v != stat_tgt[k]: stat_tgt[k] = v; save_stat_targets(); touch(); stat_at_target(k)
+                if v != stat_tgt[k]:
+                    stat_tgt[k] = v; Kit.put_var(STAT_TARGETS_KEY, ",".join(str(t) for t in stat_tgt)); touch()
+                    stat_at_target(k)
         def config_closed():
-            if page["c"] is not None: poll_stat_targets(page["c"], True)
-            page["c"] = None; page["sync"] = False
+            if cfg.f is not None: poll_stat_targets(cfg.f.c, True)
+            cfg.closed(); page["sync"] = False
             if st.get("grp_dirty_at"): st["grp_dirty_at"] = 0.0; st["queue"].append(("grp_save",))
         def set_ready():
             st["ready"] = True
@@ -1656,9 +1531,8 @@ def _module_skills():
             if win["g"] is not None and Kit.was_clicked(win["store"], "close"):
                 if settings["x_hides"]:
                     st["hidden"] = True; save_pos(); drop_window()
-                    API.SysMsg("%s: hidden; %s brings it back." % (
-                        TITLE, "the client's Skills button or the Action Bar's Skills button"
-                        if settings["replace"] else
+                    say("hidden; %s brings it back."
+                        % ("the client's or the Action Bar's Skills button" if settings["replace"] else
                         "the Action Bar's Skills button (or Skills off and on in the Modules tab)"), Kit.HUE_INFO)
                 else: Kit.dispose(win["g"]); return
             if st["resize_at"] and now - st["resize_at"] >= RESIZE_SETTLE and not safe(lambda: SNAP.pressed(), False):
@@ -1710,33 +1584,32 @@ def _module_skills():
                        "read_at": 0.0, "stats_at": 0.0})
             VG.update({"gumps": None, "sig": None, "full_at": 0.0}); load_settings(); load_marks(); load_locksets()
             load_stat_targets(); load_session()
-            st["minimized"] = (settings["minimized"] or bool(safe(lambda: HOST.dock_wanted(KEY), False)))
+            st["minimized"] = settings["minimized"] or HOST.dock_wanted(KEY)
             refresh_refs(True); read_skills(); read_stats(); read_groups(True)
             if skills_loaded(): set_ready()
             fitst.update({"width": None, "rows": None, "slot": None, "k": 1.0, "full": None}); _build_window()
             show_target_text(); hooks = Kit.dock_hooks(TITLE, DOCK_ICON, st, win, redraw)
             hooks.update({"on": bring_up, "fit": layout_fit, "exact": True, "verify": True, "drawn_at": drawn_at})
-            safe(lambda: HOST.dock_add(KEY, hooks))
+            HOST.dock_add(KEY, hooks)
             if settings["replace"]: vanilla_check()
         def _stop():
             st["shutting"] = True
             if st.get("grp_dirty_at"): st["grp_dirty_at"] = 0.0; safe(lambda: Kit.on_client(groups_save))
             write_files(); save_pos(); save_settings()
             if st["ready"]: save_session()
-            safe(lambda: HOST.dock_remove(KEY)); drop_window()
+            HOST.dock_remove(KEY); drop_window()
         load_settings(); load_stat_targets()
-        MODULE = {"start": _start, "tick": tick_body, "stop": _stop, "client_tick": True, "thread_tick": write_files,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+        return {"start": _start, "tick": tick_body, "stop": _stop, "client_tick": True, "thread_tick": write_files,
+                  "config_height": cfg.height, "build_config": cfg.build, "poll_config": cfg.poll,
+                  "config_closed": config_closed}
     def _part_alarm():
         KEY = "attention"; TITLE = "Training Alarm"; SETTINGS_KEY = "Attention_settings"; POS_KEY = "Attention_pos"
         MIN_KEY = "Attention_min"; W = 400; MINI_W, MINI_H = 300, 46; TRAY_ICON = 0x1C12; GUMP_EVERY = 0.25
         STAFF_EVERY = 1.0; STAFF_RANGE = 18; STAFF_RECHECK = 2.0; STAFF_GONE = 60.0; HIT_EVERY = 0.25; ASKED_SECS = 1.5
+        say = Kit.sayer(TITLE)
         TYPED_SECS = 5.0; SAME_GUMP_SECS = 60.0
         DEFAULT_MARKERS = ("GM, Counselor, Seer, Admin, Administrator, Developer, Staff, Game Master")
-        DEFAULT_IGNORE = ""; WHISPER_TYPES = ("whisper", "8")
-        QUIET_TYPES = ("regular", "0", "system", "1", "label", "6"); REPEAT_DEFAULT, REPEAT_MAX = 5, 120
+        DEFAULT_IGNORE = ""; WHISPER_TYPES = ("whisper", "8"); REPEAT_DEFAULT, REPEAT_MAX = 5, 120
         HOLD_DEFAULT, HOLD_MAX = 0, 600; REASONS_MAX = 8; QUOTE_MAX = 60; FLASH_SECS = 0.5; CACHE_CAP = 500
         OPEN_IDS_CAP = 60; QUEUE_CAP = 30; NAME_EVERY = 5.0
         KINDS = (("gump", "attention.gump", "Gump nobody asked for", 0x307),
@@ -1745,26 +1618,26 @@ def _module_skills():
                  ("whisper", "attention.whisper", "A whisper to you", 0x338),
                  ("hit", "attention.hit", "Hit while not fighting", 0x1F1),
                  ("test", "attention.test", "Training Alarm test", 0x307))
-        ALERT_KEY = dict((k, a) for k, a, _, _ in KINDS); SOUND_OF = dict((k, s) for k, _, _, s in KINDS)
+        ALERT_KEY = dict((k, a) for k, a, _, _ in KINDS)
         TRIGGERS = ("gump", "staff", "name", "words", "whisper", "hit")
         settings = {"gump": True, "staff": True, "name": True, "words": True, "whisper": True,
                     "hit": False, "markers": DEFAULT_MARKERS, "ignore": DEFAULT_IGNORE,
-                    "repeat": REPEAT_DEFAULT, "hold": HOLD_DEFAULT, "say": False, "anyalarm": True}
+                    "repeat": REPEAT_DEFAULT, "hold": HOLD_DEFAULT, "anyalarm": True}
         st = {"queue": [], "open_ids": {}, "last_gid": 0, "me": 0, "my_name": "", "name_re": None, "words_re": None,
               "seq": 0}
-        win = {"g": None, "c": {}, "store": ({}, {})}; page = {"c": None}; hooks = {"done": False}
-        mouse = {"looked": False, "get": None}
+        win = {"g": None, "c": {}, "store": ({}, {})}; page = {"skip": False}; hooks = {"done": False}
+        mouse = {"looked": False, "get": None}; cleanup = Kit.Cleanup()
         rx = {"markers": None, "text": None, "ignore": frozenset(), "ignore_text": None}
         def _clean(text): return str(text or "").replace(";", ",").replace("=", " ").strip()
         def load_settings():
             for k, v in Kit.codec_load(Kit.get_var(SETTINGS_KEY)).items():
-                if k in TRIGGERS or k in ("say", "anyalarm"): settings[k] = v == "1"
+                if k in TRIGGERS or k == "anyalarm": settings[k] = v == "1"
                 elif k in ("repeat", "hold"):
                     try: settings[k] = max(0, min(REPEAT_MAX if k == "repeat" else HOLD_MAX, int(v)))
                     except ValueError: continue
                 elif k in ("markers", "ignore"): settings[k] = v
         def save_settings():
-            parts = ["%s=%d" % (k, 1 if settings[k] else 0) for k in TRIGGERS + ("say", "anyalarm")]
+            parts = ["%s=%d" % (k, 1 if settings[k] else 0) for k in TRIGGERS + ("anyalarm",)]
             parts += ["repeat=%d" % settings["repeat"], "hold=%d" % settings["hold"],
                       "markers=%s" % _clean(settings["markers"]), "ignore=%s" % _clean(settings["ignore"])]
             Kit.put_var(SETTINGS_KEY, ";".join(parts))
@@ -1787,24 +1660,15 @@ def _module_skills():
                     except ValueError: continue
                 rx["ignore"] = frozenset(ids); rx["ignore_text"] = text
             return rx["ignore"]
-        def say(text):
-            if settings["say"]: API.SysMsg("%s: %s" % (TITLE, text), Kit.HUE_INFO)
         def sound_of(kind):
-            try:
-                if ALERTS.mute: return 0
-                on, sid = ALERTS.setting(ALERT_KEY[kind]); return int(sid) if on else 0
-            except Exception: return SOUND_OF.get(kind, 0)
-        def banner_up():
-            try: return bool(ALERTS.shown and ALERTS.alarm)
-            except Exception: return False
+            if ALERTS.mute: return 0
+            on, sid = ALERTS.setting(ALERT_KEY[kind]); return sid if on else 0
+        def banner_up(): return bool(ALERTS.shown and ALERTS.alarm)
         def is_up():
             if st["alarm"]: return True
             ra = st["resume_at"]
             if ra and 0 < ra - time.time() <= HOLD_MAX + 1: return True
-            if settings["anyalarm"]:
-                try: return bool(HOST.alarm_up())
-                except Exception: return False
-            return False
+            return bool(settings["anyalarm"] and HOST.alarm_up())
         def raise_alarm(kind, text, who=None, serial=0, gid=0, said=None):
             fresh = not st["alarm"]; again = False
             for r in st["alarm"]:
@@ -1825,11 +1689,9 @@ def _module_skills():
             if not st["alarm"]: return
             last = st["alarm"][-1]; st["alarm"] = []; hold = settings["hold"]
             st["resume_at"] = time.time() + hold if hold > 0 else 0.0
-            if how != "banner" and banner_up():
-                try:
-                    if last["text"] and str(ALERTS.line).endswith(last["text"]): ALERTS.dismiss()
-                except Exception: pass
-            API.SysMsg("%s: answered; %s" % (TITLE, ("skill loops go on in %d s." % hold) if hold
+            if how != "banner" and banner_up() and last["text"] and str(ALERTS.line).endswith(last["text"]):
+                ALERTS.dismiss()
+            say("answered; %s" % (("skill loops go on in %d s." % hold) if hold
                                              else "skill loops go on."), Kit.HUE_GOOD)
             st["last_answered"] = last; draw()
         def alarm_tick(now):
@@ -1845,9 +1707,7 @@ def _module_skills():
                 st["flash_at"] = now + FLASH_SECS; st["flash_on"] = not st["flash_on"]; draw()
         def read_me(now, p):
             if st["my_name"] and 0 <= now - st["name_at"] < NAME_EVERY: return
-            st["name_at"] = now
-            try: name = str(p.Name or "").strip(); st["me"] = int(p.Serial)
-            except Exception: return
+            st["name_at"] = now; name = str(p.Name or "").strip(); st["me"] = int(p.Serial)
             if name and name != st["my_name"]:
                 st["my_name"] = name
                 st["name_re"] = re.compile(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(name), re.IGNORECASE)
@@ -1866,10 +1726,10 @@ def _module_skills():
             except Exception: return True
         def mouse_readers():
             if not mouse["looked"]:
-                mouse["looked"] = True; got = []; t = safe(lambda: Client._type("ClassicUO.Input.Mouse"))
+                mouse["looked"] = True; got = []; t = Client._type("ClassicUO.Input.Mouse")
                 if t is not None:
                     for name in ("Position", "LastLeftButtonClickTime", "LastRightButtonClickTime"):
-                        m = safe(lambda: Client._member(t, name))
+                        m = Client._member(t, name)
                         if m is not None: got.append((m[0], name == "Position"))
                 mouse["get"] = got or None
             return mouse["get"]
@@ -1877,39 +1737,23 @@ def _module_skills():
             gs = mouse_readers()
             if not gs: return None
             cur = []
-            for fn, point in gs:
-                try:
-                    v = fn()
-                    if point:
-                        try: v = (int(v.X), int(v.Y))
-                        except Exception: v = int(v)
-                    else: v = int(v)
-                except Exception: v = None
-                cur.append(v)
+            for fn, point in gs: v = fn(); cur.append((int(v.X), int(v.Y)) if point else int(v))
             cur = tuple(cur); prev, st["input"] = st["input"], cur
             if prev is not None and cur != prev: st["asked_at"] = now
             return True
         def typing_tick(now):
-            try: t = bool(HOST.typing())
-            except Exception: return
-            prev, st["typing"] = st["typing"], t
+            t = bool(HOST.typing()); prev, st["typing"] = st["typing"], t
             if prev is not None and t != prev: st["typed_at"] = st["asked_at"] = now
         def gump_tick(now):
             typing_tick(now)
             if input_tick(now) is None:
-                try: up = bool(API.HasTarget("any"))
-                except Exception: up = False
+                up = bool(API.HasTarget("any"))
                 if st["cursor_up"] and not up: st["asked_at"] = now
                 st["cursor_up"] = up
                 if 0 <= now - st["used_at"] <= ASKED_SECS: st["asked_at"] = max(st["asked_at"], st["used_at"])
-            try: gid = int(API.HasGump() or 0)
-            except Exception: gid = 0
-            prev = st["gump_obj"]
+            gid = int(API.HasGump() or 0); prev = st["gump_obj"]
             if gid and prev is not None and gid == st["gump_gid"] and not gone(prev): st["open_ids"][gid] = now; return
-            g = None
-            if gid:
-                try: g = real_gump(API.GetGump(gid))
-                except Exception: g = None
+            g = real_gump(API.GetGump(gid)) if gid else None
             if g is prev or (g is not None and prev is not None and gid == st["gump_gid"] and not gone(prev)):
                 st["gump_obj"] = g
                 if gid: st["open_ids"][gid] = now
@@ -1917,26 +1761,19 @@ def _module_skills():
             if prev is not None and st["gump_vis"] and gone(prev): st["asked_at"] = now
             st["gump_obj"], st["gump_gid"] = g, gid
             if g is None: st["gump_vis"] = False; return
-            visible = bool(safe(lambda: g.IsVisible, True)); st["gump_vis"] = visible; st["last_gid"] = gid
+            visible = bool(g.IsVisible); st["gump_vis"] = visible; st["last_gid"] = gid
             opened = st["open_ids"]; seen_at = opened.get(gid); opened[gid] = now
             if len(opened) > OPEN_IDS_CAP:
                 for k in sorted(opened, key=opened.get)[:len(opened) - OPEN_IDS_CAP]: del opened[k]
-            if not st["primed"]: return
-            why = None
-            if not visible: why = "opened hidden (a module reading it)"
-            elif gid in ignored_ids(): why = "on the ignore list"
-            elif seen_at is not None and 0 <= now - seen_at <= SAME_GUMP_SECS: why = "a page of a window you had open"
-            elif 0 <= now - st["asked_at"] <= ASKED_SECS: why = "asked for %.1f s before" % (now - st["asked_at"])
-            if why is not None: say("gump 0x%X: %s." % (gid, why)); return
-            say("gump 0x%X: nobody asked for it." % gid)
+            if not st["primed"] or not visible or gid in ignored_ids(): return
+            if seen_at is not None and 0 <= now - seen_at <= SAME_GUMP_SECS: return
+            if 0 <= now - st["asked_at"] <= ASKED_SECS: return
             if settings["gump"]:
                 raise_alarm("gump", "A gump opened by itself (id 0x%X)" % gid, "gump 0x%X" % gid, gid=gid)
         def staff_tick(now):
             pat = marker_re()
             if pat is None: return
-            try: mobs = HOST.mobiles(STAFF_RANGE)
-            except Exception: return
-            checked, seen, me = st["checked"], st["staff_seen"], st["me"]
+            mobs = HOST.mobiles(STAFF_RANGE); checked, seen, me = st["checked"], st["staff_seen"], st["me"]
             if len(checked) > CACHE_CAP or pat is not st["checked_pat"]: checked.clear(); st["checked_pat"] = pat
             for m in mobs:
                 try: s = int(m.Serial)
@@ -1955,7 +1792,6 @@ def _module_skills():
                 if not hit[0]: continue
                 last = seen.get(s); seen[s] = now
                 if last is None or not 0 <= now - last <= STAFF_GONE:
-                    say("staff in view: %s." % hit[3])
                     raise_alarm("staff", "Staff in view: %s" % (hit[3] or "someone"), "staff %X" % s, serial=s)
             if len(seen) > 50:
                 for k in [k for k, t in seen.items() if not 0 <= now - t <= STAFF_GONE]: del seen[k]
@@ -1984,7 +1820,6 @@ def _module_skills():
                     continue
                 if not settings["name"] or nre is None: continue
                 if nre.search(text) or (wre is not None and wre.search(text)):
-                    say("%s said your name." % name)
                     raise_alarm("name", '%s said your name: "%s"' % (name, quote(text)), name,
                                 serial=speaker_serial(name), said=text)
         def heard_tick():
@@ -1993,7 +1828,6 @@ def _module_skills():
             st["heard"] = []; my_low = st["my_name"].lower()
             for text, name, mt in q:
                 if not name or name.lower() == "system" or (my_low and name.lower() == my_low): continue
-                if mt not in QUIET_TYPES: say("a %s line from %s." % (mt, name))
                 if mt in WHISPER_TYPES and settings["whisper"]:
                     raise_alarm("whisper", '%s whispers to you: "%s"' % (name, quote(text)), name,
                                 serial=speaker_serial(name), said=text)
@@ -2009,26 +1843,19 @@ def _module_skills():
                         m = str(mt).lower()
                         if len(MT_LOW) < 64: MT_LOW[mt] = m
                 except Exception: continue
-                if m in WHISPER_TYPES or (settings["say"] and m not in QUIET_TYPES):
+                if m in WHISPER_TYPES:
                     try: text = str(a.Text or ""); name = str(a.Name or "")
                     except Exception: continue
                     q = st["heard"]
                     if len(q) < QUEUE_CAP: q.append((text, name, m))
                 return
-        def hook_events():
-            if hooks["done"]: return
-            hooks["done"] = True; ev = safe(lambda: API.Events)
-            if ev is None: return
-            safe(lambda: ev.ObjectUsed(on_used)); safe(lambda: ev.JournalEntryAdded(on_entry))
+        def hook_events(): Kit.hook_once(hooks, "done", ("ObjectUsed", on_used), ("JournalEntryAdded", on_entry))
         def hit_tick(p):
             if not settings["hit"]: st["hp"] = None; return
-            try: hp = int(p.Hits); dead = bool(p.IsDead); war = bool(p.InWarMode)
-            except Exception: return
-            prev = st["hp"]; st["hp"] = hp
-            if prev is None or dead or war or hp >= prev: return
+            hp = int(p.Hits); prev = st["hp"]; st["hp"] = hp
+            if prev is None or p.IsDead or p.InWarMode or hp >= prev: return
             raise_alarm("hit", "You took %d damage while not fighting" % (prev - hp), "hit")
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
-        def save_pos(): Kit.save_pos(POS_KEY, win["g"])
+        queue = Kit.queuer(st)
         def on_alarm_click():
             if Follow.alt_held():
                 r = st["alarm"][-1] if st["alarm"] else st.get("last_answered")
@@ -2040,45 +1867,37 @@ def _module_skills():
                 if 0 <= now - st.get("mini_click", 0.0) <= 0.6: st["mini_click"] = 0.0; queue("toggle_min")()
                 else: st["mini_click"] = now
         def build_window():
-            w, h = (MINI_W, MINI_H) if st["minimized"] else (W, Kit.MARGIN + 30 + Kit.GAP + 96 + Kit.MARGIN)
-            x, y = Kit.load_pos(POS_KEY, (240, 160), (w, h))
-            if Kit.is_open(win["g"]): x, y = win["g"].GetX(), win["g"].GetY()
-            old, win["g"] = win["g"], None; M = Kit.MARGIN; store = ({}, {}); c = {}; g = G.CreateGump(True, True)
-            tip = ("Click: answer the alarm (skill loops go on). Alt+click: auto-follow (again to stop)")
+            g, store, c = wnd.begin(W, Kit.MARGIN + 30 + Kit.GAP + 96 + Kit.MARGIN); M = Kit.MARGIN
             if st["minimized"]:
-                c["line"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min")); c["line_w"] = w - 90
-                c["alarm_hit"] = Kit.catcher(g, 14, 12, w - 90, h - 24, on_alarm_click,
-                                             "Click: answer the alarm (skill loops go on). "
-                                             "Double-click: restore. Alt+click: auto-follow "
+                c["line_w"] = MINI_W - 90
+                c["alarm_hit"] = Kit.catcher(g, 14, 12, MINI_W - 90, MINI_H - 24, on_alarm_click,
+                                             "Click: answer the alarm. Double-click: restore. Alt+click: auto-follow "
                                              "(again to stop)", movable=True)
             else:
-                IW = w - 2 * M; Kit.add_window_frame(g, w, h)
-                Kit.title_bar(g, store, w, TITLE, KEY, queue("toggle_min"), queue("to_bar"), queue("settings"))
-                yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 96)
-                c["line"] = Kit.add_label(g, "", M + 12, yb + 10, Kit.HUE_INFO)
+                IW = W - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 96)
+                c["status"] = Kit.add_label(g, "", M + 12, yb + 10, Kit.HUE_INFO)
                 c["line2"] = Kit.add_label(g, "", M + 12, yb + 32, Kit.HUE_INFO); c["line_w"] = IW - 28
-                c["alarm_hit"] = Kit.catcher(g, M + 6, yb + 6, IW - 12, 46, on_alarm_click, tip, movable=True)
+                c["alarm_hit"] = Kit.catcher(g, M + 6, yb + 6, IW - 12, 46, on_alarm_click,
+                                             "Click: answer the alarm. Alt+click: auto-follow (again to stop)",
+                                             movable=True)
                 xb = M + 12
                 for key, art, cap, tip, act in (
-                        ("here", Kit.ART_OK, "I'm here", "Answer the alarm: skill loops go on (after the pause set on "
-                         "the settings page)", "answer"),
-                        ("test", Kit.ART_PLAY, "Test", "Raise a test alarm: the banner, the sound and paused skill "
-                         "loops, until you answer", "test"),
-                        ("ignore", Kit.ART_CLOSE, "Ignore this gump", "Answer, and put the gump that raised this alarm "
-                         "on the ignore list (it never raises the alarm again)", "ignore_gump")):
+                        ("here", Kit.ART_OK, "I'm here", "Answer the alarm: skill loops go on (after the set pause)",
+                         "answer"), ("test", Kit.ART_PLAY, "Test", "Raise a test alarm until you answer", "test"),
+                        ("ignore", Kit.ART_CLOSE, "Ignore this gump", "Answer and ignore this gump from now on",
+                         "ignore_gump")):
                     b = Kit.art_button(g, store, key, art, xb, yb + 62, cap, tip, on_click=queue(act))
                     xb += 35 + Kit.text_w(cap) + 14
                 c["ignore"] = b
-            Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], on_disposed(g), save_pos, win,
-                            {"g": g, "c": c, "store": store})
-            st["drawn"] = None; draw(); Kit.dispose(old)
+            wnd.end(g); st["drawn"] = None; draw()
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (240, 160), (MINI_W, MINI_H), TRAY_ICON,
+                         cleanup, lock=False)
         def watching_text():
             on = [w for k, w in (("gump", "gumps"), ("staff", "staff"), ("name", "your name"), ("whisper", "whispers"),
                                  ("hit", "hits")) if settings[k]]
             if st["minimized"]:
-                return "%s: %s" % (TITLE, ("watching " + ", ".join(on)) if on
-                                   else "nothing ticked on the settings page")
-            return ("Watching: " + ", ".join(on)) if on else "Nothing ticked on the settings page"
+                return "%s: %s" % (TITLE, ("watching " + ", ".join(on)) if on else "nothing ticked in settings")
+            return ("Watching: " + ", ".join(on)) if on else "Nothing ticked in settings"
         def draw():
             g = win["g"]
             if g is None or (st["minimized"] and st["docked"]): return
@@ -2094,83 +1913,67 @@ def _module_skills():
                 line2 = ("Skill loops go on in %d s" % int(left + 0.99)) if 0 < left <= HOLD_MAX + 1 else "All quiet"
             key = (line, hue, line2, lw)
             if key == st["drawn"]: return
-            st["drawn"] = key; line = Kit.fit(line, lw); Kit.set_text(c["line"], line, hue)
+            st["drawn"] = key; line = Kit.fit(line, lw); Kit.set_text(c["status"], line, hue)
             if "line2" in c: Kit.set_text(c["line2"], Kit.fit(line2, lw), Kit.HUE_INFO)
             ig = c.get("ignore")
             if ig is not None:
                 want = bool(al) and al[-1]["kind"] == "gump"
                 if c.get("ignore_on") != want:
-                    c["ignore_on"] = want; safe(lambda: setattr(ig, "IsVisible", want))
-                    b = win["store"][0].get("ignore")
-                    if b is not None: safe(lambda: setattr(b, "IsVisible", want))
+                    c["ignore_on"] = want; ig.IsVisible = want; b = win["store"][0].get("ignore")
+                    if b is not None: b.IsVisible = want
         def ignore_gump(from_alarm):
             gid = 0
             if from_alarm:
                 for r in reversed(st["alarm"]):
                     if r["kind"] == "gump" and r["gid"]: gid = r["gid"]; break
             if not gid: gid = st["last_gid"]
-            if not gid: API.SysMsg("%s: no server gump seen yet." % TITLE, Kit.HUE_INFO); return
+            if not gid: say("no server gump seen yet.", Kit.HUE_INFO); return
             if gid not in ignored_ids():
                 cur = settings["ignore"].strip().strip(",")
                 settings["ignore"] = (cur + ", " if cur else "") + "0x%X" % gid; save_settings()
-                HOST.refresh_settings(KEY)
-                API.SysMsg("%s: gump 0x%X is on the ignore list now." % (TITLE, gid), Kit.HUE_INFO)
-        def page_table():
+                HOST.refresh_settings(KEY); say("gump 0x%X ignored." % gid, Kit.HUE_INFO)
+        def ignore_and_answer(action): ignore_gump(True); answer("click")
+        ACTS = {"follow": lambda action: Follow.toggle(action[1], TITLE), "answer": lambda action: answer("click"),
+                "test": lambda action: raise_alarm("test", "Test alarm: answer it to go on", "test"),
+                "ignore_gump": ignore_and_answer, "ignore_last": lambda action: ignore_gump(False)}
+        def page_table(w):
             fields = {"top": 32, "ldy": 4, "fh": 30, "align": True, "sh": 126}
-            return (("TRIGGERS  (each pauses skill loops too)", (
-                        ("check", "gump", "A server gump opens that nobody asked for",
-                         "Not within %.1f s of your mouse, your typing or a gump of yours closing; "
-                         "not a page of an open window or an ignored id" % ASKED_SECS),
-                        ("check", "staff", "Staff come into view (a staff word in the name or title)",
-                         "A mobile within %d tiles whose name or title holds a staff word (the list below)"
-                         % STAFF_RANGE), ("check", "name", "Someone else says your character's name",
-                         "Your name is read from the game (whole words, any case)"),
+            return (("TRIGGERS  (each pauses skill loops too)", (("check", "gump", "A server gump nobody asked for",
+                         "Not within %.1f s of your mouse, typing or a gump closing; not a page of an open window "
+                         "or an ignored id" % ASKED_SECS),
+                        ("check", "staff", "Staff in view (a staff word in name or title)",
+                         "Within %d tiles, a name or title holding a staff word (list below)" % STAFF_RANGE),
+                        ("check", "name", "Someone says your name", "Read from the game (whole words, any case)"),
                         ("check", "words", "Or any word of it with 4 letters or more",
                          "For a name of two words or more: \"Wolf\" in \"Grey Wolf\"", {"dx": 34}),
-                        ("check", "whisper", "Someone whispers to you",
-                         "Lines the client marks as whispered (the DEBUG box below prints the kinds the shard sends)"),
+                        ("check", "whisper", "Someone whispers to you", "Lines the client marks as whispered"),
                         ("check", "hit", "You take damage while not in war mode",
-                         "Training, not fighting: someone or something is hurting you (off at first)")),
+                         "Something hurts you while you train (off at first)")),
                      {"top": 32, "sh": 194}), ("STAFF AND GUMPS", (
-                        ("text", "markers", "Staff words:", "Words that mark a staff member's name or title, commas "
-                         "between them (whole words, any case). Empty: no staff check."),
-                        ("text", "ignore", "Gump ids to ignore:",
-                         "Server gump ids that never raise the alarm: hex (0x1A2B) or decimal, commas between them"),
-                        ("buttons", (("ignore_last", Kit.ART_OK, "Ignore last gump",
-                                      "Put the last server gump seen on the ignore list", queue("ignore_last")),),
-                         {"bdy": 0, "stay": True}), ("note", last_gump_text(),
+                        ("text", "markers", "Staff words:", "Words marking a staff name or title, commas between "
+                         "(whole words, any case; empty: no check)"), ("text", "ignore", "Gump ids to ignore:",
+                         "Gump ids that never raise the alarm: hex (0x1A2B) or decimal, commas between"),
+                        ("buttons", (("ignore_last", Kit.ART_OK, "Ignore last gump", "Ignore the last server gump seen",
+                                      queue("ignore_last")),), {"bdy": 0, "stay": True}), ("note", last_gump_text(),
                          {"dx": 12 + 35 + Kit.text_w("Ignore last gump") + 14, "ndy": 3, "key": "last"})), fields),
                     ("ALARM  (sound: Settings > Alerts)", (("num", "repeat", "Repeat the sound every:",
-                         "Seconds between alarm sounds until you answer (0-%d, 0 = only once)" % REPEAT_MAX, "s", 0,
-                         REPEAT_MAX), ("num", "hold", "Loops stay paused after you answer:",
-                         "Seconds skill loops stay paused after you answer (0-%d, 0 = they go on at once)" % HOLD_MAX,
-                         "s", 0, HOLD_MAX),
-                        ("check", "anyalarm", "Any alarm pauses skill loops", "Skill loops pause while any module's "
-                         "alarm banner waits for a click (an Ultima Tracker > Lookout alarm, a red in your house)")),
-                     dict(fields, fw=40, ugap=12)), ("DEBUG  (for checking the shard's texts)", (
-                        ("check", "say", "Print every gump, staff match and odd line in the journal",
-                         "Why each server gump did or didn't raise the alarm, each staff match and the kind of every "
-                         "unusual line (whispers)"),), {"top": 32, "sh": 66}))
-        def config_height(w): return Kit.Form.height(page_table(), w)
-        def build_config(g, x, y, w):
-            f = Kit.Form(g, x, y, w, settings, page_table())
-            page.update({"f": f, "c": f.c, "last_shown": st["last_gid"]})
+                         "Seconds between sounds until you answer (0-%d, 0 = once)" % REPEAT_MAX, "s", 0, REPEAT_MAX),
+                        ("num", "hold", "Loops stay paused after you answer:",
+                         "Seconds loops stay paused after you answer (0-%d, 0 = none)" % HOLD_MAX, "s", 0, HOLD_MAX),
+                        ("check", "anyalarm", "Any alarm pauses skill loops", "While any module's alarm banner waits "
+                         "for a click (Ultima Tracker > Lookout, a red in your house)")), dict(fields, fw=40, ugap=12)))
         def last_gump_text():
             return ("Last server gump: 0x%X" % st["last_gid"]) if st["last_gid"] else "No server gump seen yet"
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            if "ignore_last" in st["queue"]: st["queue"].remove("ignore_last"); ignore_gump(False); return
-            new = page["f"].read()
+        def page_clicks(f):
+            page["skip"] = "ignore_last" in st["queue"]
+            if page["skip"]: st["queue"].remove("ignore_last"); ignore_gump(False)
+        def page_adjust(f, new):
+            if page["skip"]: new.update(settings); return
             for k in ("markers", "ignore"):
-                new[k] = settings[k]
-                try: v = _clean(c[k].Text)
-                except Exception: continue
-                if v != _clean(settings[k]): new[k] = v
-            if page.get("last_shown") != st["last_gid"]:
-                page["last_shown"] = st["last_gid"]; Kit.set_text(c["last"], last_gump_text(), Kit.HUE_INFO)
-            if new != settings: settings.update(new); save_settings(); st["drawn"] = None
-        def config_closed(): page["c"] = None
+                v = _clean(new[k]); new[k] = v if v != _clean(settings[k]) else settings[k]
+            Kit.set_text(f.c["last"], last_gump_text(), Kit.HUE_INFO)
+        def page_changed(old, new): st["drawn"] = None
+        cfg = Kit.Page(settings, page_table, save_settings, page_changed, adjust=page_adjust, clicks=page_clicks)
         def _start():
             st.update({"shutting": False, "docked": False, "active": True, "alarm": [],
                        "queue": [a for a in st["queue"] if a == "ignore_last"],
@@ -2181,23 +1984,19 @@ def _module_skills():
                        "next_hit": 0.0, "hp": None, "heard": [], "next_sound": 0.0,
                        "banner_seen": False, "flash_at": 0.0, "flash_on": False, "drawn": None,
                        "last_answered": None, "rd": Journal.reader(), "checked_pat": None,
-                       "minimized": Kit.load_min(MIN_KEY) or bool(safe(lambda: HOST.dock_wanted(KEY), False))})
+                       "minimized": wnd.start_min()})
             load_settings(); hook_events()
             for k, akey, label, snd in KINDS: HOST.alert_kind(akey, label, snd)
-            HOST.services["attention.up"] = is_up; build_window()
-            HOST.dock_add(KEY, Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw"), scale=True))
+            cleanup.service("attention.up", is_up); build_window(); wnd.dock(scale=True)
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time()
             while st["queue"]:
-                action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-                if Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY): continue
-                if kind == "follow": Follow.toggle(action[1], TITLE)
-                elif action == "answer": answer("click")
-                elif action == "test": raise_alarm("test", "Test alarm: answer it to go on", "test")
-                elif action == "ignore_gump": ignore_gump(True); answer("click")
-                elif action == "ignore_last": ignore_gump(False)
+                action = st["queue"].pop(0)
+                if wnd.action(action): continue
+                fn = ACTS.get(action[0] if isinstance(action, tuple) else action)
+                if fn is not None: fn(action)
             p = HOST.me()
             if p is None: return
             read_me(now, p)
@@ -2212,20 +2011,16 @@ def _module_skills():
                 if not is_up(): st["resume_at"] = 0.0
                 draw()
         def _stop():
-            st["shutting"] = True; st["active"] = False
-            if HOST.services.get("attention.up") is is_up: HOST.services.pop("attention.up", None)
-            st["alarm"] = []; st["resume_at"] = 0.0; HOST.dock_remove(KEY); save_pos()
-            Kit.save_min(MIN_KEY, st["minimized"]); save_settings(); st["rd"] = None; st["gump_obj"] = None
-            g, win["g"] = win["g"], None; Kit.dispose(g)
+            st["shutting"] = True; st["active"] = False; st["alarm"] = []; st["resume_at"] = 0.0; save_settings()
+            st["rd"] = None; st["gump_obj"] = None; cleanup.close()
         load_settings()
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                  "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
     def _part_bags():
         KEY = "skillbags"; TITLE = "Skill Bags"; SETTINGS_KEY = "SkillBags_settings"; RULES_KEY = "SkillBags_rules"
         DONE_KEY = "SkillBags_done"; POS_KEY = "SkillBags_pos"; MIN_KEY = "SkillBags_min"; W = 740
         MINI_W, MINI_H = 240, 46; TRAY_ICON = 0x0E76; ROW_H = 42; MAX_RULES = 8; MAX_DONE = 300; NAME_SCANS_MAX = 6
+        say = Kit.sayer(TITLE)
         RELIST_EVERY = 5.0; BAG_NAME_EVERY = 2.0; TARGET_TIMEOUT = 3.0; OPEN_TIMEOUT = 2.5; OPEN_RETRY = 6.0
         BUSY_RETRY = 1.5; MAX_BUSY = 4; SKILL_TIMER = 10.0
         SKILL_TIMER_SHORT = {"item identification": 3.0, "arms lore": 3.0, "detect hidden": 3.0}
@@ -2273,9 +2068,9 @@ def _module_skills():
         FILTERS = [("all", "Every item"), ("containers", "Containers only"),
                    ("graphics", "Graphics in Text (hex)"), ("name", "Name contains Text")]
         FILTER_NAMES = [f[1] for f in FILTERS]; CODE_TEXT = {1: "OK", 2: "failed", 3: "skipped", 4: "done"}
-        settings = {"hidden": True, "war": True, "open": True, "retries": DEFAULT_RETRIES, "say": False, "guard": True}
-        rules = []; st = {}; win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
-        page = {"c": None, "rows": [], "next_read": 0.0}
+        settings = {"hidden": True, "war": True, "open": True, "retries": DEFAULT_RETRIES, "guard": True}
+        rules = []; st = {}; win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; cleanup = Kit.Cleanup()
+        page = {"f": None, "rows": [], "next_read": 0.0}
         resw = {"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False}
         def esc(s): return str(s or "").replace("|", "/").replace("~", "-")
         def clamp_delay(v, default):
@@ -2289,12 +2084,8 @@ def _module_skills():
         def rule_action(r): return ACTIONS[r["action"]]
         def skill_floor(r):
             a = ACTIONS[r["action"]]
-            if a[2] == "skill": name = a[3]
-            elif a[2] == "cskill":
-                name = r["custom"].strip()
-                if not name: return 0.0
-            else: return 0.0
-            return SKILL_TIMER_SHORT.get(name.lower(), SKILL_TIMER)
+            name = a[3] if a[2] == "skill" else r["custom"].strip() if a[2] == "cskill" else ""
+            return SKILL_TIMER_SHORT.get(name.lower(), SKILL_TIMER) if name else 0.0
         def parse_graphics(text):
             out = []
             for part in str(text or "").replace(";", ",").split(","):
@@ -2311,7 +2102,6 @@ def _module_skills():
                 for n, k in enumerate(("hidden", "war", "open")): settings[k] = p[n] == "1"
                 try: settings["retries"] = max(0, min(9, int(p[3])))
                 except Exception: settings["retries"] = DEFAULT_RETRIES
-            if len(p) >= 5: settings["say"] = p[4] == "1"
             settings["guard"] = (p[5] == "1") if len(p) >= 6 else True; del rules[:]; raw = Kit.get_var(RULES_KEY)
             if raw:
                 for chunk in raw.split("|"):
@@ -2339,8 +2129,7 @@ def _module_skills():
                         r["done"][s] = c; r["order"].append(s)
         def save_settings():
             Kit.put_var(SETTINGS_KEY, "|".join(["1" if settings["hidden"] else "0", "1" if settings["war"] else "0",
-                "1" if settings["open"] else "0", str(settings["retries"]), "1" if settings["say"] else "0",
-                "1" if settings["guard"] else "0"]))
+                "1" if settings["open"] else "0", str(settings["retries"]), "0", "1" if settings["guard"] else "0"]))
             Kit.put_var(RULES_KEY, "|".join("~".join([str(r["action"]), str(r["bag"]), str(r["filt"]), esc(r["text"]),
                           esc(r["custom"]), "%.2f" % r["delay"], "1" if r["deep"] else "0",
                           "1" if r["auto"] else "0"]) for r in rules))
@@ -2393,18 +2182,16 @@ def _module_skills():
         def clear_results(r):
             r.pop("_res", None); r.pop("_rescount", None)
             if resw["rule"] is r: resw["dirty"] = True
-        def _by_count(kv): return (-kv[1], kv[0])
         def counts_text(r):
             txt = r.get("_rescount")
             if txt is None:
                 res = r.get("_res") or []
-                if not res: txt = "No results yet: each item's answer shows here once the rule handles it."
+                if not res: txt = "No results yet."
                 else:
                     cnt = {}
                     for e in res: cnt[e[4]] = cnt.get(e[4], 0) + 1
-                    txt = "%d item%s: %s" % (len(res), "" if len(res) == 1 else "s",
-                                             ", ".join(["%d %s" % (n, t) for t, n in
-                                                        sorted(cnt.items(), key=_by_count)]))
+                    txt = "%s: %s" % (Kit.count(len(res), "item"), ", ".join(["%d %s" % (n, t) for t, n in
+                                                        sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))]))
                 r["_rescount"] = txt
             return txt
         get_item = Kit.find_item
@@ -2482,8 +2269,7 @@ def _module_skills():
                 if n >= NAME_SCANS_MAX:
                     scans.pop(serial, None); gave_up.append((serial, it)); cache["items"].append((serial, it))
                     mark_done(r, serial, 3); add_result(r, serial, 3, "", "its name never came", "skipped (no name)")
-                    API.SysMsg("%s: 0x%08X skipped, its name never came (rule %d)." %
-                               (TITLE, serial, i + 1), Kit.HUE_INFO)
+                    say("0x%08X skipped, its name never came (rule %d)." % (serial, i + 1), Kit.HUE_INFO)
             if gave_up:
                 gone = set(s for s, _ in gave_up); cache["pending"] = [p for p in cache["pending"] if p[0] not in gone]
             if len(scans) > MAX_DONE: scans.clear()
@@ -2509,9 +2295,7 @@ def _module_skills():
             if p is None: return "No player"
             why = HOST.fight_hold(now)
             if why == "dead": return "Dead"
-            try:
-                if settings["hidden"] and p.IsHidden: return "Hidden"
-            except Exception: pass
+            if settings["hidden"] and p.IsHidden: return "Hidden"
             if why == "war": return "War mode"
             gp = st["guard_paused"]
             if gp == "unknown": return UNKNOWN_STATUS
@@ -2539,13 +2323,13 @@ def _module_skills():
                     return i, r, serial, it
                 if i in st["run"] and not unknown and not waiting and did is not None:
                     st["run"].discard(i)
-                    API.SysMsg("%s: %s on %s, %d of %d handled." % (
-                        TITLE, rule_action(r)[1], bag_name(r), r["_count"][0], r["_count"][1]), Kit.HUE_GOOD)
+                    say("%s on %s, %d of %d handled." % (
+                        rule_action(r)[1], bag_name(r), r["_count"][0], r["_count"][1]), Kit.HUE_GOOD)
             return None
         def auto_off(i, r):
             st["run"].discard(i); r["auto"] = False; save_settings()
-            if i < len(win["rows"]): safe(lambda: setattr(win["rows"][i]["auto"], "IsChecked", False))
-            if page["c"] is not None: HOST.refresh_settings(KEY)
+            if i < len(win["rows"]): win["rows"][i]["auto"].IsChecked = False
+            if page["f"] is not None: HOST.refresh_settings(KEY)
         def start_job(i, r, serial, it, now):
             a = rule_action(r); kind = a[2]
             j = {"rule": i, "serial": serial, "t": now, "phase": "target", "reader": None, "lines": [], "raw": [],
@@ -2553,8 +2337,7 @@ def _module_skills():
             if kind in ("skill", "cskill"):
                 name = a[3] if kind == "skill" else r["custom"].strip()
                 if not name:
-                    API.SysMsg("%s: rule %d needs a skill name in its Custom box on the settings "
-                               "page." % (TITLE, i + 1), Kit.HUE_BAD)
+                    say("rule %d needs a skill name in its Custom box." % (i + 1), Kit.HUE_BAD)
                     auto_off(i, r); return False
                 HOST.claim_cursor(KEY, TARGET_TIMEOUT + 0.5); j["reader"] = Journal.reader(); API.UseSkill(name)
             elif kind in ("tool", "ctool"):
@@ -2562,16 +2345,13 @@ def _module_skills():
                 if kind == "ctool":
                     gl = parse_graphics(r["custom"]); graphic = gl[0] if gl else 0
                     if not graphic:
-                        API.SysMsg("%s: rule %d needs a tool graphic in its Custom box on the "
-                                   "settings page." % (TITLE, i + 1), Kit.HUE_BAD)
+                        say("rule %d needs a tool graphic in its Custom box." % (i + 1), Kit.HUE_BAD)
                         auto_off(i, r); return False
-                try: tool = API.FindType(int(graphic), API.Backpack)
-                except Exception: tool = None
+                tool = API.FindType(int(graphic), API.Backpack)
                 if not tool:
                     if st["no_tool"].get(i, 0.0) < now:
                         st["no_tool"][i] = now + 10.0
-                        API.SysMsg("%s: no tool 0x%04X in your backpack for rule %d." %
-                                   (TITLE, int(graphic), i + 1), Kit.HUE_BAD)
+                        say("no tool 0x%04X in your backpack for rule %d." % (int(graphic), i + 1), Kit.HUE_BAD)
                     st["later"][(i, serial)] = now + 10.0; st["run"].discard(i); return False
                 HOST.claim_cursor(KEY, TARGET_TIMEOUT + 0.5); j["reader"] = Journal.reader(); API.UseObject(tool.Serial)
             else: j["reader"] = Journal.reader(); API.UseObject(serial); j["phase"] = "recover"
@@ -2581,12 +2361,10 @@ def _module_skills():
             t = va_pref["t"]
             if t is None:
                 out = set([APP_NAME.lower() + ":"])
-                try:
-                    for sl in HOST.slots:
-                        out.add(str(sl.title).lower() + ":")
-                        for pt in (sl.parts or ()):
-                            if len(pt) > 1: out.add(str(pt[1]).lower() + ":")
-                except Exception: pass
+                for sl in HOST.slots:
+                    out.add(str(sl.title).lower() + ":")
+                    for pt in (sl.parts or ()):
+                        if len(pt) > 1: out.add(str(pt[1]).lower() + ":")
                 t = va_pref["t"] = tuple(out)
             return t
         def is_answer(j, ln):
@@ -2605,9 +2383,6 @@ def _module_skills():
             lines, raw = j["lines"], j["raw"]; came = False
             for ln in rd.new():
                 if ln.text and not ln.text.startswith(TITLE):
-                    if settings["say"]:
-                        API.SysMsg("%s: reply: %s (from %s, %s)" % (TITLE, ln.text, ln.name or "nobody",
-                                                                  ln.kind or "?"), Kit.HUE_INFO)
                     if not is_answer(j, ln): continue
                     lines.append(ln.low); came = True; raw.append((ln.text, ln.name or ""))
                     if len(lines) > 40: del lines[:-40]; del raw[:-40]
@@ -2631,8 +2406,7 @@ def _module_skills():
                 if n >= MAX_BUSY:
                     st["busy_n"].pop(key, None); mark_done(r, serial, 2)
                     add_result(r, serial, 2, j["name"], answer_of(j) or "no answer from the shard", "no answer")
-                    API.SysMsg("%s: giving up on 0x%08X (no answer from %s)." %
-                               (TITLE, serial, rule_action(r)[1]), Kit.HUE_BAD)
+                    say("giving up on 0x%08X (no answer from %s)." % (serial, rule_action(r)[1]), Kit.HUE_BAD)
                 else: st["busy_n"][key] = n; st["later"][key] = now + BUSY_RETRY
             elif res == "fail":
                 st["busy_n"].pop(key, None); tries = r.setdefault("_tries", {}); n = tries.get(serial, 0) + 1
@@ -2674,14 +2448,11 @@ def _module_skills():
             finish_job(j, r, job_result(j, a), now)
         def guard_check():
             active = not st["paused"] and (bool(st["run"]) or any(r["auto"] and r["bag"] for r in rules)); hold = None
-            if active and (settings["guard"] or "attention.up" not in HOST.services):
-                try: hold = HOST.guard_hold()
-                except Exception: hold = None
+            if active and (settings["guard"] or "attention.up" not in HOST.services): hold = HOST.guard_hold()
             if hold != st["guard_paused"]:
                 st["guard_paused"] = hold
                 if active:
-                    if hold == "guard":
-                        msg = ("%s: paused in a guard zone (no skill use in towns); it goes on when you leave." % TITLE)
+                    if hold == "guard": msg = "%s: paused in a guard zone; it goes on when you leave." % TITLE
                     elif hold == "unknown":
                         msg = ("%s: paused until the guard zone is known; cross a town's guard line once." % TITLE)
                     else: msg = "%s: out of the guard zone; going on." % TITLE
@@ -2706,44 +2477,35 @@ def _module_skills():
                 st["status"] = "%s %d/%d" % (rule_action(r)[1], r["_count"][0] + 1, r["_count"][1])
             else: st["next_scan"] = now + SCAN_EVERY
         def pick_bag(i):
-            if st["pick"] is not None: API.SysMsg("%s: already targeting a bag." % TITLE, Kit.HUE_INFO); return
-            st["pick"] = i; API.SysMsg("%s: target the bag for rule %d." % (TITLE, i + 1), Kit.HUE_INFO)
+            if st["pick"] is not None: say("already targeting a bag.", Kit.HUE_INFO); return
+            st["pick"] = i; say("target the bag for rule %d." % (i + 1), Kit.HUE_INFO)
             def done(serial): st["queue"].append(("picked", i, int(serial or 0)))
             HOST.pick_target(20, done)
         def bag_picked(i, serial):
             st["pick"] = None
             if i >= len(rules): return
-            if not serial: API.SysMsg("%s: cancelled." % TITLE, Kit.HUE_INFO); return
+            if not serial: say("cancelled.", Kit.HUE_INFO); return
             it = get_item(serial)
-            try: ok = bool(it is not None and it.IsContainer)
-            except Exception: ok = False
-            if not ok: API.SysMsg("%s: that isn't a container." % TITLE, Kit.HUE_BAD); return
+            if it is None or not it.IsContainer: say("that isn't a container.", Kit.HUE_BAD); return
             r = rules[i]
             if r["bag"] != serial:
                 r["bag"] = serial; r["done"].clear(); del r["order"][:]; st["later"].clear(); invalidate(r)
                 clear_results(r)
-            save_settings(); API.SysMsg("%s: rule %d uses %s." % (TITLE, i + 1, bag_name(r, False)), Kit.HUE_GOOD)
+            save_settings(); say("rule %d uses %s." % (i + 1, bag_name(r, False)), Kit.HUE_GOOD)
             st["redraw"] = True; HOST.refresh_settings(KEY)
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
+        queue = Kit.queuer(st)
         def build_window():
-            w, h = (MINI_W, MINI_H) if st["minimized"] else (
-                W, Kit.MARGIN + 30 + Kit.GAP + 40 + Kit.GAP + 30 + max(1, len(rules)) * ROW_H + 8 + Kit.MARGIN)
-            x, y = Kit.load_pos(POS_KEY, (200, 200), (w, h))
-            if Kit.is_open(win["g"]): x, y = win["g"].GetX(), win["g"].GetY()
-            old, win["g"] = win["g"], None; M = Kit.MARGIN; store = ({}, {}); c = {}; rows = []
-            g = G.CreateGump(True, True)
-            if st["minimized"]: c["status"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"))
-            else:
-                IW = w - 2 * M; Kit.add_window_frame(g, w, h)
-                Kit.title_bar(g, store, w, TITLE, KEY, queue("toggle_min"), queue("to_bar"), queue("settings"))
-                yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 40)
+            g, store, c = wnd.begin(W, Kit.MARGIN + 30 + Kit.GAP + 40 + Kit.GAP + 30 + max(1, len(rules)) * ROW_H + 8 +
+                                    Kit.MARGIN)
+            M = Kit.MARGIN; rows = []
+            if not st["minimized"]:
+                IW = W - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 40)
                 c["pause"] = Kit.art_button(g, store, "pause", Kit.ART_PLAY, M + 12, yb + 9,
-                                            "Resume" if st["paused"] else "Pause",
-                                            "Stop every rule for now, or start them again", on_click=queue("pause"))
+                                            "Resume" if st["paused"] else "Pause", "Stop or restart every rule",
+                                            on_click=queue("pause"))
                 x_add = M + 12 + 35 + Kit.text_w("Resume") + 14
                 Kit.art_button(g, store, "add", Kit.ART_OK, x_add, yb + 9, "Add rule",
-                               "Add a rule (a bag and an action); it is set up on the settings page",
-                               on_click=queue("add"))
+                               "Add a rule (set it up on the settings page)", on_click=queue("add"))
                 x_st = x_add + 35 + Kit.text_w("Add rule") + 14
                 c["status"] = Kit.add_label(g, "", x_st, yb + 12, Kit.HUE_INFO); c["status_w"] = M + IW - 4 - x_st
                 st["full_txt"] = None; yr = yb + 40 + Kit.GAP
@@ -2756,28 +2518,24 @@ def _module_skills():
                                   M + 12, y0 + 5, Kit.HUE_INFO)
                 for i, r in enumerate(rules):
                     ry = y0 + i * ROW_H; row = {}
-                    row["auto"] = Kit.add_check(g, "", M + 10, ry + 2, r["auto"],
-                                                "Watch this bag and handle every new item that lands in it")
+                    row["auto"] = Kit.add_check(g, "", M + 10, ry + 2, r["auto"], "Handle every new item that lands "
+                                                "in this bag")
                     row["bag"] = Kit.add_label(g, "", M + 36, ry + 3, Kit.HUE_TEXT)
                     row["act"] = Kit.add_label(g, "", M + 172, ry + 3, Kit.HUE_TITLE)
                     row["prog"] = Kit.add_label(g, "", M + 298, ry + 3, Kit.HUE_INFO)
-                    row["last"] = Kit.add_label(g, "", M + 36, ry + 22, Kit.HUE_INFO)
-                    safe(lambda: row["last"].SetTooltip(
-                        "The shard's last answer to this rule and how it was read (ok, fail, skip "
-                        "or busy). The DEBUG box on the settings page prints every line the shard says."))
+                    row["last"] = Kit.with_tip(Kit.add_label(g, "", M + 36, ry + 22, Kit.HUE_INFO), "The shard's last "
+                                               "answer to this rule and how it was read (ok, fail, skip or busy)")
                     for key, art, bx, cap, tip, act in (
-                            ("res", Kit.ART_PAGE, x_res, "Results", "Open this rule's results: the shard's answer to "
-                             "each item, with counts and an export (again: close)", "results"),
-                            ("bag", Kit.ART_PLAY, x_bag, "Bag...", "Target the bag this rule works on", "bag"),
-                            ("run", Kit.ART_PLAY, x_run, "Run", "One pass over the bag now (the items not done yet)",
-                             "run"), ("reset", Kit.ART_CLOSE, x_reset, "Reset",
-                             "Forget what was done in this bag, so every item is handled again", "reset")):
+                            ("res", Kit.ART_PAGE, x_res, "Results", "Show the shard's answer per item (again: close)",
+                             "results"), ("bag", Kit.ART_PLAY, x_bag, "Bag...", "Target the bag this rule works on",
+                             "bag"), ("run", Kit.ART_PLAY, x_run, "Run", "One pass over the items not done yet", "run"),
+                            ("reset", Kit.ART_CLOSE, x_reset, "Reset", "Forget what was done, so every item is handled "
+                             "again", "reset")):
                         Kit.art_button(g, store, "%s%d" % (key, i), art, bx, ry + 1, cap, tip, on_click=queue((act, i)))
                     row["text"] = (None, None, None, None); rows.append(row)
-            Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], on_disposed(g),
-                            lambda: Kit.save_pos(POS_KEY, win["g"]), win,
-                            {"g": g, "c": c, "store": store, "rows": rows})
-            st["redraw"] = False; refresh(); Kit.dispose(old)
+            wnd.end(g, {"rows": rows}); st["redraw"] = False; refresh()
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=TRAY_ICON,
+                         cleanup=cleanup, lock=False)
         fit = Kit.fit
         def refresh():
             if st["minimized"] and st["docked"]: return
@@ -2814,46 +2572,35 @@ def _module_skills():
             if changed: save_settings(); HOST.refresh_settings(KEY)
         RES_NAME_W, RES_TAG_W = 230, 120
         def rule_index(r): return next((k for k in range(len(rules)) if rules[k] is r), -1)
-        def save_res_pos(): Kit.save_pos(RES_POS_KEY, resw["g"])
-        def on_res_disposed(g):
-            def handler(*args):
-                if resw["g"] is g: resw["g"], resw["rows"], resw["rule"] = None, [], None
-            return handler
-        def close_results():
-            g = resw["g"]
-            if g is not None: save_res_pos()
-            resw.update({"g": None, "rows": [], "rule": None, "c": {}}); Kit.dispose(g)
         def show_results(i):
             if i >= len(rules): return
             r = rules[i]
-            if resw["rule"] is r and Kit.is_open(resw["g"]): close_results(); return
+            if resw["rule"] is r and Kit.is_open(resw["g"]): resultw.close(); return
             resw["rule"], resw["page"] = r, 0
             if Kit.is_open(resw["g"]): resw["dirty"] = True
             else: build_results()
         def build_results():
             M = Kit.MARGIN; w = RES_W; IW = w - 2 * M; sh = 30 + 24 + RES_ROWS * RES_ROW_H + 8
-            h = M + 30 + Kit.GAP + sh + M; x, y = Kit.load_pos(RES_POS_KEY, (260, 220), (w, h)); old = resw["g"]
-            if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-            resw["g"] = None; store = ({}, {}); c = {}; g = G.CreateGump(True, True); Kit.add_window_frame(g, w, h)
+            h = M + 30 + Kit.GAP + sh + M; g, store, c = resultw.begin(w, h); Kit.add_window_frame(g, w, h)
             Kit.add_section(g, M, M, IW, 30)
             Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close",
                            on_click=queue("res_close"))
             x_exp = w - M - 54 - 12 - 35 - Kit.text_w("Export")
             Kit.art_button(g, store, "export", Kit.ART_OK, x_exp, M + 4, "Export",
-                           "Write this rule's results to a text file in the VirtueAssistantSettings folder",
+                           "Write the results to a file in the VirtueAssistantSettings folder",
                            on_click=queue("res_export"))
             x_clr = x_exp - 12 - 35 - Kit.text_w("Clear")
             Kit.art_button(g, store, "clear", Kit.ART_CLOSE, x_clr, M + 4, "Clear",
-                           "Forget this rule's results (the items stay done; Reset in the Skill "
-                           "Bags window handles them again)", on_click=queue("res_clear"))
+                           "Forget these results (items stay done; Reset handles them again)",
+                           on_click=queue("res_clear"))
             c["title"] = Kit.add_label(g, "", M + 30, M + 7, Kit.HUE_TITLE); c["title_w"] = x_clr - (M + 30) - 8
             ys = M + 30 + Kit.GAP; Kit.add_section(g, M, ys, IW, sh, "RESULTS  (newest first)")
             x_old = M + IW - 12 - 35 - Kit.text_w("Next")
-            Kit.art_button(g, store, "older", Kit.ART_PAGE, x_old, ys + 24, "Next",
-                           "Next page (older results)", on_click=queue("res_older"))
+            Kit.art_button(g, store, "older", Kit.ART_PAGE, x_old, ys + 24, "Next", "Older results",
+                           on_click=queue("res_older"))
             x_new = x_old - 10 - 35 - Kit.text_w("Prev")
-            Kit.art_button(g, store, "newer", Kit.ART_PAGE, x_new, ys + 24, "Prev",
-                           "Previous page (newer results)", on_click=queue("res_newer"))
+            Kit.art_button(g, store, "newer", Kit.ART_PAGE, x_new, ys + 24, "Prev", "Newer results",
+                           on_click=queue("res_newer"))
             c["page_x"], c["page_y"] = x_new - 8, ys + 28
             c["page"] = Kit.add_label(g, "", c["page_x"], ys + 28, Kit.HUE_INFO)
             c["counts"] = Kit.add_label(g, "", M + 12, ys + 28, Kit.HUE_TEXT)
@@ -2865,22 +2612,22 @@ def _module_skills():
                              "tag": Kit.add_label(g, "", M + 12 + RES_NAME_W, ry, Kit.HUE_INFO),
                              "ans": Kit.add_label(g, "", M + 12 + RES_NAME_W + RES_TAG_W, ry, Kit.HUE_INFO),
                              "tip": None})
-            Kit.show_window(g, x, y, w, h, None, False, on_res_disposed(g), save_res_pos, resw,
-                            {"g": g, "c": c, "rows": rows})
-            refresh_results(); Kit.dispose(old)
+            resultw.end(g, {"rows": rows}); refresh_results()
+        resultw = Kit.Window(KEY, TITLE, None, resw, build_results, RES_POS_KEY, default=(260, 220), cleanup=cleanup,
+                             lock=False, owner=False, clear={"rows": [], "rule": None, "c": {}})
         RES_HUE = {1: Kit.HUE_GOOD, 2: Kit.HUE_BAD, 3: Kit.HUE_INFO, 4: Kit.HUE_TEXT}
         def refresh_results():
             resw["dirty"] = False; r, rows = resw["rule"], resw["rows"]
             if not rows or r is None: return
             i = rule_index(r)
-            if i < 0: close_results(); return
+            if i < 0: resultw.close(); return
             c = resw["c"]; res = r.get("_res") or []; n = len(res); pages = max(1, (n + RES_ROWS - 1) // RES_ROWS)
             pg = resw["page"] = max(0, min(resw["page"], pages - 1))
             Kit.set_text(c["title"], fit("RULE %d RESULTS: %s" % (i + 1, rule_action(r)[1]), c["title_w"]))
             Kit.set_text(c["counts"], fit(counts_text(r), c["counts_w"]))
             ptxt = "page %d of %d" % (pg + 1, pages) if pages > 1 else ""
             if Kit.set_text(c["page"], ptxt) and ptxt:
-                safe(lambda: Kit.ui_pos(c["page"], c["page_x"] - Kit.text_w(ptxt), c["page_y"]))
+                Kit.ui_pos(c["page"], c["page_x"] - Kit.text_w(ptxt), c["page_y"])
             top = n - 1 - pg * RES_ROWS; today = time.localtime()[:3]
             for k, row in enumerate(rows):
                 idx = top - k
@@ -2891,15 +2638,15 @@ def _module_skills():
                     hue = Kit.HUE_TITLE if tag == "magic" else RES_HUE.get(code, Kit.HUE_INFO)
                     Kit.set_text(row["tag"], fit(tag, RES_TAG_W - 8), hue)
                     Kit.set_text(row["ans"], fit(answer or "no answer", c["ans_w"]))
-                    if row["tip"] != answer: row["tip"] = answer; safe(lambda: row["ans"].SetTooltip(answer or ""))
+                    if row["tip"] != answer: row["tip"] = answer; row["ans"].SetTooltip(answer or "")
                 else:
                     for key in ("name", "tag", "ans"): Kit.set_text(row[key], "")
         def export_results():
             r = resw["rule"]; i = rule_index(r) if r is not None else -1
             if i < 0: return
             res = r.get("_res") or []
-            if not res: API.SysMsg("%s: rule %d has no results to export yet." % (TITLE, i + 1), Kit.HUE_INFO); return
-            serial = safe(lambda: int(API.Player.Serial), 0); path = Kit.data_path(EXPORT_NAME % (serial, i + 1))
+            if not res: say("rule %d has no results to export yet." % (i + 1), Kit.HUE_INFO); return
+            path = Kit.data_path(EXPORT_NAME % (int(API.Player.Serial), i + 1))
             lines = ["Skill Bags results - rule %d: %s on %s" % (i + 1, rule_action(r)[1], bag_name(r, False)),
                      "Exported %s - %s" % (time.strftime("%Y-%m-%d %H:%M"), counts_text(r)), "",
                      "%-19s  %-10s  %-32s  %-18s  %s" % ("Time", "Serial", "Item", "Result", "The shard's answer")]
@@ -2909,18 +2656,16 @@ def _module_skills():
             st["writes"].append((path, "\n".join(lines) + "\n"))
         def write_files(): write_queue(st["writes"], TITLE, "results")
         SEC_R = 118
-        HINT = ("The OK / FAIL / SKIP phrases that read the shard's answers are RunUO defaults, "
-                "not checked on this shard: the DEBUG box at the bottom prints what the shard "
-                "really says, and the window's Last line shows each rule's last answer.")
-        TIP_TEXT = ("For Graphics in Text: the item graphics in hex, commas between them (0x14FC, "
-                    "0x0E76). For Name contains Text: part of the item's name (treasure map)")
-        TIP_CUSTOM = ("Custom skill: the skill's name as the client spells it (Item "
-                      "Identification). Custom tool: the tool's graphic in hex (0x14FC: "
-                      "lockpicks). Nothing for the other actions.")
-        TIP_DELAY = ("Seconds between two items of this rule (%g-%g; a skill rule waits at least "
-                     "its skill timer, 3 or 10 s)" % (MIN_DELAY, MAX_DELAY))
-        TIP_DEEP = "Also handle the items inside bags that sit in this bag"
-        TIP_AUTO = ("Watch the bag and handle every new item that lands in it (the window's box too)")
+        HINT = ("The OK / FAIL / SKIP phrases that read the shard's answers are RunUO defaults, not checked on this "
+                "shard; the window's Last line shows each rule's last answer.")
+        TIP_TEXT = ("Graphics in Text: hex graphics, commas between (0x14FC, 0x0E76). Name contains Text: part of the "
+                    "name (treasure map)")
+        TIP_CUSTOM = ("Custom skill: its client name (Item Identification). Custom tool: its hex graphic "
+                      "(0x14FC: lockpicks)")
+        TIP_DELAY = ("Seconds between items (%g-%g; a skill rule waits at least its 3 or 10 s timer)"
+                     % (MIN_DELAY, MAX_DELAY))
+        TIP_DEEP = "Also handle items in bags inside it"
+        TIP_AUTO = "Handle every new item that lands in the bag (the window's box too)"
         def page_table(w, prow=None, dds=None):
             def rule_sec(i, r):
                 def draw(f, x, y):
@@ -2945,46 +2690,35 @@ def _module_skills():
                     prow.append(row)
                 return ("RULE %d  (%s)" % (i + 1, fit(bag_name(r, False), 300)), (("custom", 0, draw),), {"sh": SEC_R})
             return ([("OPTIONS", [("check", "hidden", "Pause while hidden", "Using a skill would reveal you"),
-                        ("check", "open", "Open a bag the client hasn't looked inside yet",
-                         "Double-click the bag once so its contents are known", {"stay": True}),
+                        ("check", "open", "Open bags the client hasn't looked in",
+                         "Double-clicks the bag once so its contents are known", {"stay": True}),
                         ("buttons", (("add", Kit.ART_OK, "Add rule", "Add a rule (a bag and an action)",
                                       queue("add")),), {"dx": 400}), ("num", "retries", "Extra tries after a failure:",
-                         "Times the item is tried again after a failed attempt, the FAIL phrase (0-9)", None, 0, 9,
-                         {"lw": 268, "fw": 40, "ldy": 4, "ltip": True, "h": 2}),
-                        ("check", "guard", "Pause in guard zones", "No skill use in towns or before the zone is known; "
+                         "Retries after a FAIL phrase (0-9)", None, 0, 9,
+                         {"lw": 268, "fw": 40, "ldy": 4, "ltip": True, "h": 2, "clamp": False}),
+                        ("check", "guard", "Pause in guard zones", "No skill use in towns or an unknown zone; "
                          "unticked counts only while Skills > Training Alarm is on", {"dx": 380})] +
                      [("note", line, {"h": 18}) for line in Kit.wrap(HINT, w - 24) or [HINT]], {"pad": 6})] +
-                    [rule_sec(i, r) for i, r in enumerate(rules)] + [("DEBUG  (for checking the shard's texts)", (
-                        ("check", "say", "Print the shard's replies in the journal", "While an answer is awaited, "
-                         "every journal line seen is printed as \"%s: reply: ...\", to compare with the OK / FAIL / "
-                         "SKIP phrases" % TITLE),), {"top": 32, "sh": 66})])
+                    [rule_sec(i, r) for i, r in enumerate(rules)])
         def config_height(w): return Kit.Form.height(page_table(w), w)
         def build_config(g, x, y, w):
             prow, dds = [], []; f = Kit.Form(g, x, y, w, settings, page_table(w, prow, dds))
             for kind, i, dx, dy, dw, items, idx in sorted(dds, key=lambda d: -d[3]):
-                try: dd = G.CreateDropDown(dw, list(items), int(idx)); dd.SetPos(dx, dy); g.Add(dd); prow[i][kind] = dd
-                except Exception: prow[i][kind] = None; Kit.add_label(g, items[idx], dx, dy + 4, Kit.HUE_INFO)
-            page.update({"c": f.c, "rows": prow, "next_read": 0.0})
+                dd = G.CreateDropDown(dw, list(items), int(idx)); dd.SetPos(dx, dy); g.Add(dd); prow[i][kind] = dd
+            page.update({"f": f, "rows": prow, "next_read": 0.0})
         def poll_config():
-            c = page["c"]
-            if c is None: return
+            f = page["f"]
+            if f is None: return
             now = time.time()
             if now < page["next_read"]: return
-            page["next_read"] = now + CHECK_EVERY; changed = False; relist = []; auto_moved = []
+            page["next_read"] = now + CHECK_EVERY; relist = []; auto_moved = []
             try:
-                for k in ("hidden", "open", "say", "guard"):
-                    v = bool(c[k].IsChecked)
-                    if v != settings[k]: settings[k] = v; changed = True
-                t = str(c["retries"].Text or "").strip()
-                if t.isdigit() and 0 <= int(t) <= 9 and int(t) != settings["retries"]:
-                    settings["retries"] = int(t); changed = True
+                new = f.read(True); changed = new != settings; settings.update(new)
                 for i, row in enumerate(page["rows"]):
                     if i >= len(rules): break
                     r = rules[i]; act_new = False
                     for kind, names in (("action", ACTIONS), ("filt", FILTERS)):
-                        dd = row.get(kind)
-                        if dd is None: continue
-                        idx = safe(lambda: int(dd.GetSelectedIndex()), r[kind])
+                        idx = int(row[kind].GetSelectedIndex())
                         if 0 <= idx < len(names) and idx != r[kind]:
                             r[kind] = idx; changed = True; relist.append(r)
                             if kind == "action":
@@ -3000,8 +2734,8 @@ def _module_skills():
                         v = bool(row[k].IsChecked)
                         if v != r[k]: r[k] = v; changed = True; (relist if k == "deep" else auto_moved).append(r)
             except Exception as ex:
-                page["c"] = None
-                API.SysMsg("%s: settings page error: %s (reopen the page)." % (TITLE, ex), Kit.HUE_BAD); return
+                page["f"] = None
+                say("settings page error: %s (reopen the page)." % ex, Kit.HUE_BAD); return
             if changed:
                 save_settings()
                 for r in relist: invalidate(r)
@@ -3011,65 +2745,28 @@ def _module_skills():
                         try: win["rows"][i]["auto"].IsChecked = r["auto"]
                         except Exception: st["redraw"] = True
                 if page.get("dirty"): page["dirty"] = False; HOST.refresh_settings(KEY)
-        def config_closed(): page["c"] = None; page["rows"] = []
+        def config_closed(): page["f"] = None; page["rows"] = []
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "paused": False,
                        "job": None, "next_scan": 0.0, "next_check": 0.0, "status": "Idle",
                        "run": set(), "opening": {}, "later": {}, "pick": None, "redraw": False,
                        "save_done": False, "no_tool": {}, "busy_n": {}, "next_rows": 0.0,
                        "rr": 0, "guard_paused": None, "writes": [], "idle_at": 0.0, "done_at": 0.0,
-                       "minimized": bool(safe(lambda: HOST.dock_wanted(KEY), False)) or Kit.load_min(MIN_KEY)})
+                       "minimized": wnd.start_min()})
             resw.update({"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False}); load_settings()
-            build_window(); HOST.dock_add(KEY, Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw"), scale=True))
+            build_window(); wnd.dock(scale=True)
             n = sum(1 for r in rules if r["auto"] and r["bag"])
-            API.SysMsg("%s: on, %d rule%s, %d watching." % (TITLE, len(rules), "" if len(rules) == 1 else "s", n),
-                       Kit.HUE_GOOD)
+            say("on, %s, %d watching." % (Kit.count(len(rules), "rule"), n), Kit.HUE_GOOD)
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time()
             while st["queue"]:
                 action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-                if Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY): continue
-                if action == "pause":
-                    st["paused"] = not st["paused"]; st["idle_at"] = 0.0
-                    if st["paused"] and st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
-                    lbl = win["c"].get("pause")
-                    if lbl is not None: Kit.set_text(lbl, "Resume" if st["paused"] else "Pause")
-                    API.SysMsg("%s: %s." % (TITLE, "paused" if st["paused"] else "resumed"), Kit.HUE_INFO)
-                elif action == "add":
-                    if len(rules) >= MAX_RULES: API.SysMsg("%s: at most %d rules." % (TITLE, MAX_RULES), Kit.HUE_INFO)
-                    else:
-                        rules.append(new_rule()); save_settings(); build_window(); HOST.refresh_settings(KEY)
-                        if page["c"] is None: HOST.show_settings(KEY)
-                elif kind == "remove" and action[1] < len(rules):
-                    i = action[1]
-                    if st["job"] is not None and st["job"]["rule"] == i: HOST.release_cursor(KEY); st["job"] = None
-                    elif st["job"] is not None and st["job"]["rule"] > i: st["job"]["rule"] -= 1
-                    gone = rules.pop(i)
-                    if resw["rule"] is gone: close_results()
-                    elif resw["rule"] is not None: resw["dirty"] = True
-                    st["rr"] = 0; st["run"] = set(k - 1 if k > i else k for k in st["run"] if k != i)
-                    st["later"].clear(); st["busy_n"].clear(); st["no_tool"].clear(); save_settings(); build_window()
-                    HOST.refresh_settings(KEY)
-                elif kind == "bag" and action[1] < len(rules): pick_bag(action[1])
-                elif kind == "picked": bag_picked(action[1], action[2])
-                elif kind == "run" and action[1] < len(rules):
-                    i = action[1]
-                    if not rules[i]["bag"]:
-                        API.SysMsg("%s: set the bag for rule %d first (Bag button)." % (TITLE, i + 1), Kit.HUE_BAD)
-                    else: st["run"].add(i); st["later"].clear(); invalidate(rules[i]); st["next_scan"] = 0.0
-                elif kind == "reset" and action[1] < len(rules):
-                    i = action[1]; rules[i]["done"].clear(); del rules[i]["order"][:]; rules[i].pop("_tries", None)
-                    rules[i].pop("_last", None); invalidate(rules[i]); st["later"].clear(); save_done()
-                    API.SysMsg("%s: rule %d will handle every item again (%s)." %
-                               (TITLE, i + 1, bag_name(rules[i])), Kit.HUE_INFO)
-                elif kind == "results": show_results(action[1])
-                elif action == "res_close": close_results()
-                elif action == "res_export": export_results()
-                elif action == "res_clear" and resw["rule"] is not None: clear_results(resw["rule"]); resw["page"] = 0
-                elif action in ("res_older", "res_newer"):
-                    resw["page"] += 1 if action == "res_older" else -1; resw["dirty"] = True
+                if wnd.action(action) or (kind in ("remove", "bag", "run", "reset") and action[1] >= len(rules)):
+                    continue
+                fn = ACTS.get(kind)
+                if fn is not None: fn(action)
             if st.get("redraw"): build_window()
             if resw["dirty"] and resw["g"] is not None: refresh_results()
             if not st["minimized"] and now >= st["next_check"]: st["next_check"] = now + CHECK_EVERY; read_checks()
@@ -3080,35 +2777,66 @@ def _module_skills():
         def _stop():
             st["shutting"] = True
             if st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
-            HOST.dock_remove(KEY); Kit.save_pos(POS_KEY, win["g"]); Kit.save_min(MIN_KEY, st["minimized"])
-            save_settings(); g, win["g"] = win["g"], None; Kit.dispose(g); close_results()
+            save_settings(); cleanup.close()
             if st["writes"]:
                 if Client.on_client_thread():
-                    API.SysMsg("%s: the export wasn't written (the module stopped); " "export again." % TITLE,
-                               Kit.HUE_INFO)
+                    say("the export wasn't written (the module stopped); export again.", Kit.HUE_INFO)
                     del st["writes"][:]
                 else: write_files()
+        def toggle_pause(action):
+            st["paused"] = not st["paused"]; st["idle_at"] = 0.0
+            if st["paused"] and st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
+            lbl = win["c"].get("pause")
+            if lbl is not None: Kit.set_text(lbl, "Resume" if st["paused"] else "Pause")
+            say("%s." % ("paused" if st["paused"] else "resumed"), Kit.HUE_INFO)
+        def add_rule(action):
+            if len(rules) >= MAX_RULES: say("at most %d rules." % MAX_RULES, Kit.HUE_INFO); return
+            rules.append(new_rule()); save_settings(); build_window(); HOST.refresh_settings(KEY)
+            if page["f"] is None: HOST.show_settings(KEY)
+        def remove_rule(action):
+            i = action[1]
+            if st["job"] is not None and st["job"]["rule"] == i: HOST.release_cursor(KEY); st["job"] = None
+            elif st["job"] is not None and st["job"]["rule"] > i: st["job"]["rule"] -= 1
+            gone = rules.pop(i)
+            if resw["rule"] is gone: resultw.close()
+            elif resw["rule"] is not None: resw["dirty"] = True
+            st["rr"] = 0; st["run"] = set(k - 1 if k > i else k for k in st["run"] if k != i)
+            st["later"].clear(); st["busy_n"].clear(); st["no_tool"].clear(); save_settings(); build_window()
+            HOST.refresh_settings(KEY)
+        def run_rule(action):
+            i = action[1]
+            if not rules[i]["bag"]:
+                say("set the bag for rule %d first (Bag button)." % (i + 1), Kit.HUE_BAD); return
+            st["run"].add(i); st["later"].clear(); invalidate(rules[i]); st["next_scan"] = 0.0
+        def reset_rule(action):
+            i = action[1]; rules[i]["done"].clear(); del rules[i]["order"][:]; rules[i].pop("_tries", None)
+            rules[i].pop("_last", None); invalidate(rules[i]); st["later"].clear(); save_done()
+            say("rule %d will handle every item again (%s)." % (i + 1, bag_name(rules[i])), Kit.HUE_INFO)
+        def clear_shown(action):
+            if resw["rule"] is not None: clear_results(resw["rule"]); resw["page"] = 0
+        def page_step(action): resw["page"] += 1 if action == "res_older" else -1; resw["dirty"] = True
+        ACTS = {"pause": toggle_pause, "add": add_rule, "remove": remove_rule, "run": run_rule, "reset": reset_rule,
+                "bag": lambda action: pick_bag(action[1]), "picked": lambda action: bag_picked(action[1], action[2]),
+                "results": lambda action: show_results(action[1]), "res_close": lambda action: resultw.close(),
+                "res_export": lambda action: export_results(), "res_clear": clear_shown, "res_older": page_step,
+                "res_newer": page_step}
         DONE_SAVE_EVERY = 5.0
         def _interval(): j = st["job"]; return 0.05 if j is not None and j["phase"] == "target" else 0.1
         load_settings()
-        MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": write_files,
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": write_files,
                   "interval": _interval, "config_height": config_height, "build_config": build_config,
                   "poll_config": poll_config, "config_closed": config_closed}
-        return MODULE
     PARTS = (("window", _part_window, 0.25, "skills"), ("alarm", _part_alarm, 0.1, "attention"),
         ("bags", _part_bags, 0.1, "skillbags"),)
-    MODULE = PartSet(KEY, TITLE, PARTS).hooks(); return MODULE
+    return PartSet(KEY, TITLE, PARTS).hooks()
 
 
-if "HOST" in globals() and hasattr(globals()["HOST"], "add"):
-    HOST.add("skills", "Skills", "Your skills, training and what needs you at the keyboard", _module_skills, 0.1,
-             category="Skills and home", parts=(("window", "Skills Window",
-                  "A skills window with locks, groups, gains and targets", True, ("skills",)),
-                 ("alarm", "Training Alarm", "An alarm when staff or a gump need you; skill loops pause", False,
-                  ("attention",)), ("bags", "Skill Bags",
-                  "Uses a skill on every item in a bag, once each", False, ("skillbags",)),),
-             aliases=('Skill Bags', 'Attention', 'GM check', 'training', 'locks', 'gains', 'Item ID'))
-else:
+if "HOST" not in globals():
     import API
-    API.SysMsg("Skills is a Virtue Assistant module and can't run on its own. "
-               "Run Virtue Assistant instead; it loads this file.", 33)
+    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("skills", "Skills", "Skills, training and AFK alarms", _module_skills, 0.1,
+         category="Skills and home", parts=(("window", "Skills Window",
+              "Skills with locks, groups and gains", True, ("skills",)),
+             ("alarm", "Training Alarm", "Alarm when staff or a gump needs you", False,
+              ("attention",)), ("bags", "Skill Bags", "A skill on each item in a bag, once", False, ("skillbags",)),),
+         aliases=('Skill Bags', 'Attention', 'GM check', 'training', 'locks', 'gains', 'Item ID'))

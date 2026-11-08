@@ -11,7 +11,7 @@ def _module_meters():
     PLACE_ELSEWHERE = "Elsewhere"; PLACE_MIN_SECS = 60.0; GRAPH_MINUTES = 60; GRAPH_H = 40; GRAPH_COL = 4
     GRAPH_BLOCK = 18 + GRAPH_H + 4; EXPORT_FILE = "Meters_%08X.txt"; EXPORT_ROWS = 50; RECAP_SECS = 10.0
     RECAP_ROWS = 12; RECAP_COLS = 40; RECAP_W = 360; RECAP_POS_KEY = "Meters_recap_pos"
-    RECAP_HINT = ("Who: spell words heard just before the hit,", "else whom you were fighting (shown with ?).")
+    RECAP_HINT = ("Who: spell words heard before the hit,", "else whom you fought (marked ?).")
     TAKEN_KEEP = 200; HP_KEEP = 300; CASTS_KEEP = 20; CAST_CREDIT_SECS = 4.0; CAST_EARLY = 0.5
     HARM_SET = frozenset(("Magic Arrow", "Harm", "Fireball", "Lightning", "Mind Blast",
                    "Energy Bolt", "Explosion", "Flamestrike", "Chain Lightning",
@@ -65,7 +65,7 @@ def _module_meters():
           "mobs": {}, "dead_seen": {}, "pack_sig": None, "pend": [], "orph": [], "last_spell": None, "cast_t": 0.0,
           "prev_lt": 0, "to_write": []}
     spots = []; graph = {"min": None, "b": None, "hist": {}, "ver": 0, "vb": {}}; recap = {"g": None, "rows": []}
-    data = {}; wins = []; page = {"c": None, "store": ({}, {})}
+    data = {}; wins = []; page = {}; cleanup = Kit.Cleanup()
     feed = {"q": None, "handler": None, "event": None, "kind": "not hooked"}
     refl = {"tried": False, "tm": None, "la": None}; jobs = []; SEGN = [0]; import heapq
     RE_COUNT = re.compile(r"^[0-9,]+\s+"); PACK_CHUNK = 60; NAME_EVERY = 1.0; find_mob = HOST.mobile
@@ -77,9 +77,7 @@ def _module_meters():
                 if got is not None: return [int(s) for s in got]
             except Exception: pass
         pets = []
-        try: mobs = HOST.mobiles(PET_RANGE)
-        except Exception: mobs = []
-        for m in mobs:
+        for m in HOST.mobiles(PET_RANGE):
             try:
                 if m.IsRenamable: pets.append(int(m.Serial))
             except Exception: pass
@@ -140,7 +138,7 @@ def _module_meters():
         parts = []
         for w in wins:
             g = w["g"]
-            if Kit.is_open(g): w["x"], w["y"] = safe(lambda: g.GetX(), w["x"]), safe(lambda: g.GetY(), w["y"])
+            if Kit.is_open(g): w["x"], w["y"] = g.GetX(), g.GetY()
             size = w.get("size") or (0, 0)
             parts.append("%d,%s,%s,%d,%d,%s,%s,%d,%d" % (w["id"], w["metric"], "overall" if w["seg"] == "overall"
                                                          else "current", int(w["x"]), int(w["y"]),
@@ -256,14 +254,14 @@ def _module_meters():
     def nr(seg, v, r, head=fmt_num): return "%s (%s/%s)" % (head(v), fmt_rate(rate_of(seg, r, v)), r)
     def view(mid, seg, limit=None):
         _, rate, f, _, _ = METRIC[mid]
-        if seg is None: return (["No fight yet. Attack something and the meters start."], [])
+        if seg is None: return (["No fight yet."], [])
         dur = seg_duration_text(seg)
         if mid == "session": return session_view(seg)
         if mid == "big":
             big = seg["big"] if limit is None else seg["big"][:limit]
             rows = [(name, amt, fmt_num(amt), ser, None) for amt, name, ser in big]
             head = (["Biggest %s on %s" % (fmt_num(seg["big"][0][0]), seg["big"][0][1])]
-                    if seg["big"] else ["No hits yet. Hits land here as they happen."])
+                    if seg["big"] else ["No hits yet."])
             return (head + [dur], rows)
         d = seg["d"].get(mid, {})
         if mid == "gold":
@@ -307,7 +305,7 @@ def _module_meters():
             rows.append((name, rate, "%s/h (%s)" % (fmt_rate(rate), ", ".join(bits)), None, r))
         rows.sort(key=_rate_size, reverse=True)
         if limit is not None: del rows[max(0, limit):]
-        n = len(names); return (["Gained %s" % fmt_num(tot), "%d place%s" % (n, "" if n == 1 else "s"), dur], rows)
+        n = len(names); return (["Gained %s" % fmt_num(tot), Kit.count(n, "place"), dur], rows)
     def session_view(seg):
         wall = wall_secs(seg); cs = seg["combat"]
         dd, dt, hd = total(seg, "dmg_done"), total(seg, "dmg_taken"), total(seg, "heal_done")
@@ -331,10 +329,7 @@ def _module_meters():
             from System.Linq.Expressions import Expression, ParameterExpression
             stat = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static; asm = API.GetType().Assembly
             sink = asm.GetType("ClassicUO.Game.Managers.EventSink")
-            ent = asm.GetType("ClassicUO.Game.GameObjects.Entity")
-            if sink is None or ent is None: raise LookupError("TazUO's EventSink / Entity not found")
-            ev = sink.GetEvent("OnEntityDamage", stat)
-            if ev is None: raise LookupError("no OnEntityDamage event")
+            ent = asm.GetType("ClassicUO.Game.GameObjects.Entity"); ev = sink.GetEvent("OnEntityDamage", stat)
             t_obj, t_int, t_uint = (clr.GetClrType(Object), clr.GetClrType(Int32), clr.GetClrType(UInt32))
             ftype = Tuple[UInt32, Int32]; q = ConcurrentQueue[ftype](); p_s = Expression.Parameter(t_obj, "sender")
             p_e = Expression.Parameter(t_int, "amount"); qc = Expression.Constant(q)
@@ -348,8 +343,7 @@ def _module_meters():
             dom = AppDomain.CurrentDomain; left = dom.GetData(HOOK_KEY)
             if left is not None: safe(lambda: ev.GetRemoveMethod(True).Invoke(None, Array[Object]([left])))
             ev.GetAddMethod(True).Invoke(None, Array[Object]([handler])); dom.SetData(HOOK_KEY, handler)
-            feed.update({"q": q, "handler": handler, "event": ev, "kind": "exact (damage numbers per mobile)"})
-            return True
+            feed.update({"q": q, "handler": handler, "event": ev, "kind": "exact (per mobile)"}); return True
         except Exception as ex:
             feed.update({"q": None, "handler": None, "event": None})
             try:
@@ -366,7 +360,7 @@ def _module_meters():
         except Exception: pass
         feed.update({"q": None, "handler": None, "event": None, "kind": "not hooked"})
     def on_damage_amount(*args):
-        if not st["active"]: return
+        if not st["active"] or feed.get("q") is not None: return
         for a in args:
             try: st["amtq"].append(int(a))
             except Exception: continue
@@ -376,23 +370,13 @@ def _module_meters():
             refl["tried"] = True
             try:
                 from System.Reflection import BindingFlags
-                fl = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic; world = None
-                f = API.GetType().GetField("World", fl)
-                if f is not None: world = f.GetValue(API)
-                if world is None:
-                    sf = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
-                    ct = API.GetType().Assembly.GetType("ClassicUO.Client")
-                    game = ct.GetProperty("Game", sf).GetValue(None, None)
-                    uo = game.GetType().GetProperty("UO", fl).GetValue(game, None)
-                    world = uo.GetType().GetProperty("World", fl).GetValue(uo, None)
-                p = world.GetType().GetProperty("TargetManager", fl)
-                tm = p.GetValue(world, None) if p is not None else \
-                    world.GetType().GetField("TargetManager", fl).GetValue(world)
+                fl = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+                world = API.GetType().GetField("World", fl).GetValue(API)
+                tm = world.GetType().GetProperty("TargetManager", fl).GetValue(world, None)
                 refl["tm"], refl["la"] = tm, tm.GetType().GetProperty("LastAttack", fl)
             except Exception: refl["tm"] = refl["la"] = None
         if refl["la"] is None: return 0
-        try: return int(refl["la"].GetValue(refl["tm"], None) or 0)
-        except Exception: return 0
+        return int(refl["la"].GetValue(refl["tm"], None) or 0)
     def on_used(*args):
         if not st["active"]: return
         for a in args:
@@ -403,31 +387,18 @@ def _module_meters():
         for a in args:
             t = safe(lambda: a.Title)
             if t: st["buffq"].append(str(t)); del st["buffq"][:-50]; return
-    def hook_events():
-        if st["hooked"]: return
-        st["hooked"] = True; ev = safe(lambda: API.Events)
-        if ev is not None: safe(lambda: ev.ObjectUsed(on_used)); safe(lambda: ev.OnBuffAdded(on_buff))
-    def _opt(fn, default):
-        try: v = fn(); return default if v is None else v
-        except Exception: return default
-    def _map(): return API.GetMap()
-    def _last_target(): return API.LastTargetSerial
-    def _backpack(): return API.Backpack
     def sample():
         now = time.time()
         out = {"me": None, "dmg": [], "info": {}, "fhp": {}, "wst": {}, "used": [], "pack": None, "friends": None}
         p = HOST.me()
         if p is None: return out
-        try: gold = int(p.Gold or 0)
-        except Exception: gold = 0
-        try: war = bool(p.InWarMode)
-        except Exception: war = False
         ser = int(p.Serial)
         if ser != st["my_ser"] or now >= st["next_name"]:
             st["my_name"] = str(p.Name or ""); st["my_ser"], st["next_name"] = ser, now + NAME_EVERY
         me = {"ser": ser, "name": st["my_name"], "hits": int(p.Hits),
               "hmax": int(p.HitsMax), "mana": int(p.Mana), "x": int(p.X), "y": int(p.Y),
-              "gold": gold, "dead": bool(p.IsDead), "war": war, "poison": bool(p.IsPoisoned), "map": int(_opt(_map, 0))}
+              "gold": int(p.Gold or 0), "dead": bool(p.IsDead), "war": bool(p.InWarMode), "poison": bool(p.IsPoisoned),
+              "map": int(API.GetMap())}
         out["me"] = me; q = feed["q"]
         if q is not None:
             for _ in range(FEED_BURST):
@@ -438,7 +409,7 @@ def _module_meters():
         for ser, _ in out["dmg"]:
             if ser not in mobs and ser not in info and ser != me["ser"]:
                 m = find_mob(ser); info[ser] = str(m.Name or "") if m is not None else ""
-        out["lt"] = int(_opt(_last_target, 0)); out["la"] = last_attack()
+        out["lt"] = int(API.LastTargetSerial or 0); out["la"] = last_attack()
         for sers in (st["engaged"], (out["lt"], out["la"])):
             for ser in sers:
                 if is_mobile(ser) and ser not in mobs and ser not in info and ser != me["ser"]:
@@ -446,8 +417,8 @@ def _module_meters():
                     if m is not None: info[ser] = str(m.Name or "")
         if now >= st["next_friends"]:
             st["next_friends"] = now + FRIENDS_EVERY
-            party = [int(s) for s in (safe(lambda: API.GetPartyMemberSerials(), []) or [])]; pets = pets_near()
-            friends = [int(s) for s in (safe(lambda: API.GetAllFriends(), []) or [])]
+            party = [int(s) for s in API.GetPartyMemberSerials() or []]; pets = pets_near()
+            friends = [int(s) for s in API.GetAllFriends() or []]
             out["friends"] = (party, pets, friends); pres, seen = [], set()
             for sers in (friends, pets, party):
                 for fs in sers:
@@ -475,8 +446,8 @@ def _module_meters():
                 if it is not None: out["used"].append((int(it.Graphic), str(it.Name or "")))
         if not settings["scan"]: st["pscan"] = None
         elif st["pscan"] is None and now >= st["next_scan"]:
-            st["next_scan"] = now + SCAN_EVERY; bp = _opt(_backpack, 0)
-            if bp: st["pscan"] = [HOST.pack_items(True), 0, [], 0, 0, now]
+            st["next_scan"] = now + SCAN_EVERY
+            if API.Backpack: st["pscan"] = [HOST.pack_items(True), 0, [], 0, 0, now]
         ps = st["pscan"]
         if ps is not None: out["pack"] = pack_step(ps, now)
         return out
@@ -649,13 +620,8 @@ def _module_meters():
             st["engaged"][ser] = now; w["mine"] = now; record("dmg_done", name, dmg, ser); record_big(dmg, name, ser)
             enter_combat()
     def read_journal(now):
-        jr = st["jr"]
-        if jr is None: return
-        try: lines = jr.new()
-        except Exception: return
-        if not lines: return
         me = st["me"]; my_name = me["name"] if me else None
-        for ln in lines:
+        for ln in st["jr"].new():
             name = ln.name; low = ln.low.strip()
             if my_name and name == my_name:
                 sp = SPELLS.get(low)
@@ -680,8 +646,7 @@ def _module_meters():
                 if "your skill in" in low:
                     m = RE_SKILL.search(low)
                     if m:
-                        try: v = float(m.group(3))
-                        except ValueError: continue
+                        v = float(m.group(3))
                         record("skills", m.group(1).strip().title(), v if m.group(2).lower() == "increased" else -v)
                         continue
                 if "your " in low and " has " in low:
@@ -693,8 +658,7 @@ def _module_meters():
                     m = RE_FAME.search(low)
                     if m: record("fame", "%s %s" % (m.group(2).title(), m.group(1).lower()), 1)
     def find_place(me):
-        try: area = HOST.guard_area()
-        except Exception: area = None
+        area = HOST.guard_area()
         if area: return str(area)
         best = None; x, y, m = me["x"], me["y"], me["map"]
         for sp in spots:
@@ -712,11 +676,11 @@ def _module_meters():
     def add_spot(name, radius):
         me = st["me"]
         if me is None or not (me["x"] or me["y"]):
-            say("your position isn't known yet; try again in a moment.", Kit.HUE_BAD); return
+            say("position unknown; try again.", Kit.HUE_BAD); return
         name = spot_name(name) or "Spot %d" % (len(spots) + 1); lo, hi = SPOT_RADIUS_LIMITS
         radius = max(lo, min(hi, int(radius))); old = [sp for sp in spots if sp[0].lower() == name.lower()]
         if not old and len(spots) >= SPOTS_MAX:
-            say("%d named spots is the most; remove one first." % SPOTS_MAX, Kit.HUE_BAD); return
+            say("%d spots at most; remove one first." % SPOTS_MAX, Kit.HUE_BAD); return
         for sp in old: spots.remove(sp)
         spots.append([name, me["x"], me["y"], me["map"], radius]); save_spots(); st["place"] = None
         say("spot \"%s\" named here (%d, %d), %d tiles round." % (name, me["x"], me["y"], radius), Kit.HUE_GOOD)
@@ -731,9 +695,8 @@ def _module_meters():
         st["fnames"] = (now, names); return names
     def note_cast(now, name, spell):
         if name in friendly_names(now): return
-        try: info = Kit.spell_info(spell)
-        except Exception: info = None
-        delay = float(info[3]) if info else 0.0; cs = st["casts"]; cs.append([now, name, spell, False, delay])
+        info = Kit.spell_info(spell); delay = float(info[3]) if info else 0.0; cs = st["casts"]
+        cs.append([now, name, spell, False, delay])
         while cs and (len(cs) > CASTS_KEEP or now - cs[0][0] > cs[0][4] + CAST_CREDIT_SECS): cs.pop(0)
     def credit_hit(now):
         for c in st["casts"]:
@@ -763,7 +726,7 @@ def _module_meters():
         if want:
             for ser, nm in st["mobs"].items():
                 if nm in want: sers[nm] = ser
-            for m in (safe(lambda: API.GetAllMobiles(), []) or []):
+            for m in API.GetAllMobiles() or []:
                 try:
                     nm = str(m.Name or "")
                     if nm in want: sers[nm] = int(m.Serial)
@@ -794,7 +757,6 @@ def _module_meters():
                 say("%s exported to %s." % (cap, path), Kit.HUE_GOOD)
             except Exception as ex: say("couldn't write %s (%s)." % (path, ex), Kit.HUE_BAD)
     queue = Kit.queuer(st); M = Kit.MARGIN
-    def win_by_id(wid): return next((w for w in wins if w["id"] == wid), None)
     def dock_key(w): return KEY if w["id"] == 0 else "%s_%d" % (KEY, w["id"])
     def win_title(w): return TITLE if w["id"] == 0 else "%s %d" % (TITLE, w["id"] + 1)
     def on_disposed(w, g):
@@ -844,14 +806,12 @@ def _module_meters():
                 if fit is not None:
                     body_h = max(30, min(body_h, hh - yr - M)); rows = max(0, (body_h - extra_h) // ROW_H)
                 hh = yr + body_h + M
-            IW = ww - 2 * M; g = None
+            IW = ww - 2 * M
             if fit is None:
                 x, y = Kit.clamp(x, y, ww, hh); min_h = yr + extra_h + ROW_H + M
-                try:
-                    g = G.CreateModernGump(x, y, ww, hh, True, min(SIZE_MIN_W, ww), min(min_h, hh), on_resized(w))
-                    safe(lambda: g.SetAlpha(0))
-                except Exception: g = None
-            if g is None: g = G.CreateGump(True, True)
+                g = G.CreateModernGump(x, y, ww, hh, True, min(SIZE_MIN_W, ww), min(min_h, hh), on_resized(w))
+                g.SetAlpha(0)
+            else: g = G.CreateGump(True, True)
             Kit.add_window_frame(g, ww, hh, mouse=False)
             title_room = (Kit.MARGIN + 30 + Kit.text_w(win_title(w).upper()) + 16 + 84 + Kit.DOCK_DX
                           + 35 + Kit.text_w("Settings") + Kit.MARGIN)
@@ -860,27 +820,26 @@ def _module_meters():
                           queue(("settings",)) if ww >= title_room else None, close_tip=close_tip)
             Kit.add_section(g, M, yb, IW, 30); bx = M + 8
             Kit.art_button(g, store, "prev", ART_LEFT, bx, yb + 4, None,
-                           "Show the previous display", on_click=queue(("step", w["id"], -1)))
+                           "Show previous display", on_click=queue(("step", w["id"], -1)))
             Kit.art_button(g, store, "next", Kit.ART_PLAY, bx + 32, yb + 4, None,
-                           "Show the next display", on_click=queue(("step", w["id"], 1)))
+                           "Show next display", on_click=queue(("step", w["id"], 1)))
             mt, _, _, color, mobrows = METRIC[mid]; mx = bx + 68
             pick_cap = mt if mx + 35 + Kit.text_w(mt) + 10 + 35 + 40 <= M + IW - 6 else None
-            Kit.art_button(g, store, "pick", Kit.ART_PAGE, mx, yb + 4, pick_cap,
-                           "Open the display list to pick what this window shows"
+            Kit.art_button(g, store, "pick", Kit.ART_PAGE, mx, yb + 4, pick_cap, "Pick what this window shows"
                            + ("" if pick_cap else " (now: %s)" % mt), on_click=queue(("picker", w["id"])))
             sx = mx + (35 + Kit.text_w(mt) if pick_cap else 30) + 10
             c["seg_room"], c["iw"] = max(20, M + IW - 6 - sx - 35), IW; seg_cap = Kit.fit(seg_caption(w), c["seg_room"])
             c["seg"] = Kit.art_button(g, store, "segs", Kit.ART_PAGE, sx, yb + 4, seg_cap,
-                                      "Open the segment list: the current fight, the whole "
-                                      "session (Overall) or an earlier fight", on_click=queue(("segpick", w["id"])))
+                                      "Pick a segment: current fight, Overall or an earlier fight",
+                                      on_click=queue(("segpick", w["id"])))
             Kit.add_section(g, M, yr, IW, body_h); c["head"] = Kit.add_label(g, "", M + 8, yr + 5, Kit.HUE_INFO)
             follow = "Alt+click: auto-follow (again to stop)"
             if mid in ("session", "big", "gold"): tip = follow if mobrows else None
-            else: tip = "Open this row's details" + (". " + follow if mobrows else "")
+            else: tip = "Show this row's details" + (". " + follow if mobrows else "")
             val_w = min(VAL_W, int(IW * 0.45)); name_w = IW - 12 - val_w - 10
             for i in range(rows):
                 ry = yr + 26 + i * ROW_H; pb = G.CreateGumpSimpleProgressBar(IW - 12, ROW_H - 2, BAR_BG, color, 0, 100)
-                pb.SetPos(M + 6, ry); safe(lambda: pb.SetAcceptMouseInput(False)); g.Add(pb)
+                pb.SetPos(M + 6, ry); pb.SetAcceptMouseInput(False); g.Add(pb)
                 ln = Kit.add_label(g, "", M + 10, ry + 1, Kit.HUE_TEXT)
                 lv = Kit.add_label(g, "", M + IW - 6 - val_w, ry + 1, Kit.HUE_TEXT)
                 slots.append({"bar": pb, "name": ln, "val": lv, "ser": None, "key": None,
@@ -895,20 +854,19 @@ def _module_meters():
                 for i in range(ncol):
                     box = G.CreateGumpColorBox(0.9, color)
                     box.SetRect(gx + i * (GRAPH_COL + 1), base - 1, GRAPH_COL, 1)
-                    safe(lambda: setattr(box, "IsVisible", False)); safe(lambda: box.SetAcceptMouseInput(False))
+                    box.IsVisible = False; box.SetAcceptMouseInput(False)
                     g.Add(box); gcols.append({"box": box, "x": gx + i * (GRAPH_COL + 1), "h": 0})
                 c["gbase"] = base; fy += GRAPH_BLOCK
             Kit.art_button(g, store, "new", Kit.ART_PAGE, M + 8, fy, "New",
-                           "Open another meter window (up to %d)" % MAX_WINDOWS, on_click=queue(("new",)))
+                           "Open another window (up to %d)" % MAX_WINDOWS, on_click=queue(("new",)))
             rx = M + 8 + 35 + Kit.text_w("New") + 14
             Kit.art_button(g, store, "report", Kit.ART_PAGE, rx, fy, "Report",
-                           "Put this display's top %d rows in party chat (in a party, if the "
-                           "Meters settings page says so), else in your journal" % REPORT_ROWS,
+                           "Post the top %d rows to party chat (if set and in a party), else the journal" % REPORT_ROWS,
                            on_click=queue(("report", w["id"])))
             if w["id"] == 0:
                 ry2 = fy + 26 if two_rows else fy
                 Kit.art_button(g, store, "reset", Kit.ART_CLOSE, ww - M - 8 - 35 - Kit.text_w("Reset"),
-                               ry2, "Reset", "Clear every meter and start a new session", on_click=queue(("reset",)))
+                               ry2, "Reset", "Clear all meters; new session", on_click=queue(("reset",)))
         w["x"], w["y"] = Kit.show_window(g, x, y, ww, hh, dock_key(w), w["minimized"] and w["docked"],
                                          on_disposed(w, g), save_windows, w,
                                          {"g": g, "c": c, "store": store, "slots": slots, "vkey": None,
@@ -918,42 +876,37 @@ def _module_meters():
             if Kit.is_open(sub) and not w["minimized"]:
                 info = Kit.scroll_info(sub)
                 if info is not None: sw, sh = int(info["w"]), int(info["h"])
-                else:
-                    sw = int(safe(lambda: sub.GetWidth(), PICK_W) or PICK_W)
-                    sh = int(safe(lambda: sub.GetHeight(), 200) or 200)
-                sx, sy = side_pos(w, sw); Kit.place(sub, sx, sy, sw, sh); safe(lambda: Kit.attach(sub, g))
+                else: sw, sh = int(sub.GetWidth() or PICK_W), int(sub.GetHeight() or 200)
+                sx, sy = side_pos(w, sw); Kit.place(sub, sx, sy, sw, sh); Kit.attach(sub, g)
         refresh_window(w); Kit.dispose(old)
     def on_resized(w):
         def fn(*args):
             w["resize_at"] = time.time(); g = w["g"]
             if w["preview"] or w["fit"] is not None or w["minimized"] or not Kit.is_open(g): return
-            try: same = (int(g.GetWidth()), int(g.GetHeight())) == w["drawn"]
-            except Exception: same = False
-            if not same: w["preview"] = True; safe(lambda: g.SetAlpha(0.55))
+            if (int(g.GetWidth()), int(g.GetHeight())) != w["drawn"]: w["preview"] = True; g.SetAlpha(0.55)
         return fn
     def apply_resize(w):
         g = w["g"]; w["preview"] = False
         if not Kit.is_open(g) or w["minimized"]: return
-        try: gw, gh = int(g.GetWidth()), int(g.GetHeight())
-        except Exception: return
+        gw, gh = int(g.GetWidth()), int(g.GetHeight())
         if w["fit"] is not None:
-            safe(lambda: g.SetAlpha(0))
+            g.SetAlpha(0)
             if (gw, gh) != w["drawn"]: build_window(w)
             return
         drawn = w["drawn"] or (0, 0)
-        if abs(gw - drawn[0]) <= 2 and abs(gh - drawn[1]) <= 2: safe(lambda: g.SetAlpha(0)); return
-        sh = (Kit.screen() or (0, 0))[1]
+        if abs(gw - drawn[0]) <= 2 and abs(gh - drawn[1]) <= 2: g.SetAlpha(0); return
+        sh = Kit.screen()[1]
         if sh > 0: gh = min(gh, sh)
         w["size"] = own_size(gw, gh); build_window(w); save_windows()
     def side_pos(w, width):
-        g = w["g"]; x, y = (g.GetX(), g.GetY()) if Kit.is_open(g) else (w["x"], w["y"])
-        r = safe(lambda: Kit.rect(g)) if Kit.is_open(g) else None
-        if r is not None: x, y = r[0], r[1]
-        sw = (Kit.screen() or (0, 0))[0]; nx = x + ((w.get("drawn") or (W, 0))[0]) + 4
+        g = w["g"]; r = Kit.rect(g) if Kit.is_open(g) else None
+        x, y = (r[0], r[1]) if r is not None else (w["x"], w["y"])
+        sw = Kit.screen()[0]; nx = x + ((w.get("drawn") or (W, 0))[0]) + 4
         if sw and nx + width > sw: nx = max(0, x - width - 4)
         return nx, y
-    def sub_frame(width, hh, title, store, close_key, action):
-        g = G.CreateGump(True, True); Kit.add_window_frame(g, width, hh); Kit.add_section(g, M, M, width - 2 * M, 30)
+    def sub_frame(width, hh, title, store, close_key, action, g=None):
+        if g is None: g = G.CreateGump(True, True)
+        Kit.add_window_frame(g, width, hh); Kit.add_section(g, M, M, width - 2 * M, 30)
         Kit.add_label(g, title, M + 30, M + 7, Kit.HUE_TITLE)
         Kit.art_button(g, store, close_key, Kit.ART_CLOSE, width - M - 54, M + 4, None, "Close", on_click=queue(action))
         return g
@@ -961,7 +914,7 @@ def _module_meters():
     def show_sub(w, slot, g, width, hh):
         x0, y0 = side_pos(w, width)
         Kit.show_window(g, x0, y0, width, hh, None, False, on_sub_disposed(w, slot, g), None, w, {slot: g})
-        safe(lambda: Kit.attach(g, w["g"]))
+        Kit.attach(g, w["g"])
     def build_picker(w):
         drop_sub(w, "picker"); IW = PICK_W - 2 * M; col = (IW - 24) // 2
         hs = [28 + ((len(ms) + 1) // 2) * 22 + 6 for _, ms in GROUPS]; h_win = 28 + 2 * 22 + 6
@@ -978,19 +931,19 @@ def _module_meters():
                             "Show %s in this window" % METRIC[mid][0])
             y += h + Kit.GAP
         Kit.add_section(g, M, y, IW, h_win, "THIS WINDOW"); on = bool(w.get("graph")); state = "on" if on else "off"
-        Kit.add_label(g, Kit.fit("Graph of the last hour under the rows", IW - 36 - Kit.text_w(state)), M + 12, y + 28)
+        Kit.add_label(g, Kit.fit("Last-hour graph", IW - 36 - Kit.text_w(state)), M + 12, y + 28)
         Kit.add_label(g, state, M + IW - 12 - Kit.text_w(state), y + 28, Kit.HUE_GOOD if on else Kit.HUE_INFO)
         Kit.catcher(g, M + 8, y + 26, IW - 16, 20, queue(("graph", w["id"])),
-                    "Show or hide a graph of this display's last hour under the rows (one bar per minute)")
-        Kit.add_label(g, Kit.fit("Export this segment to a text file", IW - 24), M + 12, y + 50)
+                    "Show or hide the last hour under the rows, one bar per minute")
+        Kit.add_label(g, Kit.fit("Export this segment", IW - 24), M + 12, y + 50)
         Kit.catcher(g, M + 8, y + 48, IW - 16, 20, queue(("export", w["id"])),
-                    "Write every display of this segment to %s in the VirtueAssistantSettings folder"
+                    "Write every display to %s in the VirtueAssistantSettings folder"
                     % (EXPORT_FILE.replace("%08X", "<serial>")))
         show_sub(w, "picker", g, PICK_W, hh)
     def build_segpick(w):
         drop_sub(w, "segpick"); IW = PICK_W - 2 * M
         items = [("current", "Current fight" + (" (going on)" if data["cur"] else " (or the last)"), ""),
-                 ("overall", "Overall (the whole session)", fmt_time(time.time() - data["overall"]["start"]))]
+                 ("overall", "Overall (session)", fmt_time(time.time() - data["overall"]["start"]))]
         for h in data["hist"]:
             items.append((h["n"], "#%d  %s" % (h["n"], h["name"]),
                           "%s  %s" % (fmt_time(combat_secs(h)), fmt_num(total(h, "dmg_done")))))
@@ -1001,8 +954,7 @@ def _module_meters():
             cy = y + 28 + i * 22; hue = Kit.HUE_TITLE if val == w["seg"] else Kit.HUE_TEXT
             Kit.add_label(g, Kit.fit(text, IW - 24 - rw - 6), M + 12, cy, hue)
             if right: Kit.add_label(g, right, M + IW - 12 - rw, cy, Kit.HUE_INFO)
-            Kit.catcher(g, M + 8, cy - 2, IW - 16, 20, queue(("seg", w["id"], val)),
-                        "Show this segment in the meter window")
+            Kit.catcher(g, M + 8, cy - 2, IW - 16, 20, queue(("seg", w["id"], val)), "Show this segment")
         show_sub(w, "segpick", g, PICK_W, hh)
     DETAIL_LINES = ("Total", "Share", "Rate", "Times", "Average", "Biggest", "Smallest", "First", "Last")
     def build_detail(w):
@@ -1032,12 +984,10 @@ def _module_meters():
             if v > 0 and h < 1: h = 1
             if h != col["h"]:
                 box = col["box"]
-                try:
-                    if h: Kit.ui_rect(box, col["x"], base - h, GRAPH_COL, h)
-                    if (h > 0) != (col["h"] > 0): box.IsVisible = h > 0
-                except Exception: pass
+                if h: Kit.ui_rect(box, col["x"], base - h, GRAPH_COL, h)
+                if (h > 0) != (col["h"] > 0): box.IsVisible = h > 0
                 col["h"] = h
-        if mid == "session": cap = "No graph for the summary: pick another display"
+        if mid == "session": cap = "No graph for the summary"
         elif top <= 0: cap = "Last hour, per minute: nothing yet"
         else:
             cap = "Last hour, %s per minute: peak %s" % (
@@ -1084,10 +1034,7 @@ def _module_meters():
             else:
                 Kit.set_text(slot["name"], ""); Kit.set_text(slot["val"], ""); prog = (0.0, 1.0)
                 slot["ser"], slot["key"] = None, None
-            if prog != slot["prog"]:
-                slot["prog"] = prog
-                try: slot["bar"].SetProgress(prog[0], prog[1])
-                except Exception: pass
+            if prog != slot["prog"]: slot["prog"] = prog; slot["bar"].SetProgress(prog[0], prog[1])
         refresh_detail(w)
     def refresh_detail(w):
         if not Kit.is_open(w["detail"]): return
@@ -1109,12 +1056,7 @@ def _module_meters():
                 "First": "%s ago" % fmt_time(now - r[4]), "Last": "%s ago" % fmt_time(now - r[5])})
         elif key: vals["Total"] = "nothing in this segment"
         for t in DETAIL_LINES: Kit.set_text(c[t], Kit.fit(vals[t], c["vw"]))
-    def drag_busy():
-        try:
-            if SNAP.drag: return True
-        except Exception: pass
-        try: return SNAP.pressed() is True
-        except Exception: return False
+    def drag_busy(): return bool(SNAP.drag) or SNAP.pressed() is True
     def layout_fit(w):
         def fit(fw, fh, mode):
             new = (int(fw), int(fh)) if (fw is not None and fh is not None) else None
@@ -1126,20 +1068,18 @@ def _module_meters():
         for w in wins:
             g = w["g"]
             if w["minimized"] or w["docked"] or w["resize_at"] or not Kit.is_open(g): continue
-            try: want = HOST.layout_slot(dock_key(w))
-            except Exception: continue
+            want = HOST.layout_slot(dock_key(w))
             if want is not None:
                 want = (int(want[0]), int(want[1])); fit = w["fit"]
                 if fit is None or abs(fit[0] - want[0]) > 4 or abs(fit[1] - want[1]) > 4:
                     w["fit"] = want; build_window(w); continue
                 if w["drawn"] is None or w["drawn"][0] != max(120, fit[0]): build_window(w); continue
-                try: real = (int(g.GetWidth()), int(g.GetHeight()))
-                except Exception: real = None
-                if real is not None and (abs(real[0] - w["drawn"][0]) > 2 or abs(real[1] - w["drawn"][1]) > 2):
+                real = (int(g.GetWidth()), int(g.GetHeight()))
+                if abs(real[0] - w["drawn"][0]) > 2 or abs(real[1] - w["drawn"][1]) > 2:
                     w["misfit"] = w.get("misfit", 0) + 1
                     if w["misfit"] in (2, 6, 20): build_window(w)
                 else: w["misfit"] = 0
-            elif w["fit"] is not None and not safe(lambda: HOST.layout_holds(dock_key(w)), False):
+            elif w["fit"] is not None and not HOST.layout_holds(dock_key(w)):
                 w["fit"] = None; build_window(w)
     def dock_win(w):
         hooks = Kit.dock_hooks(win_title(w), TRAY_ICON, w, w, queue(("redraw", w["id"])), fit=layout_fit(w))
@@ -1154,11 +1094,6 @@ def _module_meters():
             sers = recap["rows"]
             if i < len(sers) and sers[i] and Follow.alt_held(): queue(("follow", sers[i]))()
         return handler
-    def save_recap_pos(): Kit.save_pos(RECAP_POS_KEY, recap["g"])
-    def close_recap():
-        g, recap["g"] = recap["g"], None
-        if Kit.is_open(g): Kit.save_pos(RECAP_POS_KEY, g)
-        Kit.dispose(g); recap["rows"] = []
     def recap_hp_at(hp, t):
         cur = hp[0] if hp else (t, 0, 0)
         for h in hp:
@@ -1168,16 +1103,13 @@ def _module_meters():
     def build_recap():
         rc = st["recap"]
         if rc is None: return
-        old = recap["g"]; recap["g"] = None; IW = RECAP_W - 2 * M; rows = rc["rows"][-RECAP_ROWS:]; strip_h = 30
+        IW = RECAP_W - 2 * M; rows = rc["rows"][-RECAP_ROWS:]; strip_h = 30
         sh = 30 + 20 + strip_h + 8 + max(1, len(rows)) * 20 + 2 * 18 + 6; hh = M + 30 + Kit.GAP + sh + M
-        if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-        else:
-            dx, dy = side_pos(wins[0], RECAP_W) if wins else (200, 200)
-            x, y = Kit.load_pos(RECAP_POS_KEY, (dx, dy), (RECAP_W, hh))
-        g = sub_frame(RECAP_W, hh, "DEATH RECAP", ({}, {}), "close", ("recap_close",)); y0 = M + 30 + Kit.GAP
+        g, store, _c = recapw.begin(RECAP_W, hh, side_pos(wins[0], RECAP_W) if wins else None)
+        sub_frame(RECAP_W, hh, "DEATH RECAP", store, "close", ("recap_close",), g); y0 = M + 30 + Kit.GAP
         Kit.add_section(g, M, y0, IW, sh, "LAST %d SECONDS  (damage you took)" % int(RECAP_SECS)); n = len(rc["rows"])
-        head = "Died %s:  %s damage in %d hit%s" % (
-            time.strftime("%H:%M:%S", time.localtime(rc["t"])), fmt_num(rc["total"]), n, "" if n == 1 else "s")
+        head = "Died %s:  %s damage in %s" % (
+            time.strftime("%H:%M:%S", time.localtime(rc["t"])), fmt_num(rc["total"]), Kit.count(n, "hit"))
         Kit.add_label(g, Kit.fit(head, IW - 20), M + 10, y0 + 26, Kit.HUE_TEXT); ys = y0 + 26 + 20
         Kit.add_label(g, "HP", M + 10, ys + (strip_h - 16) // 2, Kit.HUE_INFO); sx0 = M + 10 + Kit.text_w("HP") + 8
         cw = max(2, (M + IW - 10 - sx0) // RECAP_COLS); t0 = rc["t"] - RECAP_SECS
@@ -1188,7 +1120,7 @@ def _module_meters():
                 box = G.CreateGumpColorBox(0.9, "#c22d2d")
                 box.SetRect(sx0 + i * cw, ys + strip_h - bh, max(1, cw - 1), bh); g.Add(box)
         yr = ys + strip_h + 8; sers = []
-        if not rows: Kit.add_label(g, "No damage numbers were seen in that time.", M + 10, yr, Kit.HUE_INFO)
+        if not rows: Kit.add_label(g, "No damage seen.", M + 10, yr, Kit.HUE_INFO)
         who_x, who_w = M + 60, IW - 166
         for i, (t, dmg, who, ser, hits, hmax) in enumerate(rows):
             ry = yr + i * 20; Kit.add_label(g, "-%.1fs" % max(0.0, rc["t"] - t), M + 10, ry, Kit.HUE_INFO)
@@ -1200,78 +1132,65 @@ def _module_meters():
                             "Alt+click: auto-follow (again to stop)")
         for i, line in enumerate(RECAP_HINT):
             Kit.add_label(g, Kit.fit(line, IW - 20), M + 10, y0 + sh - 40 + i * 18, Kit.HUE_INFO)
-        Kit.show_window(g, x, y, RECAP_W, hh, None, False, on_sub_disposed(recap, "g", g), save_recap_pos, recap,
-                        {"g": g, "rows": sers})
-        Kit.dispose(old)
+        recapw.end(g, {"rows": sers})
+    recapw = Kit.Window(KEY, TITLE, None, recap, build_recap, RECAP_POS_KEY, cleanup=cleanup, names=None, lock=False,
+                        owner=False, clear={"rows": []})
     def report(w):
         mid = w["metric"]; seg = seg_for(w); head, rows = view(mid, seg, REPORT_ROWS)
         title = "%s (%s)" % (METRIC[mid][0], seg_caption(w))
         parts = ["%d. %s %s" % (i + 1, r[0], r[2]) for i, r in enumerate(rows[:REPORT_ROWS])]
-        in_party = bool(safe(lambda: API.GetPartyMemberSerials(), []) or [])
-        if settings["party"] and in_party:
-            body = "; ".join(parts) or "nothing yet"; msg = "%s: %s - %s" % (title, "  ".join(head[:2]), body)
+        if settings["party"] and API.GetPartyMemberSerials():
+            body = "; ".join(parts) or "nothing yet"; msg = "%s: %s; %s" % (title, "  ".join(head[:2]), body)
             lines = [msg] if len(msg) <= PARTY_MSG_MAX else ["%s: %s" % (title, "  ".join(head[:2])), body]
             for line in lines:
                 if len(line) > PARTY_MSG_MAX: line = line[:PARTY_MSG_MAX - 2] + ".."
-                safe(lambda: API.PartyMsg(line))
+                API.PartyMsg(line)
         else:
             say("%s: %s." % (title, "  ".join(head)), Kit.HUE_INFO)
             for p in parts or ["nothing yet"]: say("   %s." % p, Kit.HUE_TEXT)
-    FIELDS = (("idle", "A fight ends after this much quiet:",
-               "No damage dealt or taken for this long ends the current fight", "s"),
-              ("engage", "Count damage on what you attacked or targeted within:",
-               "Damage on a mobile you attacked or targeted this recently counts as yours", "s"),
-              ("history", "Earlier fights kept in the segment list:",
-               "How many finished fights the segment list remembers", "fights"),
-              ("min_heal", "Ignore HP rises smaller than:",
-               "HP rises below this count as regeneration, not healing", "HP"), ("rows", "Rows in each meter window:",
-               "Bar rows in a meter window of its own size; changing it undoes corner drags", "rows"))
-    CHECKS = (("rank", "Number the rows (1. 2. 3. ...)", "Put a rank number before each row's name"),
-              ("pct", "Show each row's share of the total (%)",
-               "Add the row's percentage of the display's total after its value"),
-              ("party", "Report to party chat when you are in a party", "Unticked, Report always goes to your journal"),
-              ("scan", "Watch the backpack: items gained, reagents and ammo used",
-               "Open your backpack once after logging in so the client knows what is in it"),
-              ("travel", "Count tiles walked and recalls / gates",
-               "Fill the Travel display: tiles walked, and recalls, gates and teleports"),
+    FIELDS = (("idle", "A fight ends after quiet of:", "No damage for this long ends the fight", "s"),
+              ("engage", "Your targets count for:", "Damage on what you attacked or targeted this recently is yours",
+               "s"), ("history", "Earlier fights kept:", "Finished fights in the segment list", "fights"),
+              ("min_heal", "Ignore HP rises under:", "Smaller rises count as regeneration", "HP"),
+              ("rows", "Rows per window:", "For windows at their own size; undoes corner drags", "rows"))
+    CHECKS = (("rank", "Number the rows", "A rank before each name"),
+              ("pct", "Show each row's share (%)", "Percentage of the total after the value"),
+              ("party", "Report to party chat in a party", "Unticked, Report goes to your journal"),
+              ("scan", "Watch the backpack (loot, reagents, ammo)",
+               "Open your backpack once after login so the client knows its contents"),
+              ("travel", "Count tiles walked and recalls / gates", "Fills the Travel display"),
               ("recap", "Show a death recap when you die",
-               "A window with the last %d seconds of damage you took: who, how much, and "
-               "your HP falling" % int(RECAP_SECS)))
-    PCT_HINT = ("Pets' and strangers' HP come as a percentage, so their healing is a \"(%)\" row outside the total.")
-    SPOT_ROW = 24
+               "The last %d s of damage taken: who, how much, your HP" % int(RECAP_SECS)))
+    PCT_HINT = "Pets' and strangers' healing is a \"(%)\" row outside the total."; SPOT_ROW = 24
     def page_table(w):
         return (("COUNTING  (fights, healing, rows)", [("num",) + r + LIMITS[r[0]] for r in FIELDS],
                  {"align": True, "pad": 4}), ("SHOW AND TRACK", [("check",) + r for r in CHECKS] + [
                     ("note", Kit.fit(PCT_HINT, w - 28), {"ndy": 2, "h": 18})], {"pad": 4}),
-                ("GOLD BY PLACE  (named spots, per character)",
+                ("GOLD BY PLACE  (per character)",
                  (("custom", 28 + max(1, len(spots)) * SPOT_ROW, draw_spots),), {"pad": 4}), ("TOOLS", (
-                    ("buttons", (("new", Kit.ART_PAGE, "New meter window",
-                                  "Open another meter window (up to %d)" % MAX_WINDOWS),
-                                 ("recap", Kit.ART_PAGE, "Last death recap",
-                                  "Show the recap of your last death this session again"),
-                                 ("own_size", Kit.ART_CLOSE, "Reset sizes", "Give every meter window out of a zone "
-                                  "its own size again (Rows above, %d px wide)" % W))),
+                    ("buttons", (("new", Kit.ART_PAGE, "New meter window", "Open one more (up to %d)" % MAX_WINDOWS),
+                                 ("recap", Kit.ART_PAGE, "Last death recap", "Show it again"),
+                                 ("own_size", Kit.ART_CLOSE, "Reset sizes",
+                                  "Give windows outside zones their own size (Rows above, %d px wide)" % W))),
                     ("buttons", (("export", Kit.ART_OK, "Export",
-                                  "Write every display of the first meter window's segment to %s next to "
-                                  "Virtue Assistant" % EXPORT_FILE.replace("%08X", "<serial>")),
-                                 ("reset", Kit.ART_CLOSE, "Reset all meters",
-                                  "Clear every meter and start a new session"))),
+                                  "Write the first window's segment to %s in the VirtueAssistantSettings folder"
+                                  % EXPORT_FILE.replace("%08X", "<serial>")),
+                                 ("reset", Kit.ART_CLOSE, "Reset all meters", "Clear everything; new session"))),
                     ("note", Kit.fit("Damage numbers: " + feed["kind"], w - 28), {"key": "feed", "h": 26})),
                  {"pad": 4}))
     def draw_spots(f, x, y):
         g, c, w, store = f.g, f.c, f.w, f.store; Kit.add_label(g, "Name:", x + 12, y + 3)
         nx = x + 12 + Kit.text_w("Name:") + 8
         c["spot_name"] = Kit.with_tip(Kit.add_textbox(g, "", nx, y, 140, numbers=False),
-                                      "The new spot's name (up to %d letters)" % SPOT_NAME_MAX)
+                                      "Spot name (up to %d letters)" % SPOT_NAME_MAX)
         rx = nx + 140 + 12; Kit.add_label(g, "Radius:", rx, y + 3); rx += Kit.text_w("Radius:") + 8
         c["spot_radius"] = Kit.with_tip(Kit.add_textbox(g, str(page.get("radius", SPOT_RADIUS)), rx, y, 44),
-                                        "Tiles round you that belong to the spot (%d-%d)" % SPOT_RADIUS_LIMITS)
+                                        "Tiles round you (%d-%d)" % SPOT_RADIUS_LIMITS)
         rx += 44 + 10; Kit.add_label(g, "tiles", rx, y + 3, Kit.HUE_INFO)
         Kit.art_button(g, store, "spot_add", Kit.ART_OK, rx + Kit.text_w("tiles") + 12, y - 2,
-                       "Name this spot", "Name where you stand: gold gained within the radius "
-                       "counts for this spot (a known guarded town comes first)")
+                       "Name this spot", "Gold gained within the radius counts here (a guarded town comes first)")
         if not spots:
-            Kit.add_label(g, Kit.fit("No spots yet. Stand where you farm, type a name, then click Name this spot.",
+            Kit.add_label(g, Kit.fit("No spots yet: stand where you farm, type a name, click Name this spot.",
                                    w - 28), x + 12, y + 28 + 3, Kit.HUE_INFO)
         rm_w = Kit.pic_size(Kit.ART_CLOSE[0])[0] or 30
         c["spot_rm"] = [("spot_rm%d" % i, sp[0]) for i, sp in enumerate(spots)]
@@ -1279,52 +1198,36 @@ def _module_meters():
             ry = y + 28 + i * SPOT_ROW; where = "facet %d at %d, %d, %d tiles round" % (sp[3], sp[1], sp[2], sp[4])
             ww_ = Kit.text_w(where); Kit.add_label(g, Kit.fit(sp[0], w - 24 - rm_w - 18 - ww_ - 12), x + 12, ry + 3)
             Kit.add_label(g, where, x + w - 12 - rm_w - 12 - ww_, ry + 3, Kit.HUE_INFO)
-            Kit.art_button(g, store, "spot_rm%d" % i, Kit.ART_CLOSE, x + w - 12 - rm_w, ry,
-                           None, "Remove the spot " + sp[0])
-    def config_height(w): return Kit.Form.height(page_table(w), w)
-    def build_config(g, x, y, w):
-        f = Kit.Form(g, x, y, w, settings, page_table(w))
-        page.update({"f": f, "c": f.c, "store": f.store, "unread": False, "next_read": 0.0, "w": w})
+            Kit.art_button(g, store, "spot_rm%d" % i, Kit.ART_CLOSE, x + w - 12 - rm_w, ry, None, "Remove " + sp[0])
     CONFIG_READ_EVERY = 0.2
-    def poll_config(force=False):
-        c = page["c"]
-        if c is None: return
-        store = page["store"]
+    def page_clicks(f):
+        c, store = f.c, f.store
         for k in ("reset", "new"):
             if Kit.was_clicked(store, k): queue((k,))()
         if Kit.was_clicked(store, "own_size"):
             if st["active"]: queue(("own_size",))()
             else: forget_sizes_off()
-        off = not st["active"]
-        for key, action in (("export", ("export", 0)), ("recap", ("recap",))):
-            if Kit.was_clicked(store, key):
-                if off: say("turn Meters on first (the Modules tab).", Kit.HUE_INFO)
-                else: queue(action)()
+        todo = [a for k, a in (("export", ("export", 0)), ("recap", ("recap",))) if Kit.was_clicked(store, k)]
         if Kit.was_clicked(store, "spot_add"):
-            name = str(safe(lambda: c["spot_name"].Text, "") or "")
-            radius = Kit.read_int(c["spot_radius"], SPOT_RADIUS, *SPOT_RADIUS_LIMITS); page["radius"] = radius
-            if off: say("turn Meters on first to name a spot (the Modules tab).", Kit.HUE_INFO)
-            else: queue(("spot_add", name, radius))()
+            page["radius"] = Kit.read_int(c["spot_radius"], SPOT_RADIUS, *SPOT_RADIUS_LIMITS)
+            todo.append(("spot_add", str(c["spot_name"].Text or ""), page["radius"]))
+        for action in todo:
+            if st["active"]: queue(action)()
+            else: say("turn Meters on first.", Kit.HUE_INFO)
         for key, name in c["spot_rm"]:
             if Kit.was_clicked(store, key):
-                if off: remove_spot(name)
-                else: queue(("spot_rm", name))()
-        now = time.time()
-        if not force and now < page.get("next_read", 0.0): page["unread"] = True; return
-        page["next_read"], page["unread"] = now + CONFIG_READ_EVERY, False
-        Kit.set_text(c["feed"], Kit.fit("Damage numbers: " + feed["kind"], page.get("w", 600) - 28))
-        new = page["f"].read()
-        if new != settings:
-            rebuild = new["rows"] != settings["rows"]; settings.update(new); save_settings()
-            del data["hist"][settings["history"]:]
-            if rebuild:
-                if st["active"]:
-                    for w in wins: w["size"] = None; queue(("redraw", w["id"]))()
-                else: forget_sizes_off()
-            st["next_ui"] = 0.0
-    def config_closed():
-        if page.get("unread"): poll_config(True)
-        page["c"] = None
+                if st["active"]: queue(("spot_rm", name))()
+                else: remove_spot(name)
+    def show_feed(f, new): Kit.set_text(f.c["feed"], Kit.fit("Damage numbers: " + feed["kind"], f.w - 28))
+    def on_change(old, new):
+        del data["hist"][new["history"]:]
+        if new["rows"] != old["rows"]:
+            if st["active"]:
+                for w in wins: w["size"] = None; queue(("redraw", w["id"]))()
+            else: forget_sizes_off()
+        st["next_ui"] = 0.0
+    cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=show_feed, clicks=page_clicks,
+                   every=CONFIG_READ_EVERY)
     def _start():
         st.update({"shutting": False, "active": True, "queue": [], "last_tick": time.time(),
                    "next_ui": 0.0, "next_friends": 0.0, "next_scan": 0.0, "me": None,
@@ -1333,18 +1236,18 @@ def _module_meters():
                    "casts": [], "recap": None, "recap_show": False, "to_write": [],
                    "redraw_wait": set(), "present": [], "pscan": None, "pack_cand": None, "my_ser": None,
                    "my_name": "", "next_name": 0.0, "fnames": None})
-        st["jr"] = safe(Journal.reader); load_settings(); reset_data(); load_windows(); load_spots()
+        st["jr"] = Journal.reader(); load_settings(); reset_data(); load_windows(); load_spots()
+        cleanup.add(unhook_damage)
         for w in wins:
             w["shutting"] = w["docked"] = False
-            if safe(lambda: HOST.dock_wanted(dock_key(w)), False): w["minimized"] = True
-        hook_events()
+            if HOST.dock_wanted(dock_key(w)): w["minimized"] = True
+        if not st["hooked"]:
+            st["hooked"] = True
+            with Kit.quiet: API.Events.ObjectUsed(on_used); API.Events.OnBuffAdded(on_buff)
         if feed["handler"] is None: del jobs[:]; jobs.append(hook_damage)
         for w in wins: build_window(w); dock_win(w)
     def _thread_tick():
-        while jobs and not st["shutting"]:
-            job = jobs.pop(0)
-            try: job()
-            except Exception: pass
+        while jobs and not st["shutting"]: jobs.pop(0)()
         if st["to_write"]: write_files()
     def _thread_wanted(): return bool(jobs) or bool(st["to_write"])
     def _tick():
@@ -1361,14 +1264,13 @@ def _module_meters():
                 if w["id"] in ids: build_window(w)
             save_windows()
         for w in wins:
-            if w["resize_at"] and now - w["resize_at"] >= RESIZE_SETTLE \
-                    and not safe(lambda: SNAP.pressed(), False) and not drag_busy():
+            if w["resize_at"] and now - w["resize_at"] >= RESIZE_SETTLE and not drag_busy():
                 w["resize_at"] = 0.0; apply_resize(w)
         if now >= st.get("next_zone", 0.0): st["next_zone"] = now + ZONE_EVERY; check_zones()
         try: s = sample()
         except Exception as ex:
             s = None; msg = str(ex)[:120]
-            if msg != st.get("err"): st["err"] = msg; say("couldn't read the client this time (%s)." % msg, Kit.HUE_BAD)
+            if msg != st.get("err"): st["err"] = msg; say("couldn't read the client (%s)." % msg, Kit.HUE_BAD)
         read_journal(now)
         if s: process(s, now)
         track_place(now, dt)
@@ -1382,11 +1284,12 @@ def _module_meters():
                 if not w["docked"]: refresh_window(w)
     def do_action(action):
         kind = action[0]
-        w = win_by_id(action[1]) if len(action) > 1 and isinstance(action[1], int) and kind != "follow" else None
+        w = (next((x for x in wins if x["id"] == action[1]), None)
+             if len(action) > 1 and isinstance(action[1], int) and kind != "follow" else None)
         if kind == "settings": HOST.show_settings(KEY)
         elif kind == "follow": Follow.toggle(action[1], TITLE)
         elif kind == "new":
-            if len(wins) >= MAX_WINDOWS: say("%d windows is the most." % MAX_WINDOWS, Kit.HUE_INFO); return
+            if len(wins) >= MAX_WINDOWS: say("%d windows at most." % MAX_WINDOWS, Kit.HUE_INFO); return
             base = wins[-1]; g = base["g"]; bx, by = (g.GetX(), g.GetY()) if Kit.is_open(g) else (base["x"], base["y"])
             nid = max(x["id"] for x in wins) + 1; used = set(x["metric"] for x in wins)
             metric = next((m for m in ORDER if m not in used), DEFAULT_METRIC)
@@ -1397,13 +1300,13 @@ def _module_meters():
                 if had and ow["fit"] is None and Kit.is_open(ow["g"]): build_window(ow)
             save_windows()
         elif kind == "reset":
-            reset_data(); st["next_ui"] = 0.0; say("every meter cleared; a new session starts now.", Kit.HUE_GOOD)
+            reset_data(); st["next_ui"] = 0.0; say("all meters cleared; new session.", Kit.HUE_GOOD)
         elif kind == "spot_add": add_spot(action[1], action[2])
         elif kind == "spot_rm": remove_spot(action[1])
         elif kind == "recap":
             if st["recap"] is None: say("no death this session.", Kit.HUE_INFO)
             else: build_recap()
-        elif kind == "recap_close": close_recap()
+        elif kind == "recap_close": recapw.close()
         elif w is None: return
         elif kind == "graph":
             w["graph"] = not w.get("graph"); build_window(w); dock_win(w)
@@ -1438,18 +1341,15 @@ def _module_meters():
         elif kind == "report": report(w)
     def _stop():
         st["shutting"], st["active"], st["jr"] = True, False, None; del jobs[:]; save_windows(); save_settings()
-        unhook_damage(); close_recap()
+        cleanup.close()
         for w in list(wins): close_window(w, False)
     load_settings(); load_spots(); reset_data()
     return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-            "thread_wanted": _thread_wanted, "config_height": config_height, "build_config": build_config,
-            "poll_config": poll_config, "config_closed": config_closed}
+            "thread_wanted": _thread_wanted, "config_height": cfg.height, "build_config": cfg.build,
+            "poll_config": cfg.poll, "config_closed": cfg.closed}
 
 
-if "HOST" in globals() and hasattr(globals()["HOST"], "add"):
-    HOST.add("meters", "Meters", "Damage, healing, loot and gold meters, per fight or session", _module_meters, 0.25,
-             category="Extras")
-else:
+if "HOST" not in globals():
     import API
-    API.SysMsg("Meters is a Virtue Assistant module and can't run on its own. "
-               "Run Virtue Assistant instead; it loads this file.", 33)
+    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("meters", "Meters", "Damage, healing, loot and gold meters", _module_meters, 0.25, category="Extras")

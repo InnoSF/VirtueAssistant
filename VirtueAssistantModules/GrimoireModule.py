@@ -20,7 +20,7 @@ def _module_grimoire():
     COL_ROW     = "#C8B070"; ROW_A = 0.05
     TEXT_HUES = {COL_TEXT: Kit.HUE_TEXT, COL_HEAD: Kit.HUE_TITLE, COL_DIM: Kit.HUE_INFO,
                  COL_MUTED: Kit.HUE_INFO, COL_EMPTY: Kit.HUE_BAD}
-    COL_BG      = "#17110C"; gump = None
+    gump = None
     SPELL_DESC = ("Lowers the target's Dexterity for a time.|Conjures a random piece of food into your pack.|Lowers "
                   "the target's Intelligence for a time.|Restores a small amount of the target's health.|Strikes the "
                   "target with a minor bolt of magic.|Lets the target see clearly in darkness.|Wards you with armor "
@@ -70,47 +70,33 @@ def _module_grimoire():
     frame = new_layer(); pages = {}; tgt = frame; row_bgs = {}; tab_marks = {}; tab_parts = {}
     click_state = {"key": None, "t": 0.0, "selected": None}; say = Kit.sayer(TITLE)
     def norm(s): s = re.sub(r"[^a-z]", "", (s or "").lower()); return s.replace("summon", "") if "elemental" in s else s
-    def items_in_pack(fresh=False):
-        try: return HOST.pack_items(deep=True, max_age=0.0 if fresh else 0.5) or []
-        except Exception: return []
-    HAND_LAYERS = (("OneHanded", "TwoHanded"), ("onehanded", "twohanded")); _hands = {"layers": None}
+    def items_in_pack(fresh=False): return HOST.pack_items(deep=True, max_age=0.0 if fresh else 0.5)
     def held_items():
-        out = []; pairs = (_hands["layers"],) if _hands["layers"] else HAND_LAYERS
-        for pair in pairs:
-            for layer in pair:
-                try: it = API.FindLayer(layer)
-                except Exception: it = None
-                if it: out.append(it); _hands["layers"] = pair
-        try: out += list(API.ItemsInContainer(API.Player.Serial, False) or [])
-        except Exception: pass
-        seen, items = set(), []
-        try: pack = API.Backpack
-        except Exception: pack = None
+        out = [API.FindLayer("OneHanded"), API.FindLayer("TwoHanded")]
+        out += list(API.ItemsInContainer(API.Player.Serial) or ()); seen, items, pack = set(), [], API.Backpack
         for it in out:
-            if not it: continue
-            s = it.Serial
-            if s not in seen and s != pack: seen.add(s); items.append(it)
+            if it and it.Serial not in seen and it.Serial != pack: seen.add(it.Serial); items.append(it)
         return items
     def load_rb_types():
-        raw = API.GetPersistentVar("Grimoire_RunebookTypes", "", API.PersistentVar.Char) or ""; types = set()
-        for part in raw.split(","):
+        types = set()
+        for part in Kit.get_var("Grimoire_RunebookTypes").split(","):
             try: g, h = part.split(":"); types.add((int(g, 16), int(h, 16)))
             except ValueError: pass
         return types
     rb_types = load_rb_types(); rb_seen = set()
-    def is_runebook(it): return (it.Graphic, it.Hue) in rb_types or is_runebook_v(it.Graphic, it.Hue, it.Name)
+    def is_runebook(it): return is_runebook_v(it.Graphic, it.Hue, it.Name)
     def is_runebook_v(g, h, name):
         if (g, h) in rb_types: return True
         name = (name or "").lower()
         if "rune" in name and "book" in name: return True
         if "spellbook" in name: return False
         if g in SPELLBOOK_GRAPHICS and h == 0x0461: return True
-        return g == 0x22C5 and g not in SPELLBOOK_GRAPHICS
+        return g == 0x22C5
     def is_spellbook(it): return it.Graphic in SPELLBOOK_GRAPHICS and not is_runebook(it)
     def find_spellbook():
         books = [it for it in held_items() + items_in_pack() if is_spellbook(it)]
         for b in books:
-            if safe(lambda: len(list(API.GetSpellsInSpellbook(b.Serial) or [])) > 0, False): return b.Serial
+            if list(API.GetSpellsInSpellbook(b.Serial) or ()): return b.Serial
         return books[0].Serial if books else 0
     def close_spellbook_window(serial):
         closed = False
@@ -122,9 +108,7 @@ def _module_grimoire():
                 except Exception: pass
         except Exception: pass
         return closed
-    def spells_key():
-        try: return "spells_%08X" % int(API.Player.Serial)
-        except Exception: return "spells"
+    def spells_key(): return "spells_%08X" % int(API.Player.Serial)
     def load_known_spells(force=False):
         if not spellbook_serial: return None
         names = list(API.GetSpellsInSpellbook(spellbook_serial) or [])
@@ -159,9 +143,6 @@ def _module_grimoire():
     def count_entry(graphic, lbl, n, owned=True):
         return [graphic, lbl, count_text(n), TEXT_HUES[COL_TEXT if owned else COL_MUTED],
                 TEXT_HUES[COL_EMPTY if owned else COL_MUTED]]
-    def set_label_hue(lbl, hue):
-        try: lbl.Hue = hue; return True
-        except Exception: return False
     def scroll_flags(totals): return (totals.get(RECALL_SCROLL, 0) > 0, totals.get(GATE_SCROLL, 0) > 0)
     def refresh_counts():
         if not frame["counts"] and not any(pg["counts"] for pg in pages.values()): return
@@ -170,8 +151,7 @@ def _module_grimoire():
         for entry in entries:
             graphic, lbl, last = entry[0], entry[1], entry[2]; n = totals.get(graphic, 0); text = count_text(n)
             if text == last: continue
-            if (n == 0) != (last == "0"):
-                if not set_label_hue(lbl, entry[3] if n else entry[4]): st["dirty"] = True
+            if (n == 0) != (last == "0"): lbl.Hue = entry[3] if n else entry[4]
             set_label_text(lbl, text); entry[2] = text
         if changed: refresh_castable()
         flags = scroll_flags(totals); shown = page_key(st["tab"])
@@ -184,7 +164,7 @@ def _module_grimoire():
     def report_books():
         books = [it for it in held_items() + items_in_pack() if it.Graphic in BOOKISH
                  or "book" in (it.Name or "").lower()]
-        if not books: say("no books found in your backpack or hands.", Kit.HUE_BAD); return
+        if not books: say("no books in your pack or hands.", Kit.HUE_BAD); return
         say("books you carry (graphic / hue / name / kind):", Kit.HUE_INFO)
         for it in books:
             kind = "runebook" if is_runebook(it) else ("spellbook" if is_spellbook(it) else "?")
@@ -200,8 +180,7 @@ def _module_grimoire():
         it = API.FindItem(serial)
         if not it: say("that isn't an item.", Kit.HUE_BAD); return False
         rb_types.add((it.Graphic, it.Hue))
-        API.SavePersistentVar("Grimoire_RunebookTypes", ",".join("%X:%X" % t for t in sorted(rb_types)),
-                              API.PersistentVar.Char)
+        Kit.put_var("Grimoire_RunebookTypes", ",".join("%X:%X" % t for t in sorted(rb_types)))
         say("runebooks are graphic 0x%04X, hue 0x%04X; saved." % (it.Graphic, it.Hue), Kit.HUE_GOOD); return True
     def _book_vals(items):
         out = []
@@ -407,9 +386,6 @@ def _module_grimoire():
         changed = old != (rune_cache.get(serial), book_charges.get(serial))
         if changed: rekey_favs(serial); lists["ver"] += 1
         return changed
-    def player_key():
-        try: return "%08X" % int(API.Player.Serial)
-        except Exception: return None
     def resolve(serial, index, name=None, taken=None):
         lst = rune_cache.get(serial)
         if not lst: return None
@@ -444,8 +420,8 @@ def _module_grimoire():
             i = resolve(serial, last[1], last[2])
             if i is not None and i != last[1]: favs["last"] = (serial, i, last[2], last[3]); favs["save_last"] = True
     def load_favs():
-        who = player_key()
-        if who is None or who == favs["owner"]: return
+        who = "%08X" % int(API.Player.Serial)
+        if who == favs["owner"]: return
         if favs["save"] or favs["save_last"]: save_favs()
         lst = []; parts = load_value("favs_" + who).split(";")
         if parts and parts[0] == "v1":
@@ -510,21 +486,16 @@ def _module_grimoire():
         def look():
             gid = API.HasGump()
             if gid and (gid == gump_id or gid != before): return ("gump", gid)
-            book = API.FindItem(serial)
-            try:
-                if book and book.GetContainerGump(): return ("container", None)
-            except Exception: pass
-            return None
+            book = API.FindItem(serial); return ("container", None) if book and book.GetContainerGump() else None
         result = (None, "double-clicking the book opened nothing within 3 seconds"); deadline = time.time() + 3.0
-        while time.time() < deadline and HOST.idle(0.05):
-            seen = Kit.on_client(look)
-            if seen is not None: result = seen; break
-        API.ConfigNextGump()
+        try:
+            while time.time() < deadline and HOST.idle(0.05):
+                seen = Kit.on_client(look)
+                if seen is not None: result = seen; break
+        finally: API.ConfigNextGump()
         if (result[0] is None and Kit.on_client(lambda: len(list(API.ItemsInContainer(serial) or [])))):
             result = ("container", None)
-        if result[0] == "gump" and result[1] != gump_id:
-            say("the runebook gump ID is 0x%08X (set RUNEBOOK_GUMP_ID to this)." % result[1], Kit.HUE_INFO)
-            gump_id = result[1]
+        if result[0] == "gump": gump_id = result[1]
         return result
     def rune_label(rune_serial):
         def item_name(): it = API.FindItem(rune_serial); return ((it.Name if it else "") or "").strip()
@@ -553,16 +524,11 @@ def _module_grimoire():
             if not name or "unmarked" in name.lower(): continue
             dests.append({"name": name, "slot": None, "button": None, "rune": rune})
         def close():
-            try:
-                book = API.FindItem(serial); g = book.GetContainerGump() if book else None
-                if g: g.Dispose()
-            except Exception: pass
+            book = API.FindItem(serial); g = book.GetContainerGump() if book else None
+            if g: g.Dispose()
         Kit.on_client(close); return sorted(dests, key=lambda d: d["name"].lower())
     def gump_text(gid):
-        def read():
-            g = API.GetGump(gid)
-            try: return ((g.PacketGumpText or "") if g else ""), None
-            except Exception as ex: return "", ex
+        def read(): g = API.GetGump(gid); return (g.PacketGumpText or "") if g else ""
         return Kit.on_client(read)
     def read_runebook(serial):
         rune_errors.pop(serial, None); kind, gid = open_book(serial)
@@ -581,9 +547,8 @@ def _module_grimoire():
                                           % (serial, gid, API.HasGump(), "\n".join(describe_items(serial))
                                              or "  (none known)")))
             return None, None
-        raw, ex = gump_text(gid)
-        if not raw: HOST.idle(0.1); raw, ex = gump_text(gid)
-        if ex is not None: rune_errors[serial] = "Couldn't read the book's window (%s)." % ex
+        raw = gump_text(gid)
+        if not raw: HOST.idle(0.1); raw = gump_text(gid)
         API.CloseGump(gid); dests = extract_destinations(raw) if raw else []
         if not dests:
             rune_errors.setdefault(serial, "The book's window didn't match any known layout.")
@@ -596,7 +561,7 @@ def _module_grimoire():
             return dests, None
         return dests, extract_charges(raw)
     def note_open_gump(book_serial, gid):
-        raw, _ = gump_text(gid)
+        raw = gump_text(gid)
         if not raw: return
         dests = extract_destinations(raw)
         if dests and store_book(book_serial, dests, extract_charges(raw)): Kit.on_client(lambda: drop_page(book_serial))
@@ -615,23 +580,14 @@ def _module_grimoire():
                                            "gate from this", "travel from this", "location is blocked",
                                            "too encumbered", "heat of battle", "doth not appear to work",
                                            "is not marked", "not yet marked")
-    def item_amount(it):
-        try: return max(1, int(it.Amount or 0))
-        except Exception: return 1
+    def item_amount(it): return max(1, int(it.Amount or 0))
     def trip_look(serials):
         def look():
-            up, n, xy = False, 0, None
-            try: up = bool(API.HasTarget("any"))
-            except Exception: pass
-            for s in serials:
-                it = API.FindItem(s)
-                if it: n += item_amount(it)
-            try: xy = (int(API.Player.X), int(API.Player.Y))
-            except Exception: pass
-            return up, n, xy
+            n = sum(item_amount(it) for it in map(API.FindItem, serials) if it)
+            return bool(API.HasTarget("any")), n, (int(API.Player.X), int(API.Player.Y))
         return Kit.on_client(look)
     def cursor_up_refused():
-        if safe(lambda: API.HasTarget("any"), False):
+        if API.HasTarget("any"):
             say("a target cursor is up; finish it or press Esc first.", Kit.HUE_INFO); return True
         return False
     def travel_by_scroll(book_serial, dest, method):
@@ -656,7 +612,7 @@ def _module_grimoire():
             target = book_serial
         if not wait_cursor_free(): return
         if cursor_up_refused(): return
-        claim_cursor(SCROLL_CAST_TIMEOUT + 1.0)
+        HOST.claim_cursor(KEY, SCROLL_CAST_TIMEOUT + 1.0)
         try:
             start = player_xy(); API.CancelPreTarget(); API.PreTarget(target, "neutral"); API.UseObject(scroll)
             deadline = time.time() + SCROLL_CAST_TIMEOUT
@@ -667,20 +623,18 @@ def _module_grimoire():
                     if API.HasTarget("any") and not cursor_taken(): API.Target(target)
                     return
                 if left < before or failed_since(since, me) or moved_far(start, now_xy): break
-        finally: API.CancelPreTarget(); release_cursor()
+        finally: API.CancelPreTarget(); HOST.release_cursor(KEY)
     def cursor_taken(): return HOST.cursor_busy(KEY) is not None
-    def claim_cursor(seconds): safe(lambda: HOST.claim_cursor(KEY, seconds))
-    def release_cursor(): safe(lambda: HOST.release_cursor(KEY))
     def wait_cursor_free():
         until = time.time() + 3.0
         while cursor_taken() and time.time() < until:
             if not HOST.idle(0.1): return False
         return True
-    def player_xy(): return Kit.on_client(lambda: safe(lambda: (int(API.Player.X), int(API.Player.Y)), None))
-    def player_name(): return Kit.on_client(lambda: safe(lambda: API.Player.Name or "", "")) or ""
+    def player_xy(): return Kit.on_client(lambda: (int(API.Player.X), int(API.Player.Y)))
+    def player_name(): return Kit.on_client(lambda: API.Player.Name) or ""
     def moved_far(start, now):
         return start is not None and now is not None and max(abs(now[0] - start[0]), abs(now[1] - start[1])) > 30
-    def journal_from_now(): safe(lambda: Journal.update(True)); return Journal.Reader()
+    def journal_from_now(): Journal.update(True); return Journal.Reader()
     _va = {"titles": None}
     def va_line(text):
         i = text.find(": ")
@@ -688,11 +642,9 @@ def _module_grimoire():
         titles = _va["titles"]
         if titles is None:
             titles = set(["Virtue Assistant", "Grimoire"])
-            try:
-                for sl in HOST.slots:
-                    titles.add(sl.title)
-                    for p in sl.parts: titles.add(p[1]); titles.add("%s > %s" % (sl.title, p[1]))
-            except Exception: pass
+            for sl in HOST.slots:
+                titles.add(sl.title)
+                for p in sl.parts: titles.add(p[1]); titles.add("%s > %s" % (sl.title, p[1]))
             _va["titles"] = titles
         return text[:i] in titles
     def failure_in(lines, texts, me):
@@ -705,9 +657,7 @@ def _module_grimoire():
                     if not va_line(ln.text or ""): return True
                     break
         return False
-    def failed_since(rd, me=""):
-        try: return failure_in(rd.new(), TRAVEL_FAIL_TEXTS, me)
-        except Exception: return False
+    def failed_since(rd, me=""): return failure_in(rd.new(), TRAVEL_FAIL_TEXTS, me)
     def travel(book_serial, dest, method):
         if cursor_up_refused(): return
         if method in ("recall_scroll", "gate_scroll"): travel_by_scroll(book_serial, dest, method); return
@@ -715,7 +665,7 @@ def _module_grimoire():
             spell = TRAVEL_SPELL.get(method, "Recall")
             if not wait_cursor_free(): return
             if cursor_up_refused(): return
-            claim_cursor(RUNE_CAST_CLAIM)
+            HOST.claim_cursor(KEY, RUNE_CAST_CLAIM)
             try:
                 since, start, me = journal_from_now(), player_xy(), player_name(); pearl = REAGENTS["BP"][1]
                 stacks = Kit.on_client(lambda: [(it.Serial, item_amount(it)) for it in items_in_pack(True)
@@ -728,8 +678,7 @@ def _module_grimoire():
                     if up: HOST.idle(0.15); break
                     if before and left < before: break
                     if failed_since(since, me) or moved_far(start, now_xy): break
-                API.CancelPreTarget()
-            finally: release_cursor()
+            finally: API.CancelPreTarget(); HOST.release_cursor(KEY)
             return
         gid = book_gump(book_serial)
         if gid is None: return
@@ -741,38 +690,13 @@ def _module_grimoire():
         if (method == "charge" or dest["slot"] is None) and book_serial not in bg_reads: bg_reads.append(book_serial)
     view = {"scale": 1.0}
     def sc(v): return int(round(v * view["scale"]))
-    _props = {}
-    def clr_prop(obj, name):
-        from System.Reflection import BindingFlags; t = obj.GetType(); key = (t.FullName, name)
-        if key not in _props:
-            flags = (BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
-            p = None
-            while t is not None and p is None: p = t.GetProperty(name, flags); t = t.BaseType
-            _props[key] = p
-        return _props[key]
-    _vis = {"ok": None, "way": None}
-    def _shown_attr(ctrl, shown): ctrl.IsVisible = shown
-    def _shown_clr(ctrl, shown):
-        p = clr_prop(ctrl, "Control"); inner = p.GetValue(ctrl, None) if p is not None else ctrl
-        clr_prop(inner, "IsVisible").SetValue(inner, shown, None)
-    def set_shown(ctrl, shown):
-        if _vis["ok"] is False: return False
-        shown = bool(shown); way = _vis["way"]
-        for fn in ((way,) if way is not None else (_shown_attr, _shown_clr)):
-            try: fn(ctrl, shown); _vis["ok"], _vis["way"] = True, fn; return True
-            except Exception: pass
-        if way is not None and fn is _shown_attr:
-            try: _shown_clr(ctrl, shown); return True
-            except Exception: pass
-        _vis["ok"] = False; return False
     def on_window(parent, ctrl):
         if parent is gump:
             tgt["tops"].append(ctrl)
-            if tgt["hidden"]: set_shown(ctrl, False)
+            if tgt["hidden"]: ctrl.IsVisible = False
     def show_layer(layer, shown):
-        for ctrl in layer["tops"]:
-            if not set_shown(ctrl, shown): return False
-        layer["hidden"] = not shown; return True
+        for ctrl in layer["tops"]: ctrl.IsVisible = shown
+        layer["hidden"] = not shown
     def put(parent, ctrl, track): on_window(parent, ctrl); parent.Add(ctrl); track.append(ctrl); return ctrl
     def box(parent, x, y, w, h, color, alpha, track):
         b = G.CreateGumpColorBox(alpha, color); b.SetRect(sc(x), sc(y), max(1, sc(w)), max(1, sc(h)))
@@ -788,30 +712,16 @@ def _module_grimoire():
         l.SetPos(sc(x), sc(y)); l.SetAcceptMouseInput(False); return put(parent, l, track)
     _uo_meta = {}
     def place_uo(l, x, y, size, width, align):
-        try: lw = int(l.GetWidth())
-        except Exception: lw = 0
-        if not lw:
-            try: lw = 7 * len(l.Text or "")
-            except Exception: lw = 0
-        try: lh = int(l.GetHeight()) or 16
-        except Exception: lh = 16
-        X = sc(x)
+        lw = int(l.GetWidth()) or 7 * len(l.Text or ""); lh = int(l.GetHeight()) or 16; X = sc(x)
         if width and align == "center": X += max(0, (sc(width) - lw) // 2)
         elif width and align == "right": X += max(0, sc(width) - lw)
         Y = sc(y) + max(0, (int(sc(size) * 1.3) - lh) // 2); l.SetPos(X, Y)
         if width and align != "left":
             if len(_uo_meta) > 3000:
-                for k in list(_uo_meta):
-                    try: gone = k.IsDisposed
-                    except Exception: gone = True
-                    if gone: del _uo_meta[k]
-            try: _uo_meta[l] = (x, y, size, width, align)
-            except TypeError: pass
+                for k in [k for k in _uo_meta if k.IsDisposed]: del _uo_meta[k]
+            _uo_meta[l] = (x, y, size, width, align)
     def set_label_text(l, text):
-        try: l.Text = text
-        except Exception: safe(lambda: l.SetText(text))
-        try: m = _uo_meta.get(l)
-        except TypeError: m = None
+        l.Text = text; m = _uo_meta.get(l)
         if m is not None: place_uo(l, m[0], m[1], m[2], m[3], m[4])
     def item_pic(parent, graphic, x, y, size, track):
         p = G.CreateGumpItemPic(graphic, sc(size), sc(size)); p.SetPos(sc(x), sc(y)); p.SetAcceptMouseInput(False)
@@ -825,10 +735,7 @@ def _module_grimoire():
                                                                                            (False, STAR_OFF)))
     def recolor_star(parts, on):
         r, g_, b_ = _star_rgb[bool(on)]
-        try:
-            for p in parts: p.SetBaseColor(r, g_, b_, 255)
-            return True
-        except Exception: return False
+        for p in parts: p.SetBaseColor(r, g_, b_, 255)
     def on_click(ctrl, fn): G.AddControlOnClick(ctrl, fn)
     _dbl = {"ok": None}
     def hook_double_click(api_ctrl, fn):
@@ -841,10 +748,8 @@ def _module_grimoire():
     def make_row_click(key, action):
         def cb():
             now = time.time(); prev = click_state["selected"]
-            try:
-                if prev is not None and prev != key and prev in row_bgs: row_bgs[prev].SetAlpha(ROW_A)
-                if key in row_bgs: row_bgs[key].SetAlpha(0.20)
-            except Exception: pass
+            if prev is not None and prev != key and prev in row_bgs: row_bgs[prev].SetAlpha(ROW_A)
+            if key in row_bgs: row_bgs[key].SetAlpha(0.20)
             click_state["selected"] = key
             if _dbl["ok"] is False and click_state["key"] == key and now - click_state["t"] <= 3.0:
                 click_state["key"], click_state["t"] = None, 0.0; st["queue"].append(stamped(action, now))
@@ -858,9 +763,7 @@ def _module_grimoire():
         on_click(bg, make_row_click(key, action)); hook_double_click(bg, queue_stamped(action))
     def go_circle(i):
         if i != st["circle"] or st["tab"] != "spells": switch_page("spells", lambda: st.update({"circle": i}))
-    def queue_action(action):
-        def cb(): st["queue"].append(action)
-        return cb
+    queue_action = Kit.queuer(st)
     def queue_stamped(action):
         def cb(): st["queue"].append(stamped(action))
         return cb
@@ -879,8 +782,7 @@ def _module_grimoire():
         win["opacity"] = min(100, max(0, load_int("Opacity", DEFAULT_OPACITY))); fit_screen()
     def fit_screen():
         if fitst["own"] is not None: return
-        try: W, H = Kit.screen()
-        except Exception: return
+        W, H = Kit.screen()
         if H > 0: win["h"] = max(MIN_H * SCALE_MIN // 100, min(win["h"], H))
         if W > 0: win["w"] = max(MIN_W * SCALE_MIN // 100, min(win["w"], W))
     def LW(): return max(MIN_W, int(win["w"] / view["scale"]))
@@ -904,47 +806,22 @@ def _module_grimoire():
         gump.SetAlpha(0)
         if px < 0: gump.CenterXInViewPort(); gump.CenterYInViewPort()
     def clear(track):
-        meta = _uo_meta
-        for c in track:
-            if meta:
-                try: meta.pop(c, None)
-                except TypeError: pass
-            try: c.Dispose()
-            except Exception: pass
+        for c in track: _uo_meta.pop(c, None); c.Dispose()
         del track[:]
-    _art_sizes = {}; _art = {"ok": None}
+    _art_sizes = {}
     def art_size(graphic):
         if graphic not in _art_sizes:
-            w = h = 0
-            try:
-                p = G.CreateGumpPic(graphic, 0, 0, 0)
-                try: w, h = int(p.GetWidth()), int(p.GetHeight())
-                except Exception:
-                    prop = clr_prop(p, "Control"); inner = prop.GetValue(p, None) if prop is not None else p
-                    w = int(clr_prop(inner, "Width").GetValue(inner, None))
-                    h = int(clr_prop(inner, "Height").GetValue(inner, None))
-                p.Dispose()
-            except Exception: pass
-            _art_sizes[graphic] = (w, h)
+            p = G.CreateGumpPic(graphic, 0, 0, 0); _art_sizes[graphic] = (int(p.GetWidth()), int(p.GetHeight()))
+            p.Dispose()
         return _art_sizes[graphic]
-    def art_ok():
-        if _art["ok"] is None:
-            _art["ok"] = bool(art_size(ART_FRAME)[0] > 0 and art_size(Kit.SECTION_TILE)[0] > 0 and art_size(GEM)[0] > 0)
-        return _art["ok"]
     def pic_px(parent, graphic, X, Y, W, H, track, mouse=False, hue=0):
         p = G.CreateGumpPic(graphic, X, Y, hue); p.SetWidth(max(1, W)); p.SetHeight(max(1, H))
         if not mouse: p.SetAcceptMouseInput(False)
         return put(parent, p, track)
     def tiled_px(parent, graphic, X, Y, W, H, track):
-        try: t = G.CreateTiledGumpPic(graphic, max(1, W), max(1, H))
-        except Exception: return pic_px(parent, graphic, X, Y, W, H, track)
-        t.SetRect(X, Y, max(1, W), max(1, H)); t.SetAcceptMouseInput(False); return put(parent, t, track)
+        t = G.CreateTiledGumpPic(graphic, max(1, W), max(1, H)); t.SetRect(X, Y, max(1, W), max(1, H))
+        t.SetAcceptMouseInput(False); return put(parent, t, track)
     def stone(parent, x, y, w, h, track, alpha=1.0):
-        if not art_ok():
-            parts = [(box(parent, x, y, w, h, COL_BG, alpha, track), 1.0)]
-            for (bx, by, bw, bh) in ((x, y, w, 2), (x, y + h - 2, w, 2), (x, y, 2, h), (x + w - 2, y, 2, h)):
-                box(parent, bx, by, bw, bh, "#6A6A6A", 1.0, track)
-            return parts
         X0, Y0, X3, Y3 = sc(x), sc(y), sc(x + w), sc(y + h); lw, th = art_size(ART_FRAME)
         rw, bh = art_size(ART_FRAME + 8); lw, rw = min(lw, (X3 - X0) // 2), min(rw, (X3 - X0) // 2)
         th, bh = min(th, (Y3 - Y0) // 2), min(bh, (Y3 - Y0) // 2); xs = [X0, X0 + lw, X3 - rw, X3]
@@ -957,14 +834,10 @@ def _module_grimoire():
         for p in parts: p.SetAlpha(alpha)
         return [(p, 1.0) for p in parts]
     def parchment(parent, x, y, w, h, track, alpha=1.0):
-        if art_ok(): p = tiled_px(parent, Kit.SECTION_TILE, sc(x), sc(y), sc(w), sc(h), track)
-        else: p = box(parent, x, y, w, h, "#101010", 1.0, track)
-        p.SetAlpha(alpha * Kit.SECTION_ALPHA); return [(p, Kit.SECTION_ALPHA)]
+        p = tiled_px(parent, Kit.SECTION_TILE, sc(x), sc(y), sc(w), sc(h), track); p.SetAlpha(alpha * Kit.SECTION_ALPHA)
+        return [(p, Kit.SECTION_ALPHA)]
     def corner_knots(w, h, track):
-        if not art_ok() or not Kit.CORNER_ART: return
-        cw, ch = art_size(Kit.CORNER_ART)
-        if not cw or not ch: return
-        W, H = sc(w), sc(h)
+        cw, ch = art_size(Kit.CORNER_ART); W, H = sc(w), sc(h)
         return [pic_px(gump, Kit.CORNER_ART, X, Y, cw, ch, track)
                 for X, Y in ((0, 0), (W - cw, 0), (0, H - ch), (W - cw, H - ch))]
     _ttf_widths = {}
@@ -982,42 +855,28 @@ def _module_grimoire():
         key = (text, size, view["scale"])
         if key not in _ttf_widths:
             if len(_ttf_widths) >= 4000: _ttf_widths.clear()
-            px = 0
-            try:
-                l = G.CreateGumpTTFLabel(text, max(6, sc(size)), COL_TEXT); px = int(l.GetWidth() or 0)
-                safe(lambda: l.Dispose())
-            except Exception: pass
+            l = G.CreateGumpTTFLabel(text, max(6, sc(size)), COL_TEXT); px = int(l.GetWidth() or 0); l.Dispose()
             _ttf_widths[key] = px or int(0.55 * size * len(text))
         return int(round(_ttf_widths[key] / view["scale"]))
-    def art_w(art): gw = art_size(art[0])[0] if art_ok() else 0; return int(round((gw or 30) / view["scale"]))
-    def button(x, y, w, h, text, tooltip, fn, active=False, size=14, parent=None, color=None, art=None):
-        parent = parent or gump
-        if color is None: color = COL_TEXT
-        c = tgt["ctrls"]
-        if art_ok():
-            if art is None: art = (GEM_ON, GEM_ON, GEM_ON) if active else Kit.ART_PLAY
-            gw, gh = art_size(art[0]); b = G.CreateGumpButton("", 0, art[0], art[1], art[2])
-            b.SetPos(sc(x), sc(y) + max(0, (sc(h) - gh) // 2)); put(parent, b, c); on_click(b, fn)
-            if tooltip: safe(lambda: b.SetTooltip(tooltip))
-            if text:
-                lx = x + int(round(gw / view["scale"])) + 4
-                label(parent, text, lx, y + (h - size) // 2 - 1, size, color, c)
-                hit = box(parent, lx, y, max(4, x + w - lx), h, COL_ROW, 0.0, c); on_click(hit, fn)
-                if tooltip: hit.SetTooltip(tooltip)
-            return b
-        b = box(parent, x, y, w, h, COL_HEAD if active else COL_ROW, 0.85 if active else 0.4, c)
-        label(parent, text, x, y + (h - size) // 2 - 1, size, COL_BG if active else color, c, width=w, align="center")
-        on_click(b, fn)
-        if tooltip: b.SetTooltip(tooltip)
+    def art_w(art): return int(round(art_size(art[0])[0] / view["scale"]))
+    def button(x, y, w, h, text, tooltip, fn, size=14, parent=None, art=Kit.ART_PLAY):
+        parent = parent or gump; c = tgt["ctrls"]
+        gw, gh = art_size(art[0]); b = G.CreateGumpButton("", 0, art[0], art[1], art[2])
+        b.SetPos(sc(x), sc(y) + max(0, (sc(h) - gh) // 2)); put(parent, b, c); on_click(b, fn); Kit.with_tip(b, tooltip)
+        if text:
+            lx = x + int(round(gw / view["scale"])) + 4
+            label(parent, text, lx, y + (h - size) // 2 - 1, size, COL_TEXT, c)
+            hit = box(parent, lx, y, max(4, x + w - lx), h, COL_ROW, 0.0, c); on_click(hit, fn)
+            Kit.with_tip(hit, tooltip)
         return b
-    def dock_wish(): return bool(safe(lambda: HOST.dock_wanted(KEY), False))
-    def set_dock_wish(on): safe(lambda: HOST.dock_want_set(KEY, on))
-    def bar_alive(): return bool(safe(HOST.bar_alive, False))
-    def min_click(): set_dock_wish(False); toggle_min()
+    def min_click():
+        if Kit.zone_up(KEY) and not st["minimized"]: return
+        HOST.dock_want_set(KEY, False); toggle_min()
     def fold_to_bar():
-        set_dock_wish(True)
+        if Kit.zone_up(KEY): return
+        HOST.dock_want_set(KEY, True)
         if not st["minimized"]: toggle_min()
-        if bar_alive(): set_docked(True)
+        if HOST.bar_alive(): set_docked(True)
         else: HOST.dock_note(TITLE)
     def toggle_min():
         st["minimized"] = not st["minimized"]
@@ -1025,51 +884,42 @@ def _module_grimoire():
         else: gump.SetHeight(win["h"]); gump.SetResizable(True)
         set_docked(False); save_int("Min", 1 if st["minimized"] else 0); st["dirty"] = True
     def save_window_pos():
-        try: x, y = int(gump.GetX()), int(gump.GetY())
-        except Exception: return
-        loop["last_pos"] = (x, y)
+        x, y = int(gump.GetX()), int(gump.GetY()); loop["last_pos"] = (x, y)
         for k, v in (("X", x), ("Y", y)): save_int(k, v)
     def set_docked(on):
         on = bool(on)
         if on == st["docked"]: return
-        st["docked"] = on
-        try: gump.IsVisible = not on
-        except Exception:
-            try: clr_prop(gump, "IsVisible").SetValue(gump, not on, None)
-            except Exception: st["docked"] = False
+        st["docked"] = on; gump.IsVisible = not on
     def link_tick():
         now = time.time()
         if now < st.get("link_next", 0.0): return
         st["link_next"] = now + 0.1
         if st.pop("to_bar", False): fold_to_bar()
-        try: cmd = API.GetSharedVar(LINK_CMD)
-        except Exception: cmd = None
+        cmd = API.GetSharedVar(LINK_CMD)
         if cmd:
-            safe(lambda: API.RemoveSharedVar(LINK_CMD)); cmd = str(cmd)
+            API.RemoveSharedVar(LINK_CMD); cmd = str(cmd)
             if cmd == "show" and (st["minimized"] or st["docked"]):
-                set_dock_wish(False)
+                HOST.dock_want_set(KEY, False)
                 if st["minimized"]: toggle_min()
                 set_docked(False)
             elif cmd == "dock" and not st["docked"]: fold_to_bar()
         if st["docked"]:
-            if not bar_alive(): set_docked(False)
+            if not HOST.bar_alive(): set_docked(False)
         elif st["minimized"] and now >= st.get("wish_next", 0.0):
             st["wish_next"] = now + 0.25
-            if dock_wish() and bar_alive(): set_docked(True)
+            if HOST.dock_wanted(KEY) and HOST.bar_alive(): set_docked(True)
         elif not st["minimized"] and now >= st.get("wish_next", 0.0):
             st["wish_next"] = now + 1.0
-            if dock_wish(): set_dock_wish(False)
+            if HOST.dock_wanted(KEY): HOST.dock_want_set(KEY, False)
         ls = "docked" if st["docked"] else ("minimized" if st["minimized"] else "open")
-        if ls != st["link_state"]: st["link_state"] = ls; safe(lambda: API.SetSharedVar(LINK_STATE, ls))
+        if ls != st["link_state"]: st["link_state"] = ls; API.SetSharedVar(LINK_STATE, ls)
     def on_opacity(value):
         win["opacity"] = int(value)
-        for p, factor in bg_box["parts"]: safe(lambda: p.SetAlpha(win["opacity"] / 100.0 * factor))
+        for p, factor in bg_box["parts"]: p.SetAlpha(win["opacity"] / 100.0 * factor)
         save_int("Opacity", win["opacity"])
     def on_scale(value): pending_scale["value"] = int(value); pending_scale["t"] = time.time()
     def size_gump():
-        try: gump.SetWidth(win["w"]); gump.SetHeight(sc(TITLE_H) if st["minimized"] else win["h"])
-        except Exception: pass
-        st["dirty"] = True
+        gump.SetWidth(win["w"]); gump.SetHeight(sc(TITLE_H) if st["minimized"] else win["h"]); st["dirty"] = True
     def save_scale(new, w, h):
         for k, v in (("Scale", int(round(new * 100))), ("W", w), ("H", h)): save_int(k, v)
     def rescale(new, save):
@@ -1104,66 +954,50 @@ def _module_grimoire():
         bg_box["parts"] = stone(gump, 0, 0, w, h, c, op); frame = [p for p, _f in bg_box["parts"]]
         bg_box["parts"] += parchment(gump, 12, 12, w - 24, 30, c, op)
         if not st["minimized"]:
-            frame += corner_knots(w, h, c) or []; bg_box["parts"] += parchment(gump, 12, h - 40, w - 24, 28, c, op)
-        try:
-            Kit._frame_parts[gump] = frame; Kit.note_title(gump, sc(12))
-            if safe(lambda: HOST.layout_unified(KEY), False): Kit.hide_zone_frame(gump)
-        except Exception: pass
-        label(gump, "GRIMOIRE", 42, 18, 14, COL_HEAD, c)
+            frame += corner_knots(w, h, c); bg_box["parts"] += parchment(gump, 12, h - 40, w - 24, 28, c, op)
+        Kit._frame_parts[gump] = frame; label(gump, "GRIMOIRE", 42, 18, 14, COL_HEAD, c)
         left = w - 12 - 44 - 20 - (0 if st["minimized"] else Kit.DOCK_DX + 106 + 98)
         c.append(Kit.title_catcher(gump, sc(12), sc(12), sc(left - 16), sc(30), queue_ui(("min_click",)),
                                    key="grimoire:mini" if st["minimized"] else "grimoire"))
         x = w - 12 - 44; zoned = Kit.zone_up(KEY)
         if not zoned:
-            button(x, 15, 30, 24, "", "Close Grimoire (turns it off; the Modules tab turns it " "back on)",
-                   queue_ui(("close",)), art=Kit.ART_CLOSE)
-            x -= 20
-            button(x, 15, 16, 24, "", "Restore" if st["minimized"] else "Minimize (double-click the title does " "too)",
-                   queue_ui(("min_click",)), art=Kit.ART_RESTORE if st["minimized"] else Kit.ART_MIN)
+            button(x, 15, 30, 24, "", Kit.CLOSE_TIP % TITLE, queue_ui(("close",)), art=Kit.ART_CLOSE); x -= 20
+            button(x, 15, 16, 24, "", Kit.RESTORE_TIP if st["minimized"] else Kit.MIN_TIP, queue_ui(("min_click",)),
+                   art=Kit.ART_RESTORE if st["minimized"] else Kit.ART_MIN)
         if not st["minimized"]:
             if not zoned:
                 x -= Kit.DOCK_DX
                 button(x, 15, 16, 24, "", Kit.DOCK_TIP, lambda: st.__setitem__("to_bar", True), art=Kit.ART_DOCK)
             x -= 106
-            button(x, 15, 100, 24, "Settings", "Open the Grimoire settings page",
-                   queue_ui(("settings",)), art=Kit.ART_PAGE)
+            button(x, 15, 100, 24, "Settings", Kit.SETTINGS_TIP % TITLE, queue_ui(("settings",)), art=Kit.ART_PAGE)
             x -= 98
-            button(x, 15, 92, 24, "Refresh", "Find your spellbook and runebooks again and read every runebook afresh",
+            button(x, 15, 92, 24, "Refresh", "Find your spellbook and runebooks again and reread every runebook",
                    queue_action(("refresh",)), art=Kit.ART_OK)
         return 50
     def content_right(): return LW() - SIDE_W - 20
-    def tab_on(): return 1.0 if art_ok() else 0.6
     def is_book_key(key): return key not in ("spells", "favs", "+add") and not isinstance(key, tuple)
     def book_low(serial): cur = book_charges.get(serial, (None, None))[0]; return cur is not None and cur < LOW_CHARGES
     def tab_tip(key, title, short):
         tip = title if short != title else None
         if is_book_key(key) and book_low(key):
-            cur = book_charges[key][0]; tip = "%s: %d charge%s left (low)" % (title, cur, "" if cur == 1 else "s")
+            cur = book_charges[key][0]; tip = "%s: %s left (low)" % (title, Kit.count(cur, "charge"))
         return tip
     def tab_button(key, x, y, w, h, text, tooltip, title=None):
         c = tgt["ctrls"]; on = st["tab"] == key; color = COL_EMPTY if is_book_key(key) and book_low(key) else COL_TEXT
-        if art_ok():
-            gw, gh = art_size(GEM); gx, gy = sc(x), sc(y) + max(0, (sc(h) - gh) // 2)
-            pic_px(gump, GEM, gx, gy, gw, gh, c); mark = pic_px(gump, GEM_ON, gx, gy, gw, gh, c)
-            mark.SetAlpha(tab_on() if on else 0.0)
-            lbl = label(gump, text, x + int(round(gw / view["scale"])) + 4, y + (h - 14) // 2 - 1, 14, color, c)
-            b = box(gump, x, y, w, h, COL_ROW, 0.0, c)
-        else:
-            b = box(gump, x, y, w, h, COL_ROW, 0.4, c)
-            mark = box(gump, x, y, w, h, COL_HEAD, tab_on() if on else 0.0, c)
-            lbl = label(gump, text, x, y + (h - 14) // 2 - 1, 14, color, c, width=w, align="center")
-        fn = queue_switch(key); on_click(b, fn); on_click(mark, fn)
+        gw, gh = art_size(GEM); gx, gy = sc(x), sc(y) + max(0, (sc(h) - gh) // 2)
+        pic_px(gump, GEM, gx, gy, gw, gh, c); mark = pic_px(gump, GEM_ON, gx, gy, gw, gh, c)
+        mark.SetAlpha(1.0 if on else 0.0)
+        lbl = label(gump, text, x + int(round(gw / view["scale"])) + 4, y + (h - 14) // 2 - 1, 14, color, c)
+        b = box(gump, x, y, w, h, COL_ROW, 0.0, c); fn = queue_switch(key); on_click(b, fn); on_click(mark, fn)
         if tooltip: b.SetTooltip(tooltip); mark.SetTooltip(tooltip)
         tab_marks[key] = mark
         if is_book_key(key): tab_parts[key] = (lbl, b, mark, title or text, text, color == COL_EMPTY)
     def recolor_tab(serial):
         parts = tab_parts.get(serial); low = book_low(serial)
         if parts is None or parts[5] == low: return
-        lbl, b, mark, title, short, _ = parts
-        if not set_label_hue(lbl, TEXT_HUES[COL_EMPTY if low else COL_TEXT]): st["dirty"] = True; return
+        lbl, b, mark, title, short, _ = parts; lbl.Hue = TEXT_HUES[COL_EMPTY if low else COL_TEXT]
         tab_parts[serial] = (lbl, b, mark, title, short, low); tip = tab_tip(serial, title, short) or title
-        try: b.SetTooltip(tip); mark.SetTooltip(tip)
-        except Exception: pass
+        b.SetTooltip(tip); mark.SetTooltip(tip)
     def queue_switch(key):
         def cb(): st["switch"] = key
         return cb
@@ -1183,11 +1017,10 @@ def _module_grimoire():
         bg_box["parts"] += parchment(gump, 12, top, right - 12, tabs_bottom - top, tgt["ctrls"], op)
         for key, title, short, x, y, w in places:
             if key == "+add":
-                button(x, y, w, 24, short, "Target a runebook that isn't listed; books of its kind are found from "
-                       "then on", queue_action(("register",)), art=Kit.ART_OK)
+                button(x, y, w, 24, short, "Target an unlisted runebook; books of its kind are found from then on",
+                       queue_action(("register",)), art=Kit.ART_OK)
             elif key == "favs":
-                tab_button(key, x, y, w, 24, short, "Your starred destinations, your last trip "
-                           "and a search of every runebook you carry")
+                tab_button(key, x, y, w, 24, short, "Starred destinations, last trip and a search of every runebook")
             else: tab_button(key, x, y, w, 24, short, tab_tip(key, title, short), title)
         top = tabs_bottom + Kit.GAP
         bg_box["parts"] += parchment(gump, 12, top, right - 12, LH() - BOTTOM_H - top, tgt["ctrls"], op)
@@ -1215,14 +1048,11 @@ def _module_grimoire():
             label(parent, fit(name, SIDE_W - 52 - (16 if sa else 0)), ox + 48, y + 21, 12, COL_TEXT, c); y += rh
         if sa is not None: attach(sa)
     def build_spell_page(top, circle):
-        c = tgt["ctrls"]; right = content_right(); x = 22; cw, ch = art_size(CIRCLE_ART) if art_ok() else (0, 0)
-        for i, r in enumerate(["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]):
-            if cw and ch:
-                h = 30; w = max(1, cw * h // ch)
-                p = pic_px(gump, CIRCLE_ART + i, sc(x), sc(top + 2), sc(w), sc(h), c, mouse=True)
-                if circle != i: p.SetAlpha(0.45)
-                on_click(p, queue_ui(("circle", i))); safe(lambda: p.SetTooltip(CIRCLES[i][0])); x += w + 6
-            else: button(x, top + 4, 48, 26, r, CIRCLES[i][0], queue_ui(("circle", i)), active=circle == i); x += 52
+        c = tgt["ctrls"]; right = content_right(); x = 22; cw, ch = art_size(CIRCLE_ART); w = max(1, cw * 30 // ch)
+        for i in range(8):
+            p = pic_px(gump, CIRCLE_ART + i, sc(x), sc(top + 2), sc(w), sc(30), c, mouse=True)
+            if circle != i: p.SetAlpha(0.45)
+            on_click(p, queue_ui(("circle", i))); p.SetTooltip(CIRCLES[i][0]); x += w + 6
         title, spells = CIRCLES[circle]; label(gump, title, x + 10, top + 6, 18, COL_HEAD, c); top += 38
         if not spellbook_serial:
             label(gump, "No spellbook in your pack or hands. Carry one, then click Refresh.",
@@ -1261,7 +1091,7 @@ def _module_grimoire():
     def cast_state(entry, totals, mana):
         for g_ in entry[1]:
             if totals.get(g_, 0) <= 0: return (True, "Out of " + REG_NAMES.get(g_, "a reagent"))
-        if mana is not None and mana < entry[2]: return (True, "Not enough mana (it takes %d)" % entry[2])
+        if mana is not None and mana < entry[2]: return (True, "Not enough mana (needs %d)" % entry[2])
         return (False, "")
     def cast_tip(entry):
         tip = "Double-click to cast " + entry[0]
@@ -1275,17 +1105,14 @@ def _module_grimoire():
             for e in pg["spells"]:
                 now = cast_state(e, totals, mana)
                 if now == e[6]: continue
-                e[6] = now; dim = now[0]; set_label_hue(e[3], TEXT_HUES[COL_DIM if dim else COL_TEXT])
-                try: e[4].SetAlpha(DIM_ICON if dim else 1.0); e[5].SetTooltip(cast_tip(e))
-                except Exception: pass
+                e[6] = now; dim = now[0]; e[3].Hue = TEXT_HUES[COL_DIM if dim else COL_TEXT]
+                e[4].SetAlpha(DIM_ICON if dim else 1.0); e[5].SetTooltip(cast_tip(e))
     def mana_tick(now):
         if (now < loop["next_mana"] and loop["next_mana"] - now <= MANA_EVERY) \
                 or st["tab"] != "spells" or st["minimized"] or st["docked"]:
             return
         loop["next_mana"] = now + MANA_EVERY
-        try: mana = int(API.Player.Mana)
-        except Exception: mana = None
-        tier = None if mana is None else sum(1 for m in SPELL_MANA if m <= mana); loop["mana"] = mana
+        mana = int(API.Player.Mana); tier = sum(1 for m in SPELL_MANA if m <= mana); loop["mana"] = mana
         if tier != loop["tier"]: loop["tier"] = tier; refresh_castable()
     def charges_text(serial):
         cur, mx = book_charges.get(serial, (None, None))
@@ -1313,9 +1140,8 @@ def _module_grimoire():
         if dests is None or (not dests and serial in rune_errors):
             msg = rune_errors.get(serial, "Couldn't read this runebook.")
             label(gump, msg, 22, top + 36, 14, COL_EMPTY, c, width=right - 26)
-            label(gump, "Details were saved to Grimoire_runebook_dump.txt in the "
-                        "VirtueAssistantSettings folder; send that file over, then click Refresh to try again."
-                  if serial in dump["books"] else
+            label(gump, "Details saved to Grimoire_runebook_dump.txt in the VirtueAssistantSettings folder; send "
+                        "that file, then click Refresh." if serial in dump["books"] else
                   "Click Re-read to save this book's details to Grimoire_runebook_dump.txt in "
                   "the VirtueAssistantSettings folder.", 22, top + 62, 12, COL_DIM, c, width=right - 26)
             return
@@ -1327,8 +1153,8 @@ def _module_grimoire():
                    "gate_scroll": totals.get(GATE_SCROLL, 0), "charge": charges}
         charges_known = book_charges.get(serial, (None, None))[0] is not None; n = len(dests)
         any_std = any(d["slot"] is not None for d in dests); any_btn = any_std or any(d.get("rune") for d in dests)
-        label(gump, "%d destination%s; double-click a name to %s there" %
-              (n, "" if n == 1 else "s", DEFAULT_TRAVEL), 22, top + 36, RUNE_HEAD_SIZE, COL_DIM, c, smooth=True)
+        label(gump, "%s; double-click a name to %s there" %
+              (Kit.count(n, "destination"), DEFAULT_TRAVEL), 22, top + 36, RUNE_HEAD_SIZE, COL_DIM, c, smooth=True)
         aw = art_w(Kit.ART_PLAY); methods = []
         if any_btn:
             for m, head, tip in RUNE_METHODS:
@@ -1370,11 +1196,11 @@ def _module_grimoire():
                 elif m == "charge" and charges_known: full_tip += " (%d left)" % have
                 b = button(bx + (cw - aw) // 2, y + 2, aw, rh - 8, "", full_tip,
                            queue_stamped(("travel", serial, dest, m)), parent=sa)
-                if not have: safe(lambda b=b: b.SetAlpha(0.35))
+                if not have: b.SetAlpha(0.35)
                 bx += cw
         attach(sa)
     def default_method(dest): return DEFAULT_TRAVEL if dest["slot"] is not None or dest.get("rune") else "charge"
-    STAR_TIP = "Put this destination in Favourites (click again to take it off)"
+    STAR_TIP = "Add to Favourites (click again to remove)"
     METHOD_VERB = {"recall": "recall", "gate": "gate", "charge": "recall (a charge)",
                    "recall_scroll": "recall (a scroll)", "gate_scroll": "gate (a scroll)",
                    "sacred": "travel (Sacred Journey)"}
@@ -1384,8 +1210,7 @@ def _module_grimoire():
         cap = "Search:"; label(gump, cap, sx - 10 - text_w(cap), top + 8, 14, COL_TEXT, c)
         tiled_px(gump, Kit.FIELD_TILE, sc(sx) - 2, sc(top + 4) - 1, sc(sw) + 4, 24, c)
         tb = G.CreateGumpTextBox(fav_ui["text"], sc(sw), 22, False, 16); tb.SetPos(sc(sx), sc(top + 4))
-        Kit.with_tip(tb, "Type part of a rune's or runebook's name to search every runebook you carry (empty: your "
-                     "Favourites)")
+        Kit.with_tip(tb, "Search every runebook you carry by rune or book name (empty: your Favourites)")
         put(gump, tb, c); info = label(gump, "", 22, top + 38, 14, COL_DIM, c); list_y = top + 62; row_w = right - 34
         sa = scroll_area(16, list_y, right - 20, LH() - list_y - BOTTOM_H - 4)
         fav_ui.update({"layer": tgt, "tb": tb, "info": info, "sa": sa, "pool": [], "seen": None, "ver": -1,
@@ -1393,7 +1218,7 @@ def _module_grimoire():
         fav_render(building=True); attach(sa)
     def fav_rows():
         titles = dict((b["serial"], b["title"]) for b in runebooks); order = [b["serial"] for b in runebooks]
-        if not order: return [], "No runebooks found in your pack or hands."
+        if not order: return [], "No runebooks in your pack or hands."
         q = fav_ui["text"].strip().lower(); rows = []
         if q:
             words = q.split(); more = False
@@ -1407,8 +1232,8 @@ def _module_grimoire():
                 if more: break
             if more: return rows, "More than %d found; type more letters." % SEARCH_MAX
             if rows:
-                return rows, "%d destination%s found; double-click one to %s there" % (
-                    len(rows), "" if len(rows) == 1 else "s", DEFAULT_TRAVEL)
+                return rows, "%s found; double-click one to %s there" % (
+                    Kit.count(len(rows), "destination"), DEFAULT_TRAVEL)
             return rows, "No rune or runebook name has '%s' in it." % fav_ui["text"].strip()
         last = favs["last"]
         if last is not None and last[0] in titles:
@@ -1426,9 +1251,9 @@ def _module_grimoire():
                 if i is None: away += 1; continue
                 rows.append((s, i, f[2], titles[s], None, False)); n += 1
         if n:
-            info = "%d favourite%s; double-click one to %s there, or type above to search" % (
-                n, "" if n == 1 else "s", DEFAULT_TRAVEL)
-        else: info = "Click the star by a destination on a runebook's page to list it here."
+            info = "%s; double-click one to %s there, or type above to search" % (
+                Kit.count(n, "favourite"), DEFAULT_TRAVEL)
+        else: info = "Click a destination's star on a runebook page to list it here."
         if away: info += "  (%d not in the books you carry)" % away
         return rows[:SEARCH_MAX + 1], info
     def fav_render(building=False):
@@ -1438,7 +1263,7 @@ def _module_grimoire():
         Kit.set_text(ui["info"], fit(info, ui["info_w"]), TEXT_HUES[COL_DIM]); pool = ui["pool"]
         for i in range(len(rows)):
             if i >= len(pool): pool.append(new_fav_slot(i, rows[i]))
-            if not fav_assign(pool[i], rows[i]): st["fav_redraw"] = True
+            fav_assign(pool[i], rows[i])
         for i in range(len(rows), len(pool)): fav_assign(pool[i], None)
     def new_fav_slot(i, row):
         ui = fav_ui; sa, track, rh = ui["sa"], ui["layer"]["ctrls"], 30; y = i * rh
@@ -1453,34 +1278,26 @@ def _module_grimoire():
         on_click(slot["bg"], fav_cb(slot, lambda a: make_row_click(("fav", slot["i"]), ("favgo",) + a)()))
         hook_double_click(slot["bg"], fav_cb(slot, lambda a: st["queue"].append(stamped(("favgo",) + a)))); return slot
     def fav_show(slot, shown):
-        slot["shown"] = shown; ctrls = [slot["bg"], slot["hit"], slot["name"], slot["book"]] + slot["star"]
-        for ctl in ctrls:
-            if not set_shown(ctl, shown): break
-        else: return
-        try:
-            slot["bg"].SetAlpha(ROW_A if shown else 0.0)
-            for p in slot["star"]: p.SetAlpha(1.0 if shown else 0.0)
-        except Exception: pass
-        if not shown: Kit.set_text(slot["name"], ""); Kit.set_text(slot["book"], "")
+        slot["shown"] = shown
+        for ctl in [slot["bg"], slot["hit"], slot["name"], slot["book"]] + slot["star"]: ctl.IsVisible = shown
     def fav_assign(slot, row):
         if row is None:
             if slot["a"] is not None: slot["prev"], slot["at"], slot["a"] = slot["a"], time.time(), None
             if slot["shown"]: fav_show(slot, False)
-            return True
+            return
         a = (row[0], row[1], row[2], row[4], row[5])
         if slot["a"] != a: slot["prev"], slot["at"], slot["a"] = slot["a"], time.time(), a
         if not slot["shown"]: fav_show(slot, True)
         ui = fav_ui
         Kit.set_text(slot["name"], fit(("Last: " if row[5] else "") + row[2], ui["name_w"] - 4), TEXT_HUES[COL_TEXT])
         book = row[3] + ((", " + METHOD_VERB.get(row[4], row[4])) if row[4] else "")
-        Kit.set_text(slot["book"], fit(book, ui["row_w"] - ui["name_w"] - 46), TEXT_HUES[COL_DIM]); ok = True
+        Kit.set_text(slot["book"], fit(book, ui["row_w"] - ui["name_w"] - 46), TEXT_HUES[COL_DIM])
         on = (row[0], row[1]) in favs["keys"]
-        if on != slot["on"]: ok = recolor_star(slot["star"], on); slot["on"] = on
+        if on != slot["on"]: recolor_star(slot["star"], on); slot["on"] = on
         lst = rune_cache.get(row[0]) or ()
         m = row[4] or (default_method(lst[row[1]]) if row[1] < len(lst) else DEFAULT_TRAVEL)
         tip = "Double-click to %s to %s (%s)" % (METHOD_VERB.get(m, m), row[2], row[3])
         if tip != slot["tip"]: slot["tip"] = tip; Kit.with_tip(slot["bg"], tip)
-        return ok
     def fav_cb(slot, go):
         def cb():
             a = slot["prev"] if slot["prev"] is not None and time.time() - slot["at"] < 0.15 else slot["a"]
@@ -1492,10 +1309,7 @@ def _module_grimoire():
         if pages.get("favs") is not ui["layer"]: ui["layer"] = None; return
         if st["tab"] != "favs" or st["minimized"] or st["docked"]: return
         if now >= ui["next"] or ui["next"] - now > SEARCH_EVERY:
-            ui["next"] = now + SEARCH_EVERY
-            try: t = str(ui["tb"].Text or "")
-            except Exception: t = ui["text"]
-            ui["text"] = t
+            ui["next"] = now + SEARCH_EVERY; ui["text"] = str(ui["tb"].Text or "")
         if ui["text"] != ui["seen"] or ui["ver"] != lists["ver"]: fav_render()
     def fav_travel(act):
         serial, index, name, method = act[1], act[2], act[3], act[4]; i = resolve(serial, index, name)
@@ -1530,16 +1344,14 @@ def _module_grimoire():
         key = page_key(tab)
         if key == prev and key in pages and not pages[key]["hidden"]: return
         click_state["selected"] = None
-        if prev in pages and not show_layer(pages[prev], False): st["dirty"] = True; return
-        if key in pages:
-            if not show_layer(pages[key], True): st["dirty"] = True
-            return
-        build_page(key, False)
+        if prev in pages: show_layer(pages[prev], False)
+        if key in pages: show_layer(pages[key], True)
+        else: build_page(key, False)
     def switch_tab(key):
-        for k, mark in tab_marks.items(): safe(lambda: mark.SetAlpha(tab_on() if k == key else 0.0))
+        for k, mark in tab_marks.items(): mark.SetAlpha(1.0 if k == key else 0.0)
         switch_page(key)
     def prebuild_next():
-        if _vis["ok"] is not True or st["minimized"]: return False
+        if st["minimized"]: return False
         missing = [k for k in all_page_keys() if k not in pages]
         if missing: build_page(missing[0], missing[0] != page_key(st["tab"]))
         loop["next_prebuild"] = time.time() + PREBUILD_EVERY; return bool(missing)
@@ -1549,7 +1361,6 @@ def _module_grimoire():
         old_pages = list(pages.values())
         for d in (pages, row_bgs, tab_marks): d.clear()
         click_state["selected"] = None; st["dirty"] = False; top = build_chrome()
-        if _vis["ok"] is None and bg_box["parts"]: set_shown(bg_box["parts"][0][0], True)
         if not st["minimized"]:
             build_supplies(top); build_tabs(top); label(gump, st["status"], 30, LH() - 35, 12, COL_DIM, frame["ctrls"])
             build_page(page_key(st["tab"]), False); loop["next_prebuild"] = time.time() + PREBUILD_EVERY
@@ -1574,44 +1385,37 @@ def _module_grimoire():
                                                        and not any(b["serial"] == st["tab"] for b in runebooks)):
             st["tab"] = "spells"
         count = ("All spells shown" if known_spells is None else "%d spells known" % len(known_spells))
-        st["status"] = "%s, %d runebook%s" % (count if spellbook_serial else "No spellbook",
-                                                 len(runebooks), "" if len(runebooks) == 1 else "s")
+        st["status"] = "%s, %s" % (count if spellbook_serial else "No spellbook", Kit.count(len(runebooks), "runebook"))
         if not runebooks and bags and (full or not st["reported"]): report_books(); st["reported"] = True
         st["scanned"] = True; st["dirty"] = True
     def read_and_store(serial):
         dests, charges = read_runebook(serial)
         if store_book(serial, dests, charges): Kit.on_client(lambda: drop_page(serial))
     def on_close(): st["closed"] = True
-    CONFIG_H = 124
     CONFIG_PAGE = (("WINDOW", (
-        ("slider", "opacity", "Background opacity:", "How solid the window's stone and black backdrop are (0-100, 0 = "
+        ("slider", "opacity", "Background opacity:", "How solid the stone and black backdrop are (0-100, 0 = "
          "see-through)", 0, 100),
-        ("slider", "scale", "Scale:", "Size of everything in the window (%d-%d%%, applied once the slider stops "
-         "moving)" % (SCALE_MIN, SCALE_MAX), SCALE_MIN, SCALE_MAX),
-        ("note", "Drag a corner of the Grimoire window to resize it.", {"ndy": 2})), {"sh": CONFIG_H}),)
+        ("slider", "scale", "Scale:", "Size of everything in the window (%d-%d%%, applied when the slider stops)"
+         % (SCALE_MIN, SCALE_MAX), SCALE_MIN, SCALE_MAX),
+        ("note", "Drag a window corner to resize.", {"ndy": 2})), {"sh": 124}),)
     CONFIG_OPTS = {"top": 34, "fh": 30, "ldy": 0, "sdy": 4, "lw": 178, "sw": 200, "ugap": 12, "vfmt": "%d%%"}
-    cfg = {"f": None, "loaded": False}
-    def build_config(g, x, y, w):
-        if not cfg["loaded"] and not Kit.is_open(gump): cfg["loaded"] = True; load_window_prefs()
-        cfg["f"] = Kit.Form(g, x, y, w, {"opacity": win["opacity"], "scale": int(round(view["scale"] * 100))},
-                            CONFIG_PAGE, **CONFIG_OPTS)
-    def poll_config():
-        f = cfg["f"]
-        if f is None: return
-        seen, new = f.vals, f.read()
-        if new["opacity"] != seen["opacity"]: on_opacity(new["opacity"])
-        if new["scale"] != seen["scale"]:
+    page_vals = {"opacity": DEFAULT_OPACITY, "scale": 100, "loaded": False}
+    def page_change(old, new):
+        if new["opacity"] != old["opacity"]: on_opacity(new["opacity"])
+        if new["scale"] != old["scale"]:
             on_scale(new["scale"])
             if not Kit.is_open(gump): apply_scale()
-        seen.update(new)
-    def config_closed(): cfg["f"] = None
-    loop = {}; trip = {}; jobs = []; cast = {"rd": None, "me": ""}
+    cfg = Kit.Page(page_vals, CONFIG_PAGE, None, page_change, CONFIG_OPTS)
+    def build_config(g, x, y, w):
+        if not page_vals["loaded"] and not Kit.is_open(gump): page_vals["loaded"] = True; load_window_prefs()
+        page_vals.update({"opacity": win["opacity"], "scale": int(round(view["scale"] * 100))}); cfg.build(g, x, y, w)
+    loop = {}; trip = {}; jobs = []; cast = {"rd": None, "me": ""}; cleanup = Kit.Cleanup()
     def reset_state():
         nonlocal tgt
         st.update({"tab": "spells", "circle": 0, "dirty": True, "closed": False, "queue": [("scan",)], "ui_queue": [],
                    "status": "Reading your books", "minimized": False, "switch": None, "content_top": 0,
                    "shutting": False, "scanned": False, "reported": False, "docked": False, "link_state": None,
-                   "pick": None, "fav_redraw": False})
+                   "pick": None})
         for k in ("ctrls", "tops", "counts"): del frame[k][:]
         for d in (pages, row_bgs, tab_marks, tab_parts, _uo_meta, charge_seen, rb_seen): d.clear()
         for lst in (jobs, bg_reads, charge_news): del lst[:]
@@ -1623,21 +1427,19 @@ def _module_grimoire():
                        "text": "", "seen": None, "ver": -1, "next": 0.0})
         lists["ver"] += 1; lists["dest_ver"] = -1; cast.update({"wait": None, "claim": 0.0, "seen": False, "next": 0.0})
         dump.update({"written": False, "armed": False}); rb_types.clear(); rb_types.update(load_rb_types())
-        _hands["layers"] = None
     def layout_state():
         if st["closed"] or st["shutting"] or not Kit.is_open(gump): return None
         return "docked" if st["docked"] else ("minimized" if st["minimized"] else "open")
     def _start():
-        say("build 2.5 loaded.", Kit.HUE_INFO); reset_state(); fitst["own"] = None; load_window_prefs()
+        reset_state(); fitst["own"] = None; load_window_prefs()
         st["circle"] = max(0, min(len(CIRCLES) - 1, load_int("Circle", 0))); st["want_tab"] = load_int("Tab", 0) or None
-        create_window(); G.AddControlOnDisposed(gump, on_close); G.AddGump(gump)
-        safe(lambda: Kit.on_moved(gump, save_window_pos))
-        hooks = {"fit": layout_fit, "state": layout_state, "exact": True}
-        safe(lambda: HOST.layout_add(KEY, lambda: gump, TITLE, hooks)); fitst["own"], fitst["told"] = None, None
-        if load_int("Min", 0) == 1 or dock_wish(): toggle_min()
-        safe(lambda: API.RemoveSharedVar(LINK_CMD)); link_tick()
-        safe(lambda: HOST.alert_kind("grimoire.charges", "Runebook low on charges", 0x1EA))
-        HOST.services.update(SERVICES)
+        create_window(); G.AddControlOnDisposed(gump, on_close); G.AddGump(gump); Kit.on_moved(gump, save_window_pos)
+        HOST.layout_add(KEY, lambda: gump, TITLE, {"fit": layout_fit, "state": layout_state, "exact": True})
+        cleanup.add(HOST.layout_remove, KEY); fitst["own"], fitst["told"] = None, None
+        if load_int("Min", 0) == 1 or HOST.dock_wanted(KEY): toggle_min()
+        API.RemoveSharedVar(LINK_CMD); link_tick()
+        HOST.alert_kind("grimoire.charges", "Runebook low on charges", 0x1EA)
+        for name, fn in SERVICES.items(): cleanup.service(name, fn)
     def run_ui_action(act):
         kind = act[0]
         if kind == "min_click": min_click()
@@ -1653,28 +1455,21 @@ def _module_grimoire():
             serial, i = act[1], act[2]; on = toggle_fav(serial, i, act[3])
             if on is None: return
             pg = pages.get(serial); parts = pg["stars"].get(i) if pg is not None else None
-            if parts is not None and not recolor_star(parts, on): drop_page(serial)
+            if parts is not None: recolor_star(parts, on)
     def start_cast(name):
         now = time.time()
         if name in NO_TARGET_SPELLS: API.CastSpell(name); bg["hold"] = now + CAST_HOLD; return
-        claim_cursor(CAST_CLAIM)
-        try: rd = Journal.reader()
-        except Exception: rd = None
-        cast.update({"claim": now + CAST_CLAIM, "seen": False, "next": now + 0.1, "rd": rd, "me": player_name()})
+        HOST.claim_cursor(KEY, CAST_CLAIM)
+        cast.update({"claim": now + CAST_CLAIM, "seen": False, "next": now + 0.1, "rd": Journal.reader(),
+                     "me": player_name()})
         API.CastSpell(name); bg["hold"] = now + CAST_HOLD
-    def end_cast(): cast["claim"], cast["rd"] = 0.0, None; release_cursor()
+    def end_cast(): cast["claim"], cast["rd"] = 0.0, None; HOST.release_cursor(KEY)
     def watch_cast(now):
         if now >= cast["claim"]: end_cast(); return
         if now < cast["next"]: return
         cast["next"] = now + 0.1
-        try: up = bool(API.HasTarget())
-        except Exception: up = False
-        if up: cast["seen"] = True
-        elif cast["seen"]: end_cast()
-        elif cast["rd"] is not None:
-            try: lines = cast["rd"].new()
-            except Exception: lines = ()
-            if lines and failure_in(lines, CAST_FAIL_TEXTS, cast["me"]): end_cast()
+        if API.HasTarget(): cast["seen"] = True
+        elif cast["seen"] or failure_in(cast["rd"].new(), CAST_FAIL_TEXTS, cast["me"]): end_cast()
     def cursor_up_now(now):
         if API.HasTarget("any"): bg["cursor_next"] = now + 0.25; return True
         return False
@@ -1696,9 +1491,6 @@ def _module_grimoire():
             if isinstance(key, tuple): go_circle(key[1])
             else: switch_tab(key)
             if st["dirty"]: rebuild()
-        if st["fav_redraw"]:
-            st["fav_redraw"] = False
-            if "favs" in pages: drop_page("favs")
         if charge_news: charges_tick()
         if cast["claim"]: watch_cast(now)
         if cast["wait"] is not None:
@@ -1712,7 +1504,7 @@ def _module_grimoire():
             if act[0] == "pressed":
                 if 0 <= now - act[1] <= 3.0: act = act[2]
                 else:
-                    say("that trip was not made; Grimoire was busy with a runebook. Press it again.", Kit.HUE_INFO)
+                    say("trip not made; Grimoire was busy with a runebook. Press it again.", Kit.HUE_INFO)
                     act = ("dropped",)
             kind = act[0]
             if kind == "cast":
@@ -1721,7 +1513,7 @@ def _module_grimoire():
                 elif cast["wait"] is not None: pass
                 elif cursor_taken():
                     cast["wait"] = (act[1], now + CAST_DEFER)
-                    say("the target cursor is in use; %s is cast once it is free." % act[1], Kit.HUE_INFO)
+                    say("target cursor in use; %s is cast once it is free." % act[1], Kit.HUE_INFO)
                 else: start_cast(act[1])
             elif kind == "read":
                 if act[1] in bg_reads: bg_reads.remove(act[1])
@@ -1752,9 +1544,8 @@ def _module_grimoire():
             charge_seen[serial] = cur; low = book_low(serial); was_low = prev is not None and prev < LOW_CHARGES
             if low and not was_low:
                 title = next((b["title"] for b in runebooks if b["serial"] == serial), "A runebook")
-                left = "%d charge%s left" % (cur, "" if cur == 1 else "s")
-                try: HOST.alert("grimoire.charges", "%s: %s" % (title, left), who=serial)
-                except Exception: say("%s has %s." % (title, left), Kit.HUE_BAD)
+                left = "%s left" % Kit.count(cur, "charge")
+                HOST.alert("grimoire.charges", "%s: %s" % (title, left), who=serial)
             recolor_tab(serial)
     def travel_pending():
         return (trip["busy"] or time.time() - trip["at"] < 2.0 or any(a[0] == "travel" for a in jobs)
@@ -1766,7 +1557,7 @@ def _module_grimoire():
         try: serial, index = int(book_serial), int(rune_index)
         except (TypeError, ValueError): return False
         if not st["scanned"]:
-            say("still looking for your runebooks; try again in a moment.", Kit.HUE_INFO); return False
+            say("still finding your runebooks; try again shortly.", Kit.HUE_INFO); return False
         title = next((b["title"] for b in runebooks if b["serial"] == serial), None)
         if title is None: say("that runebook isn't in your pack or hands.", Kit.HUE_BAD); return False
         try: dest = rune_cache[serial][resolve(serial, index, name)]
@@ -1775,7 +1566,7 @@ def _module_grimoire():
         if method == "charge" and dest.get("rune"):
             say("%s has no charges to use; pick Recall instead." % title, Kit.HUE_BAD); return False
         if method in ("gate", "sacred") and dest.get("slot") is None and not dest.get("rune"):
-            say("%s has its own runebook layout; only its rune's own button works there, not %s."
+            say("%s has its own layout; only its rune's own button works there, not %s."
                 % (title, "Gate Travel" if method == "gate" else "Sacred Journey"), Kit.HUE_BAD)
             return False
         if travel_pending(): say("a trip is already on its way.", Kit.HUE_INFO); return False
@@ -1811,7 +1602,7 @@ def _module_grimoire():
             finally: trip["busy"] = False
             bg["hold"] = time.time() + 6.0
         elif kind == "read":
-            if safe(lambda: API.HasTarget("any"), False):
+            if API.HasTarget("any"):
                 if act[1] in bg_reads: bg_reads.remove(act[1])
                 bg_reads.insert(0, act[1]); return
             read_and_store(act[1]); bg["hold"] = max(bg["hold"], time.time() + 0.55)
@@ -1836,31 +1627,23 @@ def _module_grimoire():
             st["queue"].append(("rescan",))
         loop["held"] = held
     def _stop():
-        st["shutting"] = True
-        for k, fn in SERVICES.items():
-            if HOST.services.get(k) is fn: HOST.services.pop(k, None)
-        safe(lambda: HOST.layout_remove(KEY)); save_favs(); flush_saved(); st["docked"], st["link_state"] = False, None
-        safe(lambda: API.SetSharedVar(LINK_STATE, "off")); release_cursor()
+        st["shutting"] = True; cleanup.close(); save_favs(); flush_saved(); st["docked"], st["link_state"] = False, None
+        API.SetSharedVar(LINK_STATE, "off"); HOST.release_cursor(KEY)
         cast.update({"wait": None, "claim": 0.0, "seen": False, "rd": None})
         def keep_place():
             if Kit.is_open(gump): save_window_pos(); return True
             return False
-        try: placed = Kit.on_client(keep_place)
-        except Exception: placed = safe(keep_place, False)
+        placed = Kit.on_client(keep_place)
         if not placed and loop["last_pos"][0] is not None:
             for k, v in zip(("X", "Y"), loop["last_pos"]): save_int(k, v)
         if loop["size_dirty"]: save_size()
         if Kit.is_open(gump): Kit.dispose(gump)
-    MODULE = {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-              "thread_wanted": thread_wanted, "config_height": lambda w: CONFIG_H, "build_config": build_config,
-              "poll_config": poll_config, "config_closed": config_closed}
-    return MODULE
+    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
+              "thread_wanted": thread_wanted, "config_height": cfg.height, "build_config": build_config,
+              "poll_config": cfg.poll, "config_closed": cfg.closed}
 
 
-if "HOST" in globals() and hasattr(globals()["HOST"], "add"):
-    HOST.add("grimoire", "Grimoire", "Spellbook, runebooks and reagents in one window", _module_grimoire, 0.05,
-             category="Your things")
-else:
+if "HOST" not in globals():
     import API
-    API.SysMsg("Grimoire is a Virtue Assistant module and can't run on its own. "
-               "Run Virtue Assistant instead; it loads this file.", 33)
+    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("grimoire", "Grimoire", "Spellbook, runebooks and reagents", _module_grimoire, 0.05, category="Your things")

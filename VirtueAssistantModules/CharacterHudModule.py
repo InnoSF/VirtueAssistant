@@ -19,22 +19,15 @@ def _module_hud():
     def pieces_remove(pkey): PIECES["piece"].pop(pkey, None); PIECES["dirty"] = True; _piece_free(pkey)
     def _piece_free(pkey):
         tied = PIECES["tied"].pop(pkey, None); g = None
-        if tied is not None: safe(lambda: Kit.detach(tied[0])); g = tied[0]
-        elif pkey in PIECES["piece"]: g = safe(PIECES["piece"][pkey][2])
+        if tied is not None: Kit.detach(tied[0]); g = tied[0]
+        elif pkey in PIECES["piece"]: g = PIECES["piece"][pkey][2]()
         bare = PIECES["bare"]
         if g is None or not bare or not bare.pop(g, False) or not Kit.is_open(g): return
         for ctrl in list(Kit._frame_parts.get(g) or ()) + list(PIECES["bg"].get(g) or ()):
-            safe(lambda: setattr(ctrl, "IsVisible", True))
+            Kit.set(ctrl, "IsVisible", True)
     def pieces_frame(fkey):
-        fn = PIECES["anchor"].get(fkey)
-        if fn is None: return None
-        try: g = fn()
-        except Exception: return None
-        if g is None or not Kit.is_open(g): return None
-        try:
-            if not g.IsVisible: return None
-        except Exception: pass
-        return g
+        fn = PIECES["anchor"].get(fkey); g = fn() if fn is not None else None
+        return g if Kit.is_open(g) and g.IsVisible else None
     def pieces_on(pkey): p = PIECES["piece"].get(pkey); return p is not None and pieces_frame(p[0]) is not None
     RAISE = {"at": 0.0, "uim": None, "off": False, "same": None}
     def pieces_raise(pairs):
@@ -61,34 +54,19 @@ def _module_hud():
                     if same(v, rf): Tz.call(None, "MakeTopMostGump", [rp], uim); break
                     node = node.Next
         except Exception: RAISE["off"] = True
-    def _rect_of(g):
-        try: r = Kit.rect(g)
-        except Exception: return None
-        if r is None or r[2] <= 0 or r[3] <= 0: return None
-        return r
+    def _rect_of(g): r = Kit.rect(g); return r if r is not None and r[2] > 0 and r[3] > 0 else None
     def _pieces_sig(sw, sh):
         vals = [sw, sh]; objs = []
-        for pkey, (fk, order, getter) in PIECES["piece"].items():
-            try: g = getter()
-            except Exception: g = None
-            vals.append((pkey, fk, order)); objs.append(g)
+        for pkey, (fk, order, getter) in PIECES["piece"].items(): vals.append((pkey, fk, order)); objs.append(getter())
         for fk in PIECES["anchor"]:
             fg = pieces_frame(fk); r = span = inner = None
             if fg is not None:
-                r = _rect_of(fg); sfn = PIECES["span"].get(fk)
-                if sfn is not None:
-                    try: span = sfn()
-                    except Exception: span = None
-                ifn = PIECES["inner"].get(fk)
-                if ifn is not None:
-                    try: inner = ifn()
-                    except Exception: inner = None
+                r = _rect_of(fg); sfn, ifn = PIECES["span"].get(fk), PIECES["inner"].get(fk)
+                span = sfn() if sfn is not None else None; inner = ifn() if ifn is not None else None
             vals.append((fk, r, span, inner)); objs.append(fg)
         return vals, objs
     def pieces_place():
-        try: sw, sh = Kit.screen()
-        except Exception: sw, sh = 0, 0
-        now = time.time(); vals, objs = _pieces_sig(sw, sh)
+        sw, sh = Kit.screen(); now = time.time(); vals, objs = _pieces_sig(sw, sh)
         if not PIECES["dirty"] and now < PIECES["full_at"] and now + 2 * PLACE_EVERY > \
                 PIECES["full_at"] and vals == PIECES["sig"]:
             old = PIECES["objs"]; same = old is not None and len(old) == len(objs)
@@ -111,17 +89,14 @@ def _module_hud():
             fr_r = _rect_of(fg)
             if fr_r is None: PIECES["dirty"] = True; continue
             fx, fy, fw, fh = fr_r; below = sh <= 0 or (fy + fh / 2.0) < sh / 2.0
-            sfn, ifn = PIECES["span"].get(fk), PIECES["inner"].get(fk); span = safe(sfn) if sfn is not None else None
-            inner = safe(ifn) if ifn is not None and span is not None else None; hole = None; items.sort()
+            sfn, ifn = PIECES["span"].get(fk), PIECES["inner"].get(fk); span = sfn() if sfn is not None else None
+            inner = ifn() if ifn is not None and span is not None else None; hole = None; items.sort()
             y = fy + fh if below else fy
             for _o, pkey, getter in items:
-                try: g = getter()
-                except Exception: g = None
-                if g is None or not Kit.is_open(g): _piece_free(pkey); continue
+                g = getter()
+                if not Kit.is_open(g): _piece_free(pkey); continue
                 seen[pkey] = g
-                try:
-                    if not g.IsVisible: continue
-                except Exception: continue
+                if not g.IsVisible: continue
                 pr = _rect_of(g)
                 if pr is None: PIECES["dirty"] = True; continue
                 px, py, pw, ph = pr; ix = None
@@ -139,29 +114,25 @@ def _module_hud():
                     if sw > 0: x = max(0, min(x, sw - pw))
                     if below: ny, y = y, y + ph
                     else: y -= ph; ny = y
-                if (px, py) != (x, ny):
-                    try: g.SetPos(x, ny); Kit.note_rect(g, x, ny); Kit.moved_by_code(g)
-                    except Exception: pass
+                if (px, py) != (x, ny): g.SetPos(x, ny); Kit.note_rect(g, x, ny); Kit.moved_by_code(g)
                 tied = PIECES["tied"].get(pkey)
                 if tied is None or tied[0] is not g or tied[1] is not fg:
-                    if tied is not None and tied[0] is not g: safe(lambda: Kit.detach(tied[0]))
-                    safe(lambda: Kit.attach(g, fg)); PIECES["tied"][pkey] = (g, fg)
+                    if tied is not None and tied[0] is not g: Kit.detach(tied[0])
+                    Kit.attach(g, fg); PIECES["tied"][pkey] = (g, fg)
             PIECES["stack"][fk] = (below, (y - (fy + fh)) if below else (fy - y))
         bare = PIECES["bare"]; now_in = set(g for g, _f in inside)
         for d in (bare, PIECES["bg"]):
             for g in [g for g in d if not Kit.is_open(g)]: d.pop(g, None)
         for pkey, (fk, order, getter) in PIECES["piece"].items():
             g = seen.get(pkey)
-            if g is None:
-                g = safe(getter)
-                if g is None or not Kit.is_open(g): continue
+            if g is None: g = getter()
+            if not Kit.is_open(g): continue
             want = g in now_in
             if bare.get(g, False) != want:
                 bare[g] = want
                 if want: Kit.pin_size(g)
                 for ctrl in list(Kit._frame_parts.get(g) or ()) + list(PIECES["bg"].get(g) or ()):
-                    try: ctrl.IsVisible = not want
-                    except Exception: pass
+                    Kit.set(ctrl, "IsVisible", not want)
         PIECES["inside"] = inside
         if inside: pieces_raise(inside)
     PIECES_TARGET = {"fn": None}; READOUT_WORDS = ("Ready", "Done", "Out!", "Dead", "Paused")
@@ -169,13 +140,6 @@ def _module_hud():
     def skill_value(name, default=0.0):
         try: return float(API.GetSkill(name).Value or 0)
         except Exception: return default
-    def win_begin(win, pos_key, at, w, h):
-        x, y = Kit.load_pos(pos_key, at, (w, h))
-        if Kit.is_open(win["g"]): x, y = win["g"].GetX(), win["g"].GetY()
-        old, win["g"] = win["g"], None; return x, y, old, ({}, {}), G.CreateGump(True, True)
-    def win_head(g, store, w, h, title, key, queue):
-        Kit.add_window_frame(g, w, h)
-        Kit.title_bar(g, store, w, title, key, queue("toggle_min"), queue("to_bar"), queue("settings"))
     def part_dict(start, tick, stop, height, build, poll, closed, **more):
         more.update({"start": start, "tick": tick, "stop": stop, "client_tick": True, "config_height": height,
                      "build_config": build, "poll_config": poll, "config_closed": closed})
@@ -201,16 +165,16 @@ def _module_hud():
         LAYERS_PARROT = ("shirt", "arms", "torso", "tunic", "cloak", "face", "neck",
                          "hair", "beard", "earrings", "helmet", "robe")
         PARROT_ROBES = (0xA2CA, 0xA2CB); OPEN_ROBES = (0x9985, 0x9986, 0xA412, 0xA2CB, 0xA2CA)
-        PLATE_ARMS = (0x1410, 0x1417); SNAP_DEPTH = 110; SNAP_RETRY = 2.0; THREAD_BUDGET = 0.03; TEX_PREFIX = "vauf_"
+        PLATE_ARMS = (0x1410, 0x1417); SNAP_DEPTH = 110; SNAP_RETRY = 2.0; THREAD_BUDGET = 0.008; TEX_PREFIX = "vauf_"
         MAX_TRACKED = 12; SCALE_MIN, SCALE_MAX, SCALE_DEFAULT = 50, 150, 70; LABEL_H = 14; PICK_TIMEOUT = 10
         PREVIEW = 100; SETTINGS_KEY = "UnitFrames_settings"; TRACKED_KEY = "UnitFrames_tracked"
         FRAMEPOS_KEY = "UnitFrames_framepos"; POS_KEY = "UnitFrames_pos"; MIN_KEY = "UnitFrames_min"; W = 350
         CLOSE_ART = (0x0FB1, 0x0FB2, 0x0FB1); CLOSE_INSET = 3; MINI_W, MINI_H = 240, 46; DRAG_SETTLE = 0.4
-        TICK_EVERY = 0.1; FRAME_SNAP = SNAP_DIST; CAST_H = 24; CAST_GAP = 2; CAST_HOLD = 1.5; CAST_FAIL_WINDOW = 10.0
+        TICK_EVERY = 0.05; FRAME_SNAP = SNAP_DIST; CAST_H = 24; CAST_GAP = 2; CAST_HOLD = 1.5; CAST_FAIL_WINDOW = 10.0
         CAST_COLOR = {"cast": "#cfae2a", "done": "#2f9a3c", "fail": "#c22d2d"}
         CAST_FAIL_TEXTS = (("the spell fizzles", "fizzled"), ("your concentration is disturbed", "disturbed"),
                            ("insufficient mana", "no mana"), ("more reagents are needed", "no reagents"))
-        SPELLS = Kit.SPELL_WORDS; TEXT_PX = Kit.text_px; OWN_PREFIX = TITLE.lower() + ":"; ART_W, ART_H = 502, 194
+        SPELLS = Kit.SPELL_WORDS; TEXT_PX = Kit.text_px; ART_W, ART_H = 502, 194
         RING_C = (96.5, 96.5); HOLE_R = 52.5
         RING = ((86.0, (22, 22, 24)), (81.5, (226, 226, 230)), (79.5, "tire"), (64.5, (30, 25, 10)),
                 (61.5, (226, 226, 230)), (60.5, "gold"), (53.5, (14, 10, 2)))
@@ -225,7 +189,7 @@ def _module_hud():
                     "attack": False, "status": True, "scale": SCALE_DEFAULT, "pdx": 0, "pdy": 0,
                     "pscale_on": False, "pscale": SCALE_DEFAULT, "pzoom": 100, "mirror": False, 
                     "sup_open": False, "sup_deep": True, "sup_hide0": False, "sup_follow": True,
-                    "sup_low": 10, "sup_side": 0, "cast": True, "guard": True, "cast_say": False, "hide_bar": True}
+                    "sup_low": 10, "sup_side": 0, "cast": True, "guard": True, "hide_bar": True}
         NUMBERS = {"scale": (SCALE_MIN, SCALE_MAX), "pscale": (SCALE_MIN, SCALE_MAX),
                    "pdx": (-60, 60), "pdy": (-60, 60), "pzoom": (50, 200), "sup_low": (0, 9999), "sup_side": (0, 2)}
         settings = dict(DEFAULTS)
@@ -241,8 +205,8 @@ def _module_hud():
         st_reset(); tracked = []; anchor = {"sig": None, "at": None}
         cast = {"g": None, "c": {}, "spell": None, "start": 0.0, "secs": 1.0, "state": None,
                 "until": 0.0, "pct": 0, "word": "", "shown": None, "at": None, "leader": None, "s": None, "w": 0}
-        frames = {}; win = {"g": None, "store": ({}, {})}
-        page = {"c": None, "store": ({}, {}), "next_preview": 0.0, "layers": None}; item_info = {}
+        frames = {}; win = {"g": None, "store": ({}, {})}; cleanup = Kit.Cleanup(); say = Kit.sayer(TITLE)
+        page = {"store": ({}, {}), "next_preview": 0.0, "layers": None}; item_info = {}
         _get, _put = Kit.get_var, Kit.put_var
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ",", settings, NUMBERS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ",", settings, sorted(DEFAULTS), NUMBERS)
@@ -276,42 +240,28 @@ def _module_hud():
                 if Kit.is_open(fr.get("g")):
                     p = frame_at(fr)
                     if p is not None: note_pos(key, p)
-        def save_pos(): Kit.save_pos(POS_KEY, win["g"])
         def my_serial(): return int(safe(lambda: API.Player.Serial, 0) or 0)
         def noto_name(n):
             if n is None: return ""
             try: return NOTO_NUM.get(int(n), "")
             except Exception: return str(n).split(".")[-1].lower()
-        def find_mobile(serial):
-            if serial == st["me"]: return HOST.me()
-            try: return HOST.mobile(serial)
-            except Exception: return None
+        def find_mobile(serial): return HOST.me() if serial == st["me"] else HOST.mobile(serial)
         M_NAME, M_HITS, M_HMAX, M_MANA, M_MMAX, M_STAM, M_SMAX, M_NOTO, M_DEAD, M_POISON, M_YELLOW, M_PARA = range(12)
-        def read_mobile_slow(m):
-            return (str(safe(lambda: m.Name, "") or ""),
-                    int(safe(lambda: m.Hits, 0) or 0), int(safe(lambda: m.HitsMax, 0) or 0),
-                    int(safe(lambda: m.Mana, 0) or 0), int(safe(lambda: m.ManaMax, 0) or 0),
-                    int(safe(lambda: m.Stamina, 0) or 0), int(safe(lambda: m.StaminaMax, 0) or 0),
-                    noto_name(safe(lambda: m.Notoriety)),
-                    bool(safe(lambda: m.IsDead, False)), bool(safe(lambda: m.IsPoisoned, False)),
-                    bool(safe(lambda: m.IsYellowHits, False)), bool(safe(lambda: m.IsParalyzed, False)))
         _slow_reads = {}
         def read_mobile(serial):
             if not serial: return None
             m = find_mobile(serial)
             if m is None: return None
             try:
-                dead = bool(getattr(m, "IsDead", False)); now = time.time(); c = _slow_reads.get(serial)
+                dead = bool(m.IsDead); now = time.time(); c = _slow_reads.get(serial)
                 if c is None or now >= c[5] or dead != c[6]:
                     if c is None and len(_slow_reads) >= 64: _slow_reads.clear()
-                    c = _slow_reads[serial] = (str(getattr(m, "Name", "") or ""), int(getattr(m, "HitsMax", 0) or 0),
-                        int(getattr(m, "ManaMax", 0) or 0), int(getattr(m, "StaminaMax", 0) or 0),
-                        noto_name(getattr(m, "Notoriety", None)), now + 0.5, dead)
-                d = (c[0], int(getattr(m, "Hits", 0) or 0), c[1], int(getattr(m, "Mana", 0) or 0) if c[2] else 0, c[2],
-                     int(getattr(m, "Stamina", 0) or 0) if c[3] else 0, c[3],
-                     c[4], dead, bool(getattr(m, "IsPoisoned", False)), bool(getattr(m, "IsYellowHits", False)),
-                     bool(getattr(m, "IsParalyzed", False)))
-            except Exception: _slow_reads.pop(serial, None); d = read_mobile_slow(m)
+                    c = _slow_reads[serial] = (str(m.Name or ""), int(m.HitsMax or 0), int(m.ManaMax or 0),
+                                               int(m.StaminaMax or 0), noto_name(m.Notoriety), now + 0.5, dead)
+                d = (c[0], int(m.Hits or 0), c[1], int(m.Mana or 0) if c[2] else 0, c[2],
+                     int(m.Stamina or 0) if c[3] else 0, c[3], c[4], dead, bool(m.IsPoisoned), bool(m.IsYellowHits),
+                     bool(m.IsParalyzed))
+            except Exception: _slow_reads.pop(serial, None); return None
             name = d[M_NAME]
             if name and st["names"].get(serial) != name: st["names"][serial] = name
             return d
@@ -327,56 +277,33 @@ def _module_hud():
                 _members[key] = acc
             if acc is None: return None
             return acc[0].GetValue(obj, None) if acc[1] else acc[0].GetValue(obj)
-        class AttackTarget(object):
-            getter = None; looked = False; HOLD_FOR = 2.0
-            CHAINS = (("ClassicUO.Game.Managers.TargetManager", ("LastAttack",)),
-                      ("ClassicUO.Game.World", ("Instance", "TargetManager", "LastAttack")),
-                      ("ClassicUO.Client", ("Game", "UO", "World", "TargetManager", "LastAttack")))
-            @staticmethod
-            def _chain(tname, names):
-                t = Client._type(tname)
-                if t is None: return None
-                first = Client._member(t, names[0])
-                if first is None: return None
-                if len(names) == 1:
-                    def get(): return int(first[0]() or 0)
-                    get(); return get
-                held = {"root": None, "obj": None, "until": 0.0}; last = names[-1]
-                def get():
-                    root = first[0]()
-                    if root is None: held["obj"] = None; return 0
-                    obj = held["obj"]; now = time.time()
-                    if obj is None or root is not held["root"] or now >= held["until"] or \
-                            held["until"] - now > AttackTarget.HOLD_FOR:
-                        held["obj"] = None; obj = root
-                        for n in names[1:-1]:
-                            if obj is None: return 0
-                            obj = instance_member(obj, n)
-                        if obj is None: return 0
-                        held["root"], held["obj"], held["until"] = (root, obj, now + AttackTarget.HOLD_FOR)
-                    try: return int(instance_member(obj, last) or 0)
-                    except Exception: held["obj"] = None; raise
-                get(); return get
-            @staticmethod
-            def serial():
-                if not AttackTarget.looked:
-                    AttackTarget.looked = True
-                    for tname, names in AttackTarget.CHAINS:
-                        g = safe(lambda: AttackTarget._chain(tname, names))
-                        if g is not None: AttackTarget.getter = g; break
-                g = AttackTarget.getter; return int(safe(g, 0) or 0) if g is not None else 0
+        attack = {"get": None, "looked": False, "root": None, "obj": None, "until": 0.0}; HOLD_FOR = 2.0
+        def attack_chain():
+            t = Client._type("ClassicUO.Game.World"); first = Client._member(t, "Instance") if t is not None else None
+            if first is None: return None
+            def get():
+                root = first[0]()
+                if root is None: attack["obj"] = None; return 0
+                obj = attack["obj"]; now = time.time()
+                if obj is None or root is not attack["root"] or not 0 < attack["until"] - now <= HOLD_FOR:
+                    attack["obj"] = None; obj = instance_member(root, "TargetManager")
+                    if obj is None: return 0
+                    attack.update({"root": root, "obj": obj, "until": now + HOLD_FOR})
+                try: return int(instance_member(obj, "LastAttack") or 0)
+                except Exception: attack["obj"] = None; raise
+            get(); return get
+        def attack_serial():
+            if not attack["looked"]: attack["looked"] = True; attack["get"] = safe(attack_chain)
+            return int(safe(attack["get"], 0) or 0) if attack["get"] is not None else 0
         def update_target():
-            s = AttackTarget.serial() if settings["attack"] else 0
-            if not s:
-                try: s = int(API.LastTargetSerial or 0)
-                except Exception: s = 0
+            s = (attack_serial() if settings["attack"] else 0) or int(API.LastTargetSerial or 0)
             if not s: st["target"] = 0; return
             if s == st["target"]: return
-            if s == st["me"] and settings["ignore_self"]: return
-            if safe(lambda: API.FindMobile(s)) is not None or s == st["me"]: st["target"] = s
+            if s == st["me"]:
+                if not settings["ignore_self"]: st["target"] = s
+            elif API.FindMobile(s) is not None: st["target"] = s
         def sync_party():
-            party = set(int(x) for x in (safe(lambda: list(API.GetPartyMemberSerials()), []) or [])
-                        if int(x) and int(x) != st["me"])
+            party = set(int(x) for x in (API.GetPartyMemberSerials() or []) if int(x) and int(x) != st["me"])
             st["party"] = party; changed = False; dismissed = st["dismissed"]
             if dismissed:
                 if settings["party"]: dismissed &= party
@@ -474,7 +401,7 @@ def _module_hud():
                 return None
             @staticmethod
             def put_texture(name, w, h, pixels): Tex.put(name, w, h, pixels); st["textures"].add(name)
-        def mute(ctrl): safe(lambda: ctrl.SetAcceptMouseInput(False)); return ctrl
+        def mute(ctrl): ctrl.SetAcceptMouseInput(False); return ctrl
         def _cov(d, s): v = 0.5 - d * s; return 0.0 if v <= 0 else (1.0 if v >= 1 else v)
         def _rr(u, v, box):
             x0, y0, x1, y1, r = box; qx = abs(u - (x0 + x1) * 0.5) - ((x1 - x0) * 0.5 - r)
@@ -621,13 +548,12 @@ def _module_hud():
             return bool(jobs)
         def snap_size(s): return int(math.ceil(2 * (HOLE_R + 2) * s))
         def snap_px(): return snap_size(max(scales_in_use()))
-        def item_details(item):
-            graphic = int(safe(lambda: item.Graphic, 0) or 0); info = item_info.get(graphic)
+        def item_details(graphic, item):
+            info = item_info.get(graphic)
             if info is None:
-                data = safe(lambda: item.GetItemData())
-                info = (int(safe(lambda: data.AnimID, 0) or 0), bool(safe(lambda: data.IsPartialHue, False)),
-                        bool(safe(lambda: data.IsContainer, False)))
-                if data is not None: item_info[graphic] = info
+                data = item.GetItemData()
+                if data is None: return 0, False, False
+                info = item_info[graphic] = (int(data.AnimID or 0), bool(data.IsPartialHue), bool(data.IsContainer))
             return info
         def covered(layer, worn):
             robe = worn.get("robe", (0, 0))[0]
@@ -646,19 +572,17 @@ def _module_hud():
         def read_paperdoll(serial):
             m = find_mobile(serial)
             if m is None: return None
-            graphic = int(safe(lambda: m.Graphic, 0) or 0); body = PAPERDOLL_BODY.get(graphic)
+            graphic = int(m.Graphic or 0); body = PAPERDOLL_BODY.get(graphic)
             if body is None: return {"body": 0, "pieces": ()}
-            hue = (GM_BODY_HUE if graphic == GM_BODY else (int(safe(lambda: m.Hue, 0) or 0) & 0x3FFF))
+            hue = GM_BODY_HUE if graphic == GM_BODY else int(m.Hue or 0) & 0x3FFF
             female = graphic in FEMALE_BODIES; worn, details = {}, {}
             for layer in LAYERS:
-                try: it = API.FindLayer(layer, serial)
-                except Exception: it = None
-                if it is not None:
-                    try: ig = int(it.Graphic or 0)
-                    except Exception: ig = 0
-                    try: ih = int(it.Hue or 0) & 0x3FFF
-                    except Exception: ih = 0
-                    worn[layer] = (ig, ih); details[layer] = item_details(it)
+                it = API.FindLayer(layer, serial)
+                if it is None: continue
+                try:
+                    ig = int(it.Graphic or 0); worn[layer] = (ig, int(it.Hue or 0) & 0x3FFF)
+                    details[layer] = item_details(ig, it)
+                except Exception: worn.pop(layer, None)
             order = LAYERS
             if "cloak" in worn:
                 if worn.get("robe", (0, 0))[0] in PARROT_ROBES: order = LAYERS_PARROT
@@ -781,7 +705,7 @@ def _module_hud():
                     serial, name, size = job["serial"], "%ssnap_%d" % (TEX_PREFIX, job["serial"]), job["size"]
                     if safe(lambda: Bridge.on_main(lambda: Bridge.put_texture(name, size, size, r)) or True, False):
                         st["snaps"][serial] = {"name": name, "creature": False}
-                        if serial == st["me"] and page["c"] is not None: page["layers"] = (job["layers"], job["body"])
+                        if serial == st["me"] and cfg.f is not None: page["layers"] = (job["layers"], job["body"])
                         mark_frames(serial)
                     return False
                 if time.time() >= deadline: return True
@@ -905,15 +829,14 @@ def _module_hud():
             return 60 + (i // 4) * (w + 10), 40 + (i % 4) * (h + 2)
         def follow_or(serial, action=None):
             def h(*a):
-                if safe(Follow.alt_held, False): queue(("follow_serial", serial))(); return
+                if Follow.alt_held(): queue(("follow_serial", serial))(); return
                 if action: queue(action)()
             return h
         def frame_clicked(key):
             def handler():
                 fr = frames.get(key); g = fr and fr.get("g")
                 if not g: return
-                alt = bool(safe(Follow.alt_held, False))
-                removing = not alt and not settings["click"] and st.get("removing")
+                alt = Follow.alt_held(); removing = not alt and not settings["click"] and st.get("removing")
                 if not alt and not settings["click"] and not removing: return
                 p = frame_at(fr)
                 if p != fr.get("seen") or time.time() < fr.get("drag_until", 0.0): fr["seen"] = p; return
@@ -964,8 +887,8 @@ def _module_hud():
                                 rows[-1][3] - rows[0][1] + 8, alpha=0.9)
                 add_bars(g, c, [(a, b + 1, cc, d - 1) for a, b, cc, d in rows])
             c["strip"] = color_box(g, cx - 22, cy + int(hole * 0.42), 44, LABEL_H + 4, (0, 0, 0), 0.65)
-            safe(lambda: setattr(c["strip"], "IsVisible", False))
-            tip = None if key == "player" else ("Click: set them as your target. Alt+click: auto-follow (again to stop)"
+            c["strip"].IsVisible = False
+            tip = None if key == "player" else ("Click: make them your target. Alt+click: auto-follow (again to stop)"
                  if settings["click"] else "Alt+click: auto-follow (again to stop)")
             Kit.catcher(g, ox, oy, w, h, frame_clicked(key), None, movable=not settings["lock"])
             px0, px1 = mirror_x(style, w, sx(PANEL[0]), sx(PANEL[2]))
@@ -976,8 +899,7 @@ def _module_hud():
                 c["lbl_" + name] = mute(Kit.add_label(g, "", 0, 0))
             guard_at = None
             if key == "player":
-                c["guard_bg"] = color_box(g, 0, 0, 1, 1, (0, 0, 0), 0.65)
-                safe(lambda: setattr(c["guard_bg"], "IsVisible", False))
+                c["guard_bg"] = color_box(g, 0, 0, 1, 1, (0, 0, 0), 0.65); c["guard_bg"].IsVisible = False
                 c["lbl_guard"] = mute(Kit.add_label(g, "", 0, 0))
                 guard_at = (ox + sx(PANEL[2]) - 6, oy + max(1, sx(PANEL[1]) - LABEL_H - 3))
             frames[key] = {"g": g, "c": c, "rows": rows, "centre": (cx, cy), "hole": hole, "s": s,
@@ -986,8 +908,7 @@ def _module_hud():
                            "box": (ox, oy, w, h), "win": (W, H), "slot": fitbox.get(key), "rides": rides_inside(key)}
             if guard_at is not None: frames[key]["guard_at"] = guard_at
             st["art_dirty"] = True; G.AddControlOnDisposed(g, frame_disposed(key, g)); G.AddGump(g)
-            if not safe(lambda: (Kit.no_snap(g), True)[1], False): safe(lambda: SNAP.skip_gump(g))
-            safe(lambda: Kit.on_moved(g, frame_moved(key))); Kit.dispose(old)
+            Kit.no_snap(g); Kit.on_moved(g, frame_moved(key)); Kit.dispose(old)
         def frame_moved(key):
             def handler():
                 fr = frames.get(key)
@@ -1002,10 +923,8 @@ def _module_hud():
             x, y, fn = ox + CLOSE_INSET, oy + CLOSE_INSET, follow_or(int(key[1:]), ("xclose", key))
             tip = "Close this frame. Alt+click: auto-follow (again to stop)"
             if Kit.pic_size(art[0])[0] > 0:
-                try:
-                    b = G.CreateGumpButton("", Kit.HUE_TEXT, art[0], art[1], art[2]); b.SetPos(x, y); g.Add(b)
-                    Kit.on_click(b, fn); safe(lambda: b.SetTooltip(tip)); return
-                except Exception: pass
+                b = G.CreateGumpButton("", Kit.HUE_TEXT, art[0], art[1], art[2]); b.SetPos(x, y); g.Add(b)
+                Kit.on_click(b, fn); b.SetTooltip(tip); return
             Kit.add_label(g, "x", x + 2, y, Kit.HUE_TITLE)
             Kit.catcher(g, x, y, max(14, Kit.text_w("x") + 4), 16, fn, tip)
         def close_frame(key):
@@ -1069,7 +988,7 @@ def _module_hud():
             at = anchor["at"]; return None if at is None else (fr["g"], at)
         def cast_reserve(fy, fh):
             if not settings["cast"]: return 0, 0
-            H = (Kit.screen() or (0, 0))[1]
+            H = Kit.screen()[1]
             if H > 0 and fy + fh + CAST_GAP + CAST_H > H: return 0, CAST_H + CAST_GAP
             return CAST_H + CAST_GAP, 0
         def cast_spot(fr):
@@ -1093,7 +1012,7 @@ def _module_hud():
                 pb = G.CreateGumpSimpleProgressBar(w - 12, h - 10, BAR_BG, CAST_COLOR[k], 0, 100); pb.SetPos(6, 5)
                 g.Add(mute(pb)); c[k] = pb
             c["lbl"] = mute(Kit.add_label(g, "", 6, 4)); at = cast_spot(fr) or (0, 0); Kit.place(g, at[0], at[1], w, h)
-            G.AddGump(g); safe(lambda: setattr(g, "IsVisible", False)); safe(lambda: Kit.attach(g, fr["g"]))
+            G.AddGump(g); g.IsVisible = False; Kit.attach(g, fr["g"])
             cast.update({"g": g, "c": c, "shown": None, "at": at, "leader": fr["g"], "s": fr["s"], "w": w})
         def cast_tick(now):
             fr = frames.get("player")
@@ -1102,29 +1021,18 @@ def _module_hud():
                 if cast["g"] is not None: drop_cast()
                 return
             lines = None
-            if st["jr"] is None: st["jr"] = safe(Journal.reader)
-            else:
-                try: lines = st["jr"].new()
-                except Exception: lines = None
+            if st["jr"] is None: st["jr"] = Journal.reader()
+            else: lines = st["jr"].new()
             if lines:
-                me_name = st["names"].get(st["me"]) or ""; say = settings["cast_say"]
+                me_name = st["names"].get(st["me"]) or ""
                 for ln in lines:
                     name = ln.name or ""
-                    if say and cast["spell"] is not None and \
-                            now - cast["start"] <= cast["secs"] + CAST_FAIL_WINDOW and \
-                            not ln.low.startswith(OWN_PREFIX):
-                        API.SysMsg("%s: line [%s]: %s" % (TITLE, name or "-", ln.text.strip()), Kit.HUE_INFO)
                     if me_name and name == me_name:
                         sp = SPELLS.get(ln.low.strip())
                         if sp is not None:
-                            try: info = Kit.spell_info(sp[0])
-                            except Exception: info = None
-                            secs = info[3] if info and info[3] else 1.0
+                            info = Kit.spell_info(sp[0]); secs = info[3] if info and info[3] else 1.0
                             cast.update({"spell": sp[0], "start": min(now, ln.at or now),
                                          "secs": max(0.1, float(secs)), "state": "cast", "pct": 0, "word": ""})
-                            if say:
-                                API.SysMsg("%s: cast %s (%.2f s) from [%s]: %s" % (
-                                    TITLE, sp[0], cast["secs"], name, ln.text.strip()), Kit.HUE_INFO)
                             continue
                     elif name and name != "System": continue
                     if cast["spell"] is None or now - cast["start"] > cast["secs"] + CAST_FAIL_WINDOW: continue
@@ -1145,35 +1053,27 @@ def _module_hud():
         def draw_cast(fr):
             state = cast["state"]; g = cast["g"]
             if state is None:
-                if g is not None and cast["shown"] is not None:
-                    cast["shown"] = None; safe(lambda: setattr(g, "IsVisible", False))
+                if g is not None and cast["shown"] is not None: cast["shown"] = None; Kit.set(g, "IsVisible", False)
                 return
             if g is None or not Kit.is_open(g) or cast["s"] != fr["s"] or cast["leader"] is not fr["g"]:
                 build_cast(fr); g = cast["g"]
             at = cast_spot(fr)
             if at is not None and at != cast["at"]:
-                cast["at"] = at
-                try: g.SetRect(at[0], at[1], cast["w"], CAST_H); Kit.moved_by_code(g)
-                except Exception: pass
+                cast["at"] = at; g.SetRect(at[0], at[1], cast["w"], CAST_H); Kit.moved_by_code(g)
             label = cast["spell"] if state != "fail" else "%s: %s" % (cast["spell"], cast["word"])
             want = (state, cast["pct"], label); old = cast["shown"]
             if want == old: return
             cast["shown"] = want; c = cast["c"]
-            try:
-                if old is None or old[0] != state:
-                    for k in ("cast", "done", "fail"): c[k].IsVisible = k == state
-                if old is None or old[0] != state or old[1] != want[1]: c[state].SetProgress(float(want[1]), 100.0)
-                if old is None or old[2] != label:
-                    text = Kit.fit(label, cast["w"] - 16); Kit.set_text(c["lbl"], text, Kit.HUE_TEXT)
-                    c["lbl"].SetPos(max(6, (cast["w"] - TEXT_PX(text)) // 2), 4)
-                if old is None: g.IsVisible = True
-            except Exception: pass
+            if old is None or old[0] != state:
+                for k in ("cast", "done", "fail"): c[k].IsVisible = k == state
+            if old is None or old[0] != state or old[1] != want[1]: c[state].SetProgress(float(want[1]), 100.0)
+            if old is None or old[2] != label:
+                text = Kit.fit(label, cast["w"] - 16); Kit.set_text(c["lbl"], text, Kit.HUE_TEXT)
+                c["lbl"].SetPos(max(6, (cast["w"] - TEXT_PX(text)) // 2), 4)
+            if old is None: g.IsVisible = True
         def guard_tick(now):
             if not settings["guard"]: st["guard"] = False
-            elif now >= st["next_guard"]:
-                st["next_guard"] = now + 0.5
-                try: st["guard"] = HOST.guarded()
-                except Exception: st["guard"] = None
+            elif now >= st["next_guard"]: st["next_guard"] = now + 0.5; st["guard"] = HOST.guarded()
             fr = frames.get("player")
             if fr is None or "guard_at" not in fr or not Kit.is_open(fr.get("g")): return
             gd = st["guard"]
@@ -1183,50 +1083,46 @@ def _module_hud():
             x1, y = fr["guard_at"]; place(fr, "guard", text, x1, y, hue, "right")
             if fr["shown"].get("guard_bg") != text:
                 fr["shown"]["guard_bg"] = text; box = fr["c"]["guard_bg"]
-                if text: tw = Kit.text_w(text) + 8; safe(lambda: Kit.ui_rect(box, x1 - tw + 4, y - 1, tw, LABEL_H + 4))
-                safe(lambda: setattr(box, "IsVisible", bool(text)))
+                if text: tw = Kit.text_w(text) + 8; Kit.ui_rect(box, x1 - tw + 4, y - 1, tw, LABEL_H + 4)
+                box.IsVisible = bool(text)
         def place(fr, name, text, x, y, hue, align="left"):
             if align == "right": x -= TEXT_PX(text) if text else 0
             elif align == "center": x -= (TEXT_PX(text) if text else 0) // 2
             want = (text, hue, int(x), int(y)); shown = fr["shown"]; old = shown.get(name)
             if old == want: return
             shown[name] = want; lbl = fr["c"]["lbl_" + name]; Kit.set_text(lbl, text, hue)
-            if old is None or old[2] != want[2] or old[3] != want[3]:
-                try: Kit.ui_pos(lbl, want[2], want[3])
-                except Exception: pass
+            if old is None or old[2] != want[2] or old[3] != want[3]: Kit.ui_pos(lbl, want[2], want[3])
         def set_bar(fr, variant, cur, mx):
             want = (float(max(0, cur)), float(max(1, mx)))
             if fr["bars"].get(variant) == want: return
             pb = fr["c"].get("bar_" + variant)
-            if pb is not None:
-                try: pb.SetProgress(want[0], want[1]); fr["bars"][variant] = want
-                except Exception: pass
+            if pb is not None: pb.SetProgress(want[0], want[1]); fr["bars"][variant] = want
         def show_hits_variant(fr, want):
             if fr["variant"] == want: return
             fr["variant"] = want
             for v in ("hits", "poison", "yellow"):
                 pb = fr["c"].get("bar_" + v)
                 if pb is not None:
-                    safe(lambda: setattr(pb, "IsVisible", v == want))
-                    if v != want: safe(lambda: pb.SetProgress(0.0, 1.0)); fr["bars"][v] = (0.0, 1.0)
+                    pb.IsVisible = v == want
+                    if v != want: pb.SetProgress(0.0, 1.0); fr["bars"][v] = (0.0, 1.0)
         def set_noto(fr, rgb):
             if fr["noto"] == rgb: return
             c = fr["c"]
             if fr["art"]:
                 name = noto_texture(rgb, fr["s"])
                 if name is None: return
-                safe(lambda: setattr(c["noto"], "TextureName", name))
+                c["noto"].TextureName = name
             else:
-                for box in c["edge"]: safe(lambda: box.SetBaseColor(rgb[0], rgb[1], rgb[2], 255))
+                for box in c["edge"]: box.SetBaseColor(rgb[0], rgb[1], rgb[2], 255)
             fr["noto"] = rgb
         def set_snapshot(fr, serial):
             if not fr["art"]: return {}
             empty = not serial
             if fr["shown"].get("snap_hidden") != empty:
-                fr["shown"]["snap_hidden"] = empty; safe(lambda: setattr(fr["c"]["snap"], "IsVisible", not empty))
+                fr["shown"]["snap_hidden"] = empty; fr["c"]["snap"].IsVisible = not empty
             if empty: return {}
             want_snapshot(serial); snap = st["snaps"].get(serial) or {}; name = snap.get("name") or fr["names"]["blank"]
-            if fr["snap"] != name: fr["snap"] = name; safe(lambda: setattr(fr["c"]["snap"], "TextureName", name))
+            if fr["snap"] != name: fr["snap"] = name; fr["c"]["snap"].TextureName = name
             return snap
         def pct(cur, mx): return int(round(100.0 * cur / mx)) if mx > 0 else 0
         def update_frame(key):
@@ -1273,10 +1169,8 @@ def _module_hud():
             place(fr, "status", status, cx, ty + 2, Kit.HUE_BAD if status == "DEAD" else Kit.HUE_TITLE, "center")
             if fr["shown"].get("strip") != status:
                 fr["shown"]["strip"] = status
-                if status:
-                    sw = Kit.text_w(status) + 10
-                    safe(lambda: Kit.ui_rect(c["strip"], cx - sw // 2, ty, sw, LABEL_H + 4))
-                safe(lambda: setattr(c["strip"], "IsVisible", bool(status)))
+                if status: sw = Kit.text_w(status) + 10; Kit.ui_rect(c["strip"], cx - sw // 2, ty, sw, LABEL_H + 4)
+                c["strip"].IsVisible = bool(status)
             place(fr, "portrait_text", Kit.fit(portrait_text, 2 * hole - 6) if portrait_text else "",
                   cx, cy - LABEL_H // 2 - 1, Kit.HUE_INFO, "center")
         def wanted_frames():
@@ -1296,19 +1190,11 @@ def _module_hud():
                         and (not st["art"] or want_art(frame_scale(key)) is not None):
                     build_frame(key)
                 update_frame(key)
-        def screen_size():
-            w, h = safe(Kit.screen, (0, 0)) or (0, 0); return (int(w), int(h)) if w > 0 and h > 0 else None
         def frame_gump(key):
             def get(): fr = frames.get(key); return fr.get("g") if fr else None
             return get
-        def layout_held(key):
-            try: return bool(HOST.layout_holds(KEY + "." + key))
-            except Exception: return False
-        def frame_at(fr):
-            g = fr.get("g"); r = _rect_of(g) if g is not None else None
-            if r is not None: return r[0], r[1]
-            try: return int(g.GetX()), int(g.GetY())
-            except Exception: return None
+        def layout_held(key): return Kit.zone_up(KEY + "." + key)
+        def frame_at(fr): r = Kit.rect(fr.get("g")); return None if r is None else (r[0], r[1])
         def watch_frames(now):
             for key, fr in frames.items():
                 if not Kit.is_open(fr.get("g")): continue
@@ -1323,10 +1209,8 @@ def _module_hud():
                     note_pos(key, p, now + DRAG_SETTLE)
                 else:
                     fr["code_move"] = False
-                    if fr.get("dropped") and now >= fr.get("drag_until", 0.0):
-                        try: pressed = SNAP.pressed()
-                        except Exception: pressed = None
-                        if pressed is not True: fr["dropped"] = False; snap_to_frames(key)
+                    if fr.get("dropped") and now >= fr.get("drag_until", 0.0) and SNAP.pressed() is not True:
+                        fr["dropped"] = False; snap_to_frames(key)
             if st["pos_dirty"] and now >= st["pos_save_at"]: save_positions()
         def frame_rect(key):
             fr = frames.get(key)
@@ -1362,21 +1246,15 @@ def _module_hud():
         def move_frame(key, x, y):
             fr = frames.get(key)
             if fr is None or not Kit.is_open(fr.get("g")): return
-            w, h = fr.get("win") or frame_size(key)[1:]
-            try:
-                fr["g"].SetRect(int(x), int(y), w, h); Kit.note_rect(fr["g"], int(x), int(y), w, h)
-                Kit.moved_by_code(fr["g"])
-            except Exception: pass
+            w, h = fr.get("win") or frame_size(key)[1:]; g = fr["g"]; x, y = Kit.clamp(x, y, w, h)
+            g.SetRect(int(x), int(y), w, h); Kit.note_rect(g, int(x), int(y), w, h); Kit.moved_by_code(g)
             fr.update({"seen": (int(x), int(y)), "code_move": True, "moved": False}); st["pos"][key] = fr["seen"]
             st.update({"pos_dirty": True, "pos_save_at": time.time() + DRAG_SETTLE})
         def mirror_frames(force=False):
             p, t = frames.get("player"), frames.get("target")
             if (p is None or t is None or not Kit.is_open(p.get("g")) or not Kit.is_open(t.get("g"))): return
-            if layout_held("player") or layout_held("target"): return
-            size = screen_size()
-            if size is None: return
-            sw = size[0]; _s, w, _h = frame_size("player"); pp, tp = p.get("seen"), t.get("seen")
-            if pp is None or tp is None: return
+            sw, sh = Kit.screen(); _s, w, _h = frame_size("player"); pp, tp = p.get("seen"), t.get("seen")
+            if layout_held("player") or layout_held("target") or sw <= 0 or sh <= 0 or pp is None or tp is None: return
             p_moved = bool(p.get("moved")); t_moved = bool(t.get("moved"))
             if t_moved and not p_moved and not force:
                 want = (sw - tp[0] - w, tp[1])
@@ -1387,26 +1265,22 @@ def _module_hud():
         def target_from_frame(key):
             serial = frame_serial(key)
             if not serial: return
-            if safe(lambda: API.HasTarget(), False): API.Target(serial)
+            if API.HasTarget(): API.Target(serial)
             else:
-                safe(lambda: API.SetLastTarget(serial=serial))
+                API.SetLastTarget(serial=serial)
                 if key != "target" and serial != st["me"]: st["target"] = serial
         def add_tracked(serial, auto=False):
-            if not serial: API.SysMsg("Frames: target someone first, then click Add frame.", Kit.HUE_BAD); return
+            if not serial: say("target someone first, then click Add frame.", Kit.HUE_BAD); return
             st["dismissed"].discard(serial)
-            if serial == st["me"]:
-                API.SysMsg("Frames: that's you; your own frame is the player frame.", Kit.HUE_INFO); return
+            if serial == st["me"]: say("that's you; your own frame is the player frame."); return
             for t in tracked:
                 if t["serial"] == serial:
-                    t["auto"] = False; API.SysMsg("Frames: %s already has a frame." % t["name"], Kit.HUE_INFO)
-                    save_tracked(); return
-            if len(tracked) >= MAX_TRACKED:
-                API.SysMsg("Frames: %d frames is the limit." % MAX_TRACKED, Kit.HUE_BAD); return
+                    t["auto"] = False; say("%s already has a frame." % t["name"]); save_tracked(); return
+            if len(tracked) >= MAX_TRACKED: say("%d frames is the limit." % MAX_TRACKED, Kit.HUE_BAD); return
             d = read_mobile(serial)
-            if d is None: API.SysMsg("Frames: that isn't a mobile you can see.", Kit.HUE_BAD); return
+            if d is None: say("that isn't a mobile you can see.", Kit.HUE_BAD); return
             tracked.append({"serial": serial, "auto": auto, "name": d[M_NAME] or "Unknown"}); save_tracked()
-            API.SysMsg("Frames: added %s." % (d[M_NAME] or "a frame"), Kit.HUE_GOOD); build_window()
-            HOST.refresh_settings(KEY)
+            say("added %s." % (d[M_NAME] or "a frame"), Kit.HUE_GOOD); build_window(); HOST.refresh_settings(KEY)
         def remove_tracked(serial):
             for t in tracked:
                 if t["serial"] == serial and t["auto"]: st["dismissed"].add(serial)
@@ -1416,72 +1290,50 @@ def _module_hud():
         def pick_answer(kind):
             def done(serial): st["queue"].append((kind, int(serial or 0)))
             return done
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
-        ADD_TIP = ("Give your target a frame; with no new target, a target cursor picks someone. "
-                   "Alt+click a frame: auto-follow (again to stop)")
-        REMOVE_TIP = ("Raise a target cursor, then click the person or their frame to remove it "
-                      "(each frame has its own X too)")
+        queue = Kit.queuer(st)
+        ADD_TIP = ("Frame your target, or pick someone with a target cursor. Alt+click a frame: auto-follow "
+                   "(again to stop)")
+        REMOVE_TIP = "Click a person or their frame with a target cursor to remove it (each frame has an X too)"
         BTN_H = 40
         def build_window():
             if st["shutting"]: return
-            M, GAP = Kit.MARGIN, Kit.GAP; n = len(tracked)
-            if st["minimized"]: w, h = MINI_W, MINI_H
-            else: w, h = W, M + 30 + GAP + BTN_H + M
-            x, y, old, store, g = win_begin(win, POS_KEY, (200, 200), w, h)
-            if st["minimized"]:
-                Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"),
-                             "%s: %d frame%s" % (TITLE, n, "" if n == 1 else "s"))
+            M = Kit.MARGIN; n = len(tracked); g, store, c = wnd.begin(W, M + 30 + Kit.GAP + BTN_H + M)
+            if st["minimized"]: Kit.set_text(c["status"], "%s: %s" % (TITLE, Kit.count(n, "frame")))
             else:
-                IW = W - 2 * M; win_head(g, store, w, h, TITLE, KEY, queue); ya = M + 30 + GAP
-                Kit.add_section(g, M, ya, IW, BTN_H); bx = M + 12
-                Kit.art_button(g, store, "add", Kit.ART_CIRCLE, bx, ya + 12, "Add frame", ADD_TIP,
+                wnd.frame(g); ya = M + 30 + Kit.GAP; Kit.add_section(g, M, ya, W - 2 * M, BTN_H)
+                Kit.art_button(g, store, "add", Kit.ART_CIRCLE, M + 12, ya + 12, "Add frame", ADD_TIP,
                                on_click=queue("add_frame"))
-                bx += 15 + 5 + Kit.text_w("Add frame") + 24
-                Kit.art_button(g, store, "remove", Kit.ART_CIRCLE, bx, ya + 12, "Remove frame",
-                               REMOVE_TIP, on_click=queue("remove_frame"))
-            Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], on_disposed(g), save_pos, win,
-                            {"g": g, "store": store})
-            if st.get("min_saved") != st["minimized"]:
-                st["min_saved"] = st["minimized"]; _put(MIN_KEY, "1" if st["minimized"] else "0")
-            Kit.dispose(old)
-        CHECKS_LEFT = (("player", "Show your own frame", "A frame with your HP, mana and stamina"),
-                       ("target", "Show the target frame", "A frame for your current target"),
-                       ("hide_empty", "Hide the target frame with no target",
-                        "The target frame shows only while you have a target"), ("numbers", "Show numbers on the bars",
-                        "HP, mana and stamina as numbers on the bars (others' HP as a %)"),
+                Kit.art_button(g, store, "remove", Kit.ART_CIRCLE, M + 56 + Kit.text_w("Add frame"), ya + 12,
+                               "Remove frame", REMOVE_TIP, on_click=queue("remove_frame"))
+            wnd.end(g)
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=0x1B74,
+                         cleanup=cleanup, lock=False)
+        CHECKS_LEFT = (("player", "Show your own frame", "Your HP, mana and stamina"),
+                       ("target", "Show the target frame", "Your current target"),
+                       ("hide_empty", "Hide the target frame with no target", "Shown only while you have a target"),
+                       ("numbers", "Show numbers on the bars", "HP, mana and stamina as numbers (others' HP as a %)"),
                        ("lock", "Lock the frames in place", "Frames can't be dragged"),
                        ("cast", "Show a cast bar under your frame",
-                        "Your spell's name filling through its cast delay: green when cast, red "
-                        "on a fizzle, a broken concentration, no mana or no reagents"))
+                        "Your spell filling through its cast delay: green when cast, red when it fails"))
         CHECKS_RIGHT = (("hide_bar", "Hide TazUO's own target health bar",
-                         "So there aren't two with the target frame on; unticked, your client's own setting is back"),
+                         "Avoids two target bars; untick to get your client's setting back"),
                         ("click", "Click a frame to target it",
-                         "With a target cursor up the click aims it; otherwise it sets your last target"),
-                        ("party", "Add a frame for each party member",
-                         "Party members get a frame while they are in your party"),
+                         "Aims a target cursor if one is up, else sets your last target"),
+                        ("party", "Add a frame for each party member", "While they are in your party"),
                         ("ignore_self", "Ignore yourself as last target",
-                         "Targeting yourself (a bandage, a heal) doesn't replace your target frame"),
-                        ("attack", "Prefer the attack target",
-                         "Frame who you are attacking when the client exposes it, else your last target"),
+                         "Targeting yourself (a bandage, a heal) keeps your target frame"),
+                        ("attack", "Prefer the attack target", "Frame who you attack, else your last target"),
                         ("mirror", "Mirror the player and target frames",
-                         "Drag either frame and the other moves to the mirror-image spot "
-                         "on the far side of the screen, at the same height"),
+                         "Drag either frame and the other mirrors it across the screen"),
                         ("guard", "Show a GUARDED tag on your frame",
-                         "GUARDED while the town guards protect you, ? while Virtue Assistant "
-                         "doesn't know yet (until you enter or leave a guarded area), blank outside"))
-        CHECKS_DEBUG = (("cast_say", "Print every line that arrives while you cast in the journal",
-                         "While a spell of yours is cast, every journal line is repeated with its "
-                         "speaker, so the shard's texts can be checked"),)
-        CHECKS_ALL = CHECKS_LEFT + CHECKS_RIGHT + CHECKS_DEBUG + (("pscale_on", "", ""),)
+                         "GUARDED in guard zones, ? until known (enter or leave one), blank outside"))
         PREVIEW_TEX = TEX_PREFIX + "snap_preview"
-        SCALE_TIP = ("Size of the frames as a percentage of the art; pictures are redrawn to size "
-                     "(%d-%d%%)" % (SCALE_MIN, SCALE_MAX))
-        PSCALE_TIP = ("Size of party members' frames while 'Party members' is ticked (%d-%d%%)"
-                      % (SCALE_MIN, SCALE_MAX))
-        PORTRAIT_SLIDERS = (("pdx", "Left / right", "Shift everyone's picture left or right inside the circle", "%+d"),
-                            ("pdy", "Up / down", "Shift everyone's picture up or down inside the circle", "%+d"),
-                            ("pzoom", "Zoom", "Zoom everyone's picture in or out (100%% = %d art pixels tall)"
-                             % SNAP_DEPTH, "%d%%"))
+        SCALE_TIP = "Frame size, percent of the art (%d-%d%%)" % (SCALE_MIN, SCALE_MAX)
+        PSCALE_TIP = "Party members' frame size while ticked (%d-%d%%)" % (SCALE_MIN, SCALE_MAX)
+        PORTRAIT_SLIDERS = (("pdx", "Left / right", "Move pictures left or right in the circle", "%+d"),
+                            ("pdy", "Up / down", "Move pictures up or down in the circle", "%+d"),
+                            ("pzoom", "Zoom", "Zoom pictures in or out (100%% = %d art pixels tall)" % SNAP_DEPTH,
+                             "%d%%"))
         def page_table(w):
             lw = max(Kit.text_w("All frames:"), 24 + Kit.text_w("Party members:"))
             def pscale(f, x, y):
@@ -1497,28 +1349,24 @@ def _module_hud():
                      [("check",) + r + ({"dx": 12 + w // 2},) for r in CHECKS_RIGHT], {"pad": 6}),
                     ("FRAME SIZE", (("slider", "scale", "All frames:", SCALE_TIP, SCALE_MIN, SCALE_MAX,
                                      {"lw": lw, "lgap": 14, "ldy": 2, "sdy": 4, "sw": 260, "ugap": 12, "vfmt": "%d%%"}),
-                                    ("check", "pscale_on", "Party members:", "Party members' frames get their own size "
-                                     "(the slider beside this); untick and they use the size above", {"stay": True}),
+                                    ("check", "pscale_on", "Party members:", "Party members' frames use the slider "
+                                     "beside this; unticked, the size above", {"stay": True}),
                                     ("custom", 0, pscale)), {"top": 34, "sh": 96}),
                     ("PICTURE  (in each frame's circle)", [("custom", 0, build_preview)] +
                      [("slider", k, text + ":", tip, NUMBERS[k][0], NUMBERS[k][1], {"vfmt": fmt})
                       for k, text, tip, fmt in PORTRAIT_SLIDERS] +
-                     [("buttons", (("retake", Kit.ART_PLAY, "Retake pictures",
-                                    "Take everyone's picture again (after a change of gear)"),
-                                   ("reset", Kit.ART_CLOSE, "Reset", "Put the three picture sliders back to their "
-                                    "defaults")))], pic),
-                    ("DEBUG  (for checking the shard's texts)", [("check",) + r for r in CHECKS_DEBUG]))
-        def config_height(w): return Kit.Form.height(page_table(w), w)
+                     [("buttons", (("retake", Kit.ART_PLAY, "Retake pictures", "Take every picture again (after a gear "
+                                    "change)"),
+                                   ("reset", Kit.ART_CLOSE, "Reset", "Put the picture sliders back to defaults")))],
+                     pic))
         def build_others(f, x, y):
             g, w, store = f.g, f.w, f.store; bx = x + 12
-            Kit.art_button(g, store, "add", Kit.ART_PLAY, bx, y + 28, "Add target",
-                           "Give your current target a frame", on_click=queue("add_target"))
-            bx += 35 + Kit.text_w("Add target") + 14
-            Kit.art_button(g, store, "pick", Kit.ART_PLAY, bx, y + 28, "Pick...",
-                           "Target someone to give them a frame", on_click=queue("pick"))
-            bx_clear = x + w - 12 - 35 - Kit.text_w("Clear all")
-            Kit.art_button(g, store, "clear", Kit.ART_CLOSE, bx_clear, y + 28, "Clear all",
-                           "Remove every frame of someone else", on_click=queue("clear"))
+            Kit.art_button(g, store, "add", Kit.ART_PLAY, bx, y + 28, "Add target", "Frame your current target",
+                           on_click=queue("add_target"))
+            Kit.art_button(g, store, "pick", Kit.ART_PLAY, bx + 49 + Kit.text_w("Add target"), y + 28, "Pick...",
+                           "Pick someone to frame", on_click=queue("pick"))
+            Kit.art_button(g, store, "clear", Kit.ART_CLOSE, x + w - 47 - Kit.text_w("Clear all"), y + 28, "Clear all",
+                           "Remove everyone else's frame", on_click=queue("clear"))
             yl = y + 30 + 28 + 4; rm_w = Kit.pic_size(Kit.ART_CLOSE[0])[0] or 30
             if not tracked:
                 Kit.add_label(g, "No frames yet. Target someone, then click Add target.", x + 12, yl + 3, Kit.HUE_INFO)
@@ -1540,8 +1388,29 @@ def _module_hud():
                 top = y + (PREVIEW - len(lines) * 18) // 2
                 for i, line in enumerate(lines):
                     Kit.add_label(g, line, x + 14 + (PREVIEW - Kit.text_w(line)) // 2, top + i * 18, Kit.HUE_INFO)
-        def build_config(g, x, y, w):
-            f = Kit.Form(g, x, y, w, settings, page_table(w)); page.update({"c": f.c, "store": f.store})
+        def crop_now():
+            now = time.time(); st["crop_changed"] = now
+            if st["art"] and st.get("running") and now >= page["next_preview"]:
+                page["next_preview"] = now + 0.3; draw_preview()
+        def page_clicks(f):
+            if Kit.was_clicked(f.store, "retake"): page["layers"] = None; st["crop_changed"] = 1.0
+            if Kit.was_clicked(f.store, "reset"):
+                for k, _t, _tip, _fmt in PORTRAIT_SLIDERS: f.c[k].SetValue(DEFAULTS[k])
+                crop_now()
+        def read_pscale(f, new):
+            try: new["pscale"] = max(SCALE_MIN, min(SCALE_MAX, int(f.c["pscale"].Value)))
+            except Exception: return
+            Kit.set_text(f.c["pscale_lbl"], "%d%%" % new["pscale"])
+        def on_change(old, new):
+            if (new["lock"], new["click"]) != (old["lock"], old["click"]): st["rebuild"] = True
+            if new["party"] != old["party"]: st["next_party"] = 0.0
+            if new["mirror"] and not old["mirror"]: st["mirror_now"] = True
+            st["art_dirty"] = True
+            for k, _t, _tip, _fmt in PORTRAIT_SLIDERS:
+                if new[k] != old[k]: crop_now(); break
+        cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=read_pscale, clicks=page_clicks)
+        def build_config(g, x, y, w): page["store"] = cfg.build(g, x, y, w).store
+        def config_closed(): cfg.closed(); page.update({"layers": None, "preview_gen": None})
         def draw_preview():
             if st.get("running") and st["art"]: page["preview_want"] = True
         def read_own_layers():
@@ -1567,82 +1436,36 @@ def _module_hud():
                     if page.get("preview_gen") is gen: page["preview_gen"] = None
                     safe(lambda: Bridge.on_main(lambda: Bridge.put_texture(PREVIEW_TEX, PREVIEW, PREVIEW, r))); return
                 if time.time() >= deadline: return
-        SLIDER_BY_CALL = [False]
-        def slider_value(sl, default):
-            ways = ("call", "value") if SLIDER_BY_CALL[0] else ("value", "call"); raised = False
-            for way in ways:
-                try: v = sl.Value if way == "value" else sl.GetValue()
-                except Exception:
-                    if way == "value": raised = True
-                    continue
-                if v is not None:
-                    try: v = int(v)
-                    except Exception: continue
-                    if raised and way == "call": SLIDER_BY_CALL[0] = True
-                    return v
-            return default
-        def checked(c, k, default):
-            try: return bool(c[k].IsChecked)
-            except Exception: return bool(default)
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            changed = False
-            for k, _t, _tip in CHECKS_ALL:
-                v = checked(c, k, settings[k])
-                if v != settings[k]:
-                    settings[k] = v; changed = True
-                    if k in ("lock", "click"): st["rebuild"] = True
-                    if k == "party": st["next_party"] = 0.0
-                    if k == "mirror" and v: st["mirror_now"] = True
-            for k in ("scale", "pscale"):
-                sc = max(SCALE_MIN, min(SCALE_MAX, slider_value(c[k], settings[k])))
-                if sc != settings[k]: settings[k] = sc; Kit.set_text(c[k + "_lbl"], "%d%%" % sc); changed = True
-            if changed: st["art_dirty"] = True
-            crop = False
-            if Kit.was_clicked(page["store"], "retake"): page["layers"] = None; st["crop_changed"] = 1.0
-            if Kit.was_clicked(page["store"], "reset"):
-                for k, _t, _tip, fmt in PORTRAIT_SLIDERS:
-                    settings[k] = DEFAULTS[k]; safe(lambda: c[k].SetValue(DEFAULTS[k]))
-                    Kit.set_text(c[k + "_lbl"], fmt % DEFAULTS[k])
-                crop = True
-            for k, _t, _tip, fmt in PORTRAIT_SLIDERS:
-                lo, hi = NUMBERS[k]; v = max(lo, min(hi, slider_value(c[k], settings[k])))
-                if v != settings[k]: settings[k] = v; Kit.set_text(c[k + "_lbl"], fmt % v); crop = True
-            if crop:
-                changed = True; st["crop_changed"] = time.time()
-                if st["art"] and st.get("running") and time.time() >= page["next_preview"]:
-                    page["next_preview"] = time.time() + 0.3; draw_preview()
-            if changed: save_settings()
-        def config_closed(): page.update({"c": None, "layers": None, "preview_gen": None})
         def apply_crop(now):
             t = st["crop_changed"]
             if not t or now - t < 0.5: return
             st["crop_changed"] = 0.0
             if st["art"]:
-                if page["c"] is not None: draw_preview()
+                if cfg.f is not None: draw_preview()
                 retake_all()
         def _start():
             st_reset(); st.update({"me": my_serial(), "running": True})
             cast.update({"spell": None, "state": None, "shown": None})
             page.update({"preview_want": False, "preview_gen": None}); load_settings(); load_tracked(); load_positions()
-            HOST.services["frames.player_anchor"] = player_anchor
-            st["minimized"] = st["min_saved"] = _get(MIN_KEY, "0") == "1" or HOST.dock_wanted(KEY)
+            cleanup.service("frames.player_anchor", player_anchor); st["minimized"] = wnd.start_min()
             st["art"] = Bridge.find()
-            if not st["art"]:
-                API.SysMsg("Frames: this client doesn't allow drawn pictures; using stone frames.", Kit.HUE_INFO)
-            build_window(); HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x1B74, st, win, queue("redraw"), scale=True))
-            HOST.services["unitframes.add"] = lambda serial: queue(("add_ext", int(serial)))()
+            if not st["art"]: say("no drawn pictures on this client; using stone frames.")
+            build_window(); wnd.dock(scale=True)
+            cleanup.service("unitframes.add", lambda serial: queue(("add_ext", int(serial)))())
             fitst["player"] = fitst["target"] = None; fitbox["player"] = fitbox["target"] = None
             for fk in ("player", "target"):
-                safe(lambda k=fk: HOST.layout_add(KEY + "." + k, frame_gump(k), TITLE + " (" + k + ")",
-                                              {"fit": frame_fit(k), "fill": "frame", "exact": True, "pieces_out": True,
-                                               "hug": frame_hug(k), "untitled": True}))
+                HOST.layout_add(KEY + "." + fk, frame_gump(fk), TITLE + " (" + fk + ")",
+                                {"fit": frame_fit(fk), "fill": "frame", "exact": True, "pieces_out": True,
+                                 "hug": frame_hug(fk), "untitled": True})
                 pieces_anchor(fk, frame_gump(fk), frame_span(fk), frame_inner(fk))
+                cleanup.add(HOST.layout_remove, KEY + "." + fk); cleanup.add(pieces_anchor, fk, None)
             PIECES_TARGET["fn"] = lambda: st["target"]
+        BY_SERIAL = {"rm": remove_tracked, "click": target_from_frame, "add_ext": add_tracked,
+                     "follow_serial": lambda serial: Follow.toggle(serial, TITLE)}
+        def last_target(): return st["target"] or int(API.LastTargetSerial or 0)
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time()
             if now < st["full_at"] and not st["queue"] and not st["rebuild"] and now + 1.0 > st["full_at"]:
                 if st["art"]: take_next_snapshot(now)
@@ -1650,65 +1473,52 @@ def _module_hud():
             st["full_at"] = now + TICK_EVERY - 0.005; st["me"] = st["me"] or my_serial(); update_target()
             while st["queue"]:
                 action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-                if Kit.win_action(action, st, KEY, TITLE, build_window): continue
-                if action == "add_target": add_tracked(st["target"] or int(safe(lambda: API.LastTargetSerial, 0) or 0))
-                elif action == "pick":
-                    API.SysMsg("Frames: choose who gets a frame.", Kit.HUE_INFO)
-                    HOST.pick_target(PICK_TIMEOUT, pick_answer("picked"))
+                if wnd.action(action): continue
+                if kind == "add_frame":
+                    serial = last_target()
+                    if serial and serial != st["me"] and not is_tracked(serial): add_tracked(serial); continue
+                    kind = "busy" if HOST.cursor_busy(KEY) else "pick"
+                elif kind == "remove_frame":
+                    if not tracked: say("nobody else has a frame (turn off your own and the target frame in settings).")
+                    elif HOST.cursor_busy(KEY): kind = "busy"
+                    else:
+                        say("click the person, or their frame, to remove."); st["removing"] = True
+                        HOST.pick_target(PICK_TIMEOUT, pick_answer("unpicked"))
+                if kind == "busy": say("a target cursor is up; try again after it.")
+                elif kind == "pick":
+                    say("choose who gets a frame."); HOST.pick_target(PICK_TIMEOUT, pick_answer("picked"))
+                elif kind == "add_target": add_tracked(last_target())
                 elif kind == "picked":
                     if action[1]: add_tracked(action[1])
-                    else: API.SysMsg("Frames: pick cancelled.", Kit.HUE_INFO)
-                elif action == "add_frame":
-                    serial = st["target"] or int(safe(lambda: API.LastTargetSerial, 0) or 0)
-                    if serial and serial != st["me"] and not is_tracked(serial): add_tracked(serial)
-                    elif HOST.cursor_busy(KEY):
-                        API.SysMsg("Frames: a target cursor is up; try again after it.", Kit.HUE_INFO)
-                    else:
-                        API.SysMsg("Frames: choose who gets a frame.", Kit.HUE_INFO)
-                        HOST.pick_target(PICK_TIMEOUT, pick_answer("picked"))
-                elif action == "remove_frame":
-                    if not tracked:
-                        API.SysMsg("Frames: nobody else has a frame to remove (your own and the "
-                                   "target frame are turned off on the settings page).", Kit.HUE_INFO)
-                    elif HOST.cursor_busy(KEY):
-                        API.SysMsg("Frames: a target cursor is up; try again after it.", Kit.HUE_INFO)
-                    else:
-                        API.SysMsg("Frames: click the person, or their frame, to remove.", Kit.HUE_INFO)
-                        st["removing"] = True; HOST.pick_target(PICK_TIMEOUT, pick_answer("unpicked"))
+                    else: say("pick cancelled.")
                 elif kind == "remove_click":
                     serial = frame_serial(action[1])
-                    if serial and st.get("removing") and safe(lambda: API.HasTarget(), False): API.Target(serial)
+                    if serial and st.get("removing") and API.HasTarget(): API.Target(serial)
                 elif kind == "unpicked":
                     st["removing"] = False
-                    if not action[1]: API.SysMsg("Frames: remove cancelled.", Kit.HUE_INFO)
+                    if not action[1]: say("remove cancelled.")
                     elif is_tracked(action[1]):
                         name = next((t["name"] for t in tracked if t["serial"] == action[1]), "")
-                        remove_tracked(action[1])
-                        API.SysMsg("Frames: removed %s." % (name or "the frame"), Kit.HUE_INFO)
-                    else: API.SysMsg("Frames: they have no frame of their own.", Kit.HUE_INFO)
-                elif action == "clear":
+                        remove_tracked(action[1]); say("removed %s." % (name or "the frame"))
+                    else: say("they have no frame of their own.")
+                elif kind == "clear":
                     for t in tracked: close_frame("m%d" % t["serial"])
                     del tracked[:]; save_tracked(); HOST.refresh_settings(KEY)
-                    if settings["party"]:
-                        API.SysMsg("Frames: cleared. Party members come back while 'Add a "
-                                   "frame for each party member' is on.", Kit.HUE_INFO)
+                    if settings["party"]: say("cleared; party members come back while 'Add a frame for each party "
+                                              "member' is ticked.")
                     build_window()
-                elif kind == "rm": remove_tracked(action[1])
-                elif kind == "click": target_from_frame(action[1])
                 elif kind == "follow":
                     serial = frame_serial(action[1])
                     if serial: Follow.toggle(serial, TITLE)
-                elif kind == "follow_serial": Follow.toggle(action[1], TITLE)
-                elif kind == "add_ext": add_tracked(action[1])
                 elif kind in ("closed", "xclose"):
                     key = action[1]
                     if kind == "xclose": close_frame(key)
                     frames.pop(key, None)
                     if key in ("player", "target"):
                         settings[key] = False; save_settings(); HOST.refresh_settings(KEY)
-                        API.SysMsg("Frames: %s frame hidden; tick it again on the Frames "
-                                   "settings page." % key, Kit.HUE_INFO)
+                        say("%s frame hidden; tick it again in settings." % key)
                     elif key[1:].isdigit(): remove_tracked(int(key[1:]))
+                elif kind in BY_SERIAL: BY_SERIAL[kind](action[1])
             if st["rebuild"]:
                 st["rebuild"] = False; remember_positions()
                 for key in list(frames): close_frame(key)
@@ -1724,7 +1534,7 @@ def _module_hud():
             if now >= st["next_prune"]: st["next_prune"] = now + 5.0; prune_people()
             for fr in frames.values(): fr["moved"] = False
             watch_frames(now); rides = (rides_inside("player"), rides_inside("target"))
-            if rides != st.get("rides"): st["rides"] = rides; safe(lambda: HOST.layout_refit())
+            if rides != st.get("rides"): st["rides"] = rides; HOST.layout_refit()
             pieces_place()
             if settings["mirror"]: mirror_frames(force=st.pop("mirror_now", False))
             cast_tick(now); hbar_tick(now); guard_tick(now)
@@ -1735,36 +1545,33 @@ def _module_hud():
                 if st["pos_dirty"]: save_positions()
         def _stop():
             st.update({"shutting": True, "running": False, "removing": False, "snap_job": None, "art_jobs": []})
-            page.update({"preview_want": False, "preview_gen": None}); HOST.dock_remove(KEY)
-            HOST.services.pop("unitframes.add", None); safe(lambda: HOST.layout_remove(KEY + ".player"))
-            safe(lambda: HOST.layout_remove(KEY + ".target")); pieces_anchor("player", None)
-            pieces_anchor("target", None); PIECES_TARGET["fn"] = None; save_pos(); save_positions(); save_settings()
-            save_tracked(); HOST.services.pop("frames.player_anchor", None); safe(lambda: hbar_sync(False))
+            page.update({"preview_want": False, "preview_gen": None}); PIECES_TARGET["fn"] = None; save_positions()
+            save_settings(); save_tracked(); safe(lambda: hbar_sync(False))
             for key in list(frames): fr = frames.pop(key); g, fr["g"] = fr.get("g"), None; Kit.dispose(g)
-            drop_cast(); st["jr"] = None; g, win["g"] = win["g"], None; Kit.dispose(g)
+            drop_cast(); st["jr"] = None
             if st["art"] and st["textures"]:
                 names = list(st["textures"]); safe(lambda: Bridge.on_main(lambda: Tex.drop(names)))
                 st["textures"].clear(); st["art_scales"] = set()
-            st["art"] = None
+            st["art"] = None; cleanup.close()
         def _thread_tick():
             if st["shutting"]: return
             if st["art_jobs"]: art_work(THREAD_BUDGET)
             if st["snap_job"] is not None: snapshot_work(time.time(), THREAD_BUDGET)
             if page.get("preview_want"):
                 page["preview_want"] = False
-                if page["c"] is not None: draw_preview_now()
+                if cfg.f is not None: draw_preview_now()
             if page.get("preview_gen") is not None: preview_work(THREAD_BUDGET)
         def _thread_busy():
             return bool(st["snap_job"] or st["art_jobs"] or page.get("preview_want") or
                         page.get("preview_gen") is not None)
         def _interval(): return 0.03 if _thread_busy() else TICK_EVERY
         load_settings()
-        return part_dict(_start, _tick, _stop, config_height, build_config, poll_config, config_closed,
+        return part_dict(_start, _tick, _stop, cfg.height, build_config, cfg.poll, config_closed,
                          thread_tick=_thread_tick, interval=_interval, thread_wanted=_thread_busy)
     def _part_timers():
         KEY = "spelltimers"; TITLE = "Buffs & Timers"; SETTINGS_KEY = "SpellTimers_settings"
         POS_KEY = "SpellTimers_pos"; MIN_KEY = "SpellTimers_min"; ACTIVE_KEY = "SpellTimers_active"; TRAY_ICON = 0x0EFA
-        MINI_W, MINI_H = 320, 46; ROW_H = 28; ROWS_MIN, ROWS_MAX, ROWS_DEFAULT = 3, 16, 8; SAMPLE_EVERY = 0.2
+        MINI_W, MINI_H = 320, 46; ROW_H = 28; ROWS_MIN, ROWS_MAX, ROWS_DEFAULT = 3, 16, 8; SAMPLE_EVERY = 0.1
         OTHERS_EVERY = 0.25; ICON_RESYNC = 5.0; SPELL_ICON_BASE = 0x08C0; ICON_PX = 22; LAND_WINDOW = 2.5
         STAT_MIN_STEP = 2; STAT_GROUP = 1.0; STAT_EFFECTS_MAX = 4; TRACK_MAX = 40; ALERT_KIND = "spelltimers.ending"
         WARN_MAX = 120
@@ -1814,7 +1621,7 @@ def _module_hud():
         SPELL_OF["paralyzed"] = "Paralyzed"; SPELL_ORDER = {"buff": 0, "debuff": 1}
         KEEP_SIDS = frozenset(norm(n) for n, v in SPELLS.items() if v[1] == "buff")
         settings = {"me": True, "debuff": True, "others": True, "stats": True, "icons": True,
-                    "rows": ROWS_DEFAULT, "warn": 0, "say": False}
+                    "rows": ROWS_DEFAULT, "warn": 0}
         def st_reset():
             st.update({"shutting": False, "docked": False, "queue": [], "rd": None, "pend": None, "landings": [],
                        "last_land": None, "para": None, "pois": None, "stats": None, "next_sample": 0.0,
@@ -1823,14 +1630,13 @@ def _module_hud():
         st = {"minimized": False, "me": 0, "name": "", "prev_name": ("", 0.0), "body": 0, "hooked": False,
               "ct": None, "ct_looked": False, "ver": 0, "active": False, "redraw": False}
         st_reset(); rows = {}; effects = {"str": [], "dex": [], "int": []}
-        win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "nrows": 0}; page = {"c": None, "seen": None}
+        win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "nrows": 0}
         ROW_ICON = 24; ROW_PITCH = 30; ROW_LINE = 42; ROW_PAD = 3; ROW_MAX = 24; FORM_EVERY = 0.5
         rowui = {s: {"g": None, "cells": [], "per": 1, "lines": -1, "w": 0} for s in ("player", "target")}
         NUMS = {"rows": (ROWS_MIN, ROWS_MAX), "warn": (0, WARN_MAX)}
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings():
-            Kit.kv_save(SETTINGS_KEY, ";", settings, ("me", "debuff", "others", "stats", "icons", "say", "rows",
-                                                      "warn"), NUMS)
+            Kit.kv_save(SETTINGS_KEY, ";", settings, ("me", "debuff", "others", "stats", "icons", "rows", "warn"), NUMS)
         def save_active():
             now = time.time(); parts = ["t=%d" % int(now)]
             for stat in ("str", "dex", "int"):
@@ -1897,8 +1703,6 @@ def _module_hud():
             if r["level"] and sid == "poison": name = "%s (%s)" % (name, POISON_NAMES[max(1, min(5, r["level"]))])
             if r["who"]: name = "%s: %s" % (name, r["name"] or "someone")
             return name
-        def dbg(text):
-            if settings["say"]: API.SysMsg("%s: %s" % (TITLE, text), Kit.HUE_INFO)
         def skills(now, force=False):
             s = st["skills"]
             if force or not 0 <= now - s[2] < 15.0:
@@ -1917,17 +1721,13 @@ def _module_hud():
                 due = old["at"] + old["delay"]; st["pend"] = None
                 if old["side"] == "self" and at >= due - 0.05: land(old, st["me"], due, now)
                 elif old["side"] == "target" and not old["cursor"] and at >= due + 0.2:
-                    try: tgt = int(API.LastTargetSerial or 0)
-                    except Exception: tgt = 0
+                    tgt = int(API.LastTargetSerial or 0)
                     if tgt: land(old, tgt, due, now)
             spec = SPELLS.get(spell)
             if spec is None: st["pend"] = None; return
-            try: info = Kit.spell_info(spell)
-            except Exception: info = None
-            delay = info[3] if info and info[3] else 1.0; skills(now, True)
+            info = Kit.spell_info(spell); delay = info[3] if info and info[3] else 1.0; skills(now, True)
             st["pend"] = {"spell": spell, "sid": norm(spell), "at": at, "delay": float(delay),
                           "side": spec[0], "cursor": False, "body0": st["body"], "name0": st["name"]}
-            dbg("cast %s (%.2f s)" % (spell, delay))
         def resolve_pending(now):
             p = st["pend"]
             if p is None: return
@@ -1936,42 +1736,27 @@ def _module_hud():
             if p["side"] == "self":
                 if now >= due + 0.6: st["pend"] = None; land(p, st["me"], due, now)
                 return
-            try: up = bool(API.HasTarget())
-            except Exception: up = False
-            if up:
-                if not p["cursor"]:
-                    p["cursor"] = True
-                    try: p["lt0"] = int(API.LastTargetSerial or 0)
-                    except Exception: p["lt0"] = 0
-                try: p["mana0"] = int(API.Player.Mana)
-                except Exception: p["mana0"] = None
-                p["gone"] = None
+            if API.HasTarget():
+                if not p["cursor"]: p["cursor"] = True; p["lt0"] = int(API.LastTargetSerial or 0)
+                p["mana0"] = int(API.Player.Mana); p["gone"] = None
                 if now > due + 30.0: st["pend"] = None
                 return
             if not p["cursor"] and now < due + 1.2: return
-            try: tgt = int(API.LastTargetSerial or 0)
-            except Exception: tgt = 0
+            tgt = int(API.LastTargetSerial or 0)
             if p["cursor"]:
                 if p.get("gone") is None: p["gone"] = now
-                try: mana = int(API.Player.Mana)
-                except Exception: mana = None
-                spent = mana is None or p.get("mana0") is None or mana < p["mana0"]
-                if not spent and tgt == p.get("lt0", 0):
+                if int(API.Player.Mana) >= p["mana0"] and tgt == p.get("lt0", 0):
                     if 0 <= now - p["gone"] < 1.5: return
-                    st["pend"] = None; dbg("%s: cursor cancelled" % p["spell"]); return
+                    st["pend"] = None; return
             st["pend"] = None
             if tgt: land(p, tgt, now, now)
-            else: dbg("%s: no target known" % p["spell"])
         def land(p, who, at, now):
             spell, sid = p["spell"], p["sid"]; spec = SPELLS[spell]; me = st["me"]; on_me = not who or who == me
             dur = duration(spell, now)
             if on_me and spec[4] == "stat" and settings["stats"]:
                 st["landings"].append({"sid": sid, "t": at, "dur": dur or 0.0}); del st["landings"][:-6]
-                attach_landing(now); dbg("%s landed on you" % spell); return
-            name = ""
-            if not on_me:
-                try: m = API.FindMobile(who); name = str(m.Name or "") if m is not None else ""
-                except Exception: name = ""
+                attach_landing(now); return
+            m = None if on_me else API.FindMobile(who); name = str(m.Name or "") if m is not None else ""
             r = new_row(0 if on_me else who, sid, spec[1], at, name); r["start"] = at; r["srcs"].add("cast")
             if r["end_src"] != "icon":
                 r["end"] = (at + dur) if dur else None; r["most"] = (at + spec[3]) if spec[3] else None
@@ -1982,11 +1767,9 @@ def _module_hud():
             if watch == "body": r["base"] = p["body0"]
             elif watch == "name": r["base"] = p["name0"]
             st["last_land"] = (r["key"], now); st["warned"].pop(r["key"], None)
-            dbg("%s landed on %s" % (spell, "you" if on_me else (name or hex(who))))
         def cast_failed(now, during=False):
             p = st["pend"]
-            if p is not None and (during or now >= p["at"] + p["delay"] - 0.3):
-                dbg("%s did nothing" % p["spell"]); st["pend"] = None; return
+            if p is not None and (during or now >= p["at"] + p["delay"] - 0.3): st["pend"] = None; return
             ll = st["last_land"]
             if ll is not None and 0 <= now - ll[1] <= 1.0:
                 st["last_land"] = None; r = rows.get(ll[0])
@@ -2019,8 +1802,7 @@ def _module_hud():
             for i, stat in enumerate(("str", "dex", "int")):
                 d = vals[i] - old[i]
                 if abs(d) > 30: del effects[stat][:]; changed = True
-                elif abs(d) >= STAT_MIN_STEP:
-                    apply_step(stat, d, now); changed = True; dbg("%s %+d" % (stat.capitalize(), d))
+                elif abs(d) >= STAT_MIN_STEP: apply_step(stat, d, now); changed = True
             if changed:
                 p = st["pend"]
                 if p is not None and p["side"] == "target" and SPELLS[p["spell"]][4] == "stat" \
@@ -2064,13 +1846,11 @@ def _module_hud():
             for stat in effects: del effects[stat][:]
             st.update({"stats": None, "pend": None, "landings": [], "para": None, "pois": None})
         def sample(now):
-            try:
-                p = HOST.me()
-                if p is None: return
-                me = int(p.Serial); name = str(p.Name or ""); dead = bool(p.IsDead); para = bool(p.IsParalyzed)
-                pois = bool(p.IsPoisoned); hid = bool(p.IsHidden); body = int(p.Graphic or 0)
-                vals = (int(p.Strength or 0), int(p.Dexterity or 0), int(p.Intelligence or 0))
-            except Exception: return
+            p = HOST.me()
+            if p is None: return
+            me = int(p.Serial); name = str(p.Name or ""); dead = bool(p.IsDead); para = bool(p.IsParalyzed)
+            pois = bool(p.IsPoisoned); hid = bool(p.IsHidden); body = int(p.Graphic or 0)
+            vals = (int(p.Strength or 0), int(p.Dexterity or 0), int(p.Intelligence or 0))
             if me != st["me"]:
                 if st["me"]: clear_me()
                 st["me"] = me
@@ -2078,13 +1858,12 @@ def _module_hud():
                 if st["name"]: st["prev_name"] = (st["name"], now)
                 st["name"] = name
             if dead:
-                if not st["dead"]: st["dead"] = True; clear_me(); dbg("you died: timers on you cleared")
+                if not st["dead"]: st["dead"] = True; clear_me()
                 return
             if st["dead"]: st["dead"] = False; st["stats"] = None
             st["body"] = body
-            for k, sid, word, on in (("para", "paralyzed", "paralyzed", para), ("pois", "poison", "poisoned", pois)):
+            for k, sid, on in (("para", "paralyzed", para), ("pois", "poison", pois)):
                 if on != st[k]:
-                    if st[k] is not None: dbg("%s: %s" % (word, on))
                     st[k] = on
                     if on: new_row(0, sid, "debuff", now)["srcs"].add("flag")
                     else: drop_row((0, sid))
@@ -2110,11 +1889,8 @@ def _module_hud():
             for r in list(rows.values()):
                 who = r["who"]
                 if not who: continue
-                if who in found: m = found[who]
-                else:
-                    try: m = API.FindMobile(who)
-                    except Exception: m = None
-                    found[who] = m
+                if who not in found: found[who] = API.FindMobile(who)
+                m = found[who]
                 if m is None:
                     if not r["away"]: r["away"] = now; st["ver"] += 1
                     if r["watch"] and not r["seen"] and now > r["confirm"]: drop_row(r["key"])
@@ -2135,9 +1911,8 @@ def _module_hud():
                 elif now > r["confirm"]: drop_row(r["key"])
         def read_journal(now):
             rd = st["rd"]
-            if rd is None: st["rd"] = safe(Journal.reader); return
-            try: lines = rd.new()
-            except Exception: return
+            if rd is None: st["rd"] = Journal.reader(); return
+            lines = rd.new()
             if not lines: return
             me_name = st["name"]; prev, prev_at = st["prev_name"]
             for ln in lines:
@@ -2150,7 +1925,6 @@ def _module_hud():
                     if sp is not None: on_words(sp[0], min(now, ln.at or now), now); continue
                 if name and not mine and name != "System": them_poison(low, name); continue
                 line_me(low, now, not mine)
-                if settings["say"] and st["pend"] is not None: dbg("line [%s]: %s" % (name or "-", ln.text.strip()))
         def line_me(low, now, system):
             txt = low.strip(" *")
             for t, lvl in POISON_ME:
@@ -2191,20 +1965,13 @@ def _module_hud():
         def on_buff_event(kind, args):
             if not st["active"]: return
             for a in args:
-                title = getattr(a, "Title", None)
-                if title is None: continue
-                try:
-                    info = (kind, str(title or ""), int(getattr(a, "Graphic", 0) or 0),
-                            int(getattr(a, "Timer", 0) or 0), str(getattr(a, "Type", "") or ""))
-                except Exception: return
-                if len(st["events"]) < 60: st["events"].append(info)
+                try: info = (kind, str(a.Title or ""), int(a.Graphic or 0), int(a.Timer or 0))
+                except Exception: continue
+                if len(st["events"]) < 60: st["events"].append(info); HOST.poked = True
                 return
         def hook_events():
-            if st["hooked"]: return
-            st["hooked"] = True; ev = safe(lambda: API.Events)
-            if ev is None: return
-            safe(lambda: ev.OnBuffAdded(lambda *a: on_buff_event("add", a)))
-            safe(lambda: ev.OnBuffRemoved(lambda *a: on_buff_event("remove", a)))
+            Kit.hook_once(st, "hooked", ("OnBuffAdded", lambda *a: on_buff_event("add", a)),
+                          ("OnBuffRemoved", lambda *a: on_buff_event("remove", a)))
         def client_ms():
             if not st["ct_looked"]:
                 st["ct_looked"] = True
@@ -2230,25 +1997,21 @@ def _module_hud():
             if end is not None: r["end"], r["end_src"], r["most"] = end, "icon", None
         def handle_icons(now):
             evs, st["events"] = st["events"], []
-            for kind, title, graphic, timer, btype in evs:
-                dbg("buff icon %s: %s (graphic 0x%X, timer %d, type %s)"
-                    % ("added" if kind == "add" else "removed", title or "-", graphic, timer, btype))
-                if not settings["icons"]: continue
+            if not settings["icons"]: return
+            for kind, title, graphic, timer in evs:
                 st["icons_seen"] = True
                 if kind == "add": icon_row(title, graphic, timer, now)
                 else: drop_src((0, norm(title)), "icon")
-            if settings["icons"] and now >= st["next_icons"]:
+            if now >= st["next_icons"]:
                 st["next_icons"] = now + ICON_RESYNC
                 if not st["icons_seen"] and st["next_icons"] - ICON_RESYNC > st["started"] + 1.0: return
-                try: buffs = list(API.ActiveBuffs() or [])
-                except Exception: return
                 present = set()
-                for b in buffs:
-                    try: title = str(b.Title or ""); graphic, timer = int(b.Graphic or 0), int(b.Timer or 0)
-                    except Exception: continue
+                for b in API.ActiveBuffs() or []:
+                    title = str(b.Title or "")
                     if not title: continue
                     present.add(norm(title)); st["icons_seen"] = True; r = rows.get((0, norm(title)))
-                    if r is None or "icon" not in r["srcs"]: icon_row(title, graphic, timer, now)
+                    if r is None or "icon" not in r["srcs"]:
+                        icon_row(title, int(b.Graphic or 0), int(b.Timer or 0), now)
                 for key in [k for k, r in rows.items() if not k[0] and "icon" in r["srcs"] and k[1] not in present]:
                     drop_src(key, "icon")
         def expire(now):
@@ -2274,32 +2037,25 @@ def _module_hud():
                 left = r["end"] - now; key = r["key"]
                 if 0 < left <= lead and st["warned"].get(key) != r["end"]:
                     st["warned"][key] = r["end"]
-                    safe(lambda: HOST.alert(ALERT_KIND, "%s runs out in %d s" % (
-                        SPELL_OF.get(r["sid"], r.get("label") or r["sid"]), int(left + 0.5)), "info", who=r["sid"]))
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
-        def save_pos(): Kit.save_pos(POS_KEY, win["g"])
+                    HOST.alert(ALERT_KIND, "%s runs out in %d s" % (SPELL_OF.get(r["sid"], r.get("label") or r["sid"]),
+                                                                  int(left + 0.5)), "info", who=r["sid"])
+        queue = Kit.queuer(st)
         def build_window():
-            n = settings["rows"]
-            w, h = (MINI_W, MINI_H) if st["minimized"] else (360, 2 * Kit.MARGIN + 30 + Kit.GAP + n * ROW_H + 12)
-            x, y, old, store, g = win_begin(win, POS_KEY, (60, 260), w, h); M = Kit.MARGIN; c = {}; slots = []
-            if st["minimized"]: c["status"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"))
-            else:
-                IW = w - 2 * M; win_head(g, store, w, h, TITLE, KEY, queue); yb = M + 30 + Kit.GAP
+            n = settings["rows"]; slots = []
+            g, store, c = wnd.begin(360, 2 * Kit.MARGIN + 30 + Kit.GAP + n * ROW_H + 12)
+            if not st["minimized"]:
+                M = Kit.MARGIN; IW = 360 - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP
                 Kit.add_section(g, M, yb, IW, n * ROW_H + 12)
                 c["empty"] = Kit.add_label(g, "", M + 12, yb + 10, Kit.HUE_INFO)
                 for i in range(n): slots.append(make_slot(g, i, M, yb + 6 + i * ROW_H, IW))
-            Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], on_disposed(g), save_pos, win,
-                            {"g": g, "c": c, "store": store, "slots": slots, "nrows": n})
-            st["redraw"] = True; draw(time.time()); Kit.dispose(old)
+            wnd.end(g, {"slots": slots, "nrows": n}); st["redraw"] = True; draw(time.time())
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, default=(60, 260), mini=(MINI_W, MINI_H),
+                         icon=TRAY_ICON, lock=False, clear={"slots": []})
         def row_pic(g, x, y, px):
-            try:
-                pic = G.CreateGumpPic(SPELL_ICON_BASE, x, y); pic.SetPos(x, y); pic.SetWidth(px); pic.SetHeight(px)
-                pic.SetAcceptMouseInput(False); g.Add(pic); return pic
-            except Exception: return None
+            pic = G.CreateGumpPic(SPELL_ICON_BASE, x, y); pic.SetPos(x, y); pic.SetWidth(px); pic.SetHeight(px)
+            pic.SetAcceptMouseInput(False); g.Add(pic); return pic
         def set_icon(s, icon, px):
-            s["icon_g"] = icon
-            try: s["pic"].Graphic = icon; s["pic"].SetWidth(px); s["pic"].SetHeight(px)
-            except Exception: pass
+            s["icon_g"] = icon; s["pic"].Graphic = icon; s["pic"].SetWidth(px); s["pic"].SetHeight(px)
         def make_slot(g, i, sx, ry, IW):
             s = {"row": None, "prev": (None, 0.0), "vis": True, "icon_g": None,
                  "tip": None, "tx": None, "fw": -1, "col": None, "x": sx, "y": ry, "iw": IW}
@@ -2324,10 +2080,7 @@ def _module_hud():
             if s["vis"] == on: return
             s["vis"] = on
             for k in ("pic", "name", "time", "bg", "fill", "hit"):
-                ctl = s.get(k)
-                if ctl is not None:
-                    try: ctl.IsVisible = on
-                    except Exception: pass
+                if s.get(k) is not None: s[k].IsVisible = on
         def shown_rows():
             out = []
             for r in rows.values():
@@ -2358,12 +2111,12 @@ def _module_hud():
             return "due" if ("stat" in r["srcs"] or "icon" in r["srcs"]) else "0s", 0.0, True
         def tip_of(r):
             if r["who"]:
-                return ("%s on %s, cast by you. Click: clear this row. Alt+click: auto-follow " "(again to "
-                        "stop)" % (SPELL_OF.get(r["sid"], r["sid"]), r["name"] or "them"))
+                return ("%s on %s, cast by you. Click: clear this row. Alt+click: auto-follow (again to stop)"
+                        % (SPELL_OF.get(r["sid"], r["sid"]), r["name"] or "them"))
             if "stat" in r["srcs"] and r["end"] is None:
-                return ("From a step in your stats; it ends when the stat steps back. Click: clear this row.")
+                return "From a stat step; ends when it steps back. Click: clear this row."
             if r["end"] is None and r["sid"] in ("reactivearmor", "magicreflection"):
-                return ("Up until it is used up (the shard doesn't say when). Click: clear this row.")
+                return "Up until used up (the shard doesn't say when). Click: clear this row."
             return "Click: clear this row"
         SIDES = ("player", "target"); PIECE = {"player": KEY, "target": KEY + ".target"}
         def row_mode(): return st.get("row_mode", False)
@@ -2382,15 +2135,12 @@ def _module_hud():
         def set_form(row):
             st["row_mode"] = row
             if row:
-                HOST.dock_remove(KEY); save_pos(); g, win["g"] = win["g"], None; win["slots"] = []; Kit.dispose(g)
+                HOST.dock_remove(KEY); wnd.close()
                 for side in SIDES:
-                    fw = 200; fs = pieces_frame(side); r = _rect_of(fs) if fs is not None else None
-                    if r is not None: fw = r[2]
-                    build_row(side, fw, 0)
+                    fs = pieces_frame(side); r = _rect_of(fs) if fs is not None else None
+                    build_row(side, r[2] if r is not None else 200, 0)
                 for side in SIDES: pieces_add(PIECE[side], side, 1, lambda s=side: rowui[s]["g"])
-            else:
-                drop_rows(); build_window()
-                HOST.dock_add(KEY, Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw")))
+            else: drop_rows(); build_window(); wnd.dock()
             st["redraw"] = True
         def drop_rows():
             for side in SIDES:
@@ -2405,14 +2155,13 @@ def _module_hud():
             for i in range(n):
                 ln, col = divmod(i, per)
                 cells.append(make_cell(g, side, i, x0 + col * ROW_PITCH, ROW_PAD + ln * ROW_LINE))
-            Kit.place(g, x, y, fw, h); G.AddGump(g); safe(lambda: setattr(g, "IsVisible", lines > 0))
+            Kit.place(g, x, y, fw, h); G.AddGump(g); g.IsVisible = lines > 0
             ui.update({"g": g, "cells": cells, "per": per, "lines": lines, "w": fw}); Kit.dispose(old)
         def make_cell(g, side, i, cx, cy):
             c = {"row": None, "prev": (None, 0.0), "icon_g": None, "tip": None, "vis": True, "x": cx, "y": cy,
                  "tw": None}
             c["pic"] = row_pic(g, cx + (ROW_PITCH - ROW_ICON) // 2, cy, ROW_ICON)
-            c["time"] = Kit.add_label(g, "", cx, cy + ROW_ICON + 1, Kit.HUE_INFO)
-            safe(lambda: c["time"].SetAcceptMouseInput(False))
+            c["time"] = Kit.add_label(g, "", cx, cy + ROW_ICON + 1, Kit.HUE_INFO); c["time"].SetAcceptMouseInput(False)
             c["hit"] = Kit.catcher(g, cx, cy, ROW_PITCH, ROW_LINE - 2, row_click(lambda: rowui[side]["cells"], i), "")
             return c
         def draw_row(side, now, mine):
@@ -2425,23 +2174,17 @@ def _module_hud():
                 if key != c["row"]: c["prev"] = (c["row"], now); c["row"] = key
                 if r is None: set_vis(c, False); continue
                 set_vis(c, True); icon = r["icon"]
-                if icon != c["icon_g"] and c["pic"] is not None: set_icon(c, icon, ROW_ICON)
+                if icon != c["icon_g"]: set_icon(c, icon, ROW_ICON)
                 text, _frac, dim = row_time(r, now)
                 if r["end"] is None: text = ""
                 tw = Kit.text_px(text) if text else 0
                 if tw != c["tw"]:
-                    c["tw"] = tw
-                    safe(lambda: Kit.ui_pos(c["time"], c["x"] + max(0, (ROW_PITCH - tw) // 2), c["y"] + ROW_ICON + 1))
+                    c["tw"] = tw; Kit.ui_pos(c["time"], c["x"] + max(0, (ROW_PITCH - tw) // 2), c["y"] + ROW_ICON + 1)
                 Kit.set_text(c["time"], text, Kit.HUE_BAD if (dim or r["kind"] == "debuff") else Kit.HUE_TEXT)
                 tk = text_key(r)
                 if tk != c.get("tipk"):
                     c["tipk"] = tk; tip = "%s. %s" % (display_name(r), tip_of(r))
-                    if tip != c["tip"]: c["tip"] = tip; safe(lambda: c["hit"].SetTooltip(tip))
-        def target_serial():
-            fn = PIECES_TARGET.get("fn")
-            if fn is None: return 0
-            try: return int(fn() or 0)
-            except Exception: return 0
+                    if tip != c["tip"]: c["tip"] = tip; c["hit"].SetTooltip(tip)
         def draw(now):
             rm = row_mode()
             if not rm and (win["g"] is None or (st["minimized"] and st["docked"])): return
@@ -2450,10 +2193,9 @@ def _module_hud():
                 return
             st["redraw"] = False; st["drawn_at"], st["drawn_ver"] = now, st["ver"]; shown = shown_rows()
             if rm:
-                tgt = target_serial() if pieces_frame("target") is not None else 0; mine, theirs = [], []
-                for r in shown:
-                    if not r["who"]: mine.append(r)
-                    elif tgt and r["who"] == tgt: theirs.append(r)
+                tgt = PIECES_TARGET["fn"]() if PIECES_TARGET["fn"] is not None and pieces_frame("target") is not None \
+                    else 0
+                mine = [r for r in shown if not r["who"]]; theirs = [r for r in shown if tgt and r["who"] == tgt]
                 if rowui["player"]["g"] is not None: draw_row("player", now, mine)
                 if rowui["target"]["g"] is not None: draw_row("target", now, theirs)
                 return
@@ -2469,7 +2211,7 @@ def _module_hud():
                     Kit.set_text(lbl, txt, Kit.HUE_INFO)
                 return
             slots = win["slots"]
-            Kit.set_text(c["empty"], "" if shown else "No timers yet. Your buffs and casts show here.", Kit.HUE_INFO)
+            Kit.set_text(c["empty"], "" if shown else "No timers yet; your buffs and casts show here.", Kit.HUE_INFO)
             for i, s in enumerate(slots):
                 r = shown[i] if i < len(shown) else None; key = r["key"] if r is not None else None
                 if key != s["row"]: s["prev"] = (s["row"], now); s["row"] = key
@@ -2477,14 +2219,14 @@ def _module_hud():
                 set_vis(s, True); draw_slot(s, r, now)
         def draw_slot(s, r, now):
             icon = r["icon"]
-            if icon != s["icon_g"] and s["pic"] is not None: set_icon(s, icon, ICON_PX)
+            if icon != s["icon_g"]: set_icon(s, icon, ICON_PX)
             if r["who"]: hue, colk = (Kit.HUE_INFO if r["away"] else Kit.HUE_TITLE), "other"
             elif r["kind"] == "debuff": hue, colk = Kit.HUE_BAD, "debuff"
             else: hue, colk = Kit.HUE_TEXT, "buff"
             text, frac, dim = row_time(r, now)
             if r["who"] and r["away"]: text = text + " (away)"
             tw = Kit.text_px(text); tx = s["x"] + s["iw"] - 8 - tw
-            if tx != s["tx"]: s["tx"] = tx; safe(lambda: Kit.ui_pos(s["time"], tx, s["y"] + 1))
+            if tx != s["tx"]: s["tx"] = tx; Kit.ui_pos(s["time"], tx, s["y"] + 1)
             Kit.set_text(s["time"], text, Kit.HUE_BAD if dim else Kit.HUE_INFO); tk = text_key(r)
             room = tx - (s["x"] + 34) - 6; nk = (tk, room)
             if nk != s.get("namek"):
@@ -2494,71 +2236,38 @@ def _module_hud():
             else:
                 fw = int(round(s["bw"] * frac))
                 if dim: colk = "dim"
+            fill = s["fill"]
             if fw != s["fw"]:
-                s["fw"] = fw; fill = s["fill"]
-                if fill is not None:
-                    try:
-                        if fw <= 0: fill.IsVisible = False
-                        else: Kit.ui_w(fill, fw); fill.IsVisible = True
-                    except Exception: pass
-            if colk != s["col"] and s["fill"] is not None:
-                s["col"] = colk; rgb = COL[colk]
-                try: s["fill"].SetBaseColor(rgb[0], rgb[1], rgb[2], 255)
-                except Exception: pass
+                s["fw"] = fw
+                if fw <= 0: fill.IsVisible = False
+                else: Kit.ui_w(fill, fw); fill.IsVisible = True
+            if colk != s["col"]: s["col"] = colk; rgb = COL[colk]; fill.SetBaseColor(rgb[0], rgb[1], rgb[2], 255)
             if tk != s.get("tipk"):
                 s["tipk"] = tk; tip = tip_of(r)
-                if tip != s["tip"]: s["tip"] = tip; safe(lambda: s["hit"].SetTooltip(tip))
-        PAGE_OPTS = {"ldy": 4, "lgap": 12, "fw": 40}
+                if tip != s["tip"]: s["tip"] = tip; s["hit"].SetTooltip(tip)
         PAGE = (("WINDOW  (what it lists)", (
                     ("check", "me", "Show the buffs on you", "Bless, Strength, Protection, Reactive Armor, Magic "
-                     "Reflection, Night Sight, Incognito, Invisibility, Polymorph ..."),
+                     "Reflection, Night Sight and more"),
                     ("check", "debuff", "Show what is done to you (paralyze, poison, curses)",
                      "Paralyzed, Poison (with its level), Curse, Clumsy, Feeblemind and Weaken on you"),
-                    ("check", "others", "Show your spells on others", "Paralyze, Poison, the curses and the buffs you "
-                     "cast on someone else. Alt+click such a row: auto-follow (again to stop)"),
-                    ("num", "rows", "Rows shown:", "Rows the window has room for", None, ROWS_MIN, ROWS_MAX)),
-                 {"sh": 140}), ("HOW TIMERS ARE FOUND  (your casts always count)", (
+                    ("check", "others", "Show your spells on others", "What you cast on someone else. Alt+click such "
+                     "a row: auto-follow (again to stop)"),
+                    ("num", "rows", "Rows shown:", "Rows the window has room for", None, ROWS_MIN, ROWS_MAX,
+                     {"clamp": False})), {"sh": 140}), ("HOW TIMERS ARE FOUND  (your casts always count)", (
                     ("check", "stats", "Watch your stats for Bless, Curse and their kin",
-                     "A step of %d or more in your Str, Dex or Int is a spell on you, whoever cast it (all three at "
-                     "once: Bless / Curse); the bar ends when the stat steps back. A potion's bonus shows too."
-                     % STAT_MIN_STEP),
-                    ("check", "icons", "Use the shard's buff icons when it sends them", "A shard that sends buff icons "
-                     "gives exact names and times; a classic shard sends none (tick the DEBUG box to see)")),
-                 {"sh": 90}), ("ALERTS  (sound: Settings > Alerts)", (
-                    ("num", "warn", "Warn before a buff on you runs out:", "Seconds before a timed buff on you runs "
-                     "out that one alert comes (0-%d, 0 = never)" % WARN_MAX, "s", 0, WARN_MAX),), {"sh": 64}),
-                ("DEBUG  (for checking the shard's texts)", (
-                    ("check", "say", "Print every buff icon and cast in the journal", "Every buff icon the shard "
-                     "sends, your casts and where they landed, stat steps, and the lines that come while a spell is "
-                     "pending, so the shard's texts can be checked"),), {"sh": 64}))
-        def config_height(w): return Kit.Form.height(PAGE, w, **PAGE_OPTS)
-        def build_config(g, x, y, w):
-            page["c"] = Kit.Form(g, x, y, w, settings, PAGE, **PAGE_OPTS).c
-            page["seen"] = (str(settings["rows"]), str(settings["warn"]))
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            try:
-                ticks = {k: bool(c[k].IsChecked) for k in ("me", "debuff", "others", "stats", "icons", "say")}
-                texts = (str(c["rows"].Text).strip(), str(c["warn"].Text).strip())
-            except Exception: return
-            changed = False
-            for k, v in ticks.items():
-                if v != settings[k]:
-                    settings[k] = v; changed = True; st["redraw"] = True
-                    if k == "icons" and v: st["next_icons"] = 0.0
-            if texts != page["seen"]:
-                page["seen"] = texts
-                if texts[0].isdigit():
-                    n = int(texts[0])
-                    if ROWS_MIN <= n <= ROWS_MAX and n != settings["rows"]:
-                        settings["rows"] = n; st["rebuild"] = True; changed = True
-                if texts[1].isdigit():
-                    n = int(texts[1])
-                    if 0 <= n <= WARN_MAX and n != settings["warn"]:
-                        settings["warn"] = n; st["warned"] = {}; changed = True
-            if changed: save_settings()
-        def config_closed(): page["c"] = None
+                     "A Str, Dex or Int step of %d or more is a spell on you (all three: Bless / Curse); potions show "
+                     "too" % STAT_MIN_STEP),
+                    ("check", "icons", "Use the shard's buff icons when it sends them", "Exact names and times when "
+                     "the shard sends icons (a classic shard sends none)")), {"sh": 90}),
+                ("ALERTS  (sound: Settings > Alerts)", (
+                    ("num", "warn", "Warn before a buff on you runs out:", "One alert this many seconds before it ends "
+                     "(0-%d, 0 = never)" % WARN_MAX, "s", 0, WARN_MAX, {"clamp": False}),), {"sh": 64}))
+        def on_change(old, new):
+            st["redraw"] = True
+            if new["icons"] and not old["icons"]: st["next_icons"] = 0.0
+            if new["rows"] != old["rows"]: st["rebuild"] = True
+            if new["warn"] != old["warn"]: st["warned"] = {}
+        cfg = Kit.Page(settings, PAGE, save_settings, on_change, {"ldy": 4, "lgap": 12, "fw": 40})
         def svc_list(serial=None):
             now = time.time(); me = st["me"]; out = []
             for r in rows.values():
@@ -2571,26 +2280,24 @@ def _module_hud():
                             "level": r["level"], "delta": r["delta"]})
             return out
         def _start():
-            now = time.time(); st_reset()
-            st.update({"active": True, "redraw": True, "started": now,
-                       "minimized": Kit.load_min(MIN_KEY) or bool(safe(lambda: HOST.dock_wanted(KEY), False))})
+            now = time.time(); st_reset(); st.update({"active": True, "redraw": True, "started": now,
+                                                      "minimized": wnd.start_min()})
             rows.clear()
             for stat in effects: del effects[stat][:]
             load_settings(); restore_active(now); sync_stat_rows(); hook_events()
-            safe(lambda: HOST.alert_kind(ALERT_KIND, "Buff about to run out", 0x1EA))
-            st["row_mode"], st["form_at"] = False, 0.0
+            HOST.alert_kind(ALERT_KIND, "Buff about to run out", 0x1EA); st["row_mode"], st["form_at"] = False, 0.0
             if pieces_frame("player") is not None: set_form(True)
-            else: build_window(); HOST.dock_add(KEY, Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw")))
+            else: build_window(); wnd.dock()
             HOST.services["spelltimers.list"] = svc_list
         def _tick():
             now = time.time(); form_tick(now)
             if win["g"] is None and not row_mode(): return
-            if win["g"] is not None and Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if win["g"] is not None and Kit.closed(win): return
             while st["queue"]:
                 action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
                 if action == "redraw":
                     if not row_mode(): build_window()
-                elif Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY): pass
+                elif wnd.action(action): pass
                 elif kind == "follow": Follow.toggle(action[1], TITLE)
                 elif kind == "clear": clear_row(action[1])
             if st["rebuild"]:
@@ -2620,9 +2327,8 @@ def _module_hud():
         def _stop():
             st["shutting"] = True; st["active"] = False; HOST.dock_remove(KEY)
             if HOST.services.get("spelltimers.list") is svc_list: HOST.services.pop("spelltimers.list", None)
-            drop_rows(); save_pos(); Kit.save_min(MIN_KEY, st["minimized"]); save_settings(); save_active()
-            g, win["g"] = win["g"], None; win["slots"] = []; Kit.dispose(g)
-        load_settings(); return part_dict(_start, _tick, _stop, config_height, build_config, poll_config, config_closed)
+            drop_rows(); wnd.close(); save_settings(); save_active()
+        load_settings(); return part_dict(_start, _tick, _stop, cfg.height, cfg.build, cfg.poll, cfg.closed)
     def _part_swing():
         try: from System import DateTime
         except Exception: DateTime = None
@@ -2641,7 +2347,7 @@ def _module_hud():
         BAR_PAUSED_HUE, BAR_PAUSED_COLOR = 0x03B2, "#6b6b6b"; SWING_HISTORY = 10; MIN_GAP_MS = 250
         HISTORY_KEY = "SwingTimer_history"; DISARM_TEXTS = ("you have been disarmed", "your weapon has been disarmed")
         DISMOUNT_TEXTS = ("you have been knocked off", "you fall off of your mount", "you fall off your mount")
-        NOTICE_FROM = ("system", ""); DEBUG_WORDS = ("disarm", " mount", "dismount"); ALERT_NOTICE = "swing.notice"
+        NOTICE_FROM = ("system", ""); ALERT_NOTICE = "swing.notice"
         EAT_LOOKBACK_S = 30.0; HUE_GREEN, HUE_YELLOW, HUE_RED, HUE_GREY = 68, 53, 33, 946; HUE_TEXT = Kit.HUE_TEXT
         SW, FE, MA, WR = "Swordsmanship", "Fencing", "Mace Fighting", "Wrestling"; AR = "Archery"
         _W = [("Broadsword",       45, SW, (0xF5E, 0xF5F)), ("Cutlass",          45, SW, (0x1441, 0x1440)),
@@ -2684,35 +2390,18 @@ def _module_hud():
             chance = (max(atk_skill, -49.9) + 50.0) / ((max(def_skill, -49.9) + 50.0) * 2.0)
             chance *= 1.0 + accuracy_pct / 100.0; return max(0.0, min(1.0, chance * (1.0 + mod / 100.0)))
         def now_ms(): return time.time() * 1000.0
-        def swing_skill(name):
-            try: s = API.GetSkill(name)
-            except Exception: return 0.0
-            if s is None: return 0.0
-            for attr in ("Value", "Base"):
-                try: return float(getattr(s, attr))
-                except Exception: pass
-            try: return float(s)
-            except Exception: return 0.0
         def current_weapon():
             for layer in ("OneHanded", "TwoHanded"):
-                try: item = API.FindLayer(layer)
-                except Exception: item = None
-                if not item: continue
-                g = int(getattr(item, "Graphic", 0))
-                if g in WEAPONS: name, spd, skill = WEAPONS[g]; return name, spd, skill, accuracy_of(item)
+                item = API.FindLayer(layer)
+                if item and int(item.Graphic) in WEAPONS:
+                    name, spd, skill = WEAPONS[int(item.Graphic)]; return name, spd, skill, accuracy_of(item)
             return FISTS + (0,)
         acc_cache = {}
         def accuracy_of(item):
-            try: serial = int(item.Serial) or 0
-            except Exception: serial = 0
-            hit = acc_cache.get(serial) if serial else None
+            serial = int(item.Serial); hit = acc_cache.get(serial) if serial else None
             if hit is not None and time.time() < hit[1]: return hit[0]
-            text = ""
-            try: text = (getattr(item, "Name", "") or "").lower()
-            except Exception: pass
-            if "accurate" not in text:
-                try: text = (API.ItemNameAndProps(item.Serial, False) or "").lower()
-                except Exception: pass
+            text = (item.Name or "").lower()
+            if "accurate" not in text: text = (API.ItemNameAndProps(serial, False) or "").lower()
             pct = 0
             for key, p in ACCURACY:
                 if key in text: pct = p; break
@@ -2720,16 +2409,13 @@ def _module_hud():
                 if len(acc_cache) > 50: acc_cache.clear()
                 acc_cache[serial] = (pct, time.time() + (1e9 if pct else 2.0))
             return pct
-        STAT_ATTR = "Stamina"
         def enemy_skill(mob, override, name=None):
             if override is not None: return override
             if mob is None: return cfg["enemy_default"]
-            if name is None: name = getattr(mob, "Name", "") or ""
-            name = name.lower()
+            name = (mob.Name or "" if name is None else name).lower()
             for key, val in ENEMY_SKILL_BY_NAME:
                 if key in name: return val
-            if getattr(mob, "IsHuman", False): return 100
-            return cfg["enemy_default"]
+            return 100 if mob.IsHuman else cfg["enemy_default"]
         def load_var(key, default):
             try: return float(Kit.get_var(key, str(default)))
             except Exception: return float(default)
@@ -2742,7 +2428,7 @@ def _module_hud():
             last_swing = None; cycle_ms = None; gaps = []; gaps_weapon = None; history = {}; slow = []; dirty = False
             paused_at = None; target_serial = 0; enemy_override = None; hunger = DEFAULT_HUNGER; hunger_clock = now_ms()
             seen_sounds = set(); sounds = []; keys = []; notice = None
-        S = State()
+        S = State(); say = Kit.sayer(TITLE)
         def average_gap():
             if not S.gaps: return None
             return sum(S.gaps) / float(len(S.gaps))
@@ -2782,8 +2468,7 @@ def _module_hud():
                 if not S.history.get(wkey): S.history[wkey] = gaps; n += 1
             if not n: return
             S.gaps_weapon = None; S.dirty = True; save_history()
-            API.SysMsg("%s: learned swings of %d weapon%s brought over from the old data "
-                       "file." % (TITLE, n, "" if n == 1 else "s"), Kit.HUE_GOOD)
+            say("brought over learned swings of %s from the old data file." % Kit.count(n, "weapon"), Kit.HUE_GOOD)
         def save_history():
             files["save"] = False
             recs = ["%s|%d|%s" % (name.replace("|", "/").replace(";", "/"), spd, ",".join("%.0f" % g for g in gaps))
@@ -2803,7 +2488,7 @@ def _module_hud():
             if S.paused_at is not None:
                 if S.last_swing is not None: S.last_swing += max(0.0, when - S.paused_at)
                 S.paused_at = when
-            weapon = current_weapon(); formula = swing_delay_ms(int(getattr(API.Player, STAT_ATTR, 0)), weapon[1])
+            weapon = current_weapon(); formula = swing_delay_ms(int(API.Player.Stamina), weapon[1])
             swapped = match_weapon(weapon)
             if S.last_swing is not None and not swapped: count_gap(when - S.last_swing, formula)
             S.last_swing = when; S.cycle_ms = average_gap() or formula
@@ -2811,16 +2496,12 @@ def _module_hud():
             try: return max(0.0, (DateTime.Now - entry.Time).TotalMilliseconds)
             except Exception: return 0.0
         def sound_of(entry):
-            try: sid = int(entry.ID)
-            except Exception: return None
+            sid = int(entry.ID)
             if sid not in SWING_SOUNDS: return None
-            try: sx, sy = int(entry.X), int(entry.Y)
-            except Exception: return None
-            return (sid, sx, sy, str(getattr(entry, "Time", "")), now_ms() - _sound_age_ms(entry))
-        def handle_sound(snd, p=None):
+            return (sid, int(entry.X), int(entry.Y), str(entry.Time), now_ms() - _sound_age_ms(entry))
+        def handle_sound(snd, p):
             sid, sx, sy, tstamp, when = snd
-            if p is None: p = API.Player
-            if p is None or sx != int(p.X) or sy != int(p.Y): return
+            if sx != int(p.X) or sy != int(p.Y): return
             key = (sid, sx, sy, tstamp)
             if key in S.seen_sounds: return
             S.seen_sounds.add(key)
@@ -2829,67 +2510,40 @@ def _module_hud():
         def on_sound_event(*args):
             if not win.get("active"): return
             for a in args:
-                try: a.ID
+                try: snd = sound_of(a)
                 except Exception: continue
-                snd = sound_of(a)
                 if snd is not None and len(S.sounds) < 50:
                     S.sounds.append(snd)
                     if not loop.get("fast"):
                         xy = loop.get("xy")
                         if xy is None or (snd[1], snd[2]) == xy: HOST.poke()
                 return
-        SOUND_EVENTS_OK = False; SOUND_HOOKED = False
-        def hook_sounds():
-            nonlocal SOUND_EVENTS_OK, SOUND_HOOKED
-            if SOUND_HOOKED: return
-            SOUND_HOOKED = True
-            try: API.Events.SoundPlayed(on_sound_event); SOUND_EVENTS_OK = True
-            except Exception: pass
-        def poll_sounds(p):
-            try: entries = API.GetSoundLog(1.0)
-            except Exception: return
-            for e in entries or ():
-                snd = sound_of(e)
-                if snd is not None: handle_sound(snd, p)
+        hooked = [False]
         def set_notice(text, hue): S.notice = (text, hue, now_ms() + 4000.0)
-        note = {"rd": None, "clock": 0.0, "debug": load_var("swingtimer_notice_debug", 0) >= 1, "own": (TITLE.lower(),)}
+        note = {"rd": None, "clock": 0.0, "own": (TITLE.lower(),)}
         def own_starts():
             own = set([TITLE.lower()])
-            try:
-                for t in [APP_NAME] + [s.title for s in HOST.slots]:
-                    t = str(t or "").strip().lower()
-                    if t: own.add(t)
-            except Exception: pass
+            for t in [APP_NAME] + [s.title for s in HOST.slots]:
+                t = str(t or "").strip().lower()
+                if t: own.add(t)
             return tuple(own)
         def check_notices():
-            rd = note["rd"]
-            if rd is None: return
-            try: lines = rd.new(time.time() - Journal.read_at >= 0.5)
-            except Exception: return
             own = note["own"]
-            for ln in lines:
+            for ln in note["rd"].new(time.time() - Journal.read_at >= 0.5):
                 low = ln.low
-                if low.startswith(own): continue
-                if note["debug"]:
-                    for wd in DEBUG_WORDS:
-                        if wd in low:
-                            API.SysMsg("%s: line \"%s\" (from %s)" % (TITLE, ln.text, ln.name or "-"), Kit.HUE_INFO)
-                            break
-                if str(ln.name or "").lower() not in NOTICE_FROM: continue
+                if low.startswith(own) or str(ln.name or "").lower() not in NOTICE_FROM: continue
                 for texts, what in ((DISARM_TEXTS, ("Disarmed!", "You were disarmed")),
                                     (DISMOUNT_TEXTS, ("Dismounted!", "You were dismounted"))):
                     if any(t in low for t in texts):
-                        set_notice(what[0], HUE_RED); safe(lambda: HOST.alert(ALERT_NOTICE, what[1])); break
+                        set_notice(what[0], HUE_RED); HOST.alert(ALERT_NOTICE, what[1]); break
         EAT_MSGS = [("simply too full to eat any more", 20, 20), ("but you are stuffed", 20, 20),
             ("but are still extremely hungry", 0, 4), ("begin to feel more satiated", 5, 9),
             ("you feel much less hungry", 10, 14), ("feel quite full after consuming", 15, 19),]
         eat_rd = {"rd": None}
         def check_eating():
             rd = eat_rd["rd"]
-            try:
-                if rd is None: rd = eat_rd["rd"] = Journal.reader(); lines = Journal.recent(EAT_LOOKBACK_S)
-                else: lines = rd.new()
-            except Exception: return
+            if rd is None: eat_rd["rd"] = Journal.reader(); lines = Journal.recent(EAT_LOOKBACK_S)
+            else: lines = rd.new()
             if not lines: return
             try: now_ticks = float(DateTime.Now.Ticks)
             except Exception: now_ticks = time.time() * 1e7
@@ -2906,7 +2560,7 @@ def _module_hud():
             if elapsed >= step:
                 ticks = int(elapsed // step); S.hunger = max(0.0, S.hunger - ticks); S.hunger_clock += ticks * step
                 save_var("swingtimer_hunger", S.hunger)
-        FOLLOW_TIP = " Alt+click: auto-follow (again to stop)."
+        FOLLOW_TIP = " Alt+click: auto-follow (again to stop)"
         def note_key(what, value):
             if len(S.keys) < 50: S.keys.append((what, value)); HOST.poke()
         def on_target_picked(serial):
@@ -2914,9 +2568,7 @@ def _module_hud():
         def run_keys():
             while S.keys:
                 what, v = S.keys.pop(0)
-                if what == "target":
-                    API.SysMsg("%s: target the mobile you are fighting." % TITLE, Kit.HUE_INFO)
-                    HOST.pick_target(10, on_target_picked)
+                if what == "target": say("target the mobile you are fighting."); HOST.pick_target(10, on_target_picked)
                 elif what == "resync": mark_swing(v)
                 elif what == "hunger": set_hunger(round(S.hunger) + v)
                 elif what == "enemy":
@@ -2924,8 +2576,8 @@ def _module_hud():
                     S.enemy_override = max(ENEMY_SKILL_MIN, min(ENEMY_SKILL_MAX, base + v))
                 elif what == "follow":
                     mob = loop.get("mob")
-                    if mob is not None: Follow.toggle(int(getattr(mob, "Serial", 0) or 0), TITLE)
-                    else: API.SysMsg("%s: no target to follow." % TITLE, Kit.HUE_INFO)
+                    if mob is not None: Follow.toggle(int(mob.Serial), TITLE)
+                    else: say("no target to follow.")
         HOTKEYS = ((HK_SET_TARGET, lambda: note_key("target", None), "pick the mobile you fight"),
                    (HK_RESYNC, lambda: note_key("resync", now_ms()), "restart the bar (I just swung)"),
                    (HK_HUNGER_UP, lambda: note_key("hunger", 1), "satiety estimate +1"),
@@ -2934,27 +2586,20 @@ def _module_hud():
                    (HK_ENEMY_DOWN, lambda: note_key("enemy", -5), "enemy skill -5"))
         def not_typing(fn):
             def run(*args):
-                if not safe(lambda: HOST.typing(), False): fn()
+                if not HOST.typing(): fn()
             return run
         def register_hotkeys(on):
             for key, fn, what in HOTKEYS:
-                try:
-                    if on: API.OnHotKey(key, not_typing(fn)); HOST.hotkeys_owned[key] = TITLE
-                    else: API.OnHotKey(key)
-                except Exception: pass
-                if not on: HOST.hotkeys_owned.pop(key, None)
-                try:
-                    if on: HOST.hotkey_note(key, TITLE, what)
-                    else: HOST.hotkey_drop(key, TITLE)
-                except Exception: pass
+                if on:
+                    API.OnHotKey(key, not_typing(fn)); HOST.hotkeys_owned[key] = TITLE
+                    HOST.hotkey_note(key, TITLE, what)
+                else: API.OnHotKey(key); HOST.hotkeys_owned.pop(key, None); HOST.hotkey_drop(key, TITLE)
         def resolve_target():
-            for serial in (S.target_serial, getattr(API, "LastTargetSerial", 0)):
+            for serial in (S.target_serial, API.LastTargetSerial):
                 if serial:
-                    try: m = API.FindMobile(serial)
-                    except Exception: m = None
-                    if m and not getattr(m, "IsDead", False): return m
-            try: N = API.Notoriety; return API.NearestMobile([N.Gray, N.Criminal, N.Enemy, N.Murderer], 2)
-            except Exception: return None
+                    m = API.FindMobile(serial)
+                    if m and not m.IsDead: return m
+            N = API.Notoriety; return API.NearestMobile([N.Gray, N.Criminal, N.Enemy, N.Murderer], 2)
         set_label = Kit.set_text
         STEP_FALLBACK = {(False, False): 400.0, (False, True): 200.0, (True, False): 200.0, (True, True): 100.0}
         STEP_MIN_MS, STEP_MAX_MS = 50.0, 800.0; KITE_VAR = "swingtimer_kite"
@@ -2966,14 +2611,14 @@ def _module_hud():
         bg_opacity = max(0.0, min(100.0, load_var("swingtimer_bg_opacity", 85)))
         win = {"bar_w": 109, "x1": 0, "row1": 0, "food_w": [0] * 21, "fill_w": -1, "fill_state": None,
                "shown": {}, "tips": {}, "active": False, "closing": False}
-        ctl = {}; cfgui = {"opacity": None, "seen_opacity": None}
+        ctl = {}; cfgui = {"f": None}
         def is_open(): return Kit.is_open(ctl.get("gump"))
         def make_fill(hue, color, h):
             if Kit.pic_size(Kit.LINE_BLUE)[0] > 0:
                 t = Kit.add_tiled(ctl["gump"], Kit.LINE_BLUE, win["x1"], ROW1_Y, 1, h, hue=hue)
                 if t is not None: return t
             b = G.CreateGumpColorBox(1.0, color); b.SetRect(win["x1"] + 1, ROW1_Y + 1, 1, h)
-            safe(lambda: b.SetAcceptMouseInput(False)); ctl["gump"].Add(b); return b
+            b.SetAcceptMouseInput(False); ctl["gump"].Add(b); return b
         def window_size():
             win["row1"] = win["bar_w"] + 5 + max(Kit.text_w("15.0s"), readout_room())
             return win["row1"] + 2 * PAD + 16, 58
@@ -2993,18 +2638,17 @@ def _module_hud():
             ctl["fills"] = {"fill": make_fill(BAR_FILL_HUE, BAR_FILL_COLOR, fh),
                             "ready": make_fill(BAR_READY_HUE, BAR_READY_COLOR, fh),
                             "paused": make_fill(BAR_PAUSED_HUE, BAR_PAUSED_COLOR, fh)}
-            for f in ctl["fills"].values(): safe(lambda f=f: setattr(f, "IsVisible", False))
+            for f in ctl["fills"].values(): f.IsVisible = False
             ctl["kite"] = {}
             for name, colour in KITE_COLOR.items():
                 b = G.CreateGumpColorBox(1.0, colour); b.SetRect(x1, ROW1_Y - 1, 2, fh + 2)
-                safe(lambda b=b: b.SetAcceptMouseInput(False)); safe(lambda b=b: setattr(b, "IsVisible", False))
-                gump.Add(b); ctl["kite"][name] = b
+                b.SetAcceptMouseInput(False)
+                b.IsVisible = False; gump.Add(b); ctl["kite"][name] = b
             ctl["kite_lbl"] = Kit.add_label(gump, "", x1, ROW1_Y - 2, HUE_TEXT)
-            safe(lambda: ctl["kite_lbl"].SetAcceptMouseInput(False))
-            kite.update({"px": None, "state": None, "tiles": None})
+            ctl["kite_lbl"].SetAcceptMouseInput(False); kite.update({"px": None, "state": None, "tiles": None})
             ctl["swing"] = Kit.add_label(gump, "", x1 + win["bar_w"] + 5, ROW1_Y - 2, HUE_TEXT)
             ctl["notice"] = nl = Kit.add_label(gump, "", x1 + 4, ROW1_Y - 2, HUE_RED)
-            safe(lambda: nl.SetAcceptMouseInput(False)); safe(lambda: setattr(nl, "IsVisible", False))
+            nl.SetAcceptMouseInput(False); nl.IsVisible = False
             ctl["hit"] = Kit.add_label(gump, "", x1, ROW2_Y, HUE_GREY)
             ctl["food"] = Kit.add_label(gump, "", x1 + win["row1"] - Kit.text_w("Food 20/20"), ROW2_Y, HUE_TEXT)
             win["food_w"] = [Kit.text_px("Food %d/20" % i) for i in range(21)]; half = win["row1"] // 2
@@ -3014,53 +2658,43 @@ def _module_hud():
             ctl["tip_food"] = Kit.catcher(gump, x1 + half, ROW2_Y - 2, win["row1"] - half + 2, 18,
                                           lambda *a: None, food_tip(), movable=True)
             win["fill_w"], win["fill_state"], win["shown"], win["tips"] = -1, None, {}, {}; win["notice_shown"] = None
-            G.AddControlOnDisposed(gump, on_close(gump)); G.AddGump(gump)
-            safe(lambda: Kit.on_moved(gump, save_position))
-            if old is not None: Kit.dispose(old)
+            G.AddControlOnDisposed(gump, on_close(gump)); G.AddGump(gump); Kit.on_moved(gump, save_position)
+            Kit.dispose(old)
         def set_tip(key, text):
             c = ctl.get(key)
             if c is None or win["tips"].get(key) == text: return
-            win["tips"][key] = text; safe(lambda: c.SetTooltip(text))
+            win["tips"][key] = text; c.SetTooltip(text)
         def target_click(*a):
-            if safe(Follow.alt_held, False): note_key("follow", None)
+            if Follow.alt_held(): note_key("follow", None)
         def bar_tip(info):
-            text = ("Time to your next swing. Green: ready. Grey: paused (not in war mode or no target).")
+            text = "Time to your next swing. Green: ready; grey: paused (no war mode or target)."
             if info is not None:
                 name, speed, delay, n = info
                 text += " %s, speed %d, swing %.1f s (%s)." % (name, speed, delay / 1000.0,
-                    "learned from %d swing%s" % (n, "" if n == 1 else "s") if n else "formula")
+                    "learned from %s" % Kit.count(n, "swing") if n else "formula")
             return text + FOLLOW_TIP
         def hit_tip(info):
-            if info is None: return "Chance to hit your target. Set the target with %s.%s" % (HK_SET_TARGET, FOLLOW_TIP)
+            if info is None: return "Chance to hit your target; set it with %s.%s" % (HK_SET_TARGET, FOLLOW_TIP)
             who, skill, mine, theirs, acc, sat = info
-            return ("Chance to hit %s: your %s %.1f vs their assumed %d, accuracy +%d%%, "
-                    "satiety %+d%%. Set the target with %s.%s" % (
-                        who[:20], skill, mine, theirs, acc, sat, HK_SET_TARGET, FOLLOW_TIP))
+            return ("Chance to hit %s: your %s %.1f vs their assumed %d, accuracy +%d%%, satiety %+d%%; set the "
+                    "target with %s.%s" % (who[:20], skill, mine, theirs, acc, sat, HK_SET_TARGET, FOLLOW_TIP))
         def food_tip(label="", mod=0):
-            return ("Satiety estimate%s, %+d%% to hit. It drops 1 every %d minutes and rises when "
-                    "the journal shows you eat%s. Adjust with %s / %s." % (
+            return ("Satiety estimate%s, %+d%% to hit: drops 1 every %d min, rises when you eat%s. Adjust: %s / %s." % (
                         (": " + label.lower()) if label else "", mod, HUNGER_DECAY_SECONDS // 60,
-                        "" if FOOD_SEEN[0] else " (none seen yet, so it shows grey)", HK_HUNGER_UP, HK_HUNGER_DOWN))
-        def apply_opacity(): a = bg_opacity / 100.0; safe(lambda: ctl["section"].SetAlpha(a * Kit.SECTION_ALPHA))
+                        "" if FOOD_SEEN[0] else " (none seen yet, so grey)", HK_HUNGER_UP, HK_HUNGER_DOWN))
+        def apply_opacity(): ctl["section"].SetAlpha(bg_opacity / 100.0 * Kit.SECTION_ALPHA)
         def set_fill(progress, state):
             fw = int(win["bar_w"] * max(0, min(1000, progress)) / 1000)
             old_w, old_state = win["fill_w"], win["fill_state"]
             if fw == old_w and state == old_state: return
             win["fill_w"], win["fill_state"] = fw, state; fills = ctl["fills"]; was = old_state if old_w > 0 else None
             now = state if fw > 0 else None
-            if now is not None:
-                try: Kit.ui_w(fills[now], fw)
-                except Exception: pass
+            if now is not None: Kit.ui_w(fills[now], fw)
             if was != now:
                 for key, on in ((was, False), (now, True)):
-                    f = fills.get(key) if key is not None else None
-                    if f is not None:
-                        try: f.IsVisible = on
-                        except Exception: pass
+                    if key is not None: fills[key].IsVisible = on
         def step_note(p, t):
-            try: xy = (int(p.X), int(p.Y))
-            except Exception: return
-            was, at = kite["xy"], kite["at"]
+            xy = (int(p.X), int(p.Y)); was, at = kite["xy"], kite["at"]
             if xy == was: return
             kite["xy"], kite["at"] = xy, t
             if was is None: return
@@ -3068,7 +2702,7 @@ def _module_hud():
             if not (0 < tiles <= 4 and 0 < dt <= 700.0 * tiles): return
             ms = max(STEP_MIN_MS, min(STEP_MAX_MS, dt / float(tiles))); mode = step_mode(p)
             old = kite["steps"].get(mode); kite["steps"][mode] = ms if old is None else old + (ms - old) * 0.15
-        def step_mode(p): return (bool(getattr(p, "IsMounted", False)), bool(getattr(p, "IsRunning", True)))
+        def step_mode(p): return (bool(p.IsMounted), bool(p.IsRunning))
         def step_ms(p):
             mode = step_mode(p); v = kite["steps"].get(mode); return v if v is not None else STEP_FALLBACK[mode]
         def kite_tiles(swing_ms, step): return int(1 + (swing_ms / 2.0) / max(1.0, step))
@@ -3109,88 +2743,63 @@ def _module_hud():
         def save_position():
             g = ctl.get("gump")
             if Kit.is_open(g) and not pieces_on(LAYOUT_KEY):
-                save_var("swingtimer_x", safe(lambda: g.GetX(), WINDOW_X))
-                save_var("swingtimer_y", safe(lambda: g.GetY(), WINDOW_Y))
-        FOOD_SEEN = [False]; PAGE_HS = (96, 68, 100, 66)
-        def config_height(w): return sum(PAGE_HS) + 3 * Kit.GAP
+                save_var("swingtimer_x", g.GetX()); save_var("swingtimer_y", g.GetY())
+        FOOD_SEEN = [False]
         def satiety_text(): return "{:.0f}/20 {}".format(S.hunger, satiety_info(S.hunger)[1])
-        def build_config(g, x, y, w):
+        def _pair(a, b): return "%s / %s" % (a, b.rsplit("+", 1)[1])
+        def page_table():
             keys = ((_pair(HK_SET_TARGET, HK_RESYNC), "pick the target / restart the bar"),
                     (_pair(HK_HUNGER_UP, HK_HUNGER_DOWN), "satiety estimate +1 / -1"),
                     (_pair(HK_ENEMY_UP, HK_ENEMY_DOWN), "enemy skill +5 / -5"))
-            page = (("WINDOW", (("gap", 32), ("check", "kite", "Show the kite marker on the bar", "The turn-back point "
-                                 "of the swing and the tiles to kite out; its colour says too close, turn now or too "
-                                 "far", {"h": -32}),
-                                ("slider", "opacity", "Background opacity:", "How solid the black inside of the window "
-                                 "is; the stone edge stays solid (0-100)", 0, 100, {"lgap": 12, "sdy": 8, "sw": 160})),
-                     {"sh": PAGE_HS[0], "ldy": 4}),
-                    ("HIT CHANCE", (("num", "enemy", "Enemy skill:", "Weapon skill assumed for a monster the name "
-                                     "table doesn't know; players count as GM (%d-%d)" % (ENEMY_SKILL_MIN,
-                                     ENEMY_SKILL_MAX), None, ENEMY_SKILL_MIN, ENEMY_SKILL_MAX,
-                                     {"lgap": 8, "fw": 44, "stay": True}),
+            return (("WINDOW", (("gap", 32), ("check", "kite", "Show the kite marker on the bar", "Turn-back point and "
+                                 "tiles to kite out; colour: too close, turn now, too far", {"h": -32}),
+                                ("slider", "opacity", "Background opacity:", "How solid the window's black inside is "
+                                 "(0-100)", 0, 100, {"lgap": 12, "sdy": 8, "sw": 160})), {"sh": 96, "ldy": 4}),
+                    ("HIT CHANCE", (("num", "enemy", "Enemy skill:", "Skill assumed for an unknown monster; players "
+                                     "count as GM (%d-%d)" % (ENEMY_SKILL_MIN, ENEMY_SKILL_MAX), None, ENEMY_SKILL_MIN,
+                                     ENEMY_SKILL_MAX, {"lgap": 8, "fw": 44, "stay": True}),
                                     ("slider", "satiety", "Satiety estimate:", "How well fed you are, 0 (starving) to "
-                                     "20 (stuffed); a low value lowers the hit chance. Guessed from your eating lines; "
-                                     "set it here when you know better.", 0, 20,
+                                     "20 (stuffed); low lowers the hit chance", 0, 20,
                                      {"dx": 220, "lw": 150, "sdy": 8, "sw": 120, "unit": satiety_text()})),
-                     {"sh": PAGE_HS[1], "ldy": 4}),
-                    ("HOTKEYS", [r for k, what in keys for r in (("note", k, {"stay": True}),
-                                                                 ("note", what, {"dx": 330}))], {"sh": PAGE_HS[2]}),
-                    ("DEBUG  (for checking the shard's texts)", (("check", "debug", "Print the lines about disarming "
-                     "and mounts in the journal", "Every journal line that mentions disarming or a mount, with who "
-                     "said it, so the texts the Disarmed / Dismounted notices look for can be checked"),),
-                     {"sh": PAGE_HS[3]}))
-            vals = {"kite": kite["on"], "opacity": bg_opacity, "enemy": cfg["enemy_default"],
-                    "satiety": int(round(S.hunger)), "debug": note["debug"]}
-            cfgui.update(Kit.Form(g, x, y, w, vals, page).c)
-            cfgui.update({"seen_opacity": int(round(bg_opacity)), "seen_enemy": str(cfg["enemy_default"]),
-                          "seen_satiety": int(round(S.hunger))})
-        def _pair(a, b): return "%s / %s" % (a, b.rsplit("+", 1)[1])
-        def config_closed():
-            for k in ("opacity", "enemy", "satiety", "satiety_lbl", "debug", "kite"): cfgui[k] = None
+                     {"sh": 68, "ldy": 4}), ("HOTKEYS", [r for k, what in keys for r in (("note", k, {"stay": True}),
+                                                                 ("note", what, {"dx": 330}))], {"sh": 100}))
+        def config_height(w): return Kit.Form.height(page_table(), w)
+        def build_config(g, x, y, w):
+            cfgui["f"] = Kit.Form(g, x, y, w, {"kite": kite["on"], "opacity": int(round(bg_opacity)),
+                                               "enemy": cfg["enemy_default"], "satiety": int(round(S.hunger))},
+                                  page_table())
+        def config_closed(): cfgui["f"] = None
         def poll_config():
-            nonlocal bg_opacity; sl = cfgui["opacity"]
-            if sl is None: return
-            try: v = int(sl.Value)
-            except Exception: v = cfgui["seen_opacity"]
-            if v is not None and v != cfgui["seen_opacity"]:
-                cfgui["seen_opacity"] = v; bg_opacity = float(max(0, min(100, v)))
-                save_var("swingtimer_bg_opacity", bg_opacity)
+            nonlocal bg_opacity; f = cfgui["f"]
+            if f is None: return
+            new, seen = f.read(), f.vals; f.vals = new
+            if new["opacity"] != seen["opacity"]:
+                bg_opacity = float(new["opacity"]); save_var("swingtimer_bg_opacity", bg_opacity)
                 if is_open(): apply_opacity()
-            try: txt = str(cfgui["enemy"].Text or "").strip()
-            except Exception: txt = cfgui["seen_enemy"]
-            if txt != cfgui["seen_enemy"]:
-                cfgui["seen_enemy"] = txt
-                if txt:
-                    cfg["enemy_default"] = clamp_enemy(txt); save_var("swingtimer_enemy_default", cfg["enemy_default"])
-                    loop["slow_clock"] = 0.0
-            try: sat = int(cfgui["satiety"].Value)
-            except Exception: sat = cfgui["seen_satiety"]
-            if sat != cfgui["seen_satiety"]: cfgui["seen_satiety"] = sat; set_hunger(sat)
-            lbl = cfgui["satiety_lbl"]
-            if lbl is not None: Kit.set_text(lbl, satiety_text())
-            for ui, box, k, var in (("kite", kite, "on", KITE_VAR),
-                                    ("debug", note, "debug", "swingtimer_notice_debug")):
-                b = cfgui.get(ui)
-                if b is not None:
-                    try: on = bool(b.IsChecked)
-                    except Exception: on = box[k]
-                    if on != box[k]: box[k] = on; save_var(var, 1 if on else 0)
+            if new["enemy"] != seen["enemy"]:
+                cfg["enemy_default"] = new["enemy"]; save_var("swingtimer_enemy_default", new["enemy"])
+                loop["slow_clock"] = 0.0
+            if new["satiety"] != seen["satiety"]: set_hunger(new["satiety"])
+            Kit.set_text(f.c["satiety_lbl"], satiety_text())
+            if new["kite"] != kite["on"]: kite["on"] = new["kite"]; save_var(KITE_VAR, 1 if new["kite"] else 0)
         loop = {}
         def _start():
             win["closing"], win["active"] = False, True; files.update({"saved_at": now_ms(), "save": False})
             load_history(); del S.sounds[:], S.keys[:]; S.last_swing = S.cycle_ms = S.notice = None
             note.update({"rd": Journal.reader(), "clock": 0.0, "own": own_starts()})
-            safe(lambda: HOST.alert_kind(ALERT_NOTICE, "Disarmed or dismounted", 0x3B2))
+            HOST.alert_kind(ALERT_NOTICE, "Disarmed or dismounted", 0x3B2)
             S.hunger = max(0.0, min(20.0, load_var("swingtimer_hunger", DEFAULT_HUNGER))); S.hunger_clock = now_ms()
             kite["on"] = bool(int(load_var(KITE_VAR, 1) or 0)); kite["steps"].clear()
             kite["xy"], kite["stat0"], kite["swing0"] = None, None, None; build_window()
-            pieces_add(LAYOUT_KEY, "target", 0, lambda: ctl.get("gump")); hook_sounds(); register_hotkeys(True)
-            loop.update({"slow_clock": 0.0, "sound_clock": 0.0, "eat_clock": 0.0,
-                         "weapon": current_weapon(), "mob": None, "my_skill": 0.0,
+            pieces_add(LAYOUT_KEY, "target", 0, lambda: ctl.get("gump")); register_hotkeys(True)
+            if not hooked[0]:
+                hooked[0] = True
+                try: API.Events.SoundPlayed(on_sound_event)
+                except Exception: pass
+            loop.update({"slow_clock": 0.0, "eat_clock": 0.0, "weapon": current_weapon(), "mob": None, "my_skill": 0.0,
                          "mob_skill": enemy_skill(None, None), "mob_name": "",
                          "skill_of": None, "skill_clock": 0.0, "timer_clock": 0.0, "timer_mode": None, "fast": False})
-            API.SysMsg("%s: on (%s picks the target, %s restarts the bar)."
-                       % (TITLE, HK_SET_TARGET, HK_RESYNC), Kit.HUE_GOOD)
+            say("on (%s picks the target, %s restarts the bar)." % (HK_SET_TARGET, HK_RESYNC), Kit.HUE_GOOD)
         def _stop():
             win["closing"], win["active"] = True, False; register_hotkeys(False); note["rd"] = None
             if S.dirty: save_history()
@@ -3199,30 +2808,28 @@ def _module_hud():
         def _tick():
             if not is_open(): loop["fast"] = False; return
             t = now_ms(); p = HOST.me()
+            if p is None: return
             while S.sounds: handle_sound(S.sounds.pop(0), p)
             if S.keys: run_keys()
-            if not SOUND_EVENTS_OK and t - loop["sound_clock"] >= 100: loop["sound_clock"] = t; poll_sounds(p)
             if t - note["clock"] >= 100: note["clock"] = t; check_notices()
             if t - loop["slow_clock"] >= 250:
-                loop["slow_clock"] = t
-                try: loop["xy"] = (int(p.X), int(p.Y))
-                except Exception: loop["xy"] = None
-                loop["weapon"] = current_weapon(); was = S.gaps_weapon
+                loop["slow_clock"] = t; loop["xy"] = (int(p.X), int(p.Y)); loop["weapon"] = current_weapon()
+                was = S.gaps_weapon
                 if match_weapon(loop["weapon"]):
                     S.cycle_ms = None
                     if was is not None and loop["weapon"][2] == AR: S.last_swing = None; mark_swing(t)
                 if S.dirty and t - files["saved_at"] >= 5000: files["save"] = True
-                mob = loop["mob"] = resolve_target(); nm = (getattr(mob, "Name", "") or "") if mob is not None else ""
+                mob = loop["mob"] = resolve_target(); nm = (mob.Name or "") if mob is not None else ""
                 loop["mob_skill"] = enemy_skill(mob, None, nm)
                 loop["mob_name"] = (nm or "target") if mob is not None else ""
                 if loop["weapon"][2] != loop.get("skill_of") or t - loop.get("skill_clock", 0.0) >= 1000:
                     loop["skill_of"], loop["skill_clock"] = loop["weapon"][2], t
-                    loop["my_skill"] = swing_skill(loop["weapon"][2])
+                    loop["my_skill"] = skill_value(loop["weapon"][2])
                 decay_hunger()
                 if t - loop["eat_clock"] >= 1000: loop["eat_clock"] = t; check_eating()
-            w_name, w_speed, w_skill, w_acc = loop["weapon"]; stat = int(getattr(p, STAT_ATTR, 0)); gaps = S.gaps
+            w_name, w_speed, w_skill, w_acc = loop["weapon"]; stat = int(p.Stamina); gaps = S.gaps
             avg = sum(gaps) / float(len(gaps)) if gaps else None; predicted = avg or swing_delay_ms(stat, w_speed)
-            mob = loop["mob"]; in_combat = bool(getattr(p, "InWarMode", False)) and mob is not None
+            mob = loop["mob"]; in_combat = bool(p.InWarMode) and mob is not None
             if not in_combat:
                 if S.paused_at is None: S.paused_at = t
                 t_eff = S.paused_at
@@ -3240,11 +2847,9 @@ def _module_hud():
             set_fill(progress, "paused" if not in_combat else ("ready" if progress >= 1000 else "fill"))
             step_note(p, t); kite_draw(p, mob, cycle, stat, w_speed); loop["fast"] = in_combat and progress < 1000
             if nt is not win["notice_shown"]:
-                win["notice_shown"] = nt; nl = ctl.get("notice")
-                if nl is not None:
-                    if nt is not None: set_label(nl, nt[0], nt[1])
-                    try: nl.IsVisible = nt is not None
-                    except Exception: pass
+                win["notice_shown"] = nt; nl = ctl["notice"]
+                if nt is not None: set_label(nl, nt[0], nt[1])
+                nl.IsVisible = nt is not None
             mode = (in_combat, progress >= 1000, mob is None)
             if mode != loop["timer_mode"] or t - loop["timer_clock"] >= 100:
                 loop["timer_mode"], loop["timer_clock"] = mode, t
@@ -3312,11 +2917,9 @@ def _module_hud():
         settings = {"cure": True, "low": DEFAULT_LOW, "others": False, "other_pct": 80, "party": True, "pets": True}
         win = {"g": None, "fill": None, "fill_box": None, "label": None,
                "bar_w": 109, "fill_w": -1, "text": None, "count": None, "count_text": None, "wide": False}
-        cfg = {"box": None, "time": None, "other": None, "buffer": None, "typed": None, "since": 0.0}
+        cfg = {"f": None, "typed": None, "applied": None, "since": 0.0}; say = Kit.sayer(TITLE)
         def load_pct():
-            try:
-                v = int(Kit.get_var(PERSIST_KEY, str(DEFAULT_START_PCT)))
-                st["start_pct"] = max(PCT_MIN, min(PCT_MAX, v))
+            try: st["start_pct"] = max(PCT_MIN, min(PCT_MAX, int(Kit.get_var(PERSIST_KEY, str(DEFAULT_START_PCT)))))
             except Exception: st["start_pct"] = DEFAULT_START_PCT
         def save_pct(): Kit.put_var(PERSIST_KEY, str(st["start_pct"]))
         def load_timing():
@@ -3363,40 +2966,35 @@ def _module_hud():
             g = G.CreateGump(True, True); Kit.place(g, x, y, WIN_W, WIN_H)
             Kit.add_window_frame(g, WIN_W, WIN_H, corners=False)
             PIECES["bg"][g] = [Kit.add_section(g, 8, 8, L["sec_w"], WIN_H - 16)]
-            safe(lambda: g.SetTooltip("%s: one press = one bandage (x = bandages left in your backpack)" % TITLE))
+            g.SetTooltip("%s: one press, one bandage (x = bandages left)" % TITLE)
             x1 = 8 + (L["sec_w"] - L["row1"]) // 2; win["fill"] = win["fill_box"] = None; win["bar_w"] = L["bar_w"]
             if bw > 0 and fw > 0:
                 Kit.add_pic(g, Kit.LINE_RED, x1, ROW1_Y)
-                win["fill"] = Kit.add_tiled(g, Kit.LINE_BLUE, x1, ROW1_Y, 1, fh); safe(lambda: win["fill"].SetWidth(0))
+                win["fill"] = Kit.add_tiled(g, Kit.LINE_BLUE, x1, ROW1_Y, 1, fh); win["fill"].SetWidth(0)
             else:
                 Kit.add_tiled(g, Kit.SECTION_TILE, x1, ROW1_Y, 109, 9, 1.0); box = G.CreateGumpColorBox(1.0, "#3A63A8")
                 box.SetRect(x1 + 1, ROW1_Y + 1, 1, 7); g.Add(box); win["fill_box"] = box
             tx = x1 + L["bar_w"] + 5; win["label"] = Kit.add_label(g, "Ready", tx, ROW1_Y - 2, Kit.HUE_INFO)
             Kit.catcher(g, x1 - 2, ROW1_Y - 4, L["row1"] + 4, 18, _bar_click,
-                        "The bandage in progress and who it is on. "
-                        "Alt+click: auto-follow (again to stop)", movable=True)
+                        "Bandage in progress and its patient. Alt+click: auto-follow (again to stop)", movable=True)
             x2 = 8 + (L["sec_w"] - L["row2"]) // 2; y2 = ROW2_Y
-            try:
-                pic = G.CreateGumpItemPic(0x0E21, ICON, ICON); pic.SetPos(x2, y2)
-                safe(lambda: pic.SetAcceptMouseInput(False)); g.Add(pic)
-            except Exception: Kit.add_label(g, "B", x2 + 5, y2 + 1, Kit.HUE_TEXT)
-            Kit.catcher(g, x2, y2, ICON, ICON, queue("me"), "Use one bandage on yourself"); xc = x2 + ICON + ICON_GAP
-            win["count"] = Kit.add_label(g, "", xc, y2 + 1, Kit.HUE_INFO)
+            pic = G.CreateGumpItemPic(BANDAGE_GRAPHIC, ICON, ICON); pic.SetPos(x2, y2); pic.SetAcceptMouseInput(False)
+            g.Add(pic); Kit.catcher(g, x2, y2, ICON, ICON, queue("me"), "Use one bandage on yourself")
+            xc = x2 + ICON + ICON_GAP; win["count"] = Kit.add_label(g, "", xc, y2 + 1, Kit.HUE_INFO)
             Kit.catcher(g, xc, y2, L["count_w"], ICON, lambda *a: None, "Bandages left in your backpack", movable=True)
             xt = xc + L["count_w"] + ICON_GAP; _reticle(g, xt, y2)
             Kit.catcher(g, xt, y2, ICON, ICON, _other_click, "Target someone within %d tile%s for one bandage. "
                         "Alt+click: auto-follow (again to stop)" % (OTHER_RANGE, "" if OTHER_RANGE == 1 else "s"))
             xr = xt + ICON + ICON_GAP; _repeat(g, xr, y2)
             Kit.catcher(g, xr, y2, ICON, ICON, _again_click,
-                        "Use one more bandage on the one you last bandaged. Alt+click: auto-follow (again to stop)")
+                        "One more bandage on your last patient. Alt+click: auto-follow (again to stop)")
             win.update({"fill_w": -1, "text": None, "count_text": None, "wide": wide, "g": g})
-            G.AddControlOnDisposed(g, _closed(g)); G.AddGump(g); safe(lambda: Kit.on_moved(g, save_pos))
-            if old is not None: Kit.dispose(old)
+            G.AddControlOnDisposed(g, _closed(g)); G.AddGump(g); Kit.on_moved(g, save_pos); Kit.dispose(old)
             show_count()
         def _ring(g, x, y, art, ch):
             p = Kit.add_pic(g, art, x, y, hue=53, mouse=False)
             if p is None: Kit.add_label(g, ch, x + 5, y + 1, Kit.HUE_TEXT); return False
-            safe(lambda: p.SetWidth(ICON)); safe(lambda: p.SetHeight(ICON)); return True
+            p.SetWidth(ICON); p.SetHeight(ICON); return True
         def _repeat(g, x, y):
             if not _ring(g, x, y, 8012, "@"): return
             Kit.add_box(g, x + 8, y, 10, 7, 1.0, "#101010")
@@ -3408,7 +3006,7 @@ def _module_hud():
                                    (c - 1, c - 1, 2, 2)):
                 Kit.add_box(g, x + bx, y + by, bw, bh, 1.0, TICK_COLOR)
         def _alt(o):
-            alt = safe(Follow.alt_held, False)
+            alt = Follow.alt_held()
             if alt and o is not None: queue(("follow", o["serial"]))()
             return alt
         def _other_click(*args):
@@ -3431,18 +3029,13 @@ def _module_hud():
             if w != old_w:
                 win["fill_w"] = w; fill = win["fill"]
                 if fill is not None:
-                    try: Kit.ui_w(fill, w)
-                    except Exception: pass
-                    if (w > 0) != (old_w > 0) or old_w < 0:
-                        try: fill.IsVisible = w > 0
-                        except Exception: pass
-                elif win["fill_box"] is not None:
-                    try: Kit.ui_w(win["fill_box"], max(1, w - 2))
-                    except Exception: pass
+                    Kit.ui_w(fill, w)
+                    if (w > 0) != (old_w > 0) or old_w < 0: fill.IsVisible = w > 0
+                elif win["fill_box"] is not None: Kit.ui_w(win["fill_box"], max(1, w - 2))
             lbl = win["label"]
             if lbl is not None and (text, hue) != win["text"]:
                 win["text"] = (text, hue); Kit.set_text(lbl, text, Kit.HUE_INFO if hue is None else hue)
-        def alert(kind, text, level="warn"): safe(lambda: HOST.alert(kind, text, level))
+        def alert(kind, text, level="warn"): HOST.alert(kind, text, level)
         def can_cure():
             heal, anat, at = st["skills"]; now = time.time()
             if now - at >= 5.0:
@@ -3457,80 +3050,49 @@ def _module_hud():
                         alert(ALERT_HP, "Your HP is at %d%%: bandage?" % int(hits * 100.0 / hmax))
                 else: st["hp_armed"] = True
             if settings["cure"]:
-                try: poisoned = bool(p.IsPoisoned)
-                except Exception: poisoned = False
-                if poisoned:
+                if p.IsPoisoned:
                     if st["poison_armed"] and can_cure():
-                        st["poison_armed"] = False; alert(ALERT_POISON, "You are poisoned: a bandage can cure it")
+                        st["poison_armed"] = False; alert(ALERT_POISON, "Poisoned: a bandage can cure it")
                 else: st["poison_armed"] = True
-        def count_bandages():
-            try: items = API.FindTypeAll(BANDAGE_GRAPHIC, API.Backpack)
-            except Exception: return st["count"]
-            n = 0
-            for it in items or ():
-                try: n += int(it.Amount or 1)
-                except Exception: n += 1
-            return n
         def count_tick(now):
             if now < st["count_at"]: return
-            st["count_at"] = now + 2.0; n = count_bandages()
-            if n is None: return
+            st["count_at"] = now + 2.0; n = 0
+            for it in API.FindTypeAll(BANDAGE_GRAPHIC, API.Backpack) or (): n += int(it.Amount or 1)
             prev, st["count"] = st["count"], n; low = settings["low"]
             if low > 0 and n < low:
                 if st["low_armed"] and (n > 0 or (prev or 0) > 0):
                     st["low_armed"] = False
-                    alert(ALERT_LOW, "No bandages left" if n <= 0 else
-                          "Only %d bandage%s left" % (n, "" if n == 1 else "s"))
+                    alert(ALERT_LOW, "No bandages left" if n <= 0 else "Only %s left" % Kit.count(n, "bandage"))
             else: st["low_armed"] = True
             show_count()
-        def near(m, px, py, reach):
-            try: return max(abs(int(m.X) - px), abs(int(m.Y) - py)) <= reach
-            except Exception: return False
+        def near(m, px, py, reach): return max(abs(int(m.X) - px), abs(int(m.Y) - py)) <= reach
         def describe(m):
-            try: name = str(m.Name or "") or "them"; serial = int(m.Serial)
-            except Exception: return None
+            name = str(m.Name or "") or "them"
             short = name if len(name) <= OTHER_NAME_CHARS else name[:OTHER_NAME_CHARS - 1] + "."
-            return {"serial": serial, "name": name, "short": short}
+            return {"serial": int(m.Serial), "name": name, "short": short}
         def start_bandage(p, now, target):
-            if st["phase"] != "idle": API.SysMsg("%s: a bandage is already running." % TITLE, Kit.HUE_INFO); return
+            if st["phase"] != "idle": say("a bandage is already running."); return
             if API.HasTarget("any") or HOST.cursor_busy(KEY):
-                API.SysMsg("%s: a target cursor is up (finish it or press Esc first)." % TITLE, Kit.HUE_INFO); return
-            try:
-                if p.IsDead: return
-            except Exception: pass
+                say("a target cursor is up (aim it or press Esc first)."); return
+            if p.IsDead: return
             bandage = API.FindType(BANDAGE_GRAPHIC, API.Backpack)
-            if not bandage:
-                set_bar(0.0, "Out!", Kit.HUE_BAD); API.SysMsg("%s: out of bandages!" % TITLE, Kit.HUE_BAD); return
-            if st.get("rd") is not None:
-                try: st["rd"].new()
-                except Exception: pass
-            API.UseObject(bandage.Serial); st["count_at"] = min(st["count_at"], now + COUNT_AFTER_USE)
+            if not bandage: set_bar(0.0, "Out!", Kit.HUE_BAD); say("out of bandages!", Kit.HUE_BAD); return
+            st["rd"].new(); API.UseObject(bandage.Serial); st["count_at"] = min(st["count_at"], now + COUNT_AFTER_USE)
             HOST.claim_cursor(KEY, TARGET_TIMEOUT); st["target"] = target; st["begun"], st["by_buff"] = False, False
             st["phase"], st["deadline"] = "cursor", now + TARGET_TIMEOUT
         def picked(serial):
             st["pick"] = False
             if serial: queue(("on", int(serial)))()
         def bandage_other(p, now, serial):
-            try: m = API.FindMobile(serial)
-            except Exception: m = None
-            if m is None: API.SysMsg("%s: can't see them." % TITLE, Kit.HUE_BAD); return
-            try: me = int(p.Serial) == int(m.Serial)
-            except Exception: me = False
-            if me: start_bandage(p, now, None); return
-            try:
-                if m.IsDead: API.SysMsg("%s: they are dead." % TITLE, Kit.HUE_BAD); return
-                px, py = int(p.X), int(p.Y)
-            except Exception: return
-            if not near(m, px, py, OTHER_RANGE):
-                API.SysMsg("%s: too far away (they must be within %d tile%s)." %
-                           (TITLE, OTHER_RANGE, "" if OTHER_RANGE == 1 else "s"), Kit.HUE_BAD)
-                return
-            d = describe(m)
-            if d is None: return
-            start_bandage(p, now, d)
+            m = API.FindMobile(serial)
+            if m is None: say("can't see them.", Kit.HUE_BAD); return
+            if int(p.Serial) == int(m.Serial): start_bandage(p, now, None); return
+            if m.IsDead: say("they are dead.", Kit.HUE_BAD); return
+            if not near(m, int(p.X), int(p.Y), OTHER_RANGE):
+                say("too far away (%s at most)." % Kit.count(OTHER_RANGE, "tile"), Kit.HUE_BAD); return
+            start_bandage(p, now, describe(m))
         def watch_last_target(now):
-            try: serial = int(API.LastTargetSerial)
-            except Exception: return
+            serial = int(API.LastTargetSerial)
             if serial != st["lt"][0]: st["lt"] = (serial, now)
         def guess_patient(p, now):
             serial, when = st["lt"]
@@ -3550,15 +3112,12 @@ def _module_hud():
             st["t0"] = min(now, at); st["phase"], st["begun"], st["by_buff"] = "heal", not buff, buff
             st["count_at"] = min(st["count_at"], now + COUNT_AFTER_USE)
         def watch_buff(p, now):
-            try: up = bool(API.BuffExists("Healing"))
-            except Exception: return None
-            was, st["buff"] = st["buff"], up
+            up = bool(API.BuffExists("Healing")); was, st["buff"] = st["buff"], up
             if up and not was: band_begun(p, now, now, True)
             elif was and not up and st["phase"] == "heal" and st["by_buff"]: return "done"
             return None
         def band_answer(p, now):
-            try: lines = st["rd"].new()
-            except Exception: return None
+            lines = st["rd"].new()
             if not lines: return None
             own = TITLE.lower() + ":"
             for ln in lines:
@@ -3578,10 +3137,8 @@ def _module_hud():
                 ok = m is not None and not m.IsDead and near(m, int(p.X), int(p.Y), OTHER_RANGE)
             except Exception: ok = False
             if not ok:
-                API.CancelTarget()
-                API.SysMsg("%s: %s is out of reach; the bandage cursor was put down." % (TITLE, o["name"]), Kit.HUE_BAD)
-                return False
-            API.Target(o["serial"]); st["last"] = o; API.SysMsg("%s: bandaging %s." % (TITLE, o["name"]), Kit.HUE_INFO)
+                API.CancelTarget(); say("%s is out of reach; cursor put down." % o["name"], Kit.HUE_BAD); return False
+            API.Target(o["serial"]); st["last"] = o; say("bandaging %s." % o["name"])
             return True
         def _queued(p, now):
             if st["rebuild"]:
@@ -3594,77 +3151,57 @@ def _module_hud():
                 elif action == "other":
                     if not st["pick"] and st["phase"] == "idle": st["pick"] = True; HOST.pick_target(15.0, picked, KEY)
                 elif action == "again":
-                    o = st["last"]
-                    if o is None:
-                        API.SysMsg("%s: nobody bandaged yet; use the target icon first." % TITLE, Kit.HUE_INFO)
-                    else: bandage_other(p, now, o["serial"])
+                    if st["last"] is None: say("nobody bandaged yet; use the target icon first.")
+                    else: bandage_other(p, now, st["last"]["serial"])
                 elif kind == "on": bandage_other(p, now, action[1])
         def num_text(v): return ("%.2f" % v).rstrip("0").rstrip(".")
         def build_config(g, x, y, w):
             labels = ("On yourself:", "On someone else:", "Latency buffer:"); field = {"stay": True, "tw": 50}
             unit = ("note", "s", {"dx": 82 + max(Kit.text_w(t) for t in labels), "ndy": 4, "h": 28})
-            help_text = ("The bandage: one on you. The target icon: one on whoever you click "
-                         "(within %d tile%s). The repeat arrow: one more on the last one."
-                         % (OTHER_RANGE, "" if OTHER_RANGE == 1 else "s"))
+            help_text = ("Bandage: one on you. Target icon: one on whoever you click (within %d tile%s). "
+                         "Arrow: one more on the last one." % (OTHER_RANGE, "" if OTHER_RANGE == 1 else "s"))
+            limits = (int(TIME_MIN), int(TIME_MAX))
             page = (("BANDAGE TIMES", (
-                        ("text", "time", labels[0], "Seconds a bandage on yourself takes on this shard; applied once "
-                         "you stop typing (%d-%d)" % (int(TIME_MIN), int(TIME_MAX)), field), unit,
-                        ("text", "other", labels[1], "Seconds a bandage on someone else takes; much faster than on "
-                         "yourself on this shard (%d-%d)" % (int(TIME_MIN), int(TIME_MAX)), field), unit,
+                        ("text", "time", labels[0], "Seconds one on yourself takes; applied when you stop typing "
+                         "(%d-%d)" % limits, field), unit,
+                        ("text", "other", labels[1], "Seconds one on someone else takes, much faster on this shard "
+                         "(%d-%d)" % limits, field), unit,
                         ("text", "buffer", labels[2], "Seconds added for latency before the bar says Done (%d-%d)"
                          % (int(BUFFER_MIN), int(BUFFER_MAX)), field), unit), {"sh": CFG_H1, "align": True}),
                     ("ALERTS  (sound: Settings > Alerts)", (
-                        ("num", "box", "Alert when your HP is at or under:", "One alert when your HP falls to this "
-                         "percentage or below, again once it was above (0-99, 0 = never)", "%", PCT_MIN, PCT_MAX),
-                        ("check", "cure", "Alert when you are poisoned and a bandage could cure it", "One alert per "
-                         "poisoning, when your Healing is %d or more and your Anatomy %d or more (a bandage then "
-                         "tries to cure the poison)" % (int(CURE_HEALING), int(CURE_ANATOMY))),
-                        ("num", "low", "Alert when bandages drop under:", "One alert when the bandages in your "
-                         "backpack drop under this number (%d-%d, 0 = never)" % (LOW_MIN, LOW_MAX), None,
-                         LOW_MIN, LOW_MAX)), {"sh": CFG_H2}),
-                    ("WINDOW", [("check", "others", "Show who the bandage is on (a wider bar)", "The bar names the "
-                                 "one your bandage is on. Alt+click the name: auto-follow (again to stop)")] +
+                        ("num", "box", "Alert when your HP is at or under:", "One alert per fall to this % or below "
+                         "(0-99, 0 = never)", "%", PCT_MIN, PCT_MAX, {"clamp": False}),
+                        ("check", "cure", "Alert when poisoned and a bandage can cure it", "Once per poisoning, with "
+                         "Healing %d and Anatomy %d or more" % (int(CURE_HEALING), int(CURE_ANATOMY))),
+                        ("num", "low", "Alert when bandages drop under:", "One alert when your bandages drop under "
+                         "this (%d-%d, 0 = never)" % (LOW_MIN, LOW_MAX), None, LOW_MIN, LOW_MAX, {"clamp": False})),
+                     {"sh": CFG_H2}),
+                    ("WINDOW", [("check", "others", "Show who the bandage is on (a wider bar)", "The bar names your "
+                                 "patient. Alt+click the name: auto-follow (again to stop)")] +
                      [("note", line, {"ndy": 2}) for line in Kit.wrap(help_text, w - 24)[:2]], {"sh": CFG_H3}))
             vals = dict(settings, time=num_text(st["band_time"]), other=num_text(st["other_time"]),
                         buffer=num_text(st["buffer"]), box=st["start_pct"])
-            cfg.update(Kit.Form(g, x, y, w, vals, page, ldy=4, lgap=12, fw=40).c)
-            cfg["typed"], cfg["applied"] = None, None; cfg["seen"] = (str(settings["low"]),)
-        def config_closed():
-            for k in ("box", "time", "other", "buffer", "cure", "low", "others"): cfg[k] = None
-            cfg["typed"], cfg["applied"] = None, None
+            cfg.update({"f": Kit.Form(g, x, y, w, vals, page, ldy=4, lgap=12, fw=40), "typed": None, "applied": None})
+        def config_closed(): cfg.update({"f": None, "typed": None, "applied": None})
         def parse_time(text, lo, hi):
             try: v = float(str(text).strip().replace(",", "."))
             except (ValueError, TypeError): return None
             return v if lo <= v <= hi else None
         def poll_config():
-            box = cfg["box"]
-            if box is None: return
-            try:
-                txt = str(box.Text).strip()
-                typed = (str(cfg["time"].Text).strip(), str(cfg["other"].Text).strip(), str(cfg["buffer"].Text).strip())
-                ticks = (bool(cfg["cure"].IsChecked), bool(cfg["others"].IsChecked))
-                low_txt = str(cfg["low"].Text).strip()
+            f = cfg["f"]
+            if f is None: return
+            try: new = f.read(True)
             except Exception: config_closed(); return
-            if txt.isdigit():
-                v = int(txt)
-                if PCT_MIN <= v <= PCT_MAX and v != st["start_pct"]:
-                    st["start_pct"] = v; st["hp_armed"] = True; save_pct()
+            f.vals = new
+            if new["box"] != st["start_pct"]: st["start_pct"] = new["box"]; st["hp_armed"] = True; save_pct()
+            if new["low"] != settings["low"]: st["count_at"] = 0.0
             changed = False
-            for k, v in zip(("cure", "others"), ticks):
-                if v != settings[k]:
-                    settings[k] = v; changed = True
-                    if k == "others": st["rebuild"] = True
-                    if k == "cure": st["poison_armed"] = True
-            if (low_txt,) != cfg["seen"]:
-                cfg["seen"] = (low_txt,)
-                if low_txt.isdigit():
-                    v = int(low_txt)
-                    if LOW_MIN <= v <= LOW_MAX and v != settings["low"]:
-                        settings["low"], changed = v, True; st["low_armed"] = True; st["count_at"] = 0.0
+            for k, flag in (("cure", "poison_armed"), ("others", "rebuild"), ("low", "low_armed")):
+                if new[k] != settings[k]: settings[k] = new[k]; st[flag] = True; changed = True
             if changed: save_extra()
-            now = time.time()
+            now = time.time(); typed = (new["time"], new["other"], new["buffer"])
             if typed != cfg["typed"]: cfg["typed"], cfg["since"] = typed, now; return
-            if cfg.get("applied") == typed or now - cfg["since"] < 0.7: return
+            if cfg["applied"] == typed or now - cfg["since"] < 0.7: return
             cfg["applied"] = typed; changed = False
             for i, (k, lo, hi) in enumerate((("band_time", TIME_MIN, TIME_MAX), ("other_time", TIME_MIN, TIME_MAX),
                                              ("buffer", BUFFER_MIN, BUFFER_MAX))):
@@ -3672,14 +3209,14 @@ def _module_hud():
                 if v is not None and abs(v - st[k]) > 0.001: st[k], changed = v, True
             if changed: save_timing()
         def _start():
-            st_reset(); st["rd"] = safe(Journal.reader); load_pct(); load_timing(); load_extra()
+            st_reset(); st["rd"] = Journal.reader(); load_pct(); load_timing(); load_extra()
             for k, label, sound in ((ALERT_LOW, "Bandages running low", 0x1EA), (ALERT_HP, "HP low: bandage?", 0x1F1),
                                     (ALERT_POISON, "Poisoned (a bandage cures)", 0x1E0),
                                     (ALERT_READY, "Bandage done", 0x202)):
-                safe(lambda: HOST.alert_kind(k, label, sound))
+                HOST.alert_kind(k, label, sound)
             build_window(); pieces_add(KEY, "player", 0, lambda: win["g"])
-            API.SysMsg("%s: on (%s s on you, %s s on others); one press, one bandage."
-                       % (TITLE, num_text(st["band_time"]), num_text(st["other_time"])), Kit.HUE_GOOD)
+            say("on (%s s on you, %s s on others)." % (num_text(st["band_time"]), num_text(st["other_time"])),
+                Kit.HUE_GOOD)
         def _tick():
             p = API.Player
             if p is None: return
@@ -3692,19 +3229,18 @@ def _module_hud():
                 st["phase"], st["target"] = "idle", None; set_bar(0.0, "Dead", Kit.HUE_BAD); return
             count_tick(now); hits, hmax = p.Hits, p.HitsMax
             if hmax > 0: watch_alerts(p, hits, hmax)
-            watch_last_target(now); answer = band_answer(p, now) if st["rd"] is not None else None
-            buff_answer = watch_buff(p, now)
+            watch_last_target(now); answer = band_answer(p, now); buff_answer = watch_buff(p, now)
             if answer is None: answer = buff_answer
             if answer is not None and answer != "done" and st["phase"] != "idle":
                 if st["phase"] == "cursor": HOST.release_cursor(KEY)
                 st["phase"], st["target"] = "idle", None; set_bar(0.0, "Ready")
-                API.SysMsg("%s: the bandage failed (%s)." % (TITLE, answer), Kit.HUE_BAD); return
+                say("the bandage failed (%s)." % answer, Kit.HUE_BAD); return
             if st["phase"] == "heal":
                 o = st["target"]; band_time = st["other_time"] if o is not None else st["band_time"]
                 elapsed = now - st["t0"]
                 if elapsed >= band_time + st["buffer"] or answer == "done":
                     st["phase"], st["target"] = "idle", None; set_bar(1.0, "Done", Kit.HUE_GOOD)
-                    alert(ALERT_READY, "Bandage done: ready for the next", "info")
+                    alert(ALERT_READY, "Bandage done", "info")
                 else:
                     left = "%.1fs" % max(0.0, band_time - elapsed)
                     if o is not None and win["wide"]: left = "%s %s" % (o["short"], left)
@@ -3719,19 +3255,21 @@ def _module_hud():
                     if aimed: st["phase"], st["t0"] = "heal", now
                     else: st["phase"], st["target"] = "idle", None
                 elif now > st["deadline"]:
-                    try: up = bool(API.HasTarget("beneficial"))
-                    except Exception: up = False
-                    if up: API.SysMsg("%s: a bandage cursor is up: press Esc or aim it." % TITLE, Kit.HUE_INFO)
-                    else: API.SysMsg("%s: no bandage cursor appeared." % TITLE, Kit.HUE_BAD)
+                    if API.HasTarget("beneficial"): say("a bandage cursor is up: press Esc or aim it.")
+                    else: say("no bandage cursor appeared.", Kit.HUE_BAD)
                     HOST.release_cursor(KEY); st["phase"], st["target"] = "idle", None
                 return
             t = win["text"]
             if t is None or t[0] not in ("Ready", "Done", "Out!") or (t[0] == "Out!" and (st["count"] or 0) > 0):
                 set_bar(0.0, "Ready")
         def _stop():
-            st["shutting"] = True; safe(lambda: HOST.release_cursor(KEY)); save_pos(); pieces_remove(KEY); save_pct()
+            st["shutting"] = True; HOST.release_cursor(KEY); save_pos(); pieces_remove(KEY); save_pct()
             save_timing(); g, win["g"] = win["g"], None; win["label"] = win["count"] = None; Kit.dispose(g)
-        def _interval(): return 0.03 if st["phase"] == "cursor" else 0.1
+        def _interval():
+            if st["phase"] == "cursor": return 0.01
+            if st["phase"] != "heal": return 0.1
+            band_time = st["other_time"] if st["target"] is not None else st["band_time"]
+            return min(0.1, max(0.01, st["t0"] + band_time + st["buffer"] - time.time()))
         load_pct(); load_timing(); load_extra()
         return part_dict(_start, _tick, _stop, lambda w: CFG_H, build_config, poll_config, config_closed,
                          interval=_interval)
@@ -3745,19 +3283,20 @@ def _module_hud():
         CONFIRM_SECS = 3.0
         ALL_CMDS = (("follow", "Follow me", "all follow me"), ("guard", "Guard me", "all guard me"),
                     ("stay", "Stay", "all stay"), ("come", "Come", "all come"))
-        ALL_KILL = "all kill"
+        ALL_KILL = "all kill"; ALL_SAY = dict((a, t) for a, _, t in ALL_CMDS)
         PET_CMDS = (("pet_follow", "Follow", "%s follow me"), ("pet_guard", "Guard", "%s guard"),
                     ("pet_stay", "Stay", "%s stay"))
         PET_SAY = dict([(k, t) for k, _, t in PET_CMDS] + [("pet_kill", "%s kill")])
         HEAL_WAYS = (("", "Bandage"), ("Heal", "Heal (spell)"), ("Greater Heal", "Greater Heal (spell)"))
         LOW_ALERT, DEAD_ALERT = "pets.low", "pets.dead"; BAR_BG = "#17171a"
         BAR_HITS, BAR_POISON, BAR_STAM = "#c22d2d", "#2f9a3c", "#d39a1c"
+        KILL_TIP = "then pick the enemy with the shard's cursor (only on a click)"
         settings = {"range": RANGE_DEFAULT, "low": 30, "heal": 0, "kill": False, "hidden": True}
         def st_reset():
             st.update({"shutting": False, "docked": False, "queue": [], "heal": None, "confirm": None, "scan_at": 0.0,
                        "look_at": 0.0, "note": "", "full_at": 0.0, "note_until": 0.0, "order": []})
         st = {"minimized": False, "followers": 0, "fmax": 0, "me": 0, "note_hue": Kit.HUE_INFO, "cmd_at": {}, "seq": 0}
-        st_reset(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "n_rows": -1}; page = {"c": None}
+        st_reset(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "n_rows": -1}; cleanup = Kit.Cleanup()
         pets = {}; NUMS = {"range": (RANGE_MIN, RANGE_MAX), "low": (0, 99), "heal": (0, len(HEAL_WAYS) - 1)}
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ("range", "low", "heal", "kill", "hidden"), NUMS)
@@ -3765,13 +3304,8 @@ def _module_hud():
             st["note"], st["note_hue"] = text, Kit.HUE_INFO if hue is None else hue
             st["note_until"] = time.time() + secs; show_note()
         def note_on(now): return bool(st["note"]) and 0 <= st["note_until"] - now <= 10.0
-        def ago(secs):
-            secs = max(0, int(secs))
-            if secs < 60: return "%ds" % secs
-            if secs < 3600: return "%dm" % (secs // 60)
-            return "%dh" % (secs // 3600)
         def heal_way(): return HEAL_WAYS[settings["heal"]]
-        def tiles(n): return "%d tile%s" % (n, "" if n == 1 else "s")
+        def tiles(n): return Kit.count(n, "tile")
         def new_pet(serial, name, manual=False):
             st["seq"] += 1
             r = {"serial": serial, "name": name, "seq": st["seq"], "seen": 0.0, "where": "gone",
@@ -3781,24 +3315,14 @@ def _module_hud():
         def forget(serial):
             if pets.pop(serial, None) is not None: st["order"] = []
         def update(r, m, px, py, now, near):
-            if r["manual"] and r.get("own"):
-                try: r["own"] = bool(m.IsRenamable)
-                except Exception: r["own"] = False
-            try: name = str(m.Name or "")
-            except Exception: name = ""
+            if r["manual"] and r.get("own"): r["own"] = bool(m.IsRenamable)
+            name = str(m.Name or "")
             if name: r["name"] = name
-            try: hits, hmax = int(m.Hits or 0), int(m.HitsMax or 0)
-            except Exception: hits, hmax = 0, 0
+            hits, hmax, sta, smax = int(m.Hits or 0), int(m.HitsMax or 0), int(m.Stamina or 0), int(m.StaminaMax or 0)
             r["pct"] = max(0, min(100, int(hits * 100 // hmax))) if hmax > 0 else None
-            try: sta, smax = int(m.Stamina or 0), int(m.StaminaMax or 0)
-            except Exception: sta, smax = 0, 0
-            r["stam"] = max(0, min(100, int(sta * 100 // smax))) if smax > 0 else None; dead = False
-            try: dead = bool(m.IsDead); r["poison"] = bool(m.IsPoisoned)
-            except Exception: r["poison"] = False
-            try:
-                ox, oy = int(m.X), int(m.Y); r["dist"] = max(abs(ox - px), abs(oy - py))
-                r["dir"] = Kit.compass(ox - px, oy - py) or "here"
-            except Exception: pass
+            r["stam"] = max(0, min(100, int(sta * 100 // smax))) if smax > 0 else None
+            dead = bool(m.IsDead); r["poison"] = bool(m.IsPoisoned); ox, oy = int(m.X), int(m.Y)
+            r["dist"] = max(abs(ox - px), abs(oy - py)); r["dir"] = Kit.compass(ox - px, oy - py) or "here"
             r["where"] = "near" if near else "far"; r["seen"] = now
             if dead and not r["dead"] and r["alive"]: alert(DEAD_ALERT, "%s died" % (r["name"] or "A pet"), r["serial"])
             r["dead"] = dead
@@ -3808,15 +3332,12 @@ def _module_hud():
                 if low > 0 and pct <= low and not r["low"]:
                     r["low"] = True
                     alert(LOW_ALERT, "%s at %d%% HP (%s)" % (r["name"] or "A pet", pct, "here" if r["dist"] == 0 else
-                          "%d tile%s %s" % (r["dist"], "" if r["dist"] == 1 else "s", r["dir"])), r["serial"])
+                          "%s %s" % (tiles(r["dist"]), r["dir"])), r["serial"])
                 elif r["low"] and (low <= 0 or pct >= low + 10): r["low"] = False
-        def alert(key, text, serial): safe(lambda: HOST.alert(key, text, "warn", who=serial))
+        def alert(key, text, serial): HOST.alert(key, text, "warn", who=serial)
         def scan(p, now):
-            try: me = int(p.Serial); px, py = int(p.X), int(p.Y)
-            except Exception: return
-            st["me"] = me; was = st["followers"]
-            try: st["followers"], st["fmax"] = int(p.Followers or 0), int(p.FollowersMax or 0)
-            except Exception: st["followers"], st["fmax"] = 0, 0
+            me = int(p.Serial); px, py = int(p.X), int(p.Y); st["me"] = me; was = st["followers"]
+            st["followers"], st["fmax"] = int(p.Followers or 0), int(p.FollowersMax or 0)
             seen = set(); lost = False; rng = settings["range"]
             full = now >= st["full_at"] or st["full_at"] - now > FULL_EVERY or st["followers"] != was
             if not full:
@@ -3840,9 +3361,7 @@ def _module_hud():
                         except Exception: continue
                     mobs = ()
             if full:
-                st["full_at"] = now + FULL_EVERY
-                try: mobs = HOST.mobiles(rng) or []
-                except Exception: mobs = []
+                st["full_at"] = now + FULL_EVERY; mobs = HOST.mobiles(rng) or []
                 if len(not_pet) > 400: not_pet.clear()
             for m in mobs:
                 try:
@@ -3867,14 +3386,12 @@ def _module_hud():
             if lost or now >= st["look_at"] or st["look_at"] - now > LOOK_EVERY:
                 st["look_at"] = now + LOOK_EVERY
                 for s in [s for s in pets if s not in seen]:
-                    r = pets[s]
-                    try: m = HOST.mobile(s)
-                    except Exception: m = None
+                    r = pets[s]; m = HOST.mobile(s)
                     if m is None: r["where"] = "gone"; continue
                     try:
                         if not r["manual"] and not m.IsRenamable: forget(s); continue
-                    except Exception: pass
-                    update(r, m, px, py, now, False)
+                        update(r, m, px, py, now, False)
+                    except Exception: continue
             prune(now)
         def prune(now, room=0):
             gone = [r for r in pets.values() if r["where"] == "gone"]
@@ -3892,8 +3409,7 @@ def _module_hud():
             if not st["order"] or len(st["order"]) != len(pets):
                 st["order"] = sorted(pets.values(), key=lambda r: r["seq"])
             return st["order"]
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
-        def save_pos(): Kit.save_pos(POS_KEY, win["g"])
+        queue = Kit.queuer(st)
         def flow(g, store, items, x0, y0, xmax):
             x, y, lines = x0, y0, 1
             for key, art, caption, tip, fn, hue in items:
@@ -3904,25 +3420,19 @@ def _module_hud():
             return lines
         def all_items():
             items = [("all_" + k, Kit.ART_CLOSE if k == "stay" else Kit.ART_PLAY, caption,
-                      "Say \"%s\" (every pet of yours that hears you)" % text,
-                      queue(("all", k)), None) for k, caption, text in ALL_CMDS]
+                      "Say \"%s\" (all your pets in earshot)" % text, queue(("all", k)), None)
+                     for k, caption, text in ALL_CMDS]
             if settings["kill"]:
-                items.append(("all_kill", Kit.ART_PLAY, "Kill",
-                              "Say \"%s\": the shard then gives you a target cursor to pick the "
-                              "enemy (a combat command: only ever said when you click)" % ALL_KILL,
+                items.append(("all_kill", Kit.ART_PLAY, "Kill", "Say \"%s\", %s" % (ALL_KILL, KILL_TIP),
                               queue(("all", "kill")), Kit.HUE_BAD))
             return items
         def build_window():
-            M = Kit.MARGIN; IW = W - 2 * M; n_rows = min(MAX_ROWS, len(pets))
-            if st["minimized"]: w, h = MINI_W, MINI_H
-            else:
-                items = all_items(); lines = flow(None, None, items, M + 10, 0, M + IW - 10)
-                all_h = 30 + lines * 26 + 22; pets_h = 30 + max(1, n_rows) * ROW_H + 2
-                w, h = W, M + 30 + Kit.GAP + all_h + Kit.GAP + pets_h + M
-            x, y, old, store, g = win_begin(win, POS_KEY, (200, 200), w, h); c = {}; rows = []
-            if st["minimized"]: c["status"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"))
-            else:
-                win_head(g, store, w, h, TITLE, KEY, queue); ya = M + 30 + Kit.GAP
+            M = Kit.MARGIN; IW = W - 2 * M; n_rows = min(MAX_ROWS, len(pets)); items = all_items()
+            lines = flow(None, None, items, M + 10, 0, M + IW - 10); all_h = 30 + lines * 26 + 22
+            pets_h = 30 + max(1, n_rows) * ROW_H + 2
+            g, store, c = wnd.begin(W, M + 30 + Kit.GAP + all_h + Kit.GAP + pets_h + M); rows = []
+            if not st["minimized"]:
+                wnd.frame(g); ya = M + 30 + Kit.GAP
                 Kit.add_section(g, M, ya, IW, all_h, "ALL PETS  (said out loud)")
                 flow(g, store, items, M + 10, ya + 26, M + IW - 10)
                 c["note"] = Kit.add_label(g, "", M + 12, ya + 30 + lines * 26 - 2, Kit.HUE_INFO)
@@ -3930,14 +3440,16 @@ def _module_hud():
                 Kit.add_section(g, M, yp, IW, pets_h, ptitle); c["title_end"] = M + 8 + Kit.text_w(ptitle)
                 x_add = M + IW - 10 - 35 - Kit.text_w("Add...")
                 Kit.art_button(g, store, "add", Kit.ART_PLAY, x_add, yp + 3, "Add...",
-                               "Target a creature of yours the list doesn't show yet (listed for "
-                               "this session)", on_click=queue("add"))
+                               "List a pet of yours that isn't shown (this session)", on_click=queue("add"))
                 c["count"] = Kit.add_label(g, "", x_add - 60, yp + 6, Kit.HUE_INFO); c["count_right"] = x_add - 10
-                x_bar = M + 12 + NAME_W + 8; x_info = x_bar + BAR_W + 10
-                buttons = [(k, art, cap) for (k, cap, _), art in
+                x_bar = M + 12 + NAME_W + 8; x_info = x_bar + BAR_W + 10; way = heal_way()
+                buttons = [(k, art, cap, "Say \"%s\"" % (PET_SAY[k] % "<name>")) for (k, cap, _), art in
                            zip(PET_CMDS, (Kit.ART_PLAY, Kit.ART_PLAY, Kit.ART_CLOSE))]
-                buttons.append(("heal", Kit.ART_PLAY, "Heal"))
-                if settings["kill"]: buttons.append(("pet_kill", Kit.ART_PLAY, "Kill"))
+                buttons.append(("heal", Kit.ART_PLAY, "Heal",
+                                "Use one bandage on this pet (within %s)" % tiles(BANDAGE_RANGE) if not way[0] else
+                                "Cast %s on this pet (within %d tiles)" % (way[0], SPELL_RANGE)))
+                if settings["kill"]:
+                    buttons.append(("pet_kill", Kit.ART_PLAY, "Kill", "Say \"<name> kill\", " + KILL_TIP))
                 for i in range(n_rows):
                     ry = yp + 30 + i * ROW_H
                     row = {"val": None, "prev": None, "changed": 0.0,
@@ -3946,23 +3458,14 @@ def _module_hud():
                     for v, col, bh, by in (("hits", BAR_HITS, 9, 6), ("poison", BAR_POISON, 9, 6),
                                            ("stam", BAR_STAM, 3, 16)):
                         pb = G.CreateGumpSimpleProgressBar(BAR_W, bh, BAR_BG, col, 0, 100); pb.SetPos(x_bar, ry + by)
-                        safe(lambda: pb.SetAcceptMouseInput(False)); g.Add(pb)
-                        safe(lambda: setattr(pb, "IsVisible", False)); bars[v] = pb
+                        pb.SetAcceptMouseInput(False); g.Add(pb); pb.IsVisible = False; bars[v] = pb
                     row["bars"], row["stam_bar"] = bars, bars.pop("stam")
                     row["info"] = Kit.add_label(g, "", x_info, ry + 3, Kit.HUE_INFO)
                     Kit.catcher(g, M + 10, ry, IW - 20, 22, Kit.row_clicker(row, queue, "target"),
-                                "Click: aim the target cursor you have up at this pet, or make it "
-                                "your last target. Alt+click: auto-follow (again to stop)")
+                                "Click: aim your cursor at this pet, or make it your last target. "
+                                "Alt+click: auto-follow (again to stop)")
                     xb = M + 10
-                    for kind, art, cap in buttons:
-                        if kind == "heal":
-                            way = heal_way()
-                            tip = ("Use one bandage on this pet (within %s)" % tiles(BANDAGE_RANGE) if not way[0] else
-                                   "Cast %s on this pet (within %d tiles)" % (way[0], SPELL_RANGE))
-                        elif kind == "pet_kill":
-                            tip = ("Say \"<name> kill\": the shard then gives you a target cursor "
-                                   "to pick the enemy (a combat command: only ever said when you click)")
-                        else: tip = "Say \"%s\"" % (PET_SAY[kind] % "<name>")
+                    for kind, art, cap, tip in buttons:
                         Kit.art_button(g, store, "%s%d" % (kind, i), art, xb, ry + 24, cap,
                                        tip + ". Alt+click: auto-follow (again to stop)",
                                        hue=Kit.HUE_BAD if kind == "pet_kill" else None,
@@ -3970,19 +3473,13 @@ def _module_hud():
                         xb += 35 + Kit.text_w(cap) + 12
                     rows.append(row)
                 c["empty"] = (Kit.add_label(g, "", M + 12, yp + 33, Kit.HUE_INFO) if not n_rows else None)
-            Kit.show_window(g, x, y, w, h, None, st["minimized"] and st["docked"], on_disposed(g), save_pos, win,
-                            {"g": g, "c": c, "rows": rows, "store": store, "n_rows": n_rows, "count_w": None})
-            Kit.dispose(old); draw(time.time())
+            wnd.end(g, {"rows": rows, "n_rows": n_rows, "count_w": None}); draw(time.time())
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=0x0E81,
+                         cleanup=cleanup, lock=False, clear={"rows": [], "c": {}, "n_rows": -1})
         def set_vis(row, key, ctrl, on):
-            if row.get(key) != on:
-                row[key] = on
-                try: ctrl.IsVisible = on
-                except Exception: pass
+            if row.get(key) != on: row[key] = on; ctrl.IsVisible = on
         def set_progress(row, key, ctrl, v):
-            if row.get(key) != v:
-                row[key] = v
-                try: ctrl.SetProgress(float(v), 100.0)
-                except Exception: pass
+            if row.get(key) != v: row[key] = v; ctrl.SetProgress(float(v), 100.0)
         def status_text():
             if note_on(time.time()): return st["note"], st["note_hue"]
             low = [r for r in pets.values() if r["low"] and not r["dead"] and r["where"] != "gone"
@@ -3992,7 +3489,7 @@ def _module_hud():
                 return "%s: %s %d%% HP" % (TITLE, Kit.fit(r["name"] or "pet", 80), r["pct"]), Kit.HUE_BAD
             near = len([r for r in pets.values() if r["where"] != "gone"])
             if not pets: return "%s: none in view" % TITLE, Kit.HUE_INFO
-            return "%s: %d pet%s, %d in view" % (TITLE, len(pets), "" if len(pets) == 1 else "s", near), Kit.HUE_INFO
+            return "%s: %s, %d in view" % (TITLE, Kit.count(len(pets), "pet"), near), Kit.HUE_INFO
         def show_note():
             c = win["c"]
             if win["g"] is None or st["docked"]: return
@@ -4023,7 +3520,8 @@ def _module_hud():
                                        % (r["dist"], r["dir"]))
                 elif r["dead"] and where != "gone": info = "dead  %d %s" % (r["dist"], r["dir"])
                 elif where == "far": info = "far: %d %s" % (r["dist"], r["dir"])
-                else: info = ("out of range (%s)" % ago(now - r["seen"]) if r["seen"] else "out of range")
+                else: info = ("out of range (%s)" % Kit.ago(now - r["seen"], Kit.AGO_SHORT) if r["seen"] else
+                              "out of range")
                 Kit.set_text(row["info"], info, Kit.HUE_TEXT if bar else Kit.HUE_INFO)
                 for v, pb in row["bars"].items(): set_vis(row, "vis_" + v, pb, v == bar)
                 if bar: set_progress(row, "p_" + bar, row["bars"][bar], pct if pct is not None else 0)
@@ -4037,25 +3535,20 @@ def _module_hud():
                     more = "%d more  %s" % (len(order) - MAX_ROWS, txt)
                     if c["count_right"] - Kit.text_px(more) >= c["title_end"] + 8: txt = more
                 Kit.set_text(lbl, txt); tw = Kit.text_px(txt) if txt else 0
-                if win["count_w"] != tw:
-                    win["count_w"] = tw; safe(lambda: Kit.ui_pos(lbl, c["count_right"] - tw, Kit.ui_y(lbl)))
+                if win["count_w"] != tw: win["count_w"] = tw; Kit.ui_pos(lbl, c["count_right"] - tw, Kit.ui_y(lbl))
             empty = c.get("empty")
             if empty is not None:
                 if st["followers"] > 0:
-                    Kit.set_text(empty, "%d slot%s used, none in view. Add... lists one."
-                                 % (st["followers"], "" if st["followers"] == 1 else "s"))
+                    Kit.set_text(empty, "%s used, none in view. Add... lists one." % Kit.count(st["followers"], "slot"))
                 else: Kit.set_text(empty, "No pets in view. Click Add... to list one.")
             show_note()
         def gate(action, p, now):
             if not settings["hidden"]: return True
-            try: hidden = bool(p.IsHidden)
-            except Exception: hidden = False
-            if not hidden: st["confirm"] = None; return True
+            if not p.IsHidden: st["confirm"] = None; return True
             cf = st["confirm"]
             if cf is not None and cf[0] == action and cf[1] <= now <= cf[2]: st["confirm"] = None; return True
             st["confirm"] = (action, now + 0.3, now + CONFIRM_SECS)
-            note("You are hidden and that reveals you: click again to do it.", Kit.HUE_TITLE, CONFIRM_SECS)
-            return False
+            note("That reveals you: click again to do it.", Kit.HUE_TITLE, CONFIRM_SECS); return False
         def say(text, now):
             last = st["cmd_at"].get(text)
             if last is not None and 0 <= now - last < 0.6: return
@@ -4063,186 +3556,121 @@ def _module_hud():
             st["cmd_at"][text] = now; API.Msg(text); note("Said \"%s\"." % text)
         def pet_name(serial):
             r = pets.get(serial)
-            if r is None or not r["name"]: note("That pet has no name the client knows yet.", Kit.HUE_BAD); return None
+            if r is None or not r["name"]: note("That pet has no name yet.", Kit.HUE_BAD); return None
             return r["name"]
         def do_target(serial):
-            try: up = bool(API.HasTarget("any"))
-            except Exception: up = False
-            if up and not HOST.cursor_busy(KEY):
+            if API.HasTarget("any") and not HOST.cursor_busy(KEY):
                 API.Target(serial)
                 if st["heal"] is not None: st["heal"] = None; HOST.release_cursor(KEY)
                 return
-            try: API.SetLastTarget(serial=serial)
-            except Exception: safe(lambda: API.SetLastTarget(serial))
-            API.HeadMsg("* last target *", serial, 0x35)
+            API.SetLastTarget(serial=serial); API.HeadMsg("* last target *", serial, 0x35)
+        def dist_to(m, p): return max(abs(int(m.X) - int(p.X)), abs(int(m.Y) - int(p.Y)))
         def start_heal(serial, p, now):
             r = pets.get(serial); name = (r and r["name"]) or "that pet"
             if st["heal"] is not None: note("A heal is already on its way.", Kit.HUE_TITLE); return
-            try:
-                if p.IsDead: note("You are dead.", Kit.HUE_BAD); return
-            except Exception: pass
-            try: up = bool(API.HasTarget("any"))
-            except Exception: up = False
-            if up or HOST.cursor_busy(KEY):
+            if p.IsDead: note("You are dead.", Kit.HUE_BAD); return
+            if API.HasTarget("any") or HOST.cursor_busy(KEY):
                 note("A target cursor is up: aim it or press Esc first.", Kit.HUE_TITLE); return
-            spell, label = heal_way(); reach = SPELL_RANGE if spell else BANDAGE_RANGE
-            try:
-                m = API.FindMobile(serial)
-                d = (max(abs(int(m.X) - int(p.X)), abs(int(m.Y) - int(p.Y))) if m is not None else None)
-            except Exception: m, d = None, None
-            if m is None or d is None: note("%s is out of range." % name, Kit.HUE_BAD); return
+            spell, label = heal_way(); reach = SPELL_RANGE if spell else BANDAGE_RANGE; m = API.FindMobile(serial)
+            if m is None: note("%s is out of range." % name, Kit.HUE_BAD); return
+            d = dist_to(m, p)
             if d > reach:
                 note("%s is %d tiles away (%s reaches %d)." % (name, d, label.lower(), reach), Kit.HUE_BAD); return
             if not gate(("heal", serial), p, now): return
-            if spell:
-                API.CastSpell(spell); info = safe(lambda: Kit.spell_info(spell))
-                wait = (info[3] if info else 1.5) + CURSOR_WAIT
+            if spell: API.CastSpell(spell); wait = Kit.spell_info(spell)[3] + CURSOR_WAIT
             else:
-                try: b = API.FindType(0x0E21, API.Backpack)
-                except Exception: b = None
+                b = API.FindType(0x0E21, API.Backpack)
                 if not b:
                     note("Out of bandages.", Kit.HUE_BAD); API.SysMsg("%s: out of bandages!" % TITLE, Kit.HUE_BAD)
                     return
                 API.UseObject(b.Serial); wait = CURSOR_WAIT
             HOST.claim_cursor(KEY, wait)
             st["heal"] = {"serial": serial, "name": name, "until": now + wait, "reach": reach,
-                          "what": spell or "a bandage", "t0": now, "rd": safe(Journal.reader)}
+                          "what": spell or "a bandage", "t0": now, "rd": Journal.reader()}
             note("%s for %s..." % (spell or "Bandage", name))
         def heal_tick(p, now):
-            j = st["heal"]; failed = None
-            try:
-                rd = j.get("rd")
-                if rd is None: failed = Journal.find(j.get("t0", now), HEAL_FAILED)
-                else:
-                    for ln in rd.new():
-                        low = ln.low
-                        for x in HEAL_FAILED:
-                            if x in low: failed = ln; break
-                        if failed is not None: break
-            except Exception: failed = None
-            if failed is not None:
-                st["heal"] = None; HOST.release_cursor(KEY)
-                note("%s for %s failed." % (j["what"][0].upper() + j["what"][1:], j["name"]), Kit.HUE_BAD); return
-            try: mine = HOST.cursor_claim[0] == KEY
-            except Exception: mine = False
-            if mine and HOST.cursor_ok(KEY, "beneficial"):
-                ok = False
-                try:
-                    m = API.FindMobile(j["serial"])
-                    ok = m is not None and max(abs(int(m.X) - int(p.X)), abs(int(m.Y) - int(p.Y))) <= j["reach"]
-                except Exception: ok = False
-                st["heal"] = None; HOST.release_cursor(KEY)
-                if ok:
-                    API.Target(j["serial"])
-                    note("%s on %s." % (j["what"][0].upper() + j["what"][1:], j["name"]), Kit.HUE_GOOD)
+            j = st["heal"]; failed = False; what = j["what"][0].upper() + j["what"][1:]
+            for ln in j["rd"].new():
+                for x in HEAL_FAILED:
+                    if x in ln.low: failed = True; break
+                if failed: break
+            if failed:
+                st["heal"] = None; HOST.release_cursor(KEY); note("%s for %s failed." % (what, j["name"]), Kit.HUE_BAD)
+                return
+            if HOST.cursor_claim[0] == KEY and HOST.cursor_ok(KEY, "beneficial"):
+                m = API.FindMobile(j["serial"]); st["heal"] = None; HOST.release_cursor(KEY)
+                if m is not None and dist_to(m, p) <= j["reach"]:
+                    API.Target(j["serial"]); note("%s on %s." % (what, j["name"]), Kit.HUE_GOOD)
                 else: API.CancelTarget(); note("%s moved out of reach." % j["name"], Kit.HUE_BAD)
                 return
             if not 0 <= j["until"] - now <= CURSOR_WAIT + 10.0:
                 st["heal"] = None; HOST.release_cursor(KEY)
-                try: up = bool(API.HasTarget("any"))
-                except Exception: up = False
-                if up: note("A target cursor is up: aim it or press Esc.", Kit.HUE_TITLE)
+                if API.HasTarget("any"): note("A target cursor is up: aim it or press Esc.", Kit.HUE_TITLE)
                 else: note("No target cursor came for %s." % j["name"], Kit.HUE_BAD)
         def picked(serial): st["queue"].append(("added", int(serial or 0)))
         def add_pet(serial, p, now):
             if not serial: return
-            if serial == st["me"] or serial == safe(lambda: int(p.Serial), 0): note("That's you.", Kit.HUE_BAD); return
-            try: m = API.FindMobile(serial)
-            except Exception: m = None
+            if serial == st["me"] or serial == int(p.Serial): note("That's you.", Kit.HUE_BAD); return
+            m = API.FindMobile(serial)
             if m is None: note("That isn't a creature in view.", Kit.HUE_BAD); return
             r = pets.get(serial)
             if r is None:
                 if len(pets) >= MAX_KNOWN: prune(now, room=1)
                 if len(pets) >= MAX_KNOWN: note("The list is full (%d)." % MAX_KNOWN, Kit.HUE_BAD); return
                 r = new_pet(serial, "", manual=True)
-            r["manual"] = True
-            try: r["own"] = bool(m.IsRenamable)
-            except Exception: r["own"] = False
-            try: px, py = int(p.X), int(p.Y)
-            except Exception: px, py = 0, 0
-            update(r, m, px, py, now, True)
+            r["manual"] = True; r["own"] = bool(m.IsRenamable); update(r, m, int(p.X), int(p.Y), now, True)
             if r["dist"] > settings["range"]: r["where"] = "far"
             note("%s is listed for this session." % (r["name"] or "It"), Kit.HUE_GOOD)
         def handle(action, p, now):
             kind = action[0] if isinstance(action, tuple) else action
-            if Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY): return
+            if wnd.action(action): return
             if action == "add": HOST.pick_target(10.0, picked); note("Target the pet to list.")
-            elif kind == "added":
-                if p is not None: add_pet(action[1], p, now)
             elif kind == "follow": Follow.toggle(action[1], TITLE)
             elif p is None: return
+            elif kind == "added": add_pet(action[1], p, now)
             elif kind == "target": do_target(action[1])
             elif kind == "heal": start_heal(action[1], p, now)
-            elif kind == "all":
-                k = action[1]
-                if k == "kill" and not settings["kill"]: return
-                text = ALL_KILL if k == "kill" else dict((a, t) for a, _, t in ALL_CMDS).get(k)
+            elif kind == "all" or kind in PET_SAY:
+                if (action[1] == "kill" if kind == "all" else kind == "pet_kill") and not settings["kill"]: return
+                if kind == "all": text = ALL_KILL if action[1] == "kill" else ALL_SAY.get(action[1])
+                else: text = pet_name(action[1]); text = text and PET_SAY[kind] % text
                 if text and not dead_now(p) and gate(action, p, now): say(text, now)
-            elif kind in PET_SAY:
-                if kind == "pet_kill" and not settings["kill"]: return
-                name = pet_name(action[1])
-                if name is None or dead_now(p) or not gate(action, p, now): return
-                say(PET_SAY[kind] % name, now)
         def dead_now(p):
-            try:
-                if p.IsDead: note("You are dead: your pets can't hear you.", Kit.HUE_BAD); return True
-            except Exception: pass
+            if p.IsDead: note("You are dead: your pets can't hear you.", Kit.HUE_BAD); return True
             return False
-        HEAL_INFO = ("One heal per click; its cursor is aimed at the pet when it comes (a bandage "
-                     "within %s, a spell within %d)." % (tiles(BANDAGE_RANGE), SPELL_RANGE))
-        KILL_INFO = ("Said only when you click; the shard then gives you its own target cursor to pick the enemy.")
-        PAGE_OPTS = {"ldy": 4, "lgap": 12, "fw": 44, "pad": 6}
+        HEAL_INFO = ("One heal per click, aimed at the pet when its cursor comes (bandage within %s, spell within %d)."
+                     % (tiles(BANDAGE_RANGE), SPELL_RANGE))
+        KILL_INFO = "Said only on a click; the shard's cursor then picks the enemy."
         def page_table(w):
             heal, kill = ([("note", line) for line in Kit.wrap(t, w - 28)] for t in (HEAL_INFO, KILL_INFO))
-            return (("WINDOW", (("num", "range", "List pets within:", "Tiles from you within which a pet is listed "
-                                 "with its bars", "tiles", RANGE_MIN, RANGE_MAX),
+            return (("WINDOW", (("num", "range", "List pets within:", "How far a pet is listed with its bars", "tiles",
+                                 RANGE_MIN, RANGE_MAX),
                                 ("check", "hidden", "While hidden, a command or a heal needs a second click",
-                                 "Speaking and healing reveal you: the first click only asks"))),
+                                 "Speaking and healing reveal you; the first click only asks"))),
                     ("HEAL BUTTON  (on each pet's row)",
                      [("note", "Heal with:", {"ndy": 4, "h": 28, "hue": Kit.HUE_TEXT})] + heal),
                     ("COMBAT COMMANDS", [("check", "kill", "Show Kill buttons (\"%s\" and \"<name> kill\")" % ALL_KILL,
-                                          "A Kill button for all your pets and one on each pet's row",
-                                          {"h": 28})] + kill),
+                                          "One for all pets and one per pet row", {"h": 28})] + kill),
                     ("ALERTS  (sound: Settings > Alerts)", (("num", "low", "Alert when a pet's HP falls to:",
-                        "One alert when a pet's HP falls to this percentage or below, again once it recovered "
-                        "(0-99, 0 = never)", "%", 0, 99),)))
-        def config_height(w): return Kit.Form.height(page_table(w), w, **PAGE_OPTS)
+                        "One alert per fall to this % or below (0-99, 0 = never)", "%", 0, 99),)))
+        def read_heal(f, new):
+            try: i = int(f.c["heal"].GetSelectedIndex())
+            except Exception: return
+            if 0 <= i < len(HEAL_WAYS): new["heal"] = i
+        def on_change(old, new):
+            if new["hidden"] != old["hidden"]: st["confirm"] = None
+            if (new["kill"], new["heal"]) != (old["kill"], old["heal"]) and win["g"] is not None: queue("redraw")()
+        cfg = Kit.Page(settings, page_table, save_settings, on_change, {"ldy": 4, "lgap": 12, "fw": 44, "pad": 6},
+                       strict=True, adjust=read_heal)
         def build_config(g, x, y, w):
-            c = Kit.Form(g, x, y, w, settings, page_table(w), **PAGE_OPTS).c
-            dd = G.CreateDropDown(200, [label for _, label in HEAL_WAYS], settings["heal"])
-            dd.SetPos(x + 22 + Kit.text_w("Heal with:"), y + 90 + Kit.GAP + 30); g.Add(dd)
-            safe(lambda: dd.SetTooltip("What the Heal button on each pet's row uses: a bandage or a heal spell"))
-            c["heal"] = dd; page["c"] = c
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            changed, relayout = False, False
-            try:
-                for k, lo, hi in (("range", RANGE_MIN, RANGE_MAX), ("low", 0, 99)):
-                    txt = str(c[k].Text or "").strip()
-                    if txt.isdigit():
-                        v = max(lo, min(hi, int(txt)))
-                        if v != settings[k]: settings[k], changed = v, True
-                v = bool(c["hidden"].IsChecked)
-                if v != settings["hidden"]: settings["hidden"], changed = v, True; st["confirm"] = None
-                v = bool(c["kill"].IsChecked)
-                if v != settings["kill"]: settings["kill"], changed, relayout = v, True, True
-                i = int(c["heal"].GetSelectedIndex())
-                if 0 <= i < len(HEAL_WAYS) and i != settings["heal"]:
-                    settings["heal"], changed, relayout = i, True, True
-            except Exception: page["c"] = None; return
-            if changed:
-                save_settings()
-                if relayout and win["g"] is not None: queue("redraw")()
-        def config_closed(): page["c"] = None
+            f = cfg.build(g, x, y, w); dd = G.CreateDropDown(200, [label for _, label in HEAL_WAYS], settings["heal"])
+            dd.SetPos(x + 22 + Kit.text_w("Heal with:"), y + 90 + Kit.GAP + 30); g.Add(dd); f.c["heal"] = dd
+            dd.SetTooltip("What each row's Heal button uses")
         def _start():
-            st_reset(); st["minimized"] = Kit.load_min(MIN_KEY) or bool(safe(lambda: HOST.dock_wanted(KEY), False))
-            load_settings()
+            st_reset(); st["minimized"] = wnd.start_min(); load_settings()
             for r in pets.values(): r["where"] = "gone" if r["where"] == "gone" else "far"
-            safe(lambda: HOST.alert_kind(LOW_ALERT, "Pet HP low", 0x335))
-            safe(lambda: HOST.alert_kind(DEAD_ALERT, "Pet died", 0x1F1)); build_window()
-            HOST.dock_add(KEY, Kit.dock_hooks(TITLE, 0x0E81, st, win, queue("redraw")))
-            HOST.services["pets.list"] = svc_pets
+            HOST.alert_kind(LOW_ALERT, "Pet HP low", 0x335); HOST.alert_kind(DEAD_ALERT, "Pet died", 0x1F1)
+            build_window(); wnd.dock(); cleanup.service("pets.list", svc_pets)
         def svc_pets(distance=None):
             if st["shutting"]: return None
             rng = settings["range"]
@@ -4252,7 +3680,7 @@ def _module_hud():
                     and r["dist"] <= distance]
         def _tick():
             if win["g"] is None: return
-            if Kit.was_clicked(win["store"], "close"): Kit.dispose(win["g"]); return
+            if Kit.closed(win): return
             now = time.time(); p = API.Player
             while st["queue"]:
                 handle(st["queue"].pop(0), p, now)
@@ -4263,30 +3691,23 @@ def _module_hud():
                 st["scan_at"] = now + SCAN_EVERY; scan(p, now); draw(now)
             elif st["note"] and not note_on(now): st["note"] = ""; show_note()
         def _stop():
-            st["shutting"] = True
-            if HOST.services.get("pets.list") is svc_pets: HOST.services.pop("pets.list", None)
-            st["heal"] = None; safe(lambda: HOST.release_cursor(KEY)); HOST.dock_remove(KEY); save_pos()
-            Kit.save_min(MIN_KEY, st["minimized"]); save_settings(); g, win["g"] = win["g"], None
-            win["rows"], win["c"], win["n_rows"] = [], {}, -1; Kit.dispose(g)
-        load_settings(); return part_dict(_start, _tick, _stop, config_height, build_config, poll_config, config_closed)
+            st["shutting"] = True; st["heal"] = None; HOST.release_cursor(KEY); save_settings(); cleanup.close()
+        load_settings(); return part_dict(_start, _tick, _stop, cfg.height, build_config, cfg.poll, cfg.closed,
+                                          interval=lambda: 0.02 if st["heal"] is not None else 0.1)
     PARTS = (("frames", _part_frames, 0.1, "unitframes"), ("timers", _part_timers, 0.1, "spelltimers"),
         ("swing", _part_swing, 0.025, "swing"), ("bandage", _part_bandage, 0.1, "bandage"),
         ("pets", _part_pets, 0.1, "pets"),)
     return PartSet(KEY, TITLE, PARTS).hooks()
 
 
-if "HOST" in globals() and hasattr(globals()["HOST"], "add"):
-    HOST.add("hud", "Character HUD", "Frames and bars for you, your target, your party and pets", _module_hud, 0.025,
-             category="On screen", parts=(("frames", "Frames",
-                  "Health frames for you, your target and your party", True, ("unitframes",)),
-                 ("timers", "Buffs & Timers", "Your buffs and debuffs, and your spells on others, timed", True,
-                  ("spelltimers",)), ("swing", "Swing Bar",
-                  "A bar that shows when your next melee swing lands", False, ("swing",)), ("bandage", "Bandages",
-                  "One press, one bandage: a timer bar and alerts", False, ("bandage",)), ("pets", "Pets",
-                  "Your pets' health, distance and commands", False, ("pets",)),),
-             aliases=('Unit Frames', 'Spell Timers', 'Swing Timer', 'Bandage Agent', 'Pets',
-                      'cast bar', 'buffs', 'debuffs', 'party frames', 'hit chance'))
-else:
+if "HOST" not in globals():
     import API
-    API.SysMsg("Character HUD is a Virtue Assistant module and can't run on its own. "
-               "Run Virtue Assistant instead; it loads this file.", 33)
+    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("hud", "Character HUD", "Frames, timers and bars for you and pets", _module_hud, 0.025,
+         category="On screen", parts=(("frames", "Frames", "Health frames: you, target, party", True,
+              ("unitframes",)), ("timers", "Buffs & Timers", "Timed buffs, debuffs and your spells", True,
+              ("spelltimers",)), ("swing", "Swing Bar", "When your next melee swing lands", False, ("swing",)),
+              ("bandage", "Bandages", "One-press bandage, timer and alerts", False, ("bandage",)),
+              ("pets", "Pets", "Pets' health, distance and commands", False, ("pets",)),),
+         aliases=('Unit Frames', 'Spell Timers', 'Swing Timer', 'Bandage Agent', 'Pets',
+                  'cast bar', 'buffs', 'debuffs', 'party frames', 'hit chance'))
