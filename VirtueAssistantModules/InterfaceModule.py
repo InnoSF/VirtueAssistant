@@ -25,7 +25,7 @@ def _module_interface():
     page = {"zones": None, "windows": None, "zone_dd": [], "frame_names": [], "layout_names": []}
     setup = {"open": False, "step": 0, "preset": 0, "zs": None, "fname": LAYOUT_DEFAULT, "assign": {}, "look": {},
              "cards": {}}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     def load_settings():
         L = LAYOUT
         settings.update({"seam": L.seamless, "fit_view": L.fit_view, "game": L.game_grows, "snap": SNAP.enabled,
@@ -47,9 +47,6 @@ def _module_interface():
             at = max(at, b)
         if at < s1: out.append((at, s1))
         return [(a, b) for a, b in out if b > a]
-    def pick_index(dd, was):
-        try: return int(dd.GetSelectedIndex())
-        except Exception: return was
     class LayoutEditor(object):
         BAR_W = 720; SETTLE = 0.3; FIELD_W = 52; ROW = 28
         KEYS = {"up": ("UP",), "down": ("DOWN",), "left": ("LEFT",), "right": ("RIGHT",),
@@ -225,8 +222,7 @@ def _module_interface():
             x, y, w, h = z.px
             if ((w, h) != fr["size"] or z.overlap or z.kind == "k" or any(o.overlap for o in self.zs.zones)):
                 self.build_zone(z); return
-            try: Kit.place(fr["g"], x, y, w, h); Kit.moved_by_code(fr["g"])
-            except Exception: pass
+            with Kit.quiet: Kit.place(fr["g"], x, y, w, h); Kit.moved_by_code(fr["g"])
             self.update_zone(z)
         def keep(self, W, H):
             if (W, H) != (self.W, self.H):
@@ -635,12 +631,8 @@ def _module_interface():
                     if self._key("delete"): self.delete_pressed(z)
             if Kit.was_clicked(store, "add"):
                 self.push(); zid = self.zs.new_id(); nz = Zone(zid, "w", (0, 0, 1, 1), "", (0, 0), "d", 0)
-                nz.set_px((self.W - 320) // 2, (self.H - 240) // 2, 320, 240, self.W, self.H); self.zs.zones.append(nz)
-                if not self.zs.push_clear(nz, self.W, self.H, HOST.grid_size()):
-                    self.zs.zones.remove(nz); self.undo.pop()
-                    self.say("no room for another zone; remove one or make one smaller."); return
-                nz.note_pins(self.W, self.H); self.sel, self.multi = zid, set(); self.build_zone(nz); self.changed()
-                self.rebuild = True
+                nz.set_px((self.W - 320) // 2, (self.H - 240) // 2, 320, 240, self.W, self.H)
+                if not self._add_zone(nz, True, "no room for another zone; remove one or make one smaller."): return
             elif Kit.was_clicked(store, "undo"): self.do_undo()
             elif Kit.was_clicked(store, "redo"): self.do_redo()
             elif Kit.was_clicked(store, "even") and z is not None:
@@ -720,7 +712,7 @@ def _module_interface():
         def poll_windows(self, z, store, c):
             L = self.layout; dd = c.get("w_pick"); now = time.time(); add = Kit.was_clicked(store, "w_add")
             if dd is not None and (now >= self._pick_next or now - HOST.input_at <= HOST.INPUT_FAST):
-                self._pick_next = now + 0.2; i = pick_index(dd, self.pick)
+                self._pick_next = now + 0.2; i = Kit.dd_index(dd, self.pick)
                 if i != self.pick:
                     self.pick = i; key = self.pick_keys[i] if 0 < i < len(self.pick_keys) else None
                     self.preview = self.preview_text(key, z) if key else ""; self.build_zone(z); self.rebuild = True
@@ -853,14 +845,16 @@ def _module_interface():
             if fr is not None: Kit.dispose(fr.get("g"))
             self.multi.discard(mate.id); self.build_zone(z); self.changed(); self.rebuild = True
             self.say('zone "%s" joined into "%s"; its windows become free when saved.' % (mate.id, z.id), Kit.HUE_INFO)
+        def _add_zone(self, nz, check, text):
+            self.zs.zones.append(nz)
+            if check and not self.zs.push_clear(nz, self.W, self.H, HOST.grid_size()):
+                self.zs.zones.remove(nz); self.undo.pop(); self.say(text); return False
+            nz.note_pins(self.W, self.H); self.sel, self.multi = nz.id, set(); self.build_zone(nz); self.changed()
+            self.rebuild = True; return True
         def duplicate(self, z):
             self.push(); nz = z.copy(); nz.id = self.zs.new_id(); nz.lock = False; step = HOST.grid_size()
-            x, y, w, h = z.px; nz.set_px(x + step, y + step, w, h, self.W, self.H); self.zs.zones.append(nz)
-            if not nz.overlap and not self.zs.push_clear(nz, self.W, self.H, step):
-                self.zs.zones.remove(nz); self.undo.pop()
-                self.say("no room for a copy of zone \"%s\"; make room first." % z.id); return
-            nz.note_pins(self.W, self.H); self.sel, self.multi = nz.id, set(); self.build_zone(nz); self.changed()
-            self.rebuild = True
+            x, y, w, h = z.px; nz.set_px(x + step, y + step, w, h, self.W, self.H)
+            self._add_zone(nz, not nz.overlap, "no room for a copy of zone \"%s\"; make room first." % z.id)
         def align(self, z, edge):
             picked = [p for p in [self.zs.by_id(i) for i in self.multi if i != z.id] if p is not None and not p.lock]
             if not picked: return
@@ -1261,7 +1255,7 @@ def _module_interface():
         L = LAYOUT
         if L.page_refresh: L.page_refresh = False; cfg.f = None; HOST.refresh_settings(KEY); return
         for n, (key, dd, zi, ids) in enumerate(page["zone_dd"]):
-            i = pick_index(dd, zi)
+            i = Kit.dd_index(dd, zi)
             if i != zi and 0 <= i < len(ids):
                 page["zone_dd"][n] = (key, dd, i, ids); zid = None if i == 0 else ids[i]; L.page_preview = ""
                 if zid:
@@ -1269,10 +1263,10 @@ def _module_interface():
                     L.page_preview = L.preview_text(key, zs.by_id(zid) if zs is not None else None)
                 L.assign_to(key, zid); L.page_refresh = True; return
         if page["zones"] is not None:
-            dd, fi = page["zones"]; i = pick_index(dd, fi)
+            dd, fi = page["zones"]; i = Kit.dd_index(dd, fi)
             if i != fi and 0 <= i < len(page["frame_names"]):
                 page["zones"] = (dd, i); L.use_frames(page["frame_names"][i]); return
-            dd, li = page["windows"]; i = pick_index(dd, li)
+            dd, li = page["windows"]; i = Kit.dd_index(dd, li)
             if i != li and 0 <= i < len(page["layout_names"]):
                 page["windows"] = (dd, i); L.use_windows("" if i == 0 else page["layout_names"][i]); return
         for k, fn in PAGE_ACTIONS:

@@ -108,7 +108,7 @@ def _module_actionbar():
           "ub_cache": None, "ub_state": None, "grim_state": None, "va_state": None, "pending_on": None,
           "right_ok": None, "dock_sig": None, "watch_next": 0.0, "script_check": None, "ub_last": None}
     st.update(fresh()); win = {"g": None, "c": {}, "store": ({}, {}), "cells": {}, "bags": {}}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     tray = {"g": None, "at": None}
     menu = {"g": None, "ref": None, "level": "cats", "cat": None, "page": 0, "c": {}, "bag": None, "items": [],
             "anchor": None, "moved": None, "placed": None}
@@ -280,8 +280,7 @@ def _module_actionbar():
             if k in d: settings[k] = d[k] == "1"
         for k, lo, hi in (("slot", SLOT_MIN, SLOT_MAX), ("bagmode", 0, len(BAG_MODES) - 1),
                           ("page", 0, PAGES - 1), ("scale", SCALE_MIN, SCALE_MAX), ("extra", 0, EXTRA_ROWS)):
-            try: settings[k] = int(d[k])
-            except Exception: pass
+            with Kit.quiet: settings[k] = int(d[k])
             settings[k] = max(lo, min(hi, settings[k]))
         a = d.get("anchor", ""); settings["anchor"] = a if a in Kit.ANCHORS else ""
         for k in ("bags", "bagkeys"): settings[k] = d.get(k, settings[k])
@@ -292,8 +291,7 @@ def _module_actionbar():
         c = blank()
         for k in ("t", "v", "tg", "k", "n"): c[k] = d.get(k, c[k])
         for k in ("g", "h", "lo"):
-            try: c[k] = int(d.get(k, c[k]))
-            except Exception: pass
+            with Kit.quiet: c[k] = int(d.get(k, c[k]))
         if c["t"] == "travel":
             for k in TRAVEL_KEYS: c[k] = d.get(k, "")
         return c
@@ -347,28 +345,7 @@ def _module_actionbar():
         p = Kit.pos(win["g"]) if Kit.is_open(win["g"]) else None
         if p is not None and p != st.get("pos_saved"): st["pos_saved"] = p; Kit.put_var(POS_KEY, "%d,%d" % p)
     class ClientUI(object):
-        looked = False; error = ""; world = None; GA = None; UIM = None; _acc = {}; _methods = {}
-        @staticmethod
-        def _flags(static):
-            from System.Reflection import BindingFlags
-            return (BindingFlags.Public | BindingFlags.NonPublic |
-                    (BindingFlags.Static if static else BindingFlags.Instance))
-        @staticmethod
-        def _get(obj, name, t=None):
-            static = obj is None; t = t if t is not None else obj.GetType(); key = (t, name, static)
-            acc = ClientUI._acc.get(key, False)
-            if acc is False:
-                acc = None; flags = ClientUI._flags(static); tt = t
-                while tt is not None:
-                    try: p = tt.GetProperty(name, flags)
-                    except Exception: p = None
-                    if p is not None: acc = (p, True); break
-                    f = tt.GetField(name, flags)
-                    if f is not None: acc = (f, False); break
-                    tt = tt.BaseType
-                ClientUI._acc[key] = acc
-            if acc is None: return None
-            return acc[0].GetValue(obj, None) if acc[1] else acc[0].GetValue(obj)
+        looked = False; error = ""; world = None; GA = None; UIM = None; _methods = {}; _get = staticmethod(Typing._get)
         @staticmethod
         def _method(t, name, ptypes, static):
             key = (t, name, tuple(ptypes), static)
@@ -376,7 +353,7 @@ def _module_actionbar():
             return ClientUI._methods[key]
         @staticmethod
         def _find_method(t, name, ptypes, static):
-            for m in t.GetMethods(ClientUI._flags(static)):
+            for m in t.GetMethods(Client.flags(static)):
                 if m.Name != name or m.IsGenericMethodDefinition: continue
                 ps = m.GetParameters()
                 if len(ps) < len(ptypes): continue
@@ -481,10 +458,9 @@ def _module_actionbar():
         for line in lines:
             if "=" not in line: continue
             k, v = line.split("=", 1); k, v = k.strip(), v.strip()
-            try:
+            with Kit.quiet:
                 if k == "slots": slots = int(v)
                 elif k.startswith("slot."): assign[int(k[5:])] = int(v)
-            except Exception: pass
         lst = [assign[i] for i in sorted(assign) if (slots <= 0 or i < slots) and assign[i] > 0]
         st["ub_cache"] = (path, mtime, lst); return list(lst)
     def ub_bags():
@@ -556,9 +532,8 @@ def _module_actionbar():
         if bp: out.append(bp)
         for it in (API.ItemsInContainer(bp, False) or []):
             if len(out) >= BAG_SLOTS: break
-            try:
+            with Kit.quiet:
                 if it.IsContainer: out.append(int(it.Serial))
-            except Exception: pass
         return out
     def scan_bags():
         mode = settings["bagmode"]
@@ -930,31 +905,13 @@ def _module_actionbar():
             if st["right_ok"] is False and Client.key_held("shift"): queue.add((menu_kind, arg), dup=True)
             else: queue.add((kind, arg), dup=True)
         return Kit.once(fn, (KEY, kind, arg), Kit.TWICE)
-    _right = {"add": {}, "mods": None}
     def hook_right(api_ctrl, fn):
         if api_ctrl is None or st["right_ok"] is False: return False
-        try:
-            mods = _right["mods"]
-            if mods is None:
-                import clr; import System; from System.Reflection import BindingFlags
-                mods = _right["mods"] = (clr, System, BindingFlags.Instance |
-                                         BindingFlags.Public | BindingFlags.NonPublic)
-            clr, System, flags = mods; ctrl = Kit.client_control(api_ctrl); key = str(ctrl.GetType().FullName)
-            add = _right["add"].get(key)
-            if add is None:
-                t, ev = ctrl.GetType(), None
-                while t is not None and ev is None: ev = t.GetEvent("MouseUp", flags); t = t.BaseType
-                add = _right["add"][key] = (clr.GetPythonType(ev.EventHandlerType), ev.GetAddMethod(True))
-            def handler(sender, e):
-                try:
-                    if str(e.Button) == "Right": Kit.pending.append(fn); e.Result = True; HOST.poke()
-                except Exception: pass
-            add[1].Invoke(ctrl, System.Array[object]([add[0](handler)])); st["right_ok"] = True; return True
-        except Exception:
-            if st["right_ok"] is None:
-                st["right_ok"] = False
-                say("no right-click events from this client; Shift+click a cell for its menu instead.")
-            return False
+        if Kit.hook_mouse(api_ctrl, fn, event="MouseUp", button="Right"): st["right_ok"] = True; return True
+        if st["right_ok"] is None:
+            st["right_ok"] = False
+            say("no right-click events from this client; Shift+click a cell for its menu instead.")
+        return False
     def add_icon(g, icon, x, y, w, h):
         side = min(w, h) - 4; p = Kit.add_pic(g, icon, x + (w - side) // 2, y + (h - side) // 2)
         if p is not None: p.SetWidth(side); p.SetHeight(side); p.SetAcceptMouseInput(False)
@@ -1376,18 +1333,17 @@ def _module_actionbar():
         for r in refs: refresh_key(r)
         shown = sel_ref(page["sel"])
         if cfg.f is not None and shown in refs: cfg.f.c["key"].SetText(cell(shown)["k"])
+    UI_SIMPLE = {"barsettings": lambda: HOST.show_settings(KEY), "lock": lambda: toggle_lock(),
+                 "minimize": lambda: queue(("toggle_min",))(),
+                 "war": lambda: API.SetWarMode(not bool(API.Player.InWarMode)),
+                 "help": lambda: API.OpenHelp(), "quests": lambda: API.OpenQuestLog()}
     def run_ui(uid):
         d = ui_def(uid)
         if d is None: say("unknown window button '%s'." % uid, Kit.HUE_BAD); return False
         how = d[3]; ok = True
-        if how == "barsettings": HOST.show_settings(KEY)
-        elif how == "lock": toggle_lock()
-        elif how == "minimize": queue(("toggle_min",))()
-        elif how == "war": API.SetWarMode(not bool(API.Player.InWarMode))
-        elif how == "help": API.OpenHelp()
+        if how in UI_SIMPLE: UI_SIMPLE[how]()
         elif how == "grimoire": return toggle_grimoire()
         elif how == "virtue": return toggle_va()
-        elif how == "quests": API.OpenQuestLog()
         elif how == "paperdoll":
             import System
             if not ClientUI.game_action("OpenPaperdoll", [System.UInt32(int(API.Player.Serial))]):
@@ -1410,11 +1366,10 @@ def _module_actionbar():
         if t is None: return []
         out = []
         def get(sf, n): return str(safe(lambda: ClientUI._get(sf, n), "") or "")
-        try:
+        with Kit.quiet:
             for sf in (ClientUI._get(None, "LoadedScripts", t) or []):
                 rel, path = get(sf, "RelativePath") or get(sf, "FileName"), get(sf, "FullPath")
                 if rel or path: out.append((rel, path))
-        except Exception: pass
         return out
     _script_names = {}; _names_due = set()
     def script_names_for(v):
@@ -1437,14 +1392,13 @@ def _module_actionbar():
         if not walk: add(v); add(base); return list(out)
         root = legion_root()
         if root:
-            try:
+            with Kit.quiet:
                 for d, dirs, files in os.walk(root):
                     rel = d.replace("\\", "/")[len(root):].strip("/")
                     if rel.count("/") >= 2: dirs[:] = []
                     dirs[:] = [x for x in dirs if not x.startswith(".") and x.lower() not in LIB_DIRS]
                     for f in files:
                         if f.lower() == blow: add((rel + "/" + f) if rel else f)
-            except Exception: pass
         add(v); add(base); _script_names[v] = (time.time() + 60.0, out); return list(out)
     _run_hint = {}
     def script_running(v):
@@ -1619,7 +1573,7 @@ def _module_actionbar():
             if any(d in LIB_DIRS for d in parts[:-1]) or parts[-1].startswith("_"): continue
             if rel and rel not in out: out.append(rel)
         if out or not root_dir: return sorted(out, key=lambda s: s.lower())
-        try:
+        with Kit.quiet:
             for root, dirs, files in os.walk(root_dir):
                 rel = root.replace("\\", "/")[len(root_dir):].strip("/")
                 if rel.count("/") >= 2 or "__init__.py" in files:
@@ -1628,7 +1582,6 @@ def _module_actionbar():
                 dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in LIB_DIRS]
                 for f in files:
                     if f.lower().endswith(".py") and not f.startswith("_"): out.append((rel + "/" + f) if rel else f)
-        except Exception: pass
         return sorted(out, key=lambda s: s.lower())
     def saved_list(cat):
         if cat == "macro": return ClientUI.macro_names()
@@ -1947,9 +1900,6 @@ def _module_actionbar():
                  {"ldy": 2, "sdy": 6, "lgap": 8, "ugap": 10, "fh": 26, "pad": 6}),
                 ("EDIT A CELL", [("custom", 128, draw_edit)] + [("note", line) for line in hint]),
                 ("HOW TO USE", [("note", line) for para in HELP for line in Kit.wrap(para, w - 24)]))
-    def dd_index(dd, default):
-        try: return int(dd.GetSelectedIndex())
-        except Exception: return default
     def buttons(f, by, specs): return Kit.buttons(f.g, f.store, f.x + 12, by, specs, 16)
     def drop_down(f, lx, ry, label, key, dw, pairs, value, tooltip):
         Kit.add_label(f.g, label, lx, ry + 2); codes = [p[0] for p in pairs]
@@ -2021,7 +1971,7 @@ def _module_actionbar():
         if cfg.f is not None: Kit.set_text(cfg.f.c["status"], text, Kit.HUE_INFO if hue is None else hue)
     def apply_edit():
         c = cfg.f.c; ref = sel_ref(page["sel"]); cur = cell(ref)
-        def chosen(lst, dd): return lst[max(0, min(len(lst) - 1, dd_index(dd, 0)))][0]
+        def chosen(lst, dd): return lst[max(0, min(len(lst) - 1, Kit.dd_index(dd, 0)))][0]
         t = chosen(TYPES, c["does"]); v = str(c["value"].Text or "").strip()
         tg = chosen(TARGETS, c["target"]); k = _norm_key(c["key"].Text); owner = key_owner(k)
         if owner: set_status("%s belongs to %s" % (k, owner), Kit.HUE_BAD); return
@@ -2053,9 +2003,9 @@ def _module_actionbar():
         if Kit.was_clicked(f.store, "pick"): queue(("pick", sel_ref(page["sel"])))(); set_status("Target the item")
         if Kit.was_clicked(f.store, "clear"): clear_cell(sel_ref(page["sel"]))
     def read_dropdowns(f, new):
-        bm = dd_index(f.c["bagmode"], settings["bagmode"])
+        bm = Kit.dd_index(f.c["bagmode"], settings["bagmode"])
         if bm != page["seen_bag"] and 0 <= bm < len(BAG_MODES): page["seen_bag"] = new["bagmode"] = bm
-        sel = dd_index(f.c["sel"], page["sel"])
+        sel = Kit.dd_index(f.c["sel"], page["sel"])
         if sel != page["seen_sel"] and 0 <= sel < ACTION_SLOTS + UI_SLOTS + EXTRA_SLOTS:
             page["sel"] = sel; HOST.refresh_settings(KEY)
     def settings_changed(old, new):

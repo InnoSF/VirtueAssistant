@@ -1,4 +1,15 @@
-WHATS_NEW = ("2.7.0.16: with the one-panel look, Social and Pets no longer jump between two looks; thinner gold "
+WHATS_NEW = ("2.7.0.24: fixes from a code review: the profile list stays on top after a Settings page switch; "
+    "Restock keeps a target typed just before its page closes; small speed fixes.",
+    "2.7.0.23: fixes the TazUO 'unbounded while loop' warning at start-up.",
+    "2.7.0.22: tidy-up only: shorter error guards in twelve modules; nothing you see changes.",
+    "2.7.0.21: Settings tab: clicking another page redraws only the page, so short pages switch "
+    "quicker.",
+    "2.7.0.20: Profiles: the favourite star is drawn more simply; it still turns gold for the "
+    "favourite.",
+    "2.7.0.19: tidy-up only: shorter code in five more modules; nothing you see changes.",
+    "2.7.0.18: tidy-up only: shorter code in five modules; nothing you see changes.",
+    "2.7.0.17: tidy-up only: shorter shared code; nothing you see changes.",
+    "2.7.0.16: with the one-panel look, Social and Pets no longer jump between two looks; thinner gold "
     "edges round the Action Bar and Paperdoll slots.",
     "2.7.0.15: Action Bar: gold trim between cells; its gold slot frames stay gold in Dark mode. "
     "Dark mode moved to Settings > Interface.",

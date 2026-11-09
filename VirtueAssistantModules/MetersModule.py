@@ -65,7 +65,7 @@ def _module_meters():
           "jr": None, "engaged": {}, "watch": {}, "friendly": {}, "mobs": {}, "dead_seen": {}, "pack_sig": None,
           "pend": [], "orph": [], "last_spell": None, "cast_t": 0.0, "prev_lt": 0, "to_write": [], "changed": False}
     win = {"g": None, "c": {}, "store": ({}, {})}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     spots = []; graph = {"min": None, "b": None, "hist": {}, "ver": 0, "vb": {}}
     recap = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
     data = {}; wins = []; page = {}
@@ -355,10 +355,9 @@ def _module_meters():
     def unhook_damage():
         h, ev = feed.get("handler"), feed.get("event")
         if h is None or ev is None: return
-        try:
+        with Kit.quiet:
             from System import Array, Object, AppDomain; ev.GetRemoveMethod(True).Invoke(None, Array[Object]([h]))
             AppDomain.CurrentDomain.SetData(HOOK_KEY, None)
-        except Exception: pass
         feed.update({"q": None, "handler": None, "event": None, "kind": "not hooked"})
     def on_damage_amount(*args):
         if not st["active"]: return

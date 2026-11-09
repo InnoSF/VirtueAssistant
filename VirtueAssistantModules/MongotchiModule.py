@@ -340,7 +340,7 @@ def _module_mongotchi():
           "shared_at": 0.0, "social_at": 0.0, "anims": {}, "snd_later": [], "parts": {"main": [], "pen": []},
           "sprites": {"main": [], "pen": []}, "bar_w": {}, "carry": None, "shop_dirty": False, "quest_dirty": False}
     win = {"g": None, "c": {}, "store": ({}, {}), "v": None}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     class View(object):
         __slots__ = ("cache", "pen", "xf", "made")
         def __init__(self): self.cache = {}; self.pen = set(); self.xf = None; self.made = None
@@ -352,21 +352,20 @@ def _module_mongotchi():
             k = id(ctrl); e = self.cache.get(k)
             if e is None: e = self.cache[k] = {}
             return e
+        def _chg(self, ctrl, key, v):
+            if ctrl is None: return False
+            e = self._e(ctrl)
+            if e.get(key) == v: return False
+            e[key] = v; return True
         def show(self, ctrl, on):
-            if ctrl is None: return
-            e = self._e(ctrl)
-            if e.get("vis") == on: return
-            e["vis"] = on; Kit.set(ctrl, "IsVisible", on)
+            if self._chg(ctrl, "vis", on): Kit.set(ctrl, "IsVisible", on)
         def look(self, ctrl, gfx, hue):
-            if ctrl is None: return
-            e = self._e(ctrl)
-            if e.get("gfx") != gfx: e["gfx"] = gfx; Kit.set(ctrl, "Graphic", gfx)
-            if e.get("hue") != hue: e["hue"] = hue; Kit.set(ctrl, "Hue", hue)
+            if self._chg(ctrl, "gfx", gfx): Kit.set(ctrl, "Graphic", gfx)
+            if self._chg(ctrl, "hue", hue): Kit.set(ctrl, "Hue", hue)
         def move(self, ctrl, x, y):
             if ctrl is None: return
-            xi, yi = int(x), int(y); e = self._e(ctrl)
-            if e.get("pos") == (xi, yi): return
-            e["pos"] = (xi, yi)
+            xi, yi = int(x), int(y)
+            if not self._chg(ctrl, "pos", (xi, yi)): return
             try:
                 xf = self.xf
                 if xf is not None and id(ctrl) in self.pen:
@@ -375,9 +374,8 @@ def _module_mongotchi():
             except Exception: pass
         def size(self, ctrl, w, h):
             if ctrl is None: return
-            wi, hi = int(w), int(h); e = self._e(ctrl)
-            if e.get("size") == (wi, hi): return
-            e["size"] = (wi, hi)
+            wi, hi = int(w), int(h)
+            if not self._chg(ctrl, "size", (wi, hi)): return
             try:
                 if self.xf is not None and id(ctrl) in self.pen:
                     sc = self.xf[4]; ctrl.SetWidth(max(1, int(round(wi * sc))))
@@ -386,16 +384,12 @@ def _module_mongotchi():
             except Exception: pass
         def alpha(self, ctrl, a):
             if ctrl is None: return
-            a = round(a, 2); e = self._e(ctrl)
-            if e.get("alpha") != a:
-                e["alpha"] = a
+            a = round(a, 2)
+            if self._chg(ctrl, "alpha", a):
                 try: ctrl.SetAlpha(a)
                 except Exception: pass
         def width(self, ctrl, w):
-            if ctrl is None: return
-            e = self._e(ctrl)
-            if e.get("w") != w:
-                e["w"] = w
+            if self._chg(ctrl, "w", w):
                 try: Kit.ui_w(ctrl, max(0, w))
                 except Exception: pass
         def text(self, lbl, text, hue=None):
@@ -1227,13 +1221,12 @@ def _module_mongotchi():
         cats = shop_cats(); k = cats[min(st["shop_cat"], len(cats) - 1)][0]
         if k == "season": return [it for it in SEASONAL if in_season(it)]
         return [it for it in BY_CAT.get(k, []) if shown_in_shop(it)]
+    SHOP_ACTS = {"buy": lambda it: buy(it), "give": lambda it: give_treat(it, time.time()),
+                 "wear": lambda it: wear(it, True), "remove": lambda it: wear(it, False)}
     def shop_act(iid, act):
         it = BY_ID.get(iid)
         if it is None or act not in [b[2] for b in row_buttons(it)]: return
-        if act == "buy": buy(it)
-        elif act == "give": give_treat(it, time.time())
-        elif act == "wear": wear(it, True)
-        elif act == "remove": wear(it, False)
+        if act in SHOP_ACTS: SHOP_ACTS[act](it)
         elif act in ("summon", "dismiss"):
             set_comp(act == "summon")
             say("%s %s." % (name(), "flutters out to join you" if settings["comp"]
@@ -1913,11 +1906,10 @@ def _module_mongotchi():
             v.made = None; v.pen = seen; v.xf = (PX0, PY0, Z["ox"], Z["oy"], k); c["pen_ctrls"] = made; c["pen_k"] = k
             for ctl in made:
                 e = v.cache.get(id(ctl)) or {}; pos, size = e.get("pos"), e.get("size")
-                try:
+                with Kit.quiet:
                     if pos is not None: tx, ty = v.tr(pos[0], pos[1]); ctl.SetPos(int(round(tx)), int(round(ty)))
                     if size is not None:
                         ctl.SetWidth(max(1, int(round(size[0] * k)))); ctl.SetHeight(max(1, int(round(size[1] * k))))
-                except Exception: pass
             c["grem_k"] = None; gremlin_scale(c, 1.0)
         stats_block(g, c, v, Z["sy"], IWz, Z["sh"], Z["bar_w"], Z["pair1"], Z["pair2"]); ay = Z["ay"]
         Kit.add_section(g, M, ay, IWz, Z["ah"]); n, cw = Z["ncols"], Z["col_w"]

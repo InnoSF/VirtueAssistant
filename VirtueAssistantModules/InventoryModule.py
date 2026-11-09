@@ -90,7 +90,7 @@ def _module_inventory():
         win = {"g": None, "c": {}, "store": ({}, {}), "side_status": None, "bar": None, "grid": None, "mgr": None,
                "trp": None, "trap_checks": [], "srt": None, "rule_checks": [], "search_box": None, "counts": [],
                "count_state": {}}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def act(kind, *args):
             def handler(*_ignored): queue.add((kind,) + args)
             return handler
@@ -208,10 +208,9 @@ def _module_inventory():
             try:
                 hook = new_ctl(R.Hook); hook.AcceptMouseInput = False; raw = st["grid_info"][0]
                 if raw is not None and Client.on_client_thread():
-                    try:
+                    with Kit.quiet:
                         hook.Parent = raw
                         if raw.Children.Contains(hook): return
-                    except Exception: pass
                 grid.Add(hook)
             except Exception as e:
                 st["driving"] = st["drive_fixed"] = True; H.error = "draw hook: %s" % e
@@ -226,10 +225,9 @@ def _module_inventory():
             if wrapper is None: return None
             t = type(wrapper); way = _raw_way.get(t)
             if way is not None:
-                try:
+                with Kit.quiet:
                     v = way(wrapper)
                     if v is not None: return v
-                except Exception: pass
             for fn in RAW_WAYS:
                 if fn is way: continue
                 try: v = fn(wrapper)
@@ -449,8 +447,7 @@ def _module_inventory():
                 if g is not None and g.IsVisible: g.IsVisible = False
         def restore_all():
             for g in list(H.managed):
-                try: release(g)
-                except Exception: pass
+                with Kit.quiet: release(g)
         def set_minimized_all(minimize):
             serials = set(st["assign"].values())
             def run():
@@ -912,10 +909,9 @@ def _module_inventory():
         def canvas_detach():
             c = CV["ctrl"]
             if c is None: return
-            try:
+            with Kit.quiet:
                 p = c.Parent
                 if p is not None: detach(p, c)
-            except Exception: pass
         def canvas_place(raw, index, x, y, w, h):
             c = CV["ctrl"]
             if c is None or c.IsDisposed:
@@ -944,9 +940,8 @@ def _module_inventory():
             a = st["opacity"]; bg = CV["bg"]; want = (a, bg)
             if CV["alpha_set"] == want: return
             for ic in ([bg] if bg is not None else []) + CV["icons"]:
-                try:
+                with Kit.quiet:
                     if abs(float(ic.Alpha) - a) > 0.001: ic.Alpha = a
-                except Exception: pass
             CV["alpha_set"] = want
         def into_canvas(w):
             raw = raw_of(w) if w is not None else None
@@ -956,8 +951,7 @@ def _module_inventory():
             c = CV["ctrl"]; grid = win.get("grid")
             if c is None or grid is None: return
             for p in CV["parts"]:
-                try: detach(c, p); p.Dispose()
-                except Exception: pass
+                with Kit.quiet: detach(c, p); p.Dispose()
             CV["parts"], CV["icons"], CV["label"], CV["count"] = [], [], {}, {}; CV["tip"] = None
             CV["alpha_set"] = None; lbl = CV["say_lbl"]; CV["say_lbl"] = None
             if lbl is not None: safe(lbl.Dispose)
@@ -1272,10 +1266,9 @@ def _module_inventory():
                                            System.UInt32(int(bag)), False), R.Actions)
                 return
             px, py = x, y
-            try:
+            with Kit.quiet:
                 if bool(R.p_profile.GetValue(None).RelativeDragAndDropItems):
                     off = Tz.get(hold, "MouseOffset"); px, py = px + int(off.X), py + int(off.Y)
-            except Exception: pass
             aw, ah = art_size(int(Tz.get(hold, "DisplayedGraphic"))); pw, ph = pic_size(aw, ah); cs = H.scale or 1.0
             box = item_box(CANVAS["regions"][slot]); cl_x, ch_x, cl_y, ch_y = centre_range(box, pw, ph)
             cx = max(cl_x, min(ch_x, px)); cy = max(cl_y, min(ch_y, py))
@@ -1440,21 +1433,19 @@ def _module_inventory():
                 st["frame_x"], st["frame_y"] = st["saved_fx"], st["saved_fy"]; st["detached_at"] = time.time()
                 H.bar_at = None
                 for raw in (st["bar_raw"], st["grid_raw"]):
-                    try:
+                    with Kit.quiet:
                         if raw is not None and not raw.IsDisposed: move(raw, st["frame_x"], st["frame_y"])
-                    except Exception: pass
                 for key in ("bar", "grid"):
                     g = win.get(key)
                     if Kit.is_open(g):
                         g.SetPos(st["frame_x"], st["frame_y"]); Kit.moved_by_code(g)
             elif info is not None:
                 st["minimized"] = st["docked"] = False; set_dock_wish(False)
-                try:
+                with Kit.quiet:
                     lead = info.get("g")
                     if Kit.is_open(lead) and (info.get("dx") or info.get("dy")):
                         st["frame_x"] = int(lead.GetX()) + int(info.get("dx", 0))
                         st["frame_y"] = int(lead.GetY()) + int(info.get("dy", 0))
-                except Exception: pass
             st["attach"] = info; st["dirty_frame"] = True
         def bare_btn_size(): w, h = Kit.pic_size(ART_BARE[0]); return (w or 15), (h or 15)
         def add_bare_button(grid, x, y, strip=True):
@@ -1561,10 +1552,9 @@ def _module_inventory():
                 try: g.SetPos(int(nx), int(ny))
                 except Exception: continue
                 moved_n += 1
-                try:
+                with Kit.quiet:
                     if snap.last is not None: snap.last[g] = (nx, ny)
                     Kit.moved_by_code(g); snap.follow(g, nx - fx, ny - fy, set([g]))
-                except Exception: pass
                 fn = snap.moved_cb.get(g)
                 if fn is not None: safe(fn)
             if moved_n and not anch["told"]:
@@ -2312,14 +2302,13 @@ def _module_inventory():
         def add_quick_strip(grid, x_right, y):
             win["quick_sig"] = quick_sig(); x = x_right - len(QUICK) * QUICK_STEP
             for i, (k, cap, _art, icon, part, tip, _svc) in enumerate(QUICK):
-                try:
+                with Kit.quiet:
                     pic = G.CreateGumpItemPic(icon, QUICK_ICON, QUICK_ICON)
                     pic.SetRect(x + i * QUICK_STEP, y, QUICK_ICON, QUICK_ICON)
                     if not quick_on(part): Kit.set(pic, "Hue", Kit.HUE_INFO)
                     Kit.set(pic, "DrawBorder", False); t = quick_tip(part, tip)
                     pic.SetTooltip(t if not quick_on(part) else cap + ": " + t)
                     G.AddControlOnClick(pic, act("quick_press", k)); grid.Add(pic)
-                except Exception: pass
         KIND_GRAPHICS = dict((k, frozenset(gs)) for k, _c, gs in SORT_KINDS); NO_RULE = (frozenset(), ())
         def rule_graphics(idx):
             kinds, extra = st["rules"].get(idx, NO_RULE); out = set(extra)
@@ -3033,7 +3022,7 @@ def _module_inventory():
               "pair": None, "pair_at": 0.0, "room": None, "room_fs": None, "told_shrink": None, "grew": False,
               "paired": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "raw": None, "doll": []}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def load_settings():
             p = Kit.get_var(SETTINGS_KEY).split("|")
             if len(p) >= 2: settings["stats"] = p[0] == "1"; settings["combine"] = p[1] == "1"
@@ -3115,13 +3104,6 @@ def _module_inventory():
                 R.MobileType = asm.GetType("ClassicUO.Game.GameObjects.Mobile")
                 R.m_covered = (R.MobileType.GetMethod("IsCovered", stat) if R.MobileType is not None else None)
             except Exception: R.m_covered = None
-        def raw_of(wrapper):
-            if wrapper is None: return None
-            try:
-                v = wrapper.Gump
-                if v is not None: return v
-            except Exception: pass
-            return Kit.client_control(wrapper)
         LAYER_ENUMS = {}
         def layer_enum(layer):
             e = LAYER_ENUMS.get(layer)
@@ -3203,13 +3185,12 @@ def _module_inventory():
         def scale_ctrl(c, raw=False, flushed=False):
             k = st["k"]
             if abs(k - 1.0) < 0.001 or c is None: return
-            try:
+            with Kit.quiet:
                 if not raw and not flushed: Kit.flush()
                 rc = c if raw else Kit.client_control(c)
                 if rc is None: return
                 if str(rc.GetType().Name) == "GumpPicTiled": rc.ScaleTiledTexture = True
                 rc.ApplyScale(k, True, True, False)
-            except Exception: pass
         def cell_info():
             fn = bag_service("bag.cell")
             if fn is None: return None
@@ -3241,7 +3222,7 @@ def _module_inventory():
             ci = cell_info()
             if ci is None: return None
             own, floor = ci[5], ci[6]; told = st["told_shrink"]; p = own
-            while True:
+            for _ in range(int(own - floor) // SHRINK_STEP + 2):
                 rows, need, wneed = need_at(ci, p / float(own), hw)
                 spare = 3 * rows if (told is not None and p > told) else 0
                 if (need + spare <= hh and wneed <= hw) or p <= floor: return (None if p >= own else p), need
@@ -3326,8 +3307,7 @@ def _module_inventory():
                 for cx, cy in ((0, 0), (w - cw, 0), (0, h - ch), (w - cw, h - ch)):
                     if cx < hx + hw and cx + cw > hx and cy < hy + hh and cy + ch > hy: continue
                     parts.append(Kit.add_pic(g, Kit.CORNER_ART, cx, cy))
-            try: Kit._frame_parts[g] = [p for p in parts if p is not None]
-            except Exception: pass
+            with Kit.quiet: Kit._frame_parts[g] = [p for p in parts if p is not None]
         def build_window():
             old, win["g"] = win["g"], None; clear_slots(); store = ({}, {}); c = {}; slots = []; att = st["attached"]
             hole = None
@@ -3407,7 +3387,7 @@ def _module_inventory():
                                  win, {"g": g, "c": c, "store": store, "slots": slots})
             to_slot(KEY, g, xy); hooks = geo["hooks"]
             if hooks is not None: hooks["verify"] = not st["paired"]
-            win["raw"] = raw_of(g) if R.ok else None
+            win["raw"] = Kit._raw_gump(g) if R.ok else None
             if att is not None: att["g"], att["raw"] = g, None
             sync_attached()
             st.update({"sig": None, "doll_sig": None, "stats_at": 0.0, "stats_key": None, "doll_at": 0.0, "wbar": None})
@@ -3511,8 +3491,7 @@ def _module_inventory():
             return gid
         def covered(layer, gfx, p=None):
             if R.m_covered is not None and R.ok and p is not None:
-                try: return bool(R.m_covered.Invoke(None, Array[Object]([p, layer_enum(layer)])))
-                except Exception: pass
+                with Kit.quiet: return bool(R.m_covered.Invoke(None, Array[Object]([p, layer_enum(layer)])))
             robe = gfx.get(L_ROBE); pants = gfx.get(L_PANTS)
             if layer == L_SHOES:
                 if gfx.get(L_LEGS) is not None or pants == 0x1411: return True
@@ -3957,7 +3936,7 @@ def _module_inventory():
         DEFAULTS = dict(settings)
         st = {"shutting": True, "minimized": False, "docked": False, "queue": [], "active": False, "hooked": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; page = {"wipe_at": 0.0}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         idx = {"recs": {}, "tombs": {}, "ver": 0, "dirty": False, "dirty_at": 0.0,
                "loaded": False, "path": None, "mtime": None, "err": "", "unread": False}
         summ = {"ver": -1, "keys": {}, "places": {}, "items": 0, "chars": 0}
@@ -4031,12 +4010,11 @@ def _module_inventory():
             Kit.put_var(FAVS_KEY, ";".join("%s=%s" % (l.replace(";", ",").replace("=", "-"),
                                                       t.replace(";", ",")) for l, t in favs))
         def account_id():
-            try:
+            with Kit.quiet:
                 Typing._find(); prof = Typing.prof
                 cur = Typing._get(None, "CurrentProfile", prof) if prof is not None else None
                 user = Typing._get(cur, "Username") if cur is not None else None
                 if user: server = Typing._get(cur, "ServerName") or ""; return fnv(("%s|%s" % (server, user)).lower())
-            except Exception: pass
             try:
                 scope = API.PersistentVar.Account; v = str(API.GetPersistentVar(ACCOUNT_KEY, "", scope) or "")
                 if not v:
@@ -4777,10 +4755,9 @@ def _module_inventory():
         def _stop():
             st["shutting"] = True; st["active"] = False
             if has_unread() or idx["dirty"]:
-                try:
+                with Kit.quiet:
                     if not idx["loaded"]: load_index()
                     take_reads(); save_index()
-                except Exception: pass
             watching.clear(); del opens[:]; cleanup.close()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
@@ -4810,8 +4787,7 @@ def _module_inventory():
               "page": 0, "count_at": 0.0, "short": {}, "layout": None,
               "hooked": False, "active": False, "redraw": False, "shown_moved": 0, "sent_at": 0.0, "flight": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "tips": {}}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
-        page = {"c": None, "seen": None, "at": 0.0}
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def noop(): pass
         def load_settings():
             settings.update({"deep": True, "src_deep": True, "src": "last", "src_serial": 0, "dest": 0})
@@ -5251,39 +5227,17 @@ def _module_inventory():
                                   "chest or bank box too (only those whose contents you have seen)", {"h": 30}),
                                  ("note", "One move every %.1f s; it stops when you pick something up." % MOVE_GAP)),
                      {"sh": OPT_H})]
-        cfg = Kit.Page(settings, page_table, save_settings)
-        def config_height(w): return Kit.Form.height(page_table(w), w)
-        def build_config(g, x, y, w):
-            vals = dict(settings); vals.update((k, targets.get(k, 0)) for k in ORDER)
-            page.update({"c": Kit.Form(g, x, y, w, vals, page_table(w)).c, "seen": None, "at": 0.0})
-        def poll_config():
-            c = page["c"]
-            if c is None: return
-            now = time.time()
-            if 0 <= now - page["at"] < POLL_EVERY: return
-            page["at"] = now
-            try:
-                texts = tuple(str(c[k].Text).strip() for k in ORDER)
-                ticks = (bool(c["deep"].IsChecked), bool(c["src_deep"].IsChecked))
-            except Exception: return
-            changed = False
-            for k, v in zip(("deep", "src_deep"), ticks):
-                if v != settings[k]: settings[k] = v; changed = True
-            if changed: save_settings(); st["count_at"] = 0.0
-            if texts == page["seen"]: return
-            page["seen"] = texts; new = False
-            for k, t in zip(ORDER, texts):
-                if not t.isdigit(): continue
-                n = min(TARGET_MAX, int(t))
-                if n != targets.get(k, 0):
-                    if n > 0: targets[k] = n
-                    else: targets.pop(k, None)
-                    new = True
-            if new:
+        def page_change(old, new):
+            if (new["deep"], new["src_deep"]) != (old["deep"], old["src_deep"]):
+                settings.update(deep=new["deep"], src_deep=new["src_deep"]); save_settings(); st["count_at"] = 0.0
+            if any(new[k] != old[k] for k in ORDER):
+                targets.clear(); targets.update((k, new[k]) for k in ORDER if new[k] > 0)
                 Kit.put_var(TARGETS_KEY, ",".join("%s=%d" % (k, targets[k]) for k in ORDER if targets.get(k, 0) > 0))
                 st["count_at"] = 0.0
                 if layout_now() != st["layout"]: st["redraw"] = True
-        def config_closed(): page["c"] = None; page["seen"] = None
+        cfg = Kit.Page(settings, page_table, None, page_change, every=POLL_EVERY)
+        def build_config(g, x, y, w):
+            cfg.vals = dict(settings); cfg.vals.update((k, targets.get(k, 0)) for k in ORDER); cfg.build(g, x, y, w)
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "run": None, "halt": False,
                        "status": ("Idle", Kit.HUE_INFO), "opened": [], "page": 0,
@@ -5315,8 +5269,8 @@ def _module_inventory():
             st.update({"shutting": True, "halt": True, "active": False}); r, st["run"] = st["run"], None; keep_flight(r)
             save_settings(); cleanup.close()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
-                "config_height": config_height, "build_config": build_config, "poll_config": poll_config,
-                "config_closed": config_closed, "interval": _interval}
+                "config_height": cfg.height, "build_config": build_config, "poll_config": cfg.poll,
+                "config_closed": cfg.closed, "interval": _interval}
     def _part_supplies():
         KEY = "supplies"; TITLE = "Supplies"; OLD_SETTINGS_KEY = "UnitFrames_settings"; SET_KEY = "UnitFrames_supset"
         SAVE_EVERY = 10.0; PACK_AGE = 0.5; SUPPLY_EVERY = 1.0; SUPPLY_W = 220; SUPPLY_ROW = 22; SUPPLY_ICON = 20
@@ -5335,7 +5289,7 @@ def _module_inventory():
         win = {"g": None, "c": {}, "store": ({}, {})}; supplies = set(SUPPLY_DEFAULT)
         sup = {"g": None, "c": {}, "rows": (), "at": None, "slot": None, "drawn": None}; warn = {}
         page = {"next_warn": 0.0}; _get, _put = Kit.get_var, Kit.put_var
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def read_pairs(key): Kit.kv_load(key, ",", settings, NUMBERS)
         def load_settings(): read_pairs(SET_KEY if _get(SET_KEY, "") else OLD_SETTINGS_KEY)
         def save_settings(): Kit.kv_save(SET_KEY, ",", settings, sorted(settings), NUMBERS)
@@ -5580,8 +5534,7 @@ def _module_inventory():
         def read_side(f, new):
             dd = f.c.get("sup_side")
             if dd is None: return
-            try: side = int(dd.GetSelectedIndex())
-            except Exception: return
+            side = Kit.dd_index(dd, -1)
             if 0 <= side < len(SUPPLY_SIDES): new["sup_side"] = side
         def on_change(old, new): st["next_supply"] = 0.0; sup["at"] = None
         cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=read_side, clicks=page_clicks)

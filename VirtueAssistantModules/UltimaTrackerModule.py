@@ -8,18 +8,17 @@ def _module_ultima():
         KEY = "ultima"; TITLE = "Ultima Tracker"; OWN_PREFIX = TITLE + ":"
         TICK_SECONDS             = 0.25; COMBAT_TICK_SECONDS      = 0.15; HP_EVERY = 0.05
         DOUBLE_CLICK_SECONDS     = 0.45
-        NPC_RECHECK_SECONDS      = 3.0; DEFAULT_SCALE   = 100; DEFAULT_OPACITY = 85; DEFAULT_RANGE   = 18
-        DEFAULT_SYNC    = False; SCALE_MIN, SCALE_MAX = 50, 200; RANGE_MIN, RANGE_MAX = 1, 24; ROW_H      = 32
+        NPC_RECHECK_SECONDS      = 3.0; DEFAULT_OPACITY = 85
+        SCALE_MIN, SCALE_MAX = 50, 200; RANGE_MIN, RANGE_MAX = 1, 24; ROW_H      = 32
         MIN_W      = 210; MIN_H      = 90; POP_W      = 200; POP_BTN_W  = 18; NPC_BTN_W  = 12; SCROLLBAR  = 14
         SAVE_EVERY = 8; BASE_WIDTH     = 220; BASE_ROW_H     = 16; BASE_FONT      = 11; CB_MIN_WIDTH   = 170
-        CB_MAX_WIDTH   = 600; CB_ROW_GAP     = 1; CB_FOOTER_H    = 10; SPELL_POISON   = "Poison"
-        SPELL_PARALYZE = "Paralyze"; SPELL_HEAL, SPELL_GREATER_HEAL = "Heal", "Greater Heal"
-        SPELL_CURE, SPELL_ARCH_CURE    = "Cure", "Arch Cure"; CAST_TIMEOUT   = 5.0; COMBAT_RANGE   = 12
-        MAX_RANGE      = 18; IDLE_TIMEOUT   = 20.0; MAX_BARS       = 12; DEFAULT_COMBAT_ONLY       = True
+        CB_MAX_WIDTH   = 600; CB_ROW_GAP     = 1; CB_FOOTER_H    = 10
+        CAST_TIMEOUT   = 5.0; COMBAT_RANGE   = 12
+        MAX_RANGE      = 18; IDLE_TIMEOUT   = 20.0; MAX_BARS       = 12
         MELEE_RANGE               = 2; NEVER_SHOW_NOTO           = ("invulnerable",)
         FRIENDLY_NOTO             = ("innocent", "ally")
         HOSTILE_NOTO = [API.Notoriety.Gray, API.Notoriety.Criminal, API.Notoriety.Enemy, API.Notoriety.Murderer]
-        ALERT_KEY        = "ultima.foe"; ALERT_SOUND      = 0x2E7; DEFAULT_ALERT_MINUTES = 5
+        ALERT_KEY        = "ultima.foe"; ALERT_SOUND      = 0x2E7
         ALERT_MIN, ALERT_MAX = 1, 60; SIGHT_CAP        = 2000; SIGHT_SLACK      = 200; SIGHT_GONE       = 60.0
         SIGHT_SAVE_SECONDS = 30.0; SIGHT_ROWS       = 12; SIGHT_REFRESH    = 30.0; SIGHT_TRAY_ICON  = 0x14F5
         KILLER_BACK      = 60.0; KILLER_SHOW      = 60.0; KILLER_ROWS      = 6; ATTACKERS_CAP    = 40
@@ -54,10 +53,9 @@ def _module_ultima():
         SECTION_GUMP  = Kit.SECTION_TILE; HEADER_GUMP   = Kit.SECTION_TILE; DIVIDER_H     = 3
         BUTTON_GUMP   = Kit.STONE_TILE; LOCK_GUMP     = 0x082C; LOCK_OFF_ALPHA = 0.6
         MIN_GUMPS     = (Kit.ART_MIN[0], Kit.ART_RESTORE[0]); OPACITY_GUMPS = (0x0837, 0x0838)
-        HUE_TEXT     = 0x0481; HUE_LOCKED   = 34
-        HUE_PARA_BAR = 0x0480
+        HUE_TEXT     = 0x0481
         FACE_HUE = {BTN_FACE: 0, BTN_FACE_ON: 0x0035, COL_HEAL: 0x0035, COL_CURE: 0x0059,
-                    COL_BANDAGE: 0, COL_POISON: 0x003F, COL_PARA: HUE_PARA_BAR}
+                    COL_BANDAGE: 0, COL_POISON: 0x003F, COL_PARA: 0x0480}
         HUE_PALETTE = [((235, 235, 235), 0x0481), ((150, 150, 150), 0x03B2),
                        ((225, 55, 55), 0x0022), ((70, 220, 70), 0x003F),
                        ((90, 150, 255), 0x0059), ((255, 155, 45), 0x0090), ((255, 220, 80), 0x0035), ((25, 25, 25), 0)]
@@ -74,18 +72,18 @@ def _module_ultima():
             "combat":  [300, 200, BASE_WIDTH, 0, False, False, DEFAULT_OPACITY],
             "panel":   [40, 380, 0, 0, False, False, DEFAULT_OPACITY],}
         FOES = {}; IGNORE = {}; LAYOUT = {k: list(v) for k, v in DEFAULT_LAYOUT.items()}
-        settings = {"scale": DEFAULT_SCALE, "opacity": DEFAULT_OPACITY, "range": DEFAULT_RANGE,
-                       "sync": DEFAULT_SYNC, "magery": False, "combat_shown": True,
-                       "combat_only": DEFAULT_COMBAT_ONLY, "healing": False, "borders": True,
+        settings = {"scale": 100, "opacity": DEFAULT_OPACITY, "range": 18,
+                       "sync": False, "magery": False, "combat_shown": True,
+                       "combat_only": True, "healing": False, "borders": True,
                        "alert_red": True, "alert_foes": True, "alert_orange": False,
-                       "alert_gray": False, "alert_minutes": DEFAULT_ALERT_MINUTES, "sightings": True, "killer": True}
+                       "alert_gray": False, "alert_minutes": 5, "sightings": True, "killer": True}
         DEFAULTS = dict(settings)
         STATE_DEFAULTS = {"dirty_save": False, "foe_ver": 0, "combat_loaded": False, "shutting": False,
                           "started": False, "loaded": False}
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "dirty_save": False, "foe_ver": 0,
               "combat_loaded": False, "started": False, "loaded": False, "party": set()}
         win = {"g": None, "c": {}, "store": ({}, {})}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         POPS = {}; DOCK_REQ = []; SETTINGS_REQ = []
         KIT_HEAD = Kit.MARGIN + 30 + Kit.GAP; KIT_MINI_H = 2 * Kit.MARGIN + 30
         def settings_click(*args): SETTINGS_REQ.append(True)
@@ -258,8 +256,8 @@ def _module_ultima():
             fs = max(7, int(h * 0.7 / min(1.0, settings["scale"] / 100.0)))
             tips, specs, parts = [], [], [] if store is None else store
             if settings["magery"]:
-                for text, spell, stronger, tip, face in (("H", SPELL_HEAL, SPELL_GREATER_HEAL, TIP_HEAL, COL_HEAL),
-                        ("C", SPELL_CURE, SPELL_ARCH_CURE, TIP_CURE, COL_CURE)):
+                for text, spell, stronger, tip, face in (("H", "Heal", "Greater Heal", TIP_HEAL, COL_HEAL),
+                        ("C", "Cure", "Arch Cure", TIP_CURE, COL_CURE)):
                     specs.append((text, make_heal_click(serial, spell, stronger) if row is None else RowClick(row, (
                         lambda sp, st: lambda s, n: make_heal_click(s, sp, st))(spell, stronger)), tip, face,
                         "#FFFFFF"))
@@ -520,7 +518,7 @@ def _module_ultima():
                 if icon:
                     graphic, (iw, ih) = icon[1 if on else 0]
                     if iw <= sz + 6 and ih <= sz + 6:
-                        hue = HUE_LOCKED if kind == "lock" and on else 0
+                        hue = 34 if kind == "lock" and on else 0
                         p = self._add(pic(graphic, x + (sz - iw) // 2, y + (sz - ih) // 2, hue))
                         if kind == "lock" and not on: set_box_alpha(p, LOCK_OFF_ALPHA)
                         self._add(catcher(x, y, sz, sz, fn, tip)); return
@@ -1096,8 +1094,8 @@ def _module_ultima():
             my_serial = me.Serial; mx, my = int(me.X), int(me.Y)
             alert_on = (settings["alert_red"] or settings["alert_foes"] or settings["alert_orange"]
                         or settings["alert_gray"])
-            cands = fresh = appeared = foes_here = None; log_on = settings["sightings"]; wins = views["windows"] or {}
-            need_hp = {}
+            cands = fresh = appeared = foes_here = None; log_on = settings["sightings"]
+            wins = views["windows"] or {}; need_hp = {}
             for c in CATS: w = wins.get(c); need_hp[c] = w is None or not (w.minimized and LAYOUT[c][5])
             for m in mobs:
                 try:
@@ -1142,9 +1140,9 @@ def _module_ultima():
             ALERT_PREV.clear()
             if cands is not None: ALERT_PREV.update(cands)
             try:
-                if foes_here is not None: foes_seen(foes_here, now)
-                if fresh is not None: foe_alerts(fresh, now)
-                if appeared is not None: log_appeared(appeared, now)
+                if foes_here: foes_seen(foes_here, now)
+                if fresh: foe_alerts(fresh, now)
+                if appeared: log_appeared(appeared, now)
             except Exception as ex: report_error(ex)
             return out
         def alert_why(tag, noto):
@@ -1908,8 +1906,8 @@ def _module_ultima():
             if par: tags += "PAR "
             return tags + pct
         TIP_CB = "Attack or aim at %s (blue or green in guards: twice). " + ALT_FOLLOW_TIP
-        CB_SPELLS = ((SPELL_POISON, "P", COL_POISON, "Cast Poison on %s. Alt+click: auto-follow (again to stop)"),
-                     (SPELL_PARALYZE, "Z", COL_PARA, "Cast Paralyze on %s. Alt+click: auto-follow (again to stop)"))
+        CB_SPELLS = (("Poison", "P", COL_POISON, "Cast Poison on %s. Alt+click: auto-follow (again to stop)"),
+                     ("Paralyze", "Z", COL_PARA, "Cast Paralyze on %s. Alt+click: auto-follow (again to stop)"))
         CB_X = Kit.MARGIN + 4
         class CombatSlot(PoolRow):
             def __init__(self, view, i, geo, d):
@@ -2133,7 +2131,7 @@ def _module_ultima():
                 self.windows, self.combat = windows, combat
                 self.g = self.list_sa = self.input = self.lock_all_lbl = self.combat_lbl = self.foe_title = None
                 self.store, self.x0, self.w = ({}, {}), 0, 0; self.foe_ver = self.seen_ver = -1
-                self.foe_rows, self.seen_at = [], 0.0; self.lock_all_text = self.combat_text = ""
+                self.foe_rows, self.seen_at = [], 0.0
                 self.list_top = self.list_h = 0; self.list_lbls = (); hub = HOST.hub
                 if hub is not None:
                     hub.add("ultima", TITLE, {"height": self.height, "build": self.build_section,
@@ -2157,7 +2155,7 @@ def _module_ultima():
                 f = tiled(Kit.FIELD_TILE, W, 24); f.SetPos(X, y0 + 21); g.Add(f)
                 self.input = API.Gumps.CreateGumpTextBox("", W - 4, 22, False, 16); self.input.SetPos(X + 2, y0 + 22)
                 self.input.SetPlaceholder("Player name"); Kit.with_tip(self.input, "Player name for the buttons below")
-                g.Add(self.input); self.combat_text = "Hide combat" if self.combat.is_open() else "Show combat"
+                g.Add(self.input); combat_text = "Hide combat" if self.combat.is_open() else "Show combat"
                 rows = (("Add foe", 0, 52, self.add_foe, Kit.ART_OK, "Put the typed name on your Foe list"),
                         ("Remove foe", 1, 52, self.remove_foe, Kit.ART_CLOSE, "Take the typed name off your Foe list"),
                         ("Target...", 2, 52, self.target_foe, Kit.ART_PLAY,
@@ -2168,12 +2166,12 @@ def _module_ultima():
                             "Show the typed name in the trackers again"),
                         ("Lock all", 2, 80, self.lock_all, Kit.ART_PLAY,
                          "Lock or unlock every tracker, the combat bars and pop-outs"),
-                        (self.combat_text, 0, 144, self.toggle_combat, Kit.ART_PLAY, "Show or hide the combat bars"),
+                        (combat_text, 0, 144, self.toggle_combat, Kit.ART_PLAY, "Show or hide the combat bars"),
                         ("Settings", 1, 144, lambda *a: HOST.show_settings("ultima"), Kit.ART_PAGE,
                          Kit.SETTINGS_TIP % TITLE), ("Sightings", 2, 144, lambda *a: SIGHT_WIN.toggle(), Kit.ART_PAGE,
                          "Open or close the Sightings window"))
                 lbls = [self._button(t, X + col * cw, y0 + dy, cw, fn, art, tip) for t, col, dy, fn, art, tip in rows]
-                self.lock_all_lbl, self.combat_lbl, self.lock_all_text = lbls[5], lbls[6], "Lock all"
+                self.lock_all_lbl, self.combat_lbl = lbls[5], lbls[6]
                 self._divider(y0 + 110); self._heading("WINDOWS", y0 + 120)
                 self._divider(y0 + 176); self.foe_title = self._heading("SAVED FOES (0)", y0 + 186)
                 self.list_top = y0 + 210; bottom = y0 + self.BODY_H
@@ -2232,10 +2230,8 @@ def _module_ultima():
                 (cw.hide if cw.is_open() else cw.show)(); self.refresh_labels()
             def refresh_labels(self):
                 if self.gump is None or self.lock_all_lbl is None: return
-                text = "Unlock all" if self._all_locked() else "Lock all"
-                if text != self.lock_all_text: self.lock_all_text = text; Kit.set_text(self.lock_all_lbl, text)
-                text = "Hide combat" if self.combat.is_open() else "Show combat"
-                if text != self.combat_text: self.combat_text = text; Kit.set_text(self.combat_lbl, text)
+                Kit.set_text(self.lock_all_lbl, "Unlock all" if self._all_locked() else "Lock all")
+                Kit.set_text(self.combat_lbl, "Hide combat" if self.combat.is_open() else "Show combat")
             def reset_defaults(self, *args):
                 reset_settings()
                 for p in POPS.values(): p.opacity, p.locked = DEFAULT_OPACITY, False
@@ -3030,7 +3026,7 @@ def _module_ultima():
     def _part_lookout():
         KEY = "lookout"; TITLE = "Lookout"; SETTINGS_KEY = "Lookout_settings"; POS_KEY = "Lookout_pos"
         MIN_KEY = "Lookout_min"; FEED_NAME = "_lookout_feed.txt"; W = 370; MINI_W, MINI_H = 280, 46; TRAY_ICON = 0x0A25
-        ROWS = 5; RECENT_CAP = 30; ROW_H = 22; DEFAULT_RANGE = 18; RANGE_MIN, RANGE_MAX = 3, 24; SCAN_EVERY = 0.25
+        ROWS = 5; RECENT_CAP = 30; ROW_H = 22; RANGE_MIN, RANGE_MAX = 3, 24; SCAN_EVERY = 0.25
         GONE_SECONDS = 30.0
         HEARTBEAT = 5.0; LOST_SECONDS = 20.0; LISTEN_EVERY = 0.1; FEED_MAX_AGE = 15.0; FEED_MAX_BYTES = 32768
         FEED_KEEP = 60; READ_MAX = 65536; ANNOUNCE_EVERY = 30.0; LISTENER_TTL = 120.0; LISTENERS_EVERY = 10.0
@@ -3039,7 +3035,7 @@ def _module_ultima():
         ALERT_LOST_SOUND = 0x04A; OWN_ALARM_HOLD = 60.0; ARROW_ID = 0x4C4F4F4B
         ROW_TIP = ("Click: tracking arrow to where they were seen (again to clear). "
                    "Alt+click: auto-follow (again to stop)")
-        settings = {"watch": False, "listen": True, "range": DEFAULT_RANGE, "ping": True, "lost": True}
+        settings = {"watch": False, "listen": True, "range": 18, "ping": True, "lost": True}
         DEFAULTS = dict(settings)
         def fresh():
             return {"shutting": False, "minimized": False, "docked": False, "queue": [], "me": 0, "path": None,
@@ -3049,7 +3045,7 @@ def _module_ultima():
                     "file": "none", "recent": [], "arrow": None, "own_alarm": None, "dirty": True, "refresh_at": 0.0}
         st = {"minimized": False, "shutting": False, "docked": False, "queue": []}; st.update(fresh())
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         NUMS, ORDER = {"range": (RANGE_MIN, RANGE_MAX)}, ("watch", "listen", "range", "ping", "lost")
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ORDER, NUMS)
@@ -3099,7 +3095,7 @@ def _module_ultima():
             except Exception: return
             if size > (FEED_MAX_BYTES if settings["watch"] else 4 * FEED_MAX_BYTES): trim(path)
         def trim(path):
-            try:
+            with Kit.quiet:
                 with open(path, "rb") as f: data = f.read()
                 cut = data.rfind(b"\n") + 1; data = data[:cut]
                 lines = [ln for ln in data.split(b"\n") if ln.strip()]; keep = lines[-FEED_KEEP:]; heard = set()
@@ -3110,7 +3106,6 @@ def _module_ultima():
                 def since():
                     with open(path, "rb") as f: f.seek(cut); return f.read()
                 Kit.write_safe(path, b"\n".join(keep) + (b"\n" if keep else b""), tail=since)
-            except Exception: pass
         def read_new(path):
             try: size = os.path.getsize(path)
             except Exception: st["file"] = "none"; return None
@@ -3367,9 +3362,8 @@ def _module_ultima():
             if here >= 0 and m != here:
                 say("that spot is in %s." % Kit.facet_name(m)); return
             API.TrackingArrow(x, y, ARROW_ID); st["arrow"] = (x, y, m)
-        def clear_arrow():
-            if st["arrow"] is not None: st["arrow"] = None; API.TrackingArrow(-1, -1, ARROW_ID)
-        def clear_recent(action): st["recent"] = []; st["own_alarm"] = None; clear_arrow(); st["dirty"] = True
+        def clear_recent(action):
+            st["recent"] = []; st["own_alarm"] = None; Kit.drop_arrow(st, ARROW_ID); st["dirty"] = True
         ACTIONS = {"clear": clear_recent, "follow": lambda action: Follow.toggle(action[1], TITLE),
                    "arrow": lambda action: toggle_arrow(action[1], action[2], action[3])}
         def page_table(w):
@@ -3439,7 +3433,7 @@ def _module_ultima():
         def _stop():
             st["shutting"] = True
             if settings["watch"] and st["me"]: post(line(0, "", "off", 0, 0, st["facet"], 0, 0, 0)); write_outbox()
-            clear_arrow(); save_settings(); cleanup.close()
+            Kit.drop_arrow(st, ARROW_ID); save_settings(); cleanup.close()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
                 "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}

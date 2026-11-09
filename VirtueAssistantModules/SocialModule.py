@@ -37,7 +37,7 @@ def _module_social():
     st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "friends": [], "names_dirty": False,
           "party": None, "profile": None, "msg": {}, "gids": {}, "me_s": 0, "fserials": []}
     win = {"g": None, "c": {}, "store": ({}, {})}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     jobs = []; NOTES = {}; notes_st = {"dirty": False, "ver": 0, "chg": {}}
     ed = {"g": None, "c": {}, "store": ({}, {}), "name": ""}; M = Kit.MARGIN
     def load_settings():
@@ -57,8 +57,7 @@ def _module_social():
         for part in Kit.get_var(NAMES_KEY).split("|"):
             if "=" in part:
                 s, n = part.split("=", 1)
-                try: names[int(s)] = n
-                except Exception: pass
+                with Kit.quiet: names[int(s)] = n
         st["names"] = names; load_guild(); load_notes()
     def save_settings():
         Kit.put_var(SETTINGS_KEY, "|".join([str(int(settings[k])) if isinstance(settings[k], bool) else str(settings[k])
@@ -165,27 +164,7 @@ def _module_social():
     class CL(object):
         looked = False; error = ""; world = None; GA = None; UIM = None; FLM = None
         @staticmethod
-        def _flags(static):
-            from System.Reflection import BindingFlags
-            return (BindingFlags.Public | BindingFlags.NonPublic |
-                    (BindingFlags.Static if static else BindingFlags.Instance))
-        _methods = {}
-        @staticmethod
-        def call(obj, name, args=(), t=None):
-            t = t if t is not None else obj.GetType(); args = list(args); key = (t, name, len(args), obj is None)
-            e = CL._methods.get(key, False)
-            if e is False:
-                m = None; flags = CL._flags(obj is None); tt = t
-                while tt is not None and m is None:
-                    for mm in tt.GetMethods(flags):
-                        if mm.Name != name or mm.IsGenericMethodDefinition: continue
-                        ps = mm.GetParameters()
-                        if len(ps) >= len(args) and all(p.IsOptional for p in ps[len(args):]): m = mm; break
-                    tt = tt.BaseType
-                e = (None if m is None else (m, [p.DefaultValue for p in m.GetParameters()[len(args):]]))
-                CL._methods[key] = e
-            if e is None: raise Exception("can't call %s.%s" % (t.Name, name))
-            import System; return e[0].Invoke(obj, System.Array[object](args + e[1]))
+        def call(obj, name, args=(), t=None): return Tz.call(obj, name, args, t, True)
         @staticmethod
         def find():
             if CL.looked: return
@@ -202,19 +181,18 @@ def _module_social():
             if world is None: CL.error = "client World not found"
             elif CL.GA is None: CL.error = "GameActions not found"
         @staticmethod
-        def on_main(fn):
+        def on_main(fn, need=True):
+            if not need: return None
             how, value = Client.on_main_ex(fn)
             if how == "ok": return value
             CL.error = Client.error or "can't run on the client thread"; return None
         @staticmethod
         def game_action(name, args=(), with_world=True):
-            if CL.GA is None: return False
             full = ([CL.world] if with_world else []) + list(args)
             def run(): CL.call(None, name, full, CL.GA); return True
-            return bool(CL.on_main(run))
+            return bool(CL.on_main(run, CL.GA is not None))
         @staticmethod
         def friends():
-            if CL.FLM is None: return None
             def run():
                 inst = Typing._get(None, "Instance", CL.FLM)
                 if inst is None: return None
@@ -223,11 +201,10 @@ def _module_social():
                     ft = f.GetType()
                     out.append((int(Typing._get(f, "Serial", ft) or 0), str(Typing._get(f, "Name", ft) or "")))
                 return out
-            return CL.on_main(run)
+            return CL.on_main(run, CL.FLM is not None)
         @staticmethod
         def party():
             world = CL.world
-            if world is None: return None
             def run():
                 party = Typing._get(world, "Party")
                 if party is None: return None
@@ -239,10 +216,9 @@ def _module_social():
                         s = int(Typing._get(m, "Serial") or 0)
                         if s and s != me: members.append(s)
                 return (leader, inviter, loot, members)
-            return CL.on_main(run)
+            return CL.on_main(run, world is not None)
         @staticmethod
         def open_ignore_list():
-            if CL.world is None or CL.UIM is None: return False
             def run():
                 import System
                 if CL.bring_to_front("IgnoreManagerGump"): return True
@@ -250,7 +226,7 @@ def _module_social():
                 if t is None: raise Exception("IgnoreManagerGump not found")
                 g = System.Activator.CreateInstance(t, System.Array[object]([CL.world]))
                 CL.call(None, "Add", [g], CL.UIM); return True
-            return bool(CL.on_main(run))
+            return bool(CL.on_main(run, CL.world is not None and CL.UIM is not None))
         @staticmethod
         def bring_to_front(type_name):
             for g in Typing._get(None, "Gumps", CL.UIM) or ():
@@ -259,7 +235,6 @@ def _module_social():
             return False
         @staticmethod
         def find_server_gump(test):
-            if CL.UIM is None: return 0, ""
             def run():
                 for g in Typing._get(None, "Gumps", CL.UIM) or ():
                     if g is None or g.IsDisposed: continue
@@ -270,7 +245,7 @@ def _module_social():
                         if test(raw): return int(Typing._get(g, "ServerSerial") or 0), raw
                     except Exception: continue
                 return 0, ""
-            r = CL.on_main(run); return r if r else (0, "")
+            r = CL.on_main(run, CL.UIM is not None); return r if r else (0, "")
         @staticmethod
         def press_labelled(gump, label):
             inner = safe(lambda: gump.Gump); gump = inner if inner is not None else gump; want = label.lower().strip()
@@ -1135,10 +1110,9 @@ def _module_social():
                     say("couldn't remove them (%s)." % CL.error, Kit.HUE_BAD)
             else: say("only the leader can remove members.")
     def clear_inviter():
-        try:
+        with Kit.quiet:
             import System; party = Typing._get(CL.world, "Party") if CL.world is not None else None
             if party is not None: Tz.put(party, "Inviter", System.UInt32(0))
-        except Exception: pass
         p = st["party"]
         if p: st["party"] = (p[0], 0, p[2], p[3])
     def to_uint(serial):
@@ -1228,8 +1202,12 @@ def _module_social():
         st["guild_said"] = ""
         if start_guild_read(): refresh()
         else: say("already reading the guild window.")
-    WITH_ARG = {"click": click_mobile, "rm": row_remove}
-    ACTIONS = {"pwin": party_window, "note_close": notew.close, "gsort": next_sort, "grefresh": guild_refresh}
+    WITH_ARG = {"click": click_mobile, "rm": row_remove, "follow": lambda serial: Follow.toggle(serial, TITLE),
+                "noview": lambda name: say("%s isn't in view." % name),
+                "picked": lambda serial: serial and add_friend(serial)}
+    ACTIONS = {"pwin": party_window, "note_close": notew.close, "gsort": next_sort, "grefresh": guild_refresh,
+               "leave": lambda: party_action("leave"), "loot": lambda: party_action("loot"),
+               "add_last": lambda: add_friend(int(API.LastTargetSerial or 0))}
     PAGE_OPTS = {"ldy": 4, "fw": 40, "ltip": True, "clamp": False}
     def page_table(w):
         return (("WINDOW", (("note", fit("Shift+click a row to note that player; %d saved for this account."
@@ -1279,7 +1257,6 @@ def _module_social():
             if action == "redraw": st["rebuild"] = True
             elif wnd.action(action): continue
             elif kind in WITH_ARG: WITH_ARG[kind](action[1])
-            elif action in ("leave", "loot"): party_action(action)
             elif action in ACTIONS: ACTIONS[action]()
             elif kind == "tab":
                 if action[1] != settings["tab"]:
@@ -1288,14 +1265,9 @@ def _module_social():
             elif kind == "page":
                 st["page"][settings["tab"]] = max(0, st["page"].get(settings["tab"], 0) + action[1])
                 st["next_list"] = 0.0
-            elif kind == "follow": Follow.toggle(action[1], TITLE)
-            elif kind == "noview": say("%s isn't in view." % action[1])
             elif action == "add":
                 say("target the friend to add.")
                 HOST.pick_target(PICK_TIMEOUT, lambda serial: queue.add(("picked", int(serial or 0)), dup=True))
-            elif kind == "picked":
-                if action[1]: add_friend(action[1])
-            elif action == "add_last": add_friend(int(API.LastTargetSerial or 0))
             elif action in WINS:
                 if open_window(action) and action == "invite": say("target who to invite.")
             elif action in ("accept", "decline") and st["party"] and st["party"][1]: answer_invite(action)

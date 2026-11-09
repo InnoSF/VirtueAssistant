@@ -63,7 +63,7 @@ def _module_grimoire():
     settings = {"opacity": DEFAULT_OPACITY, "scale": 100, "loaded": False}; DEFAULTS = dict(settings)
     st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
     win = {"g": None, "c": {}, "store": ({}, {}), "w": DEFAULT_W, "h": DEFAULT_H, "opacity": DEFAULT_OPACITY}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     def load_settings(): pass
     def save_settings(): pass
     spellbook_serial = 0; known_spells = None; runebooks = []
@@ -106,13 +106,11 @@ def _module_grimoire():
         return books[0].Serial if books else 0
     def close_spellbook_window(serial):
         closed = False
-        try:
+        with Kit.quiet:
             for g in list(Tz.get(None, "Gumps", Tz.T("ClassicUO.Game.Managers.UIManager"))):
-                try:
+                with Kit.quiet:
                     if (g.LocalSerial == serial and "Spellbook" in g.GetType().Name and not g.IsDisposed):
                         g.Dispose(); closed = True
-                except Exception: pass
-        except Exception: pass
         return closed
     def spells_key(): return "spells_%08X" % int(API.Player.Serial)
     def load_known_spells(force=False):
@@ -512,7 +510,7 @@ def _module_grimoire():
         def item_name(): it = API.FindItem(rune_serial); return ((it.Name if it else "") or "").strip()
         name = Kit.on_client(item_name)
         if not name or name.lower() in ("recall rune", "a recall rune", "rune"):
-            try:
+            with Kit.quiet:
                 rd = journal_from_now(); clicked = time.time(); API.ClickObject(rune_serial); deadline = clicked + 1.0
                 own = name.lower(); plain, plain_by = None, 0.0
                 while time.time() < deadline and not cast["claim"] and HOST.idle(0.1):
@@ -526,7 +524,6 @@ def _module_grimoire():
                     if plain is not None and time.time() >= plain_by: name = plain; break
                 else:
                     if plain is not None: name = plain
-            except Exception: pass
         return re.sub(r"^(a |an )?(marked )?recall rune( for| to)?\s*", "", name, flags=re.I).strip()
     def read_container_book(serial):
         dests = []; runes = Kit.on_client(lambda: [it.Serial for it in list(API.ItemsInContainer(serial) or [])])
@@ -629,15 +626,16 @@ def _module_grimoire():
         HOST.claim_cursor(KEY, SCROLL_CAST_TIMEOUT + 1.0)
         try:
             start = player_xy(); API.CancelPreTarget(); API.PreTarget(target, "neutral"); API.UseObject(scroll)
-            deadline = time.time() + SCROLL_CAST_TIMEOUT
-            while time.time() < deadline and HOST.idle(0.1):
-                up, left, now_xy = trip_look((scroll,))
-                if up:
-                    HOST.idle(0.15)
-                    if API.HasTarget("any") and not cursor_taken(): API.Target(target)
-                    return
-                if left < before or failed_since(since, me) or moved_far(start, now_xy): break
+            if watch_trip((scroll,), before, since, me, start, SCROLL_CAST_TIMEOUT) and API.HasTarget("any") \
+                    and not cursor_taken(): API.Target(target)
         finally: API.CancelPreTarget(); HOST.release_cursor(KEY)
+    def watch_trip(serials, before, since, me, start, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline and HOST.idle(0.1):
+            up, left, now_xy = trip_look(serials)
+            if up: HOST.idle(0.15); return True
+            if (before and left < before) or failed_since(since, me) or moved_far(start, now_xy): return False
+        return False
     def cursor_taken(): return HOST.cursor_busy(KEY) is not None
     def wait_cursor_free():
         until = time.time() + 3.0
@@ -686,12 +684,7 @@ def _module_grimoire():
                                                 if it.Graphic == pearl]) if spell in ("Recall", "Gate Travel") else None
                 serials = tuple(s for s, _n in stacks or ()); before = sum(n for _s, n in stacks or ())
                 API.CancelPreTarget(); API.PreTarget(dest["rune"], "neutral"); API.CastSpell(spell)
-                deadline = time.time() + RUNE_CAST_CLAIM
-                while time.time() < deadline and HOST.idle(0.1):
-                    up, left, now_xy = trip_look(serials)
-                    if up: HOST.idle(0.15); break
-                    if before and left < before: break
-                    if failed_since(since, me) or moved_far(start, now_xy): break
+                watch_trip(serials, before, since, me, start, RUNE_CAST_CLAIM)
             finally: API.CancelPreTarget(); HOST.release_cursor(KEY)
             return
         gid = book_gump(book_serial)

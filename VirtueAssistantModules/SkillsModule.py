@@ -153,7 +153,7 @@ def _module_skills():
               "last_click": (None, 0.0), "arm": {}, "search": "", "pc": {}, "save_at": 0.0, "to_write": [], "ver": 0,
               "preview": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "rowmap": {}}; page = {"sync": False, "skip": False}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         UIC = {}; REF = {"world": None, "player": None, "how": ""}
         SK = {"objs": [], "names": [], "click": [], "collide": [], "n": 0, "cur": [], "low": [], "full": True, "rr": 0}
         STATS = {"cur": [0, 0, 0], "locks": [0, 0, 0], "cap": 0, "prev": [0, 0, 0]}
@@ -326,10 +326,9 @@ def _module_skills():
             if i is None or i >= SK["n"] or SK["cur"][i][3] == v: return
             if not SK["collide"][i]: API.SetSkillLock(SK["names"][i], LOCK_WORD[v])
             else:
-                try:
+                with Kit.quiet:
                     import System; ga_call("ChangeSkillLockStatus", [System.UInt16(i), System.Byte(v)])
                     lt = Tz.T("ClassicUO.Game.Data.Lock"); Tz.put(SK["objs"][i], "Lock", System.Enum.ToObject(lt, v))
-                except Exception: pass
             SK["cur"][i][3] = v
         def use_skill(i):
             if i is None or i >= SK["n"]: return
@@ -790,11 +789,11 @@ def _module_skills():
             old, win["g"] = win["g"], None; UIC.clear(); st["desc"] = None; st["rebuild"] = None
             if st["hidden"]:
                 win.update({"c": {}, "rows": [], "rowmap": {}, "store": ({}, {})}); Kit.dispose(old); return
-            M = Kit.MARGIN; store = ({}, {}); c = {}; st["resize_at"], st["preview"] = 0.0, False; win["L"] = None
+            store = ({}, {}); c = {}; st["resize_at"], st["preview"] = 0.0, False; win["L"] = None
             L, Z = None, None; fitst["k"], fitst["full"] = 1.0, None
             if st["minimized"] or st["docked"]: w, h = MINI_W, MINI_H
             elif fitst["slot"] is not None: w, h = fitst["slot"]; lw, lh, k, Z = zone_geom(w, h)
-            else: L = layout(); w, h, IW = L["W"], L["H"], L["IW"]; win["L"] = L
+            else: L = layout(); w, h = L["W"], L["H"]; win["L"] = L
             x, y = Kit.load_pos(POS_KEY, (160, 120), (w, h))
             if Kit.is_open(old): x, y = old.GetX(), old.GetY()
             at = LAYOUT.placed.get(KEY) if HOST.layout_holds(KEY) else None
@@ -813,18 +812,9 @@ def _module_skills():
             else:
                 if at is None: x, y = Kit.clamp(x, y, w, h)
                 g = G.CreateModernGump(x, y, w, h, True, L["min_w"], L["min_h"], on_resized)
-                g.SetAlpha(0); Kit.add_window_frame(g, w, h, mouse=False); Kit.add_section(g, M, M, IW, 30)
-                Kit.add_label(g, TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
-                zoned = Kit.zone_up(KEY); x_set = w - M - (10 if zoned else 84 + Kit.DOCK_DX) - cap_w("Settings")
-                if zoned: Kit.catcher(g, M, M, x_set - M - 6, 30, lambda *a: None, None, movable=True)
-                else: Kit.title_catcher(g, M, M, x_set - M - 6, 30, queue("toggle_min"), key=KEY)
-                Kit.art_button(g, store, "settings", Kit.ART_PAGE, x_set, M + 4, "Settings", Kit.SETTINGS_TIP % TITLE,
-                               on_click=queue("settings"))
-                if not zoned:
-                    Kit.dock_button(g, store, w - M - 74, M + 7, on_click=queue("to_bar"))
-                    Kit.art_button(g, store, "min", Kit.ART_MIN, w - M - 74, M + 7, None, Kit.MIN_TIP,
-                                   on_click=queue("toggle_min"))
-                    Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, close_tip())
+                g.SetAlpha(0); Kit.add_window_frame(g, w, h, mouse=False)
+                Kit.title_bar(g, store, w, TITLE, KEY, queue("toggle_min"), queue("to_bar"),
+                              queue("settings"), close_tip=close_tip())
                 build_zone(g, store, c, plain_plan(L), 1.0, False)
             xy = Kit.show_window(g, x, y, w, h, KEY, st["docked"], on_disposed(g), save_pos, win,
                                  {"g": g, "c": c, "store": store, "rows": [], "rowmap": {},
@@ -1640,7 +1630,7 @@ def _module_skills():
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "open_ids": {}, "last_gid": 0,
               "me": 0, "my_name": "", "name_re": None, "words_re": None, "seq": 0}
         win = {"g": None, "c": {}, "store": ({}, {})}; page = {"skip": False}; hooks = {"done": False}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         mouse = {"looked": False, "get": None}
         rx = {"markers": None, "text": None, "ignore": frozenset(), "ignore_text": None}
         def _clean(text): return str(text or "").replace(";", ",").replace("=", " ").strip()
@@ -2093,7 +2083,7 @@ def _module_skills():
         DEFAULTS = dict(settings)
         rules = []; st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         page = {"f": None, "rows": [], "next_read": 0.0}
         resw = {"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False, "minimized": False,
                 "shutting": False, "docked": False, "queue": []}
@@ -2118,8 +2108,7 @@ def _module_skills():
                 if not part: continue
                 try: out.append(int(part, 16) if part.lower().startswith("0x") else int(part, 0))
                 except Exception:
-                    try: out.append(int(part, 16))
-                    except Exception: pass
+                    with Kit.quiet: out.append(int(part, 16))
             return out
         def load_settings():
             p = Kit.get_var(SETTINGS_KEY).split("|")
@@ -2432,14 +2421,10 @@ def _module_skills():
                     if len(lines) > 40: del lines[:-40]; del raw[:-40]
             if not lines: return None
             if not came: return j.get("res")
-            res = None
-            for rs, words in (("busy", BUSY_WORDS), ("skip", a[8]), ("ok", a[6]), ("fail", a[7])):
-                for w in words:
-                    for k in range(len(lines)):
-                        if w in lines[k]: j["match"] = lines[k]; j["match_raw"] = raw[k][0]; res = rs; break
-                    if res is not None: break
-                if res is not None: break
-            j["res"] = res; return res
+            hit = next(((rs, k) for rs, words in (("busy", BUSY_WORDS), ("skip", a[8]), ("ok", a[6]), ("fail", a[7]))
+                        for w in words for k in range(len(lines)) if w in lines[k]), None)
+            if hit is not None: j["match"] = lines[hit[1]]; j["match_raw"] = raw[hit[1]][0]
+            res = j["res"] = hit[0] if hit is not None else None; return res
         def finish_job(j, r, res, now):
             i, serial = j["rule"], j["serial"]; key = (i, serial); nxt = None
             floor = skill_floor(r) if res == "busy" else 0.0

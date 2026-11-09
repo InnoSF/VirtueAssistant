@@ -5,7 +5,7 @@ import re
 import struct
 import time
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.7.0.16"
+APP_VERSION = "2.7.0.24"
 MODULE_DIR = "VirtueAssistantModules"
 SETTINGS_DIR = "VirtueAssistantSettings"
 SETTINGS_KEY = "VirtueAssistant_settings"
@@ -78,10 +78,9 @@ class _Gumps(object):
         p = Kit._pend.get(g)
         if (p is not None and p[2] and p[3]) or g in Kit._scrolled: Kit.pin_size(g)
         r = self._inner.AddGump(g)
-        try:
+        with Kit.quiet:
             SNAP.add(g)
             if LAYOUT.loaded: LAYOUT.fresh_adds.add(g)
-        except Exception: pass
         return r
 
 
@@ -144,8 +143,7 @@ class Client(object):
         kb = Client._type("ClassicUO.Input.Keyboard")
         if kb is not None:
             for key, name in (("alt", "Alt"), ("shift", "Shift"), ("ctrl", "Ctrl")):
-                try: m = Client._member(kb, name); bool(m[0]()); Client.keys[key] = m[0]
-                except Exception: pass
+                with Kit.quiet: m = Client._member(kb, name); bool(m[0]()); Client.keys[key] = m[0]
     @staticmethod
     def second_click_swallowed():
         Client.find()
@@ -241,7 +239,7 @@ class _Hop(object):
 
 class Typing(object):
     looked = False; uim = None; prof = None; _members = {}; _flags = None; _prof_t = None; _chat_t = None
-    _now_pid = -1; _now_val = False
+    _now_memo = [-1, False]
     @staticmethod
     def _find():
         if Typing.looked: return
@@ -286,13 +284,15 @@ class Typing(object):
             except Exception: t = None
         return t
     @staticmethod
-    def now():
+    def hop(memo, fn):
         try: h = HOST; pid = h.pass_id if h.in_hop else None
         except Exception: pid = None
-        if pid is not None and Typing._now_pid == pid: return Typing._now_val
-        v = Typing._now()
-        if pid is not None: Typing._now_pid = pid; Typing._now_val = v
+        if pid is not None and memo[0] == pid: return memo[1]
+        v = fn()
+        if pid is not None: memo[0] = pid; memo[1] = v
         return v
+    @staticmethod
+    def now(): return Typing.hop(Typing._now_memo, Typing._now)
     @staticmethod
     def _now():
         Typing._find(); uim = Typing.uim
@@ -322,7 +322,7 @@ class Typing(object):
         return text is not None and len(str(text)) > 0
     @staticmethod
     def release():
-        Typing._now_pid = -1
+        Typing._now_memo[0] = -1
         def run():
             Typing._find(); uim = Typing.uim
             if uim is None: return
@@ -368,15 +368,9 @@ class Follow(object):
         for k in Follow.ALT_NAMES:
             if safe(lambda: API.IsKeyPressed(k), False): return True
         return False
-    _pid = -1; _val = None
+    _memo = [-1, None]
     @staticmethod
-    def current():
-        try: h = HOST; pid = h.pass_id if h.in_hop else None
-        except Exception: pid = None
-        if pid is not None and Follow._pid == pid: return Follow._val
-        v = Follow._current()
-        if pid is not None: Follow._pid = pid; Follow._val = v
-        return v
+    def current(): return Typing.hop(Follow._memo, Follow._current)
     @staticmethod
     def _current():
         Typing._find(); cur = Typing._get(None, "CurrentProfile", Typing.prof) if Typing.prof is not None else None
@@ -401,10 +395,10 @@ class Follow(object):
             API.SysMsg("%s: can't follow them, they are out of sight." % who, Kit.HUE_BAD); return False
         try: API.AutoFollow(serial)
         except Exception as ex: API.SysMsg("%s: couldn't auto-follow (%s)." % (who, ex), Kit.HUE_BAD); return False
-        Follow.serial = serial; Follow._pid = -1; API.HeadMsg("* following *", serial, 0x44); return True
+        Follow.serial = serial; Follow._memo[0] = -1; API.HeadMsg("* following *", serial, 0x44); return True
     @staticmethod
     def stop(who=APP_NAME):
-        s = Follow.serial; Follow._pid = -1; API.CancelAutoFollow(); Follow.serial = None
+        s = Follow.serial; Follow._memo[0] = -1; API.CancelAutoFollow(); Follow.serial = None
         if s: API.HeadMsg("* stopped following *", s, 0x35)
     @staticmethod
     def toggle(serial, who=APP_NAME):
@@ -814,8 +808,7 @@ class Kit(object):
     def retint():
         for parts in list(Kit._frame_parts.values()):
             for p in parts:
-                try: p.Hue = Kit._dark.get(int(p.Graphic), 0)
-                except Exception: pass
+                with Kit.quiet: p.Hue = Kit._dark.get(int(p.Graphic), 0)
     @staticmethod
     def add_pic(g, graphic, x, y, hue=0, mouse=True):
         try:
@@ -880,6 +873,22 @@ class Kit(object):
         Kit._prune(Kit._frame_want, 32); Kit._frame_want[g] = bool(on)
         if g in Seam.bare or g in Seam.recs: return
         for p in Kit._frame_parts.get(g) or (): Kit.set(p, "IsVisible", bool(on))
+    @staticmethod
+    def frame_fit(g, w, h):
+        fr = Kit._frames.get(g); s = Kit._rp_sizes.get(Kit.WINDOW_BG)
+        if fr is None or s is None or g in Kit._scrolled: return False
+        tl, t, tr, l, _, r, bl, b, br = s
+        cw, ch = Kit.pic_size(Kit.CORNER_ART) if fr["corners"] and Kit.CORNER_ART else (0, 0)
+        rects = [(l[0], t[1], w - l[0] - r[0], h - t[1] - b[1]), (tl[0], 0, w - tl[0] - tr[0], t[1]),
+                 (bl[0], h - b[1], w - bl[0] - br[0], b[1]), (0, tl[1], l[0], h - tl[1] - bl[1]),
+                 (w - r[0], tr[1], r[0], h - tr[1] - br[1]), (0, 0), (w - tr[0], 0), (0, h - bl[1]),
+                 (w - br[0], h - br[1])]
+        if cw and ch: rects += [(0, 0), (w - cw, 0), (0, h - ch), (w - cw, h - ch)]
+        if len(fr["pieces"]) != len(rects): return False
+        for p, rect in zip(fr["pieces"], rects):
+            if len(rect) == 4: p.SetRect(*rect)
+            else: p.SetPos(*rect)
+        return True
     @staticmethod
     def add_window_frame(g, w, h, corners=True, mouse=True):
         pieces = Kit._frame_pieces(g, w, h, corners, mouse)
@@ -1052,8 +1061,7 @@ class Kit(object):
                 try: getattr(API.Events, "Unregister" + (event if event.startswith("On") else "On" + event))(fn)
                 except Exception: Kit._hooks.setdefault(owner, []).append(rec); continue
                 holder[key] = False
-        try: Kit.on_client(run)
-        except Exception: pass
+        with Kit.quiet: Kit.on_client(run)
     @staticmethod
     def was_clicked(store, key):
         cdict = store[1]; hit = cdict.get(key, False)
@@ -1754,6 +1762,15 @@ class Kit(object):
             if gate is None or gate[key]: API.SysMsg("%s: %s" % (title, text), Kit.HUE_INFO if hue is None else hue)
         return say
     @staticmethod
+    def basics(st, title): return Kit.Cleanup(), Kit.queuer(st), Kit.sayer(title)
+    @staticmethod
+    def dd_index(dd, default):
+        try: return int(dd.GetSelectedIndex())
+        except Exception: return default
+    @staticmethod
+    def drop_arrow(st, arrow_id):
+        if st["arrow"] is not None: st["arrow"] = None; API.TrackingArrow(-1, -1, arrow_id)
+    @staticmethod
     def say(text, hue=None): API.SysMsg(APP_NAME + ": " + str(text), Kit.HUE_INFO if hue is None else hue)
     @staticmethod
     def win_action(action, st, key, title, build, min_key=None):
@@ -1910,18 +1927,14 @@ class Kit(object):
         def add(self, fn, *args): self.jobs.append((fn, args)); return fn
         def service(self, name, fn):
             HOST.services[name] = fn; self.jobs.append((Kit.Cleanup.drop, (name, fn))); return fn
-        def gump(self, holder, key="g", **clear): self.jobs.append((Kit.Cleanup.dispose, (holder, key, clear)))
         @staticmethod
         def drop(name, fn):
             if HOST.services.get(name) is fn: HOST.services.pop(name, None)
-        @staticmethod
-        def dispose(holder, key, clear): g, holder[key] = holder.get(key), None; holder.update(clear); Kit.dispose(g)
         def close(self):
             jobs = self.jobs
             while jobs:
                 fn, args = jobs.pop()
-                try: fn(*args)
-                except Exception: pass
+                with Kit.quiet: fn(*args)
     class Window(object):
         def __init__(self, key, title, st, win, build, pos_key, min_key=None, default=(200, 200), mini=None,
                      icon=None, cleanup=None, gkey="g", names=("c", "store"), lock=True, owner=True, close_tip=None,
@@ -2114,12 +2127,11 @@ class Fill(object):
     @staticmethod
     def _find_api_type(g):
         if Fill._api_t[0] is not None: return True
-        try:
+        with Kit.quiet:
             import clr; t = clr.GetClrType(type(g))
             while t is not None:
                 if str(t.Name) == "ApiUiBaseControl": Fill._api_t[0] = t; return True
                 t = t.BaseType
-        except Exception: pass
         return False
     @staticmethod
     def _scan(rec, kids, skip, k_now=1.0):
@@ -2133,13 +2145,11 @@ class Fill(object):
             if r is None: continue
             tn = str(c.GetType().Name); kind = "s" if tn in Fill.STRETCH else "p"
             if tn == "GumpPic":
-                try:
+                with Kit.quiet:
                     if int(c.Graphic) in (Kit.LINE_RED, Kit.LINE_BLUE, Kit.LINE_POISON): kind = "s"
-                except Exception: pass
             if kind == "s" and tn == "AlphaBlendControl" and r[2] < Fill.MIN_BG:
-                try:
+                with Kit.quiet:
                     if float(c.Alpha) < 0.05: kind = "p"
-                except Exception: pass
             e = [kind, r[0], r[1], r[2], r[3], None, tuple(r), c in rec["frame"],
                  "field" if tn == Fill.FIELD_T else None, None, None]
             ents[c] = e; Fill.by_raw[c] = (rec, e); new.append((c, e))
@@ -2176,8 +2186,7 @@ class Fill(object):
         except Exception: return out
         while stack:
             d = stack.pop(); out.append(d)
-            try: stack.extend(Kit._children(d))
-            except Exception: pass
+            with Kit.quiet: stack.extend(Kit._children(d))
         return out
     @staticmethod
     def _scale_one(rec, c, k):
@@ -2615,8 +2624,7 @@ class AlertsPage(_Page):
             ALERTS.raise_(Alerts.TEST_KEY, "This is how an alert looks and sounds.", "warn", who="test")
         for n, row in enumerate(c["dd"]):
             key, dd, ids, idx = row
-            try: i = int(dd.GetSelectedIndex())
-            except Exception: i = idx
+            i = Kit.dd_index(dd, idx)
             if i != idx and 0 <= i < len(ids): idx = i; c["dd"][n] = (key, dd, ids, i); ALERTS.choose(key, sound=ids[i])
             if Kit.was_clicked(self.store, "play%d" % n) and ids[idx]: API.PlaySound(int(ids[idx]))
 
@@ -3144,8 +3152,7 @@ class Host(object):
             if not wait: self.hk_wait.pop(k, None)
             self._hk_take(k, nxt); Kit.say("%s is %s's key now." % (k, nxt[0]), Kit.HUE_INFO); return
         self.hk_fns.pop(k, None)
-        try: API.OnHotKey(k)
-        except Exception: pass
+        with Kit.quiet: API.OnHotKey(k)
     def hotkey_drop(self, combo, owner=None):
         k = _norm_key(combo)
         self.hotkey_list = [e for e in self.hotkey_list
@@ -4188,19 +4195,21 @@ class Tz(object):
         if hit[0]: hit[1].SetValue(obj, value, None)
         else: hit[1].SetValue(obj, value)
     @staticmethod
-    def call(obj, name, args=(), t=None):
-        import System; t = t if t is not None else obj.GetType(); args = list(args)
-        ck = ("call", t, name, len(args), obj is None); m = Tz._found.get(ck, Tz._MISS)
-        if m is Tz._MISS:
-            m = None; flags = Tz._flags(obj is None); tt = t
-            while tt is not None and m is None:
+    def call(obj, name, args=(), t=None, opt=False):
+        import System; t = t if t is not None else obj.GetType(); args = list(args); n = len(args)
+        ck = ("call", t, name, n, obj is None, opt); hit = Tz._found.get(ck, Tz._MISS)
+        if hit is Tz._MISS:
+            hit = None; flags = Tz._flags(obj is None); tt = t
+            while tt is not None and hit is None:
                 for mm in tt.GetMethods(flags):
-                    if mm.Name == name and not mm.IsGenericMethodDefinition and mm.GetParameters().Length == len(args):
-                        m = mm; break
+                    if mm.Name != name or mm.IsGenericMethodDefinition: continue
+                    ps = list(mm.GetParameters())
+                    if len(ps) == n or opt and len(ps) > n and all(p.IsOptional for p in ps[n:]):
+                        hit = (mm, [p.DefaultValue for p in ps[n:]]); break
                 tt = tt.BaseType
-            Tz._found[ck] = m
-        if m is None: raise Exception("can't call %s.%s" % (t.Name, name))
-        return m.Invoke(obj, System.Array[object](args))
+            Tz._found[ck] = hit
+        if hit is None: raise Exception("can't call %s.%s" % (t.Name, name))
+        return hit[0].Invoke(obj, System.Array[object](args + hit[1]))
     @staticmethod
     def load_json(path, typeinfo, t):
         import System; cr = Tz.T("ClassicUO.Configuration.ConfigurationResolver")
@@ -4276,13 +4285,12 @@ class Profiles(object):
     def folder(self, name): return os.path.join(self.base, name)
     def names(self):
         import System; out = []
-        try:
+        with Kit.quiet:
             if System.IO.Directory.Exists(self.base):
                 for d in System.IO.Directory.GetDirectories(self.base):
                     n = str(System.IO.Path.GetFileName(d))
                     if n.endswith(".saving") or n.endswith(".old"): continue
                     if System.IO.File.Exists(os.path.join(str(d), "profile.txt")): out.append(n)
-        except Exception: pass
         return sorted(out, key=lambda s: s.lower())
     def info(self, name):
         text = self._read(os.path.join(self.folder(name), "profile.txt")) if name else None
@@ -4416,11 +4424,10 @@ class Profiles(object):
             try: F.Copy(p, target, True); reload(); done.append(what)
             except Exception as ex:
                 failed.append("%s (%s)" % (what, Tz.why(ex)))
-                try:
+                with Kit.quiet:
                     if old is not None: F.WriteAllBytes(target, old)
                     elif F.Exists(target): F.Delete(target)
                     reload()
-                except Exception: pass
         return done, failed
     def set_client_default(self, name):
         import System; F = System.IO.File
@@ -4507,7 +4514,7 @@ class ConfigWindow(object):
     LINK_STALE = 10.0; LINK_ENABLE = "VirtueAssistant_enable"
     def __init__(self, host):
         self.host = host; self.g = self.mode = self._pp_key = self.shown_page = self.request = self.request_tab = None
-        self.lag_lbl = self.dirty = self.gear_pos = None
+        self.lag_lbl = self.dirty = self.gear_pos = self.body = self.head = None
         self.link_state = self.prof_sel = self.prof_cache = self.prof_shown = None
         self.loading = self.stale_page = self.search_tb = self.search_text = None
         self.gear_clicked = self.closing = self.docked = self.prof_stale = self.prof_redraw = False
@@ -4528,12 +4535,11 @@ class ConfigWindow(object):
         self.lim_h = max(self.MIN_H, host.pref_int("cfg_h", (sh - 60) if sh > 400 else 1000))
         self.scale = max(50, min(200, host.pref_int("cfg_scale", 100))) / 100.0; self.size = (0, 0)
         for var in (self.LINK_CMD, self.LINK_ENABLE): API.RemoveSharedVar(var)
-    STAR_RECTS = ((7, 1, 1, 2), (6, 3, 3, 2), (5, 5, 5, 1), (1, 6, 13, 1), (2, 7, 11, 1),
-                  (4, 8, 7, 4), (3, 12, 3, 1), (9, 12, 3, 1), (3, 13, 1, 1), (11, 13, 1, 1))
-    STAR_ON, STAR_OFF = "#F0C040", "#6A6A6A"; PROF_H = 34; PROF_DD_W = 196
+    STAR_RECTS = ((7, 1, 1, 2), (6, 3, 3, 3), (1, 6, 13, 2), (4, 8, 7, 3), (3, 11, 3, 3), (9, 11, 3, 3))
+    STAR_ON, STAR_OFF = (240, 192, 64), (106, 106, 106); PROF_H = 34; PROF_DD_W = 196
     def _prof_reset(self):
         self.prof_dd = self.prof_dd_args = self.prof_tb = self.prof_seen = None; self.prof_names = []
-        self.prof_fav = ""; self.prof_stars = {}; self.prof_star_hit = False
+        self.prof_fav = ""; self.prof_stars = []; self.prof_star_hit = False
     @staticmethod
     def _cap_w(art, text): return (Kit.pic_size(art[0])[0] or 30) + 5 + Kit.text_w(text)
     def refresh_profiles(self):
@@ -4553,11 +4559,9 @@ class ConfigWindow(object):
         names, fav, cur = data[1], data[2], data[3]; sel = self.prof_sel if self.prof_sel in names else None
         if sel is None: sel = cur if cur in names else (fav if fav in names else (names[0] if names else None))
         self.prof_sel, self.prof_names, self.prof_fav = sel, names, fav; H = self.PROF_H; Kit.add_section(g, x, y, w, H)
-        xs = x + 12 + self.PROF_DD_W + 10; ys = y + (H - 16) // 2; self.prof_stars = {"on": [], "off": []}
-        for key, color, d in (("shadow", "#000000", 1), ("on", self.STAR_ON, 0), ("off", self.STAR_OFF, 0)):
-            for rx, ry, rw, rh in self.STAR_RECTS:
-                b = Kit.add_box(g, xs + rx + d, ys + ry + d, rw, rh, 1.0, color)
-                if b is not None and key != "shadow": self.prof_stars[key].append(b)
+        xs = x + 12 + self.PROF_DD_W + 10; ys = y + (H - 16) // 2; off = "#%02X%02X%02X" % self.STAR_OFF
+        boxes = [Kit.add_box(g, xs + rx, ys + ry, rw, rh, 1.0, off) for rx, ry, rw, rh in self.STAR_RECTS]
+        self.prof_stars = [b for b in boxes if b is not None]
         Kit.catcher(g, xs - 3, ys - 3, 22, 22, self._star_click,
                     "Favourite: characters that haven't loaded another profile get it (click again to clear)")
         xb = xs + 28
@@ -4571,19 +4575,23 @@ class ConfigWindow(object):
         self.prof_dd_args = (x + 12, y + 7, self.PROF_DD_W, items, names.index(sel) if sel in names else 0)
     def _add_profile_list(self, g):
         if self.prof_dd_args is None: return
-        dx, dy, dw, items, idx = self.prof_dd_args; dd = G.CreateDropDown(dw, items, idx); dd.SetPos(dx, dy); g.Add(dd)
+        old = self.prof_dd; dx, dy, dw, items, idx = self.prof_dd_args
+        if old is not None:
+            i = Kit.dd_index(old, None); Kit.dispose(old)
+            if i is not None and 0 <= i < len(self.prof_names): self.prof_sel = self.prof_names[i]
+        if self.prof_sel in self.prof_names: idx = self.prof_names.index(self.prof_sel)
+        dd = G.CreateDropDown(dw, items, idx); dd.SetPos(dx, dy); g.Add(dd)
         self.prof_dd = Kit.with_tip(dd, "Saved profiles: pick one to load or save over")
         self.prof_seen = idx; self._show_star()
     def _prof_picked(self): return self.prof_sel if self.prof_sel in self.prof_names else None
     def _show_star(self):
-        p = self._prof_picked(); on = bool(p) and p == self.prof_fav
-        for key, shown in (("on", on), ("off", not on)):
-            for b in self.prof_stars.get(key, []): Kit.set(b, "IsVisible", shown)
+        p = self._prof_picked(); r, g, b = self.STAR_ON if bool(p) and p == self.prof_fav else self.STAR_OFF
+        for box in self.prof_stars:
+            with Kit.quiet: box.SetBaseColor(r, g, b, 255)
     def _star_click(self): self.prof_star_hit = True
     def _poll_profiles(self):
         if self.prof_dd is not None and self._fld_due:
-            try: i = int(self.prof_dd.GetSelectedIndex())
-            except Exception: i = None
+            i = Kit.dd_index(self.prof_dd, None)
             if i is not None and i != self.prof_seen:
                 self.prof_seen = i
                 if 0 <= i < len(self.prof_names): self.prof_sel = self.prof_names[i]
@@ -4915,16 +4923,24 @@ class ConfigWindow(object):
         self._leave_page(); self.search_tb, self.search_text, self.search_at = None, None, 0.0; self.store = ({}, {})
         self.page_keys, self.box_list, self.zone_keys = [], [], []; self.lag_lbl = None
         self._prof_reset()
-    def _build_full(self, x, y):
-        self._reset(); self.seen, self.resize_at = {}, 0.0
-        self.part_boxes, self.fold_keys = [], []; M, GAP = Kit.MARGIN, Kit.GAP; L = M
-        slots, pages, page = self._context(); y_title = M; y_prof = y_title + 34 + GAP; y_body = self._body_y()
-        if self.tab == "settings" and page is not None: units, CW = self._units_settings(pages, page, L, y_body)
+    def _plan(self):
+        slots, pages, page = self._context(); M, GAP = Kit.MARGIN, Kit.GAP; y_body = self._body_y()
+        if self.tab == "settings" and page is not None: units, CW = self._units_settings(pages, page, M, y_body)
         elif self.tab == "settings" and self.loading is not None and pages:
             units, CW = self._units_loading(pages, self.loading.title)
         else: units, CW = self._units_modules(slots)
         placed = self._flow(units, CW); n_cols = 1 + max([p[1] for p in placed] or [0])
         W = 2 * M + n_cols * CW + (n_cols - 1) * GAP; H = y_body + max([p[2] + p[5] for p in placed] or [40]) + M
+        return page, units, CW, placed, W, H
+    def _draw_body(self, g, units, CW, placed):
+        body = PageCanvas(g); y_body = self._body_y()
+        for u, col, top, i, j, h in sorted(placed, key=lambda p: p[0]):
+            units[u]["draw"](body, Kit.MARGIN + col * (CW + Kit.GAP), y_body + top, h, i, j)
+        return body
+    def _build_full(self, x, y):
+        self._reset(); self.seen, self.resize_at = {}, 0.0
+        self.part_boxes, self.fold_keys = [], []; M, GAP = Kit.MARGIN, Kit.GAP; L = M
+        page, units, CW, placed, W, H = self._plan(); y_title = M; y_prof = y_title + 34 + GAP; y_body = self._body_y()
         IW = W - 2 * M; S = self.scale; WS, HS = int(round(W * S)), int(round(H * S))
         g = G.CreateModernGump(x, y, WS, HS, True, int(self.MIN_W * S), int(self.MIN_H * S), self._on_resized)
         g.SetAlpha(0)
@@ -4953,13 +4969,12 @@ class ConfigWindow(object):
         try: self._build_profiles(g, L, y_prof, IW)
         except Exception as ex:
             self.prof_dd_args = None; Kit.add_label(g, "Profiles unavailable: %s" % ex, L + 12, y_prof + 9, Kit.HUE_BAD)
-        for u, col, top, i, j, h in sorted(placed, key=lambda p: p[0]):
-            units[u]["draw"](g, L + col * (CW + GAP), y_body + top, h, i, j)
-        self._add_profile_list(g)
+        keys = frozenset(self.store[0]); body = self._draw_body(g, units, CW, placed); self._add_profile_list(g)
         if not Kit.scale_window(g, S) and S != 1.0:
             self.scale, S, WS, HS = 1.0, 1.0, W, H; Kit.say("can't scale the window; it stays at 100%.", Kit.HUE_BAD)
         self._replace(g, "full", x, y, WS, HS, int(round(y_body * S))); fit = Kit.scroll_info(g)
         self.size = (fit["w2"], fit["hv"]) if fit else (WS, HS); self.minimized = False; self.dirty = None
+        self.body, self.head = body, (g, W, self.tab, Kit.dark(), keys)
         if self.search_focus:
             self.search_focus = False; tb = self.search_tb
             if tb is not None:
@@ -5026,6 +5041,29 @@ class ConfigWindow(object):
         x, y = self.pos()
         if x is not None: self.x, self.y = x, y
         self.build_full(self.x, self.y); self.host.save_prefs()
+    def _switch_page(self, key):
+        self.page = key; x, y = self.pos()
+        if x is not None: self.x, self.y = x, y
+        Kit.on_client(self._swap_body); self.host.save_prefs()
+    def _swap_body(self):
+        g, head = self.g, self.head; done = False
+        if head is not None and head[0] is g and Kit.is_open(g) and self.tab == head[2] == "settings" \
+                and head[3] == Kit.dark() and self.scale == 1.0 and g not in Kit._scrolled and g not in Fill.recs \
+                and not self.resize_at and self.prof_cache is not None \
+                and self._prof_key(self.prof_cache) == self.prof_shown:
+            try: done = self._fast_body(g, head[1], head[4])
+            except Exception as ex: self.host._tell("%s: settings window error: %s%s" % (APP_NAME, ex, _error_where()))
+        if not done: self._build_full(self.x, self.y)
+    def _fast_body(self, g, W0, keys):
+        self._leave_page(); self.page_keys, self.zone_keys, self.part_boxes, self.seen = [], [], [], {}
+        page, units, CW, placed, W, H = self._plan()
+        if page is None or W != W0 or H > Kit.screen()[1] > 0 or not Kit.frame_fit(g, W, H): return False
+        store, texts, w2r = self.store, Kit._texts, Fill.w2r
+        for c in self.body.ctrls: Kit.dispose(c); texts.pop(c, None); w2r.pop(c, None)
+        for k in [k for k in store[0] if k not in keys]: store[0].pop(k, None); store[1].pop(k, None)
+        self.body = self._draw_body(g, units, CW, placed); self._add_profile_list(g)
+        self.x, self.y = Kit.place(g, self.x, self.y, W, H)
+        Kit.moved_by_code(g); self.size, self.dirty = (W, H), None; return True
     def show_settings(self, key): self.request = key
     def refresh(self, key):
         self.forget_measure(key)
@@ -5128,7 +5166,7 @@ class ConfigWindow(object):
         for key, _ in self.TABS:
             if Kit.was_clicked(store, "tab_" + key) and key != self.tab: self.tab = key; self.redraw(); return True
         for bkey, key in self.page_keys:
-            if Kit.was_clicked(store, bkey) and key != self.shown_page: self.page = key; self.redraw(); return True
+            if Kit.was_clicked(store, bkey) and key != self.shown_page: self._switch_page(key); return True
         for bkey, key in self.fold_keys:
             if Kit.was_clicked(store, bkey):
                 s = dict.get(self.host.by_key, key)
@@ -5241,8 +5279,7 @@ class HubWindow(object):
     def _pos(self):
         g = self.g
         if Kit.is_open(g) and not self.host.layout_holds("hub"):
-            try: self.x, self.y = int(g.GetX()), int(g.GetY())
-            except Exception: pass
+            with Kit.quiet: self.x, self.y = int(g.GetX()), int(g.GetY())
     def _leave(self):
         for key, title, hooks in self.sections:
             st_ = self.stores.get(key)
@@ -5651,8 +5688,7 @@ class Grid(object):
     def show_overlay(g, x, y, w, h, under=False):
         g.SetRect(x, y, w, h); g.SetAcceptMouseInput(False); g.CanMove = False
         if under:
-            try: import System; g.LayerOrder = System.Enum.Parse(g.LayerOrder.GetType(), "Under")
-            except Exception: pass
+            with Kit.quiet: import System; g.LayerOrder = System.Enum.Parse(g.LayerOrder.GetType(), "Under")
         G.AddGump(g); SNAP.skip_gump(g)
     def toggle(self): self.hide() if self.shown else self.show()
     def show(self): self.shown = True; Kit.on_client(self.build)
@@ -5815,12 +5851,11 @@ class ZoneSet(object):
         if head.startswith("grid="):
             parts = parts[1:]
             for item in head.split(","):
-                try:
+                with Kit.quiet:
                     k, v = item.split("=", 1)
                     if k == "grid": grid = int(v)
                     elif k == "screen": w, h = v.lower().split("x"); screen = (int(w), int(h))
                     elif k == "v": ver = int(v)
-                except Exception: pass
         zs = ZoneSet(name, [], grid, screen); zs.ver = ver
         for p in parts:
             if not p.strip(): continue
@@ -6081,7 +6116,7 @@ class ZoneSet(object):
             i = 0 if horizontal else 1; same.sort(key=lambda o: o.px[i]); chain = [z]
             for direction in (1, -1):
                 cur = z
-                while True:
+                for _ in range(len(same)):
                     nxt = None
                     for o in same:
                         if o in chain: continue
@@ -6141,9 +6176,8 @@ class ClientWin(object):
         try: wins = Tz.windows(ClientWin.KINDS[kind]); ClientWin.errors.pop(kind, None)
         except Exception as ex: wins = []; ClientWin.errors[kind] = Tz.why(ex)
         for raw in wins:
-            try:
+            with Kit.quiet:
                 if not raw.IsDisposed: cw = ClientWin(kind, raw); break
-            except Exception: pass
         ClientWin.found[kind] = cw; return cw
     @property
     def IsDisposed(self):
@@ -6215,11 +6249,10 @@ class ClientWin(object):
     def free(self):
         own, self.own, self.tries = self.own, None, 0; self._rc = None; Kit.put_var(ClientWin.LOCK_VAR % self.kind, "")
         if own is None or self.IsDisposed: return
-        try:
+        with Kit.quiet:
             self._lock(bool(own[5]))
             if not own[5]: self.raw.CanMove = own[4]
             Tz.call(self.raw, "ResizeWindow", (ClientWin.point(own[2], own[3]),)); self.SetPos(own[0], own[1])
-        except Exception: pass
         self.fail = {}
     def report(self):
         if self.fail and not self.warned:
@@ -6270,9 +6303,8 @@ class Tex(object):
         table = Tex.parts["table"]
         for name in list(Tex.names if names is None else names):
             Tex.names.discard(name)
-            try:
+            with Kit.quiet:
                 if table.ContainsKey(name): tex = table[name]; table.Remove(name); tex.Dispose()
-            except Exception: pass
     @staticmethod
     def control(g, name, x, y, w, h):
         t = G.LegionTextureControl(name, int(w), int(h)); t.SetRect(int(x), int(y), int(w), int(h))
@@ -6479,9 +6511,8 @@ class Layout(object):
         for key in list(self.placed):
             g = self.gump_of(key); info = Kit.scroll_info(g) if g is not None else None
             if info is not None:
-                try:
+                with Kit.quiet:
                     Kit.place(g, int(g.GetX()), int(g.GetY()), info["w"], info["h"], info["head"]); Kit.moved_by_code(g)
-                except Exception: pass
         self.placed = {}
         if self.held: self._release(set())
         held, self.journal_held = self.journal_held, None
@@ -6651,8 +6682,7 @@ class Layout(object):
         hooks = self.hooks.get(key) or {}; mn = hooks.get("min")
         if callable(mn): mn = safe(mn)
         if mn:
-            try: return int(mn[0]), int(mn[1])
-            except Exception: pass
+            with Kit.quiet: return int(mn[0]), int(mn[1])
         g = g if g is not None else self.gump_of(key)
         if isinstance(g, ClientWin):
             m = g._min_size()
@@ -6892,10 +6922,9 @@ class Layout(object):
             if not self.holds(key):
                 g = self.gump_of(key); info = Kit.scroll_info(g) if g is not None else None
                 if info is not None:
-                    try:
+                    with Kit.quiet:
                         Kit.place(g, int(g.GetX()), int(g.GetY()), info["w"], info["h"], info["head"])
                         Kit.moved_by_code(g)
-                    except Exception: pass
                 self.placed.pop(key, None)
     def keep(self, W, H, only=None):
         if not self.loaded or W <= 0 or H <= 0: return
@@ -7500,8 +7529,7 @@ class Seam(object):
         on = Kit._frame_want.get(g, True)
         for p in rec["parts"]: Kit.set(p, "IsVisible", on)
         for t in rec["title"]:
-            try: t[0].IsVisible = t[3]
-            except Exception: pass
+            with Kit.quiet: t[0].IsVisible = t[3]
     @staticmethod
     def cut(pads):
         M = Kit.MARGIN; return M - pads[0], M + 30 + Kit.GAP - pads[1], M - pads[2], M - pads[3]
@@ -7599,10 +7627,9 @@ class Seam(object):
         if rec is None or not Kit.is_open(g): return False
         Seam.bare.pop(g, None); on = Kit._frame_want.get(g)
         for c, x, y, vis in [(c, None, None, v if on is None else on) for c, v in rec["frame"]] + rec["title"]:
-            try:
+            with Kit.quiet:
                 if x is not None: c.Location = ClientWin.point(x, y)
                 c.IsVisible = vis
-            except Exception: pass
         rec["raw"].AcceptMouseInput = rec["mouse"]; Seam.catchers.pop(rec.get("catch"), None); Kit.dispose(rec["box"])
         return True
     @staticmethod
@@ -7654,10 +7681,9 @@ def module_folders():
     if base:
         if os.path.isfile(base): base = os.path.dirname(base)
         places += [base, os.path.dirname(base)]
-    try:
+    with Kit.quiet:
         import System; root = str(System.AppDomain.CurrentDomain.BaseDirectory).rstrip("/\\")
         places += [os.path.join(root, "LegionScripts"), root]
-    except Exception: pass
     found = {}
     for p in places:
         if not p: continue
@@ -7773,11 +7799,10 @@ def _module_sysstats():
     queue = Kit.queuer(st)
     def read():
         v = {}
-        try:
+        with Kit.quiet:
             fps = int(Tz.get(None, "CurrentRefreshRate", Tz.T("ClassicUO.CUOEnviroment"))); v["FPS"] = str(fps)
             v["Frame"] = "%.1f ms" % (1000.0 / fps) if fps > 0 else "-"
-        except Exception: pass
-        try:
+        with Kit.quiet:
             sock = Tz.get(None, "Socket", Tz.T("ClassicUO.Network.AsyncNetClient")); stats = Tz.get(sock, "Statistics")
             src = str(Typing._get(stats, "CurrentPingSource", default="") or "")
             v["Ping"] = "off" if src.endswith("Disabled") else "%d ms" % int(Tz.get(stats, "Ping"))
@@ -7785,9 +7810,7 @@ def _module_sysstats():
             v["Out"] = "%.1f KB/s" % (int(Tz.get(stats, "DeltaBytesSent")) / 1024.0)
             v["Packets"] = "%d in, %d out" % (int(Tz.get(stats, "TotalPacketsReceived")),
                                               int(Tz.get(stats, "TotalPacketsSent")))
-        except Exception: pass
-        try: import System; v["Memory"] = "%d MB" % (int(System.GC.GetTotalMemory(False)) // (1024 * 1024))
-        except Exception: pass
+        with Kit.quiet: import System; v["Memory"] = "%d MB" % (int(System.GC.GetTotalMemory(False)) // (1024 * 1024))
         return v
     def build_button():
         x, y = Kit.load_pos(BTN_KEY, (8, 200), (46, 46)); store = ({}, {}); g = G.CreateGump(True, True)

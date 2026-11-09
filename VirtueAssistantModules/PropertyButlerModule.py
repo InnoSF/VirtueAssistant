@@ -46,7 +46,7 @@ def _module_butler():
     win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "log_view": "log"}
     logs = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "minimized": False, "shutting": False, "docked": False,
             "w": LOG_W, "queue": []}
-    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    cleanup, queue, say = Kit.basics(st, TITLE)
     log = []; visits = []
     NOTO_HUE = {"innocent": 90, "ally": 68, "gray": 946, "criminal": 946, "murderer": 33,
                 "enemy": 43, "invulnerable": 53}
@@ -55,8 +55,7 @@ def _module_butler():
         if len(p) >= 8:
             for i, k, lo, hi, cast in ((0, "cooldown", COOLDOWN_MIN, COOLDOWN_MAX, float),
                                        (1, "range", RANGE_MIN, RANGE_MAX, int)):
-                try: settings[k] = max(lo, min(hi, cast(p[i])))
-                except Exception: pass
+                with Kit.quiet: settings[k] = max(lo, min(hi, cast(p[i])))
             n = len(p); p = p + [""] * (13 - len(p))
             for i, k in enumerate(FIELDS, 2):
                 if k: settings[k] = p[i] == "1" if isinstance(DEFAULTS[k], bool) else (p[i] if i < n else DEFAULTS[k])
@@ -64,16 +63,14 @@ def _module_butler():
         for line in Kit.get_var(LOG_KEY).split("\n"):
             q = line.split("\t")
             if len(q) >= 3:
-                try: log.append((float(q[0]), q[2], int(q[1])))
-                except Exception: pass
+                with Kit.quiet: log.append((float(q[0]), q[2], int(q[1])))
         del log[:-LOG_KEEP]; del visits[:]
         for line in Kit.get_var(VISITS_KEY).split("\n"):
             q = line.split("\t", 6)
             if len(q) >= 7:
-                try:
+                with Kit.quiet:
                     visits.append([float(q[0]), float(q[1]), int(q[2]), q[6], q[3] or "unknown",
                                    max(1, int(q[4])), int(q[5])])
-                except Exception: pass
         del visits[:-VISIT_KEEP]; win["log_view"] = "visits" if Kit.get_var(LOG_VIEW_KEY) == "visits" else "log"
     def save_settings():
         Kit.put_var(SETTINGS_KEY, "|".join(["%.1f" % settings["cooldown"], str(settings["range"])] + [
@@ -551,29 +548,24 @@ def _module_butler():
         if not sw and st["house"] is None and st["house_wait"] is None: return
         low = ln.low
         if sw:
-            for t in J_WAIT:
-                if t in low:
-                    if st["phase"] == "cursor": HOST.release_cursor(KEY)
-                    elif st["phase"] == "cast": st["sweeps"] = max(0, st["sweeps"] - 1)
-                    st["phase"], st["next_at"] = "idle", time.time() + RETRY_SOON
-                    note("Skill delay: retrying"); return
-            for t in J_NOTHING:
-                if t in low: return
-            for t in J_REVEAL:
-                if t in low:
-                    st["reveal_line"] = True; note("Someone was revealed", 6.0)
-                    if settings["sound"]: HOST.alert(ALERT_REVEAL, "Someone was revealed", "warn")
-                    return
+            if any(t in low for t in J_WAIT):
+                if st["phase"] == "cursor": HOST.release_cursor(KEY)
+                elif st["phase"] == "cast": st["sweeps"] = max(0, st["sweeps"] - 1)
+                st["phase"], st["next_at"] = "idle", time.time() + RETRY_SOON
+                note("Skill delay: retrying"); return
+            if any(t in low for t in J_NOTHING): return
+            if any(t in low for t in J_REVEAL):
+                st["reveal_line"] = True; note("Someone was revealed", 6.0)
+                if settings["sound"]: HOST.alert(ALERT_REVEAL, "Someone was revealed", "warn")
+                return
         h = st["house"]
         if h is None: return
-        for t in J_DONE[h["kind"]]:
-            if t in low:
-                add_log("%s %s" % (CMDS[h["kind"]][1], h["name"] or "the target"), Kit.HUE_GOOD)
-                if h["kind"] in ("eject", "ban"): mark_visit(h["serial"], 2 if h["kind"] == "ban" else 1)
-                finish_house(); return
-        for t in J_HOUSE_NO:
-            if t in low:
-                add_log("%s %s failed: %s" % (who(h) + (ln.text.strip(),)), Kit.HUE_BAD); finish_house(); return
+        if any(t in low for t in J_DONE[h["kind"]]):
+            add_log("%s %s" % (CMDS[h["kind"]][1], h["name"] or "the target"), Kit.HUE_GOOD)
+            if h["kind"] in ("eject", "ban"): mark_visit(h["serial"], 2 if h["kind"] == "ban" else 1)
+            finish_house(); return
+        if any(t in low for t in J_HOUSE_NO):
+            add_log("%s %s failed: %s" % (who(h) + (ln.text.strip(),)), Kit.HUE_BAD); finish_house(); return
     def start_house(kind, serial, name, now, waited=False):
         if st["house"] is not None or (st["house_wait"] is not None and not waited): note(RUNNING); return
         if st["phase"] == "cursor":

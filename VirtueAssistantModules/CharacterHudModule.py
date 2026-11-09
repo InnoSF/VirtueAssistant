@@ -204,7 +204,7 @@ def _module_hud():
         cast = {"g": None, "c": {}, "spell": None, "start": 0.0, "secs": 1.0, "state": None,
                 "until": 0.0, "pct": 0, "word": "", "shown": None, "at": None, "leader": None, "s": None, "w": 0}
         frames = {}; win = {"g": None, "c": {}, "store": ({}, {})}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         page = {"store": ({}, {}), "next_preview": 0.0, "layers": None}; item_info = {}
         _get, _put = Kit.get_var, Kit.put_var
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ",", settings, NUMBERS)
@@ -264,18 +264,6 @@ def _module_hud():
             name = d[M_NAME]
             if name and st["names"].get(serial) != name: st["names"][serial] = name
             return d
-        _members = {}
-        def instance_member(obj, name):
-            t = obj.GetType(); key = (t, name); acc = _members.get(key, False)
-            if acc is False:
-                from System.Reflection import BindingFlags
-                flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                p = t.GetProperty(name, flags)
-                if p is not None: acc = (p, True)
-                else: f = t.GetField(name, flags); acc = (f, False) if f is not None else None
-                _members[key] = acc
-            if acc is None: return None
-            return acc[0].GetValue(obj, None) if acc[1] else acc[0].GetValue(obj)
         attack = {"get": None, "looked": False, "root": None, "obj": None, "until": 0.0}; HOLD_FOR = 2.0
         def attack_chain():
             t = Client._type("ClassicUO.Game.World"); first = Client._member(t, "Instance") if t is not None else None
@@ -285,11 +273,12 @@ def _module_hud():
                 if root is None: attack["obj"] = None; return 0
                 obj = attack["obj"]; now = time.time()
                 if obj is None or root is not attack["root"] or not 0 < attack["until"] - now <= HOLD_FOR:
-                    attack["obj"] = None; obj = instance_member(root, "TargetManager")
+                    attack["obj"] = None; obj = Typing._get(root, "TargetManager")
                     if obj is None: return 0
                     attack.update({"root": root, "obj": obj, "until": now + HOLD_FOR})
-                try: return int(instance_member(obj, "LastAttack") or 0)
-                except Exception: attack["obj"] = None; raise
+                v = Typing._get(obj, "LastAttack")
+                if v is None: attack["obj"] = None
+                return int(v or 0)
             get(); return get
         def attack_serial():
             if not attack["looked"]: attack["looked"] = True; attack["get"] = safe(attack_chain)
@@ -328,8 +317,8 @@ def _module_hud():
             def find_creatures():
                 import clr; import System; from System.Reflection.Emit import DynamicMethod, OpCodes; p = Bridge.parts
                 p["uo"] = Tz.get(Tz.get(None, "Game", Client._type("ClassicUO.Client")), "UO")
-                p["anims"] = instance_member(p["uo"], "Animations")
-                p["hues"] = instance_member(instance_member(p["uo"], "FileManager"), "Hues")
+                p["anims"] = Typing._get(p["uo"], "Animations")
+                p["hues"] = Typing._get(Typing._get(p["uo"], "FileManager"), "Hues")
                 p["hue_color"] = p["hues"].GetType().GetMethod("GetHueColorRgba8888")
                 world_t = Client._type("ClassicUO.Game.World")
                 p["world"] = world_t.GetProperty("Instance").GetValue(None, None)
@@ -698,7 +687,7 @@ def _module_hud():
             job = st["snap_job"]
             if job is None or "out" in job: return False
             deadline = now + budget
-            while True:
+            while not API.StopRequested:
                 try: r = next(job["gen"])
                 except StopIteration: job["out"] = False; return False
                 except Exception: job["out"] = None; return False
@@ -861,9 +850,7 @@ def _module_hud():
                 if fr is not None and fr.get("g") is g and not st["shutting"]:
                     fr["g"] = None; queue.add(("closed", key), dup=True)
             return handler
-        def color_box(g, x, y, w, h, rgb, alpha=1.0):
-            box = G.CreateGumpColorBox(alpha, "#%02x%02x%02x" % rgb); box.SetRect(x, y, w, h); g.Add(mute(box))
-            return box
+        def color_box(g, x, y, w, h, rgb, alpha=1.0): return Kit.add_box(g, x, y, w, h, alpha, "#%02x%02x%02x" % rgb)
         def add_bars(g, c, rows):
             for row, (rx0, ry0, rx1, ry1) in zip(ROWS, rows):
                 for v in (("hits", "poison", "yellow") if row == "hits" else (row,)):
@@ -1662,7 +1649,7 @@ def _module_hud():
               "active": False, "redraw": False}
         st_reset(); rows = {}; effects = {"str": [], "dex": [], "int": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "nrows": 0}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         ROW_ICON = 24; ROW_PITCH = 30; ROW_LINE = 42; ROW_PAD = 3; ROW_MAX = 24; FORM_EVERY = 0.5
         rowui = {s: {"g": None, "cells": [], "per": 1, "lines": -1, "w": 0} for s in ("player", "target")}
         NUMS = {"rows": (ROWS_MIN, ROWS_MAX), "warn": (0, WARN_MAX)}
@@ -2471,7 +2458,7 @@ def _module_hud():
         st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "bar_w": 109, "x1": 0, "row1": 0, "food_w": [0] * 21,
                "fill_w": -1, "fill_state": None, "shown": {}, "tips": {}, "active": False, "closing": False}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def load_settings():
             settings["enemy_default"] = clamp_enemy(load_var("swingtimer_enemy_default", DEFAULT_MONSTER_SKILL))
         def save_settings(): save_var("swingtimer_enemy_default", settings["enemy_default"])
@@ -2667,8 +2654,7 @@ def _module_hud():
             if Kit.pic_size(Kit.LINE_BLUE)[0] > 0:
                 t = Kit.add_tiled(win["c"]["gump"], Kit.LINE_BLUE, win["x1"], ROW1_Y, 1, h, hue=hue)
                 if t is not None: return t
-            b = G.CreateGumpColorBox(1.0, color); b.SetRect(win["x1"] + 1, ROW1_Y + 1, 1, h)
-            b.SetAcceptMouseInput(False); win["c"]["gump"].Add(b); return b
+            return Kit.add_box(win["c"]["gump"], win["x1"] + 1, ROW1_Y + 1, 1, h, 1.0, color)
         def window_size():
             win["row1"] = win["bar_w"] + 5 + max(Kit.text_w("15.0s"), readout_room())
             return win["row1"] + 2 * PAD + 16, 58
@@ -2691,9 +2677,7 @@ def _module_hud():
             for f in c["fills"].values(): f.IsVisible = False
             c["kite"] = {}
             for name, colour in KITE_COLOR.items():
-                b = G.CreateGumpColorBox(1.0, colour); b.SetRect(x1, ROW1_Y - 1, 2, fh + 2)
-                b.SetAcceptMouseInput(False)
-                b.IsVisible = False; gump.Add(b); c["kite"][name] = b
+                c["kite"][name] = b = Kit.add_box(gump, x1, ROW1_Y - 1, 2, fh + 2, 1.0, colour); b.IsVisible = False
             c["kite_lbl"] = Kit.add_label(gump, "", x1, ROW1_Y - 2, HUE_TEXT)
             c["kite_lbl"].SetAcceptMouseInput(False); kite.update({"px": None, "state": None, "tiles": None})
             c["swing"] = Kit.add_label(gump, "", x1 + win["bar_w"] + 5, ROW1_Y - 2, HUE_TEXT)
@@ -2975,7 +2959,7 @@ def _module_hud():
         st_reset()
         win = {"g": None, "c": {"fill": None, "fill_box": None, "label": None, "count": None}, "store": ({}, {}),
                "bar_w": 109, "fill_w": -1, "text": None, "count_text": None, "wide": False}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         cfgui = {"f": None, "typed": None, "applied": None, "since": 0.0}
         def load_settings(): load_pct(); load_timing(); load_extra()
         def save_settings(): save_pct(); save_timing()
@@ -3033,8 +3017,8 @@ def _module_hud():
                 Kit.add_pic(g, Kit.LINE_RED, x1, ROW1_Y)
                 c["fill"] = Kit.add_tiled(g, Kit.LINE_BLUE, x1, ROW1_Y, 1, fh); c["fill"].SetWidth(0)
             else:
-                Kit.add_tiled(g, Kit.SECTION_TILE, x1, ROW1_Y, 109, 9, 1.0); box = G.CreateGumpColorBox(1.0, "#3A63A8")
-                box.SetRect(x1 + 1, ROW1_Y + 1, 1, 7); g.Add(box); c["fill_box"] = box
+                Kit.add_tiled(g, Kit.SECTION_TILE, x1, ROW1_Y, 109, 9, 1.0)
+                c["fill_box"] = Kit.add_box(g, x1 + 1, ROW1_Y + 1, 1, 7, 1.0, "#3A63A8")
             tx = x1 + L["bar_w"] + 5; c["label"] = Kit.add_label(g, "Ready", tx, ROW1_Y - 2, Kit.HUE_INFO)
             Kit.catcher(g, x1 - 2, ROW1_Y - 4, L["row1"] + 4, 18, _bar_click,
                         "Bandage in progress and its patient. Alt+click: auto-follow (again to stop)", movable=True)
@@ -3159,12 +3143,11 @@ def _module_hud():
         def guess_patient(p, now):
             serial, when = st["lt"]
             if not serial: return None
-            try:
+            with Kit.quiet:
                 if serial == int(p.Serial): return None
                 m = API.FindMobile(serial)
                 if m is None or not near(m, int(p.X), int(p.Y), OTHER_RANGE + 1): return None
                 if now - when <= 4.0 or (p.Hits >= p.HitsMax and not p.IsPoisoned): return describe(m)
-            except Exception: pass
             return None
         def band_begun(p, now, at, buff=False):
             mine = st["phase"] == "heal" and not st["begun"] and not st["by_buff"]
@@ -3364,7 +3347,7 @@ def _module_hud():
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "followers": 0, "fmax": 0, "me": 0,
               "note_hue": Kit.HUE_INFO, "cmd_at": {}, "seq": 0}
         st_reset(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "n_rows": -1, "room": MAX_ROWS, "w": W}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         pets = {}; NUMS = {"range": (RANGE_MIN, RANGE_MAX), "low": (0, 99), "heal": (0, len(HEAL_WAYS) - 1)}
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ("range", "low", "heal", "kill", "hidden"), NUMS)
@@ -3728,8 +3711,7 @@ def _module_hud():
                     ("ALERTS  (sound: Settings > Alerts)", (("num", "low", "Alert when a pet's HP falls to:",
                         "One alert per fall to this % or below (0-99, 0 = never)", "%", 0, 99),)))
         def read_heal(f, new):
-            try: i = int(f.c["heal"].GetSelectedIndex())
-            except Exception: return
+            i = Kit.dd_index(f.c["heal"], -1)
             if 0 <= i < len(HEAL_WAYS): new["heal"] = i
         def on_change(old, new):
             if new["hidden"] != old["hidden"]: st["confirm"] = None

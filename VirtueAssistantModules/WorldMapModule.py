@@ -4,22 +4,14 @@ def _module_worldmap():
     ATLAS_OWNERS = (("corpse", "your corpse"), ("maps", "your dig spots"),
                     ("dry", "the spots that ran dry"), ("traps", "the traps you have seen"))
     ATLAS_CHECK = 1.0; ATLAS_CLOSED_CHECK = 2.5; GUMP_EVERY = 0.5; ATLAS_SETTLE = 2.0; ATLAS_OPS = 3; ATLAS_CAP = 60
-    GUMPS = {"at": -1.0, "ok": False, "map": False, "arrow": False}; GUMP_TYPE = []
+    GUMPS = {"at": -1.0, "ok": False, "map": False, "arrow": False}
     def gump_flags(fresh=False):
         memo = GUMPS; now = time.time()
         if not fresh and 0.0 <= now - memo["at"] < GUMP_EVERY: return memo
         memo["at"] = now; mp = ar = False
         try:
-            if not GUMP_TYPE: GUMP_TYPE.append(Tz.T("ClassicUO.Game.Managers.UIManager"))
-            for w in list(Tz.get(None, "Gumps", GUMP_TYPE[0])):
-                n = str(w.GetType().Name)
-                if n == "WorldMapGump":
-                    mp = True
-                    if ar: break
-                elif n == "QuestArrowGump":
-                    ar = True
-                    if mp: break
-            memo["ok"] = True
+            names = [str(w.GetType().Name) for w in Tz.windows(("WorldMapGump", "QuestArrowGump"))]
+            mp, ar = "WorldMapGump" in names, "QuestArrowGump" in names; memo["ok"] = True
         except Exception: memo["ok"] = False
         memo["map"], memo["arrow"] = mp, ar; return memo
     class Atlas(object):
@@ -167,14 +159,6 @@ def _module_worldmap():
         z = wnd.slot
         if z is None or st["minimized"] or not HOST.layout_holds(wnd.key) or z[0] < mw or z[1] < mh: return None
         return z
-    def row_clicker(rows_of, k, field, act, queue, lo=-1e9):
-        def handler(*args):
-            rows = rows_of()
-            if k < len(rows):
-                r = rows[k]; key = r[field]; prev, at = r["prev"]
-                if prev and lo <= time.time() - at < 0.15: key = prev
-                if key: queue((act, key))()
-        return handler
     def _part_pings():
         KEY = "pings"; TITLE = "Map Pings"; DEFAULT_PORT = 8887
         HOTKEYS = {"look": "CTRL+1", "danger": "CTRL+2", "go": "CTRL+3", "help": "CTRL+4",}
@@ -191,7 +175,7 @@ def _module_worldmap():
         DEFAULTS = dict(settings)
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "app": None}
         win = {"g": None, "c": {}, "store": ({}, {})}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def load_settings():
             for k, v in Kit.codec_load(Kit.get_var(OPT_KEY)).items():
                 if k in ("sounds", "share", "gesture"): settings[k] = v == "1"
@@ -592,14 +576,12 @@ def _module_worldmap():
             return got
         def spot_of(obj):
             if obj is None: return None
-            try: return int(obj.X), int(obj.Y)
-            except Exception: pass
-            try:
+            with Kit.quiet: return int(obj.X), int(obj.Y)
+            with Kit.quiet:
                 t = obj.GetType(); fx, fy = xy_fields(t)
                 if fx is not None and fy is not None: return int(fx.GetValue(obj)), int(fy.GetValue(obj))
                 px, py = t.GetProperty("X"), t.GetProperty("Y")
                 if px is not None and py is not None: return int(px.GetValue(obj, None)), int(py.GetValue(obj, None))
-            except Exception: pass
             return None
         class Ping(object):
             def __init__(self, x, y, m, t, now, auto=False):
@@ -957,11 +939,10 @@ def _module_worldmap():
                     aim = {"t": t, "fired": False, "spot": None, "d": None, "tm": tm,
                            "until": time.time() + self.AIM_SECONDS}
                     def got(obj, aim=aim): aim["spot"] = spot_of(obj); aim["fired"] = True
-                    try:
+                    with Kit.quiet:
                         from System import Action; aim["d"] = Action[object](got)
                         tm.SetTargeting(aim["d"], Picker.CURSOR_TARGET, Picker.neutral); self.aim = aim
                         HOST.claim_cursor("pings", self.AIM_SECONDS); return
-                    except Exception: pass
                 self.jobs.append(("aim", t))
             def poll_aim(self):
                 aim = self.aim
@@ -1004,12 +985,8 @@ def _module_worldmap():
                     if now - self.conn.last_sent > 20: self.outbox.append(packet(0xFE))
                     return
                 if ((pos != self.last_pos and now - self.last_pos_sent >= 1.0) or now - self.last_pos_sent >= 10):
-                    flag = 0
-                    if p.IsDead: flag = 4
-                    elif p.IsPoisoned: flag = 1
-                    elif p.IsYellowHits: flag = 2
-                    elif p.IsParalyzed: flag = 3
-                    elif p.IsHidden: flag = 5
+                    flag = (4 if p.IsDead else 1 if p.IsPoisoned else 2 if p.IsYellowHits else 3 if p.IsParalyzed
+                            else 5 if p.IsHidden else 0)
                     stats = (int(p.Hits), int(p.Stamina), int(p.Mana), int(p.HitsMax), int(p.StaminaMax),
                              int(p.ManaMax))
                     self.outbox.append(pk_player_data(pos, stats, flag, 0xFFFFD700))
@@ -1219,8 +1196,7 @@ def _module_worldmap():
             now = time.time()
             if not force and now < page["next_read"]: return
             page["next_read"] = now + 0.2; new = f.read()
-            try: i = int(page["dd"].GetSelectedIndex())
-            except Exception: i = -1
+            i = Kit.dd_index(page["dd"], -1)
             if 0 <= i < len(CONNECTIONS): new["connection"] = CONNECTIONS[i][0]
             if new != settings: settings.update(new); save_settings(); _queue_app(("options",))
             new = {}
@@ -1294,7 +1270,7 @@ def _module_worldmap():
               "note_until": 0.0, "name": "", "drawn": None, "drawn_c": None, "unnamed": False, "hooked": False,
               "find_at": 0.0}
         win = {"g": None, "c": {}, "store": ({}, {})}; typed = {}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         NUMS = {"decay": (MIN_LO, MIN_HI), "bones": (MIN_LO, MIN_HI)}
         def load_settings():
             Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
@@ -1419,10 +1395,8 @@ def _module_worldmap():
             if settings["arrow"] and r is not None and r["spot"] and mm == r["facet"]:
                 if max(abs(int(me.X) - r["x"]), abs(int(me.Y) - r["y"])) > REACH: want = (r["x"], r["y"])
             if want == st["arrow"]: return
-            if want is None: clear_arrow()
+            if want is None: Kit.drop_arrow(st, ARROW_ID)
             else: API.TrackingArrow(want[0], want[1], ARROW_ID); st["arrow"] = want
-        def clear_arrow():
-            if st["arrow"] is not None: st["arrow"] = None; API.TrackingArrow(-1, -1, ARROW_ID)
         def on_death(me, now, at_start=False):
             if st["job"] is not None: stop_job("you died")
             x, y, m = int(me.X), int(me.Y), int(API.GetMap()); st["name"] = str(me.Name or "")
@@ -1473,7 +1447,7 @@ def _module_worldmap():
         def forget(why=None):
             if st["job"] is not None: stop_job(None)
             st["rec"] = st["ping"] = st["gone_since"] = None; st["unnamed"] = False; st["refused"] = set()
-            clear_arrow(); save_rec()
+            Kit.drop_arrow(st, ARROW_ID); save_rec()
             if why: say(why)
             st["lbl_at"] = 0.0
         def corpse_tick(me, now, mm):
@@ -1671,7 +1645,7 @@ def _module_worldmap():
         def on_change(old, new):
             if (new["decay"], new["bones"]) != (old["decay"], old["bones"]): st["warned"] = False
             st["lbl_at"] = 0.0
-            if not new["arrow"]: clear_arrow()
+            if not new["arrow"]: Kit.drop_arrow(st, ARROW_ID)
         cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=settle, final=True)
         def config_closed(): cfg.closed(); typed.clear()
         def on_corpse(*args):
@@ -1736,7 +1710,8 @@ def _module_worldmap():
             refresh(me, now, mm)
         def _interval(): return 0.1 if st["job"] is not None else 0.25
         def _stop():
-            st["shutting"] = True; st["job"] = st["ping"] = None; clear_arrow(); save_settings(); cleanup.close()
+            st["shutting"] = True; st["job"] = st["ping"] = None; Kit.drop_arrow(st, ARROW_ID); save_settings()
+            cleanup.close()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": config_closed,
                 "interval": _interval}
@@ -1763,7 +1738,7 @@ def _module_worldmap():
               "hidden": 0, "in_pack": frozenset()}
         spots = {}; parsed = {}; TEXT_EVERY = 5.0; TEXT_ALL = [False]; asked = set(); read_gumps = {}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; JR = {"rd": None}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         bank_st = {"at": 0.0, "items": []}
         def level_name(lvl): return LEVEL_NAMES[lvl] if 0 <= lvl < len(LEVEL_NAMES) else "Treasure map"
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings)
@@ -2002,10 +1977,9 @@ def _module_worldmap():
                                     if int(it.Graphic) in MAP_GRAPHICS]
             return bank_st["items"]
         def bank_open(bank):
-            try:
+            with Kit.quiet:
                 for g in Tz.windows(("ContainerGump", "GridContainer")):
                     if int(g.LocalSerial) == bank: return True
-            except Exception: pass
             return False
         def dig_tiles(keep):
             want = set((int(e["x"]), int(e["y"]), int(e["f"])) for e in keep)
@@ -2088,14 +2062,14 @@ def _module_worldmap():
                 c["empty_w"] = x_ping - 8 - x_lvl
                 for k in range(n):
                     ry = yl + 30 + k * ROW_H
-                    r = {"serial": 0, "prev": (0, 0.0), "sig": None, "tip": None, "pvis": True,
+                    r = {"val": None, "prev": None, "changed": 0.0, "sig": None, "tip": None, "pvis": True,
                          "lvl": Kit.add_label(g, "", x_lvl, ry + 3, Kit.HUE_TITLE),
                          "name": Kit.add_label(g, "", x_name, ry + 3, Kit.HUE_TEXT),
                          "where": Kit.add_label(g, "", x_where, ry + 3, Kit.HUE_INFO)}
                     r["catch"] = Kit.catcher(g, M + 6, ry, x_ping - 4 - (M + 6), ROW_H,
-                                             row_clicker(lambda: win["rows"], k, "serial", "row", queue, 0), LOOK_TIP)
+                                             Kit.row_clicker(r, queue, "row", follow=False), LOOK_TIP)
                     r["ping"] = Kit.art_button(g, store, "ping%d" % k, Kit.ART_PLAY, x_ping, ry + 1, None, PING_TIP,
-                                               on_click=row_clicker(lambda: win["rows"], k, "serial", "ping", queue, 0))
+                                               on_click=Kit.row_clicker(r, queue, "ping", follow=False))
                     rows.append(r)
             wnd.end(g, {"rows": rows}); st["drawn"] = None; refresh()
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (240, 180), (MINI_W, MINI_H), 0x14EB,
@@ -2131,7 +2105,7 @@ def _module_worldmap():
             for k, r in enumerate(rows):
                 i = first + k
                 if i >= n:
-                    if r["serial"]: r["prev"] = (r["serial"], now); r["serial"] = 0
+                    Kit.row_set(r, None, now)
                     if k == 0 and n == 0: es = ("empty", EMPTY_TEXT if not st["hidden"] else (status + "."))
                     else: es = ("empty", "")
                     if r["sig"] != es:
@@ -2139,7 +2113,7 @@ def _module_worldmap():
                         Kit.set_text(r["name"], ""); Kit.set_text(r["where"], "")
                     show(r["ping"], r, "pvis", False); continue
                 e = lst[i]
-                if r["serial"] != e["serial"]: r["prev"] = (r["serial"], now); r["serial"] = e["serial"]
+                Kit.row_set(r, (e["serial"],), now)
                 on = arrow == e["serial"]
                 rsig = (e["serial"], e["lvl"], e["dec"], e["done"], e["where"], on,
                         st["pin"] == e["serial"], settings["auto"])
@@ -2291,7 +2265,7 @@ def _module_worldmap():
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "rd": None, "ver": 0,
               "mini_key": None, "w_key": None, "arrow_at": 0.0}; spots = {}; first = {}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; jobs = []
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, KINDS + ("alert", "keep"))
         def spots_text():
@@ -2504,14 +2478,14 @@ def _module_worldmap():
                 c["here_w"] = IW - 24
                 for k in range(n):
                     ry = yh + 22 + k * ROW_H
-                    r = {"key": None, "prev": (None, 0.0), "sig": None, "vis": True, "tip": None,
+                    r = {"val": None, "prev": None, "changed": 0.0, "sig": None, "vis": True, "tip": None,
                          "kind": Kit.add_label(g, "", xk, ry + 3, Kit.HUE_TEXT),
                          "where": Kit.add_label(g, "", xw, ry + 3, Kit.HUE_TEXT),
                          "back": Kit.add_label(g, "", xb, ry + 3, Kit.HUE_INFO)}
                     r["catch"] = Kit.catcher(g, M + 6, ry, xp - 4 - (M + 6), ROW_H,
-                                             row_clicker(lambda: win["rows"], k, "key", "arrow", queue), ROW_TIP)
+                                             Kit.row_clicker(r, queue, "arrow", follow=False), ROW_TIP)
                     r["plbl"] = Kit.art_button(g, store, "ping%d" % k, Kit.ART_PLAY, xp, ry, "Ping", PING_TIP,
-                                               on_click=row_clicker(lambda: win["rows"], k, "key", "ping", queue))
+                                               on_click=Kit.row_clicker(r, queue, "ping", follow=False))
                     r["pbtn"] = store[0].get("ping%d" % k); rows.append(r)
                 c["more"] = Kit.add_label(g, "", M + 12, yh + 22 + n * ROW_H + 2, Kit.HUE_INFO)
             wnd.end(g, {"rows": rows})
@@ -2562,10 +2536,10 @@ def _module_worldmap():
             back_w = c.get("back_w", 160)
             for k, r in enumerate(win["rows"]):
                 if k >= len(listed):
-                    if r["key"] is not None: r["prev"] = (r["key"], now); r["key"] = None
+                    Kit.row_set(r, None, now)
                     r["sig"] = None; show_row(r, False); continue
                 e = listed[k][2]; where = where_text(e, me); key = e["key"]
-                if r["key"] != key: r["prev"] = (r["key"], now); r["key"] = key
+                Kit.row_set(r, (key,), now)
                 on = st["arrow"] == key; back, bhue = back_text(e, now)
                 rsig = (key, where, back, bhue, on, e["lo"], e["hi"]); show_row(r, True)
                 if rsig == r["sig"]: continue
@@ -2670,17 +2644,16 @@ def _module_worldmap():
         DEFAULTS = dict(settings)
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "hooked": False, "poke": False}
         win = {"g": None, "c": {}, "store": ({}, {})}; page = {"f": None, "gfx_typed": None, "gfx_since": 0.0}
-        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cleanup, queue, say = Kit.basics(st, TITLE)
         def load_settings():
             p = Kit.get_var(SETTINGS_KEY).split("|")
             if len(p) < 7: return
-            try:
+            with Kit.quiet:
                 settings["range"] = max(1, min(30, int(p[0]))); settings["cycle"] = max(0.5, min(10.0, float(p[1])))
                 settings["pulse"] = p[2] == "1"; settings["green"] = int(p[3]); settings["red"] = int(p[4])
                 settings["by_name"] = p[5] == "1"; gl = parse_graphics(p[6])
                 if gl or not p[6].strip(): settings["graphics"] = gl
                 if len(p) >= 8: settings["ping"] = p[7] != "0"
-            except Exception: pass
         def load_fields():
             v = Kit.codec_load(Kit.get_var(FIELDS_KEY)); settings["fields"] = v.get("on") != "0"
             settings["field_say"] = v.get("say") == "1"
@@ -2771,12 +2744,7 @@ def _module_worldmap():
             st["atlas_ver"] += 1
         def atlas_publish():
             ATLAS.set("traps", {atlas_name("Trap %d %d" % (x, y)): (x, y, m, "red") for x, y, m in st["atlas_traps"]})
-        DIRS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
-        def where(dx, dy):
-            d = max(abs(dx), abs(dy))
-            if d == 0: return "under you"
-            a = math.degrees(math.atan2(dx, -dy)) % 360.0
-            return "%s %s" % (Kit.count(d, "tile"), DIRS[int((a + 22.5) // 45.0) % 8])
+        DIRS = ("east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east")
         def alert_new_traps(its):
             alerted = st["alerted"]
             if len(alerted) + len(its) > 5000: alerted.clear()
@@ -2784,7 +2752,7 @@ def _module_worldmap():
             for it in its:
                 alerted.add(int(it.Serial)); dx, dy = int(it.X) - px, int(it.Y) - py; d = max(abs(dx), abs(dy))
                 if best_d is None or d < best_d: best, best_d, bdx, bdy = it, d, dx, dy
-            w = where(bdx, bdy)
+            w = Kit.where_text(bdx, bdy, names=DIRS)
             text = "A trap %s" % w if len(its) == 1 else "%d new traps in range (nearest %s)" % (len(its), w)
             HOST.alert(ALERT_TRAP, text, who=int(best.Serial))
         def field_hue(kind): return settings["para_hue"] if kind == "paralyze" else settings["field_hue"]
