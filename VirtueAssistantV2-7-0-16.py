@@ -5,7 +5,7 @@ import re
 import struct
 import time
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.6.103"
+APP_VERSION = "2.7.0.16"
 MODULE_DIR = "VirtueAssistantModules"
 SETTINGS_DIR = "VirtueAssistantSettings"
 SETTINGS_KEY = "VirtueAssistant_settings"
@@ -14,9 +14,12 @@ ALIVE_KEY = "VirtueAssistant_alive"
 ALONE_PARTS = "VirtueAssistant_alone_parts_%s"
 HOST_TICK = 0.02
 UI_TICK = 0.05
+UI_IDLE = 0.12
+UI_IDLE_AFTER = 2.0
 GRID_DEFAULT = 32
 SNAP_ANCHOR = 40
 KEEP_EVERY = 0.5
+KEEP_SWEEP = 2.0
 PROFILE_DIR = "VirtueAssistantProfiles"
 PROFILE_STATE_KEY = "VirtueAssistant_profile"
 PROFILE_NAME_MAX = 32
@@ -37,9 +40,16 @@ FOE_EVERY = 1.0
 FOE_NOTO = (5, 6)
 FOE_WAR_NOTO = (3, 4)
 HURT_SECS = 10.0
+MAX_MODULE_ERRORS = 25
+ERROR_SECS = 60.0
+GUMP_EXPECT_MAX = 30.0
+ATTACK_HUE = 0x22
+HARM_SECS = 3.0
+HARM_DOUBLE = 0.6
+HARM_NOTO = ("innocent", "ally", "odd")
 HOLD_TEXT = {"dead": "you are dead", "war": "war mode", "hurt": "you took damage", "foe": "a hostile is near",
     "item": "you are moving an item", "alarm": "an alarm needs you", "guard": "guard zone",
-    "unknown": "Guard zone not known yet: cross a town's guard line once",}
+    "unknown": "Guard zone not known yet: cross a town's guard line once", "attacked": "you are being attacked",}
 CATEGORY_ORDER = ("On screen", "Your things", "The world", "Skills and home", "Extras", "Other")
 SEARCH_SETTLE = 0.3
 WHATS_NEW_KEY = "VirtueAssistant_seen_version"
@@ -58,9 +68,10 @@ class _Gumps(object):
     def __init__(self, inner): self._inner = inner
     def __getattr__(self, name): v = getattr(self._inner, name); self.__dict__[name] = v; return v
     def AddControlOnClick(self, ctrl, fn):
+        key = HOST.click_key()
         def run(*args):
             try: fn(*args)
-            finally: HOST.poke()
+            finally: HOST.poke(key)
         self._inner.AddControlOnClick(ctrl, run)
     def AddGump(self, g):
         Kit.set(g, "CanCloseWithRightClick", False); Kit.set(Kit._raw_gump(g), "CanCloseWithRightClick", False)
@@ -405,6 +416,9 @@ class Follow(object):
 class Kit(object):
     WINDOW_BG     = 5054; STONE_TILE    = 5058; SECTION_TILE  = 2624; SECTION_ALPHA = 0.8; FIELD_TILE    = 2624
     CORNER_ART    = 10460; ART_PLAY    = (4005, 4007, 4006); ART_CLOSE   = (4017, 4019, 4018)
+    DARK_HUE = 1899; DARK_CORNER_HUE = 2305; DARK_SECTION_ALPHA = 0.95; LIGHT_SECTION_ALPHA = 0.8
+    GOLD_H = 2700; GOLD_V = 2701; GOLD_T = 3
+    _dark = {}; _wins = {}
     ART_OK      = (4023, 4025, 4024); ART_PAGE    = (4011, 4013, 4012); ART_MIN     = (253, 252, 253)
     ART_RESTORE = (251, 250, 251); ART_DOCK    = (5602, 5606, 5602); ART_CIRCLE  = (2117, 2118, 2118)
     DOCK_DX, DOCK_DY = 20, 2; DOCK_TIP = "Fold into the Action Bar's tray"
@@ -788,8 +802,24 @@ class Kit(object):
             wh = Kit._sizes[graphic] = (w, h)
         return wh
     @staticmethod
+    def dark(): return bool(Kit._dark)
+    @staticmethod
+    def set_dark(on):
+        art = [(Kit.WINDOW_BG + i, Kit.DARK_HUE) for i in range(9)] + [(Kit.CORNER_ART, Kit.DARK_CORNER_HUE)]
+        Kit._dark = dict(art) if on else {}
+        Kit.SECTION_ALPHA = Kit.DARK_SECTION_ALPHA if on else Kit.LIGHT_SECTION_ALPHA
+    @staticmethod
+    def look_hue(graphic, hue=0): return hue or Kit._dark.get(graphic, 0)
+    @staticmethod
+    def retint():
+        for parts in list(Kit._frame_parts.values()):
+            for p in parts:
+                try: p.Hue = Kit._dark.get(int(p.Graphic), 0)
+                except Exception: pass
+    @staticmethod
     def add_pic(g, graphic, x, y, hue=0, mouse=True):
         try:
+            hue = hue or Kit._dark.get(graphic, 0)
             p = G.CreateGumpPic(graphic, x, y, hue) if hue else G.CreateGumpPic(graphic, x, y); p.SetPos(x, y)
             if not mouse: p.SetAcceptMouseInput(False)
             g.Add(p); return p
@@ -797,6 +827,7 @@ class Kit(object):
     @staticmethod
     def add_tiled(g, graphic, x, y, w, h, alpha=None, fallback="#101010", hue=0):
         if w <= 0 or h <= 0: return None
+        hue = hue or Kit._dark.get(graphic, 0)
         try: t = (G.CreateTiledGumpPic(graphic, w, h, hue) if hue else G.CreateTiledGumpPic(graphic, w, h))
         except Exception: t = G.CreateGumpColorBox(alpha if alpha is not None else 1.0, fallback)
         t.SetRect(x, y, w, h)
@@ -824,6 +855,13 @@ class Kit(object):
             Kit.add_pic(g, base + 8, x + w - br[0], y + h - br[1], mouse=mouse)]
         return [p for p in out if p is not None]
     @staticmethod
+    def gold_box(g, x, y, w, h, t=GOLD_T):
+        out = [Kit.add_tiled(g, Kit.SECTION_TILE, x + t, y + t, w - 2 * t, h - 2 * t)]
+        for art, bx, by, bw, bh in ((Kit.GOLD_H, x, y, w, t), (Kit.GOLD_H, x, y + h - t, w, t),
+                                    (Kit.GOLD_V, x, y, t, h), (Kit.GOLD_V, x + w - t, y, t, h)):
+            out.append(Kit.add_tiled(g, art, bx, by, bw, bh))
+        return [p for p in out if p is not None]
+    @staticmethod
     def _frame_pieces(g, w, h, corners=True, mouse=True):
         out = Kit.add_resizepic(g, Kit.WINDOW_BG, 0, 0, w, h, mouse)
         if corners and Kit.CORNER_ART:
@@ -836,6 +874,12 @@ class Kit(object):
             try: Kit._prune(Kit._frame_parts); Kit._frame_parts[g] = [p for p in out if p is not None]
             except TypeError: pass
         return out
+    _frame_want = {}
+    @staticmethod
+    def frame_show(g, on):
+        Kit._prune(Kit._frame_want, 32); Kit._frame_want[g] = bool(on)
+        if g in Seam.bare or g in Seam.recs: return
+        for p in Kit._frame_parts.get(g) or (): Kit.set(p, "IsVisible", bool(on))
     @staticmethod
     def add_window_frame(g, w, h, corners=True, mouse=True):
         pieces = Kit._frame_pieces(g, w, h, corners, mouse)
@@ -867,13 +911,14 @@ class Kit(object):
     clicks_seen = False
     @staticmethod
     def on_click(ctrl, fn):
+        key = HOST.click_key()
         def handler(*args):
             Kit.clicks_seen = True; twice = Client.second_click_swallowed()
             try: fn()
             finally:
                 try:
                     if twice: fn()
-                finally: HOST.poke()
+                finally: HOST.poke(key)
         G.AddControlOnClick(ctrl, handler)
     _dbl = {}; pending = []; _fired = {}
     @staticmethod
@@ -884,11 +929,12 @@ class Kit(object):
     def _forget_old(d, now, age=5.0):
         if len(d) > 64:
             for k in [k for k, v in d.items() if now - (v[0] if type(v) is tuple else v) > age]: d.pop(k, None)
+    TWICE = 0.15
     @staticmethod
-    def once(fn, key):
+    def once(fn, key, gap=0.6):
         def run():
             now = time.time()
-            if now - Kit._fired.get(key, 0.0) < 0.6: return
+            if now - Kit._fired.get(key, 0.0) < gap: return
             Kit._fired[key] = now; Kit._forget_old(Kit._fired, now); fn()
         return run
     @staticmethod
@@ -987,12 +1033,27 @@ class Kit(object):
                 if k == kind: Kit.ui_w(f, width)
                 f.IsVisible = k == kind
             except Exception: pass
+    _hooks = {}
     @staticmethod
     def hook_once(holder, key, *pairs):
         if holder[key]: return
-        holder[key] = True
+        holder[key] = True; owner = HOST.owner_key()
         for event, fn in pairs:
-            with Kit.quiet: getattr(API.Events, event)(fn)
+            try: getattr(API.Events, event)(fn)
+            except Exception: continue
+            Kit._hooks.setdefault(owner, []).append((event, fn, holder, key))
+    @staticmethod
+    def unhook(owner):
+        recs = Kit._hooks.pop(owner, None)
+        if not recs: return
+        def run():
+            for rec in recs:
+                event, fn, holder, key = rec
+                try: getattr(API.Events, "Unregister" + (event if event.startswith("On") else "On" + event))(fn)
+                except Exception: Kit._hooks.setdefault(owner, []).append(rec); continue
+                holder[key] = False
+        try: Kit.on_client(run)
+        except Exception: pass
     @staticmethod
     def was_clicked(store, key):
         cdict = store[1]; hit = cdict.get(key, False)
@@ -1053,8 +1114,16 @@ class Kit(object):
                 if len(wd) >= Kit.WIDTHS_MAX // 2: wd.clear()
             Kit._widths[text] = px
         return px
+    _wraps = {}
     @staticmethod
     def wrap(text, width):
+        ck = (text, width); got = Kit._wraps.get(ck)
+        if got is None:
+            if len(Kit._wraps) > 600: Kit._wraps.clear()
+            got = Kit._wraps[ck] = tuple(Kit._wrap_raw(text, width))
+        return list(got)
+    @staticmethod
+    def _wrap_raw(text, width):
         lines = []; words = text.split()
         if words and Kit._px["ok"] is None: Kit.text_px("")
         if Kit._px["ok"]:
@@ -1195,14 +1264,26 @@ class Kit(object):
         if g is None: return False
         try: return not g.IsDisposed
         except Exception: return False
+    _vars = {}
     @staticmethod
     def get_var(key, default=""):
-        try: v = API.GetPersistentVar(key, default, API.PersistentVar.Char)
-        except Exception: v = default
-        return str(v or default)
+        v = Kit._vars.get(key)
+        if v is None:
+            try: v = str(API.GetPersistentVar(key, "", API.PersistentVar.Char) or "")
+            except Exception: return str(default)
+            if len(Kit._vars) > 3000: Kit._vars.clear()
+            Kit._vars[key] = v
+        return v or str(default)
     @staticmethod
-    def put_var(key, value):
-        with Kit.quiet: API.SavePersistentVar(key, value, API.PersistentVar.Char)
+    def put_var(key, value, loud=False):
+        v = str(value)
+        if Kit._vars.get(key) == v: return
+        Kit._vars.pop(key, None)
+        if loud: API.SavePersistentVar(key, value, API.PersistentVar.Char)
+        else:
+            with Kit.quiet: API.SavePersistentVar(key, value, API.PersistentVar.Char); Kit._vars[key] = v
+            return
+        Kit._vars[key] = v
     _data_dir = [None]
     DATA_MOVE = re.compile(r"^(_ultima_tracker_data\.txt|_lookout_feed\.txt|_unified_bag_\d+\.cfg"
                            r"|_storage_index_[^\\/]+?\.txt|_swing_timer_\d+\.txt"
@@ -1227,6 +1308,77 @@ class Kit(object):
         return d
     @staticmethod
     def data_path(name): return os.path.join(Kit.data_dir(), name)
+    @staticmethod
+    def write_safe(path, text, enc="utf-8", tail=None):
+        try: import threading; tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+        except Exception: tmp = "%s.%d.tmp" % (path, id(text))
+        import io
+        try:
+            if isinstance(text, bytes):
+                with io.open(tmp, "wb") as f: f.write(text)
+            else:
+                with io.open(tmp, "w", encoding=enc, newline="") as f: f.write(text)
+            more = tail() if tail is not None else None
+            if more:
+                with io.open(tmp, "ab") as f: f.write(more)
+        except Exception:
+            safe(lambda: os.remove(tmp)); raise
+        done = False
+        for _ in range(3):
+            try: os.replace(tmp, path); done = True; break
+            except Exception: pass
+        if not done:
+            bak = tmp + ".bak"; had = os.path.exists(path)
+            try:
+                if had: os.rename(path, bak)
+                os.rename(tmp, path)
+            except Exception:
+                if had and os.path.exists(bak):
+                    if os.path.exists(path): safe(lambda: os.remove(bak))
+                    else: safe(lambda: os.rename(bak, path))
+                safe(lambda: os.remove(tmp)); raise
+            if had: safe(lambda: os.remove(bak))
+        if text: Kit._seen.add(os.path.normcase(os.path.abspath(path)))
+        return True
+    _seen = set(); _gone = {}; MISS_WAIT = 5.0
+    @staticmethod
+    def read_merge(path):
+        key = os.path.normcase(os.path.abspath(path))
+        if not os.path.exists(path):
+            if key not in Kit._seen: return ""
+            now = time.time(); t = Kit._gone.setdefault(key, now)
+            if now - t < Kit.MISS_WAIT: return None
+            Kit._seen.discard(key); Kit._gone.pop(key, None); return ""
+        Kit._gone.pop(key, None); text = Kit.read_safe(path)
+        if text: Kit._seen.add(key)
+        return text
+    @staticmethod
+    def read_safe(path, missing=""):
+        try:
+            if not os.path.exists(path): return missing
+            import io
+            with io.open(path, "r", encoding="utf-8-sig") as f: return f.read()
+        except Exception: return None
+    @staticmethod
+    def merge_text(text, entries, key_of, sep="\n"):
+        out, at = [], {}
+        for e in (text or "").split(sep):
+            e = e.rstrip("\r")
+            if not e.strip(): continue
+            k = key_of(e)
+            if k is not None and k in at: out[at[k]] = e; continue
+            if k is not None: at[k] = len(out)
+            out.append(e)
+        for k, e in entries.items():
+            if k in at: out[at[k]] = e
+            elif e is not None: at[k] = len(out); out.append(e)
+        out = [e for e in out if e is not None]; return sep.join(out), out
+    @staticmethod
+    def merge_save(path, entries, key_of, sep="\n"):
+        text = Kit.read_merge(path)
+        if text is None: return None
+        merged, out = Kit.merge_text(text, entries, key_of, sep)
+        Kit.write_safe(path, merged + sep if out else ""); return out
     @staticmethod
     def data_setup():
         base, d = Kit.script_dir(), Kit.data_dir()
@@ -1269,16 +1421,21 @@ class Kit(object):
     def save_min(key, minimized): Kit.put_var(key, "1" if minimized else "0")
     @staticmethod
     def save_pos(key, g):
-        if Kit.is_open(g): Kit.put_var(key, "%d,%d" % (g.GetX(), g.GetY()))
+        if Kit.is_open(g) and g not in LAYOUT.held: Kit.put_var(key, "%d,%d" % (g.GetX(), g.GetY()))
     @staticmethod
     def queuer(st):
-        def queue(action):
-            def handler(*args):
-                if action not in st["queue"]:
-                    st["queue"].append(action)
-                    if not HOST.in_hop: HOST.poke()
+        def add(action, dup=False, front=False, cap=None, key=None):
+            q = st["queue"]
+            if not dup and action in q or cap is not None and len(q) >= cap: return False
+            if front: q.insert(0, action)
+            else: q.append(action)
+            if key is not None and (HOST.draining or not HOST.in_hop): HOST.poke(key)
+            return True
+        def queue(action, dup=False):
+            key = HOST.click_key()
+            def handler(*args): add(action, dup, key=key)
             return handler
-        return queue
+        queue.add = add; return queue
     @staticmethod
     def disposer(key, st, win):
         def on_disposed(g):
@@ -1360,7 +1517,7 @@ class Kit(object):
         return Kit.art_button(g, store, key, Kit.ART_DOCK, x_min - Kit.DOCK_DX,
                               y_min + Kit.DOCK_DY, None, Kit.DOCK_TIP, on_click=on_click)
     @staticmethod
-    def dock_hooks(title, icon, st, win, redraw, scale=False, fit=None):
+    def dock_hooks(title, icon, st, win, redraw, fit=None):
         def state():
             if win["g"] is None or st["shutting"]: return None
             return "docked" if st["docked"] else ("minimized" if st["minimized"] else "open")
@@ -1370,7 +1527,6 @@ class Kit(object):
         def undock(): st["docked"] = False; redraw()
         hooks = {"title": title, "icon": icon, "state": state, "show": to(False, False), "dock": to(True, True),
                  "undock": undock, "minimize": to(False, True), "gump": lambda: win["g"], "redraw": redraw}
-        if scale: hooks["scale"] = True
         if fit is not None: hooks["fit"] = fit
         return hooks
     @staticmethod
@@ -1519,6 +1675,21 @@ class Kit(object):
         if not serial: return None
         try: return API.FindItem(serial)
         except Exception: return None
+    @staticmethod
+    def top_of(serial):
+        s = int(serial or 0)
+        for _ in range(10):
+            it = Kit.find_item(s)
+            if it is None: return s, 0
+            try: c = int(it.Container or 0)
+            except Exception: c = 0
+            if not c or c == 0xFFFFFFFF: return s, 0
+            if c < 0x40000000: return s, c
+            s = c
+        return s, 0
+    @staticmethod
+    def in_pack(serial):
+        pack = int(API.Backpack or 0); return bool(pack) and bool(serial) and Kit.top_of(serial)[0] == pack
     @staticmethod
     def where_text(dx, dy, here="under you", names=None):
         d = max(abs(int(dx)), abs(int(dy)))
@@ -1764,6 +1935,7 @@ class Kit(object):
         def minimized(self): return self.st is not None and bool(self.st["minimized"])
         def start_min(self): return bool(HOST.dock_wanted(self.key) or (self.min_key and Kit.load_min(self.min_key)))
         def begin(self, w, h, default=None):
+            if self.queue is not None: Kit._wins[self.key] = self
             if Kit.is_open(self.old) and self.old is not self.win.get(self.gkey): Kit.dispose(self.old)
             old = self.win.get(self.gkey); mini = self.minimized()
             if mini and self.mini: w, h = self.mini
@@ -1788,6 +1960,11 @@ class Kit(object):
             xy = Kit.show_window(g, self.x, self.y, self.w if w is None else w, self.h if h is None else h,
                                  self.key if self.lock else None, st is not None and st["minimized"] and st["docked"],
                                  self.disposed(g), self.save_pos, self.win, parts, max_h)
+            slot = LAYOUT.placed.get(self.key) if LAYOUT.seamless and LAYOUT.holds(self.key) else None
+            if slot is not None and xy is not None and (xy[0], xy[1]) != (slot[0], slot[1]):
+                g.SetPos(int(slot[0]), int(slot[1])); Kit.note_rect(g, slot[0], slot[1]); Kit.moved_by_code(g)
+                xy = (slot[0], slot[1])
+            if slot is not None and xy is not None: LAYOUT.fit_now(self.key, g)
             old, self.old = self.old, None; Kit.dispose(old); return xy
         def disposed(self, g):
             def handler(*args):
@@ -1808,8 +1985,11 @@ class Kit(object):
         def fit(self, w, h, mode):
             new = (int(w), int(h)) if (w is not None and h is not None) else None
             if new != self.slot or (mode == "again" and new is not None): self.slot = new; self.queue("redraw")()
-        def dock(self, fit=False, scale=False, **extra):
-            hooks = Kit.dock_hooks(self.title, self.icon, self.st, self.win, self.queue("redraw"), scale,
+        def rows(self, row_h, fixed_h, own_n, min_n=1):
+            if self.slot is None or not HOST.layout_holds(self.key): return own_n
+            return max(min_n, int(self.slot[1] - fixed_h) // max(1, int(row_h)))
+        def dock(self, fit=False, **extra):
+            hooks = Kit.dock_hooks(self.title, self.icon, self.st, self.win, self.queue("redraw"),
                                    self.fit if fit is True else (fit or None))
             hooks.update(extra); HOST.dock_add(self.key, hooks)
             if self.cleanup is not None: self.cleanup.add(HOST.dock_remove, self.key)
@@ -1882,7 +2062,8 @@ class Fill(object):
         fx, fy = rec["fx"], rec["fy"]; N, Hn = rec["size"]; ev = Fill._ev
         if kind == "s":
             x0, x1 = ev(fx, x), ev(fx, x + w)
-            if h0 >= Fill.MIN_EDGE and (h0 > Fill.ROW_H or rec["rows"]): y0, y1 = ev(fy, y), ev(fy, y + h)
+            if h0 >= Fill.MIN_EDGE and (h0 > Fill.ROW_H or rec["rows"]) and not Fill.title_strip(e[2], e[4]):
+                y0, y1 = ev(fy, y), ev(fy, y + h)
             else: c = ev(fy, y + h / 2.0); y0, y1 = c - h / 2.0, c + h / 2.0
             x0 = max(0, min(N - 1, int(round(x0)))); y0 = max(0, min(Hn - 1, int(round(y0))))
             x1, y1 = min(N, int(round(x1))), min(Hn, int(round(y1))); return x0, y0, max(1, x1 - x0), max(1, y1 - y0)
@@ -1945,7 +2126,7 @@ class Fill(object):
         ents = rec["ent"]; same = Kit._same(); new = []
         for c in kids:
             try:
-                if c.IsDisposed or c in ents: continue
+                if c.IsDisposed or c in ents or c in Seam.catchers: continue
             except Exception: continue
             if skip and any(same(c, s) for s in skip): continue
             r = Kit._raw_rect(c)
@@ -2028,11 +2209,14 @@ class Fill(object):
             out.append((x, y, w, h))
         return out
     @staticmethod
+    def title_strip(y, h): return y <= Kit.MARGIN + 2 and h <= 31
+    @staticmethod
     def _maps(rec):
         nw, nh = rec["nat"]; N, Hn = rec["size"]; k = rec.get("k", 1.0); M = Kit.MARGIN * k; bgs = Fill._bgs(rec)
         tall = [b for b in bgs if b[3] > Fill.ROW_H]; rec["rows"] = not tall
         rec["fx"] = Fill._axis(nw * k, N, M, [(b[0] * k, (b[0] + b[2]) * k) for b in bgs], rec["mode"])
-        rec["fy"] = Fill._axis(nh * k, Hn, M, [(b[1] * k, (b[1] + b[3]) * k) for b in (tall or bgs)], rec["mode"])
+        rec["fy"] = Fill._axis(nh * k, Hn, M, [(b[1] * k, (b[1] + b[3]) * k) for b in (tall or bgs)
+                                               if not Fill.title_strip(b[1], b[3])], rec["mode"])
         rec["bgs"] = bgs
         for e in rec["ent"].values(): Fill._anchor(e, bgs)
     @staticmethod
@@ -2437,16 +2621,24 @@ class AlertsPage(_Page):
             if Kit.was_clicked(self.store, "play%d" % n) and ids[idx]: API.PlaySound(int(ids[idx]))
 
 
-def _norm_key(k): return str(k or "").strip().upper().replace(" ", "")
+def _norm_key(k):
+    parts = [p for p in str(k or "").strip().upper().replace(" ", "").split("+") if p]
+    keys = [p[5:] if p.startswith("SDLK_") else p for p in parts if p not in ("CTRL", "SHIFT", "ALT")]
+    return "+".join([m for m in ("CTRL", "SHIFT", "ALT") if m in parts] + keys[-1:])
 
 
 class Binds(object):
     VAR = "VirtueAssistant_binds"; REPEAT = 0.6; ARM_SECS = 20.0; REG_CAP = 5000; armed_until = 0.0; reg = {}
-    saved = {}; last = {}; hooked = set(); armed = False; picked = None; answer = None; loaded = False
-    OWNER = "Button binds"
+    saved = {}; last = {}; hooked = set(); armed = False; picked = None; answer = None; loaded = False; scope = None
+    OWNER = "Button binds"; IDS_VAR = "VirtueAssistant_binds_ids"
+    @staticmethod
+    def scoped(name, fn, *args):
+        was = Binds.scope; Binds.scope = name
+        try: return fn(*args)
+        finally: Binds.scope = was
     @staticmethod
     def note(store, key, on_click, ctl, tip):
-        owner = HOST.cur_owner
+        owner = Binds.scope or HOST.cur_owner
         if owner is None: cur = HOST.current(); owner = cur.key if cur is not None else "va"
         bid = "%s|%s" % (owner, key)
         if len(Binds.reg) >= Binds.REG_CAP: Binds.reg.clear()
@@ -2462,21 +2654,27 @@ class Binds(object):
     @staticmethod
     def load():
         if Binds.loaded or not safe(lambda: API.Player): return
-        Binds.loaded = True
+        Binds.loaded = True; fresh = str(Kit.get_var(Binds.IDS_VAR, "") or "") != "2"; dropped = 0
         for part in str(Kit.get_var(Binds.VAR, "") or "").split(";"):
             if "=" in part:
                 bid, combo = part.rsplit("=", 1)
+                if fresh and bid.split("|", 1)[0] in ("va", "interface"): dropped += 1; continue
+                combo = _norm_key(combo)
                 if bid and combo: Binds.saved[bid] = combo; Binds.hook(combo)
+        if fresh:
+            Kit.put_var(Binds.IDS_VAR, "2")
+            if dropped:
+                Binds.save()
+                Kit.say("%s cleared (each window has its own now); bind them again in Settings > Hotkeys."
+                        % Kit.count(dropped, "button key"), Kit.HUE_INFO)
     @staticmethod
     def save(): Kit.put_var(Binds.VAR, ";".join("%s=%s" % kv for kv in sorted(Binds.saved.items())))
     @staticmethod
     def hook(combo):
-        HOST.hotkey_note(combo, Binds.OWNER, "a button")
-        if combo in Binds.hooked: return
-        Binds.hooked.add(combo)
-        def fired(*a): Binds.fire(combo)
-        try: API.OnHotKey(combo, fired)
-        except Exception: Binds.hooked.discard(combo)
+        if HOST.hotkey_on(combo, Binds.OWNER, lambda: Binds.fire(combo), "a button") is not False:
+            Binds.hooked.add(combo)
+    @staticmethod
+    def unhook(combo): Binds.hooked.discard(combo); HOST.hotkey_off(combo, Binds.OWNER)
     @staticmethod
     def fire(combo):
         now = time.time(); was = Binds.last.get(combo); Binds.last[combo] = now
@@ -2512,12 +2710,12 @@ class Binds(object):
         if taken is not None:
             Kit.say("%s is already %s's key; pick another." % (combo, taken), Kit.HUE_BAD); return
         old = Binds.saved.get(bid)
-        if old: HOST.hotkey_drop(old, Binds.OWNER)
+        if old and old != combo: Binds.unhook(old)
         Binds.saved[bid] = combo; Binds.hook(combo); Binds.save()
         Kit.say("%s bound." % combo, Kit.HUE_GOOD); HOST.refresh_settings(KEYS_PAGE)
     @staticmethod
     def clear():
-        for combo in set(Binds.saved.values()): HOST.hotkey_drop(combo, Binds.OWNER)
+        for combo in set(Binds.saved.values()) | Binds.hooked: Binds.unhook(combo)
         Binds.saved.clear(); Binds.save()
 
 
@@ -2583,7 +2781,7 @@ class WhatsNew(object):
         except Exception: return False
         return str(seen or "") != APP_VERSION
     def open(self):
-        if self.due(): Kit.on_client(self._build)
+        if self.due(): Kit.on_client(lambda: Binds.scoped("va.news", self._build))
     def _build(self):
         M, W = Kit.MARGIN, self.W; lines = []
         for para in self.text: lines += Kit.wrap(para, W - 2 * M - 24) or [""]
@@ -2610,7 +2808,8 @@ class ModuleSlot(object):
         self.api = self.lazy = self.broken = self.iv_fn = self.thread_want = None
         self.enabled = self.default_on = self.running = self.busy = self.pending_stop = False
         self.thread_due = self.on_client = self.has_thread = False
-        self.category = "Other"; self.next_due = self.worst_ms = 0.0; self.errors = set(); self.error_count = 0
+        self.category = "Other"; self.next_due = self.worst_ms = 0.0; self.errors = set(); self.error_times = {}
+        self.start_tok = None; self.page_err_at = 0.0
         self.parts = self.aliases = (); self.parts_on = {}; self.parts_running = set(); self.folded = True
     def part(self, key):
         for p in self.parts:
@@ -2672,6 +2871,7 @@ class JLine(object):
 
 class Journal(object):
     KEEP = 60.0; MAX_BACK = 30.0; lines = []; seen = {}; seq = 0; read_at = 0.0; pass_id = -1; zero_seen = False
+    ATTACK_RE = re.compile(r"\*?\s*(.+?)\s+is attacking you", re.IGNORECASE)
     class Reader(object):
         __slots__ = ("last",)
         def __init__(self): self.last = Journal.seq
@@ -2779,6 +2979,11 @@ class Picker(object):
                             "got": None, "block": False, "cancel": False, "owner": owner})
         HOST.poke()
     @staticmethod
+    def due():
+        for j in Picker.jobs:
+            if j["d"] is None or j["got"] is not None: return True
+        return False
+    @staticmethod
     def _done(j, serial):
         if j in Picker.jobs: Picker.jobs.remove(j)
         try: j["fn"](int(serial or 0))
@@ -2795,7 +3000,7 @@ class Picker(object):
                 try:
                     from System import Action
                     def got(obj, j=j):
-                        try: j["got"] = (int(getattr(obj, "Serial", 0) or 0) if obj is not None else 0)
+                        try: j["got"] = (int(obj.Serial or 0) if obj is not None else 0)
                         except Exception: j["got"] = 0
                     j["d"] = Action[object](got); tm.SetTargeting(j["d"], Picker.CURSOR_TARGET, Picker.neutral)
                     j["until"] = time.time() + j["t"]
@@ -2842,18 +3047,25 @@ class Host(object):
     def __init__(self):
         self.slots = []; self.by_key = _KeyMap(self); self.old_map = {}
         self.cur_part = self.cur_owner = self.config = self.hub = self.grid = self.profile_req = self.alone = None
-        self.hurt_hp = self._me = self._want_raw = None; self.stack = []
+        self.hurt_hp = self._me = self._want_raw = self.attack_rd = None; self.stack = []
+        self.harm_conf = (None, 0, 0.0)
         self.quitting = self.shut = self.ui_busy = self.poked = self.prefs_frozen = False
-        self.in_hop = self.pass_poked = False; self.alive_at = 0.0
-        self.ui_next = self.dock_next = self._claim_len = self.hurt_until = self.hurt_at = self.input_at = 0.0
+        self.in_hop = self.pass_poked = self.pass_all = self.poke_user = self.draining = False; self.alive_at = 0.0
+        self.poke_keys = set(); self.pass_keys = self.NO_KEYS; self.off_q = []; self._stop_fi = None
+        self.look = self.LOOKAHEAD
+        import threading; self._drain_lk = threading.Lock()
+        self.ui_next = self.dock_next = self._claim_len = self.hurt_until = self.input_at = 0.0
+        self.attacked_until = self.prefs_at = 0.0; self.hurt_who = 0; self.prefs_due = False
         self.docks = []; self.services = {}; self.hotkeys_owned = {}; self.prefs = {}; self.cursor_claim = (None, 0.0)
+        self.hk_fns = {}; self.hk_wait = {}; self.gump_exp = {}; self.services["gump.expect"] = self.gump_expect
         self.foe_seen = (0.0, None); self.client_idles = self.pass_id = 0
         self._me_pid = self._mob_pid = self._one_pid = -1; self._mob_list = (); self._one = {}; self._pack = {}
+        self._mob_at = 0.0; self._pack_v = 0; self._pack_keys = set(); self._pack_hook = {"on": False}
+        self._pack_fn = self._pack_event
         self.active = []; self.client_run = []; self._pass_fn = self._client_pass; self._want_set = frozenset()
-        self.told, self._zone_held, self._zone_was_d = set(), set(), None
-        self.load_jobs = []; self.hotkey_list = []; self.pages = []
-        for key, title, page in ((ALERTS_PAGE, "Alerts", AlertsPage()), (KEYS_PAGE, "Keys", KeysPage()),
-                                 (LAYOUT_PAGE, "Layout", LayoutPage())):
+        self.told, self._zone_held, self._zone_was_d, self._zone_bring = set(), set(), None, {}
+        self.load_jobs = []; self.hotkey_list = []; self.pages = []; self.held_on = set()
+        for key, title, page in ((ALERTS_PAGE, "Alerts", AlertsPage()), (KEYS_PAGE, "Hotkeys", KeysPage())):
             s = ModuleSlot(key, title, "", None, 1.0); s.api = page.api(); self.pages.append(s)
         self.whats_new = WhatsNew()
     def _tell(self, msg):
@@ -2862,7 +3074,18 @@ class Host(object):
         self.told.add(msg); API.SysMsg(msg, Kit.HUE_BAD)
     def _refresh_active(self):
         act = [s for s in self.slots if s.running]; self.active = act; self.client_run = [s for s in act if s.on_client]
-    def poke(self): self.poked = True; self.input_at = time.time()
+    NO_KEYS = frozenset()
+    def poke(self, key=None, user=True):
+        if self.draining:
+            if key is None: self.pass_all = self.pass_poked = True
+            else: self.pass_keys = self.pass_keys | frozenset((key, key.partition(".")[0]))
+            if user: self.pass_poked = True; self.input_at = time.time()
+            if user or key is None: self.ui_next = 0.0
+            return
+        if key is None: self.poked = True
+        else: ks = self.poke_keys; ks.add(key); ks.add(key.partition(".")[0])
+        if user: self.poke_user = True; self.input_at = time.time()
+    def click_key(self): cur = self.current(); return cur.key if cur is not None else None
     INPUT_FAST = 1.0; PAGE_EVERY = 0.25
     def poll_due(self, gate, every=None):
         now = time.time()
@@ -2889,6 +3112,40 @@ class Host(object):
         self.hotkey_list = [e for e in self.hotkey_list if not (_norm_key(e[0]) == k and e[1] == owner)]
         self.hotkey_list.append((k, str(owner), str(what or "")))
         if k not in self.hotkeys_owned: self.hotkeys_owned[k] = str(owner)
+    def hotkey_on(self, combo, owner, fn, what=""):
+        k, owner = _norm_key(combo), str(owner)
+        if not k: return False
+        cur = self.current(); ent = (owner, fn, cur.key if cur is not None else None, str(what or ""))
+        held = self.hk_fns.get(k)
+        if held is not None and held[0] != owner:
+            wait = [w for w in self.hk_wait.get(k, ()) if w[0] != owner]; wait.append(ent); self.hk_wait[k] = wait
+            Kit.say("%s is already %s's key; %s can't use it until that lets it go." % (k, held[0], owner), Kit.HUE_BAD)
+            return None
+        if held is None:
+            try: API.OnHotKey(k, self._hk_fire(k))
+            except Exception: return False
+        self._hk_take(k, ent); return True
+    def _hk_take(self, k, ent):
+        self.hk_fns[k] = ent; self.hotkey_note(k, ent[0], ent[3]); self.hotkeys_owned[k] = ent[0]
+    def _hk_fire(self, k):
+        def fired(*args):
+            ent = self.hk_fns.get(k)
+            if ent is not None: ent[1]()
+        return fired
+    def hotkey_off(self, combo, owner):
+        k, owner = _norm_key(combo), str(owner); held = self.hk_fns.get(k)
+        wait = [w for w in self.hk_wait.get(k, ()) if w[0] != owner]
+        if wait: self.hk_wait[k] = wait
+        else: self.hk_wait.pop(k, None)
+        self.hotkey_drop(k, owner)
+        if held is None or held[0] != owner: return
+        if wait:
+            nxt = wait.pop(0)
+            if not wait: self.hk_wait.pop(k, None)
+            self._hk_take(k, nxt); Kit.say("%s is %s's key now." % (k, nxt[0]), Kit.HUE_INFO); return
+        self.hk_fns.pop(k, None)
+        try: API.OnHotKey(k)
+        except Exception: pass
     def hotkey_drop(self, combo, owner=None):
         k = _norm_key(combo)
         self.hotkey_list = [e for e in self.hotkey_list
@@ -2941,6 +3198,7 @@ class Host(object):
             if on and not s.enabled: self.enable(module)
             return
         s.parts_on[part] = on
+        if not on: s.error_times.pop(part, None)
         if on and not s.enabled: self.enable(module)
         elif not on and not s.parts_wanted(): self.disable(module)
         else: self.save_prefs(); self._part_notify(s)
@@ -2954,6 +3212,18 @@ class Host(object):
         if self.grid is not None:
             self.grid.toggle(); self.prefs["grid_on"] = "1" if self.grid_shown() else "0"; self.save_prefs()
         return self.grid_shown()
+    def set_dark(self, on):
+        on = bool(on); self.prefs["dark"] = "1" if on else "0"; self.save_prefs(); Kit.set_dark(on); Kit.retint()
+        for k, d in list(self.docks):
+            try: s = d["state"]() if d.get("redraw") is not None else None
+            except Exception: s = None
+            if s in ("open", "minimized"): safe(d["redraw"])
+        for w in list(Kit._wins.values()):
+            if Kit.is_open(w.win.get(w.gkey)): w.queue.add("redraw")
+        for name, fn in list(self.services.items()):
+            if name.startswith("look."): safe(fn)
+        self.refresh_settings(LAYOUT_OWNER)
+        self.poke(); Kit.say("Dark mode on." if on else "Dark mode off.", Kit.HUE_GOOD)
     def dock_wanted(self, key): return key in self._dock_want()
     def _dock_want(self):
         raw = self.prefs.get("dock_want", "") or ""
@@ -2964,6 +3234,13 @@ class Host(object):
         if bool(on) == (key in want): return
         self.prefs["dock_want"] = ",".join(sorted(want | {key} if on else want - {key})); self.save_prefs()
     def dock_forget(self, key): self.dock_want_set(key, False)
+    def gump_expect(self, gid, secs=5.0):
+        gid = int(gid or 0)
+        if not gid: return
+        now = time.time(); exp = dict((k, t) for k, t in list(self.gump_exp.items()) if 0 < t - now <= GUMP_EXPECT_MAX)
+        exp[gid] = now + max(0.0, min(float(secs), GUMP_EXPECT_MAX)); self.gump_exp = exp
+    def gump_expected(self, gid, now):
+        t = self.gump_exp.get(gid); return t is not None and 0 < t - now <= GUMP_EXPECT_MAX
     def dock_to_bar(self, key, title=None):
         if LAYOUT.holds(key): return False
         self.dock_want_set(key, True); d = dict(self.docks).get(key); alive = self.bar_alive()
@@ -3000,7 +3277,7 @@ class Host(object):
     def layout_locked(self, key): return LAYOUT.locked(key)
     def layout_arrange(self, on=None): LAYOUT.set_arrange((not LAYOUT.arrange) if on is None else on)
     def layout_arranging(self): return LAYOUT.arrange
-    def layout_in_use(self): return bool(LAYOUT.assign)
+    def layout_in_use(self): return bool(LAYOUT.assign) and LAYOUT.enabled
     def layout_pair(self, top_key, bottom_key): return LAYOUT.pair_below(top_key, bottom_key)
     def layout_refit(self): LAYOUT.dirty = LAYOUT.fresh = True
     @staticmethod
@@ -3058,6 +3335,9 @@ class Host(object):
                 if v == "d": self.dock_to_bar(k, d.get("title"))
                 else: safe(d.get("minimize"))
                 continue
+            if on and s is None and not LAYOUT.arrange and time.time() >= self._zone_bring.get(k, 0.0):
+                fn = d.get("show") or d.get("on")
+                if fn is not None: self._zone_bring[k] = time.time() + 2.0; safe(fn)
             if changed and d.get("redraw") is not None and s != "docked": safe(d.get("redraw"))
     TWICE = "%s: %s loaded twice (module key \"%s\"); skipped the second copy."
     def add(self, key, title, desc, factory, interval, default_on=False, category=None, parts=(), aliases=()):
@@ -3071,7 +3351,7 @@ class Host(object):
             self._note_parts(s, default_on, category, parts, aliases); self.slots.append(s); self.by_key[key] = s
         try: s.api = factory()
         except Exception as ex:
-            s.broken = str(ex) + _error_where(); Kit.say("%s could not be loaded: %s" % (title, s.broken), Kit.HUE_BAD)
+            s.broken = str(ex) + _error_where(); Kit.say("couldn't load %s (%s)." % (title, s.broken), Kit.HUE_BAD)
         self._arm(s)
         if VA_ALONE and self.alone is None: self.run_alone(s)
         return s
@@ -3091,7 +3371,7 @@ class Host(object):
         if not self.load_jobs or self.stack: return
         s = self.load_jobs.pop(0); ok = self.load(s)
         if ok and s.enabled and not s.running and not s.pending_stop: self.start(s)
-        elif not ok and s.enabled: s.enabled = False; self.save_prefs()
+        elif not ok and s.enabled: s.enabled = False; self.held_on.add(s.key); self.save_prefs()
         if self.config is not None: self.config.loaded(s.key)
     def load(self, s):
         if s is None: return False
@@ -3104,7 +3384,7 @@ class Host(object):
                 s.lazy = None; line = getattr(ex, "lineno", None)
                 where = (" (%s line %s)" % (os.path.basename(path), line)) if line else _error_where()
                 s.api, s.broken = None, "%s%s" % (getattr(ex, "msg", None) or ex, where)
-                Kit.say("%s could not be loaded: %s" % (s.title, s.broken), Kit.HUE_BAD)
+                Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
         return s.api is not None
     def current(self): return self.stack[-1] if self.stack else None
     def stopping(self):
@@ -3121,7 +3401,7 @@ class Host(object):
         end = time.time() + max(0.0, seconds)
         while not API.StopRequested:
             if self.aborting(): return False
-            safe(API.ProcessCallbacks); self.run_due()
+            self.drain(); self.run_due()
             if self.aborting(): return False
             rem = end - time.time()
             if rem <= 0 or rem > seconds + 1.0: return True
@@ -3134,37 +3414,65 @@ class Host(object):
         elif s in stack: stack.remove(s)
         s.busy = False
     def report(self, s, ex, what=None, part=None):
-        msg = str(ex) + _error_where(); s.error_count += 1
+        msg = str(ex) + _error_where()
         if msg not in s.errors:
             s.errors.add(msg); Kit.say("%s error (still running): %s" % (what or s.title, msg), Kit.HUE_BAD)
-        if s.error_count >= 25 and s.enabled:
-            Kit.say("%s kept failing and was switched off." % (what or s.title), Kit.HUE_BAD)
-            if part is not None and s.parts and s.parts_on.get(part): self.part_set(s.key, part, False)
-            else: self.disable(s.key)
-            if s.enabled: s.error_count = 0
+        self.count_error(s, what, part)
+    def count_error(self, s, what=None, part=None, page=False):
+        now = time.time()
+        if page:
+            if 0 <= now - s.page_err_at < 1.0: return
+            s.page_err_at = now
+        seen = [t for t in s.error_times.get(part, ()) if 0 <= now - t < ERROR_SECS]
+        seen.append(now); s.error_times[part] = seen
+        if len(seen) < MAX_MODULE_ERRORS or not s.enabled: return
+        s.error_times.pop(part, None); Kit.say("%s kept failing and was switched off." % (what or s.title), Kit.HUE_BAD)
+        if part is not None and s.parts and s.parts_on.get(part): self.part_set(s.key, part, False)
+        else: self.disable(s.key)
     def start(self, s):
         if s.running or self.stopping() or not self.load(s): return
-        if self.config is not None: self.config.forget_measure(s.key)
-        s.errors, s.error_count = set(), 0; s.pending_stop = False; self._enter(s)
+        s.errors, s.error_times = set(), {}; s.pending_stop = False; self._enter(s); tok = s.start_tok = object()
+        import threading; lk = threading.Lock(); run = {"began": False, "ended": False, "undone": False}
+        def undo():
+            with lk:
+                if run["undone"]: return
+                run["undone"] = True
+            safe(lambda: s.api["stop"]()); safe(lambda: self._unclaim(s))
+        def go():
+            with lk:
+                if s.start_tok is not tok or not s.running: return
+                run["began"] = True
+            try: s.api["start"]()
+            finally:
+                with lk: run["ended"] = True; late = s.start_tok is not tok or not s.running
+                if late: undo()
         try:
-            s.running = True; self._arm(s); self._refresh_active(); self.client_idles = 0; Kit.on_client(s.api["start"])
+            s.running = True; self._arm(s); self._refresh_active(); self.client_idles = 0; Kit.on_client(go)
         except Exception as ex:
-            s.running = False; msg = str(ex) + _error_where()
-            Kit.say("%s could not start: %s" % (s.title, msg), Kit.HUE_BAD)
-            safe(lambda: s.api["stop"]()); s.enabled = False; self.save_prefs()
+            with lk: s.start_tok = None; s.running = False; busy = run["began"] and not run["ended"]
+            msg = str(ex) + _error_where(); Kit.say("couldn't start %s (%s)." % (s.title, msg), Kit.HUE_BAD)
+            if not busy: undo()
+            s.enabled = False; self.save_prefs()
         finally: self._leave(s); self._refresh_active()
         s.next_due = 0.0
     def _stop(self, s):
         s.pending_stop = False
         if not s.running: return
-        if self.config is not None: self.config.forget_measure(s.key)
-        olds = [s.key] + [old for p in s.parts for old in p[4]]
-        for k in olds + [p[0] for p in s.parts]: Picker.drop(k)
-        if self.cursor_claim[0] in olds: self.cursor_claim = (None, 0.0)
-        self._enter(s)
+        self._unclaim(s); self._enter(s)
         try: s.api["stop"]()
         except Exception: pass
         finally: s.running = False; self._leave(s); self._refresh_active()
+    def _unclaim(self, s):
+        olds = [s.key] + [old for p in s.parts for old in p[4]]
+        for k in olds + [p[0] for p in s.parts]: Picker.drop(k)
+        if self.cursor_claim[0] in olds: self.cursor_claim = (None, 0.0)
+        for k, wait in list(self.hk_wait.items()):
+            for w in [w for w in wait if w[2] == s.key]: self.hotkey_off(k, w[0])
+        for k, ent in list(self.hk_fns.items()):
+            if ent[2] == s.key: self.hotkey_off(k, ent[0])
+        pre = s.key + "."
+        for owner in list(Kit._hooks):
+            if owner in olds or str(owner).startswith(pre): Kit.unhook(owner)
     def tick(self, s, hook="tick"):
         s.busy = True; stack = self.stack; stack.append(s); self.client_idles = 0; t0 = time.time()
         try: s.api[hook]()
@@ -3187,6 +3495,7 @@ class Host(object):
     def enable(self, key):
         s, part = self.resolve(key)
         if s is None: return
+        if self.off_q: self.off_q = [e for e in self.off_q if e[1:] != (s.key, part)]
         if part is not None: self.part_set(s.key, part, True); return
         self._parts_fill(s)
         if s.lazy is not None and Client.on_client_thread():
@@ -3203,11 +3512,12 @@ class Host(object):
         s, part = self.resolve(key)
         if s is None: return
         if self.shut or self.stopping(): return
+        if self.draining: self.off_q.append((key, s.key, part)); return
         if part is None and s.parts and self.cur_part is not None and self.current() is s \
                 and s.parts_on.get(self.cur_part):
             part = self.cur_part
         if part is not None: self.part_set(s.key, part, False); return
-        s.enabled = False; self.save_prefs()
+        self.held_on.discard(s.key); s.enabled = False; self.save_prefs()
         if s.running:
             s.pending_stop = True
             if not s.busy: self._stop(s)
@@ -3215,15 +3525,23 @@ class Host(object):
         if self.shut: return
         if self.profile_req is not None and not self.stack:
             req, self.profile_req = self.profile_req, None; self.profile_job(req); return
-        if self.load_jobs and not self.stack: self._run_load_jobs()
-        poked, self.poked = self.poked, False; self.pass_id += 1
-        if poked: self.ui_next = 0.0
+        poked, self.poked = self.poked, False; self.pass_id += 1; keys, user = self.poke_keys, self.poke_user
+        if keys: self.poke_keys = set()
+        else: keys = self.NO_KEYS
+        self.poke_user = False; self.pass_keys = keys
+        if poked or user: self.ui_next = 0.0
         now = time.time()
-        if poked or self._client_due(now):
-            self.pass_poked = poked
+        if self.prefs_due: self.prefs_flush()
+        if poked or keys or self._client_due(now):
+            self.pass_poked, self.pass_all = poked or user, poked
             try: Kit.on_client(self._pass_fn)
             except Exception as ex:
                 if not self.stopping(): self._tell("%s: pass error: %s" % (APP_NAME, ex))
+            poked, keys = self.pass_all, self.pass_keys
+            if self.stopping(): return
+            if self.off_q:
+                q, self.off_q = self.off_q, []
+                for e in q: self.disable(e[0])
             now = time.time()
         if Picker.jobs: Picker.run_blocking()
         for s in self.active:
@@ -3231,39 +3549,80 @@ class Host(object):
                 if s.busy: continue
                 self._stop(s)
             elif s.busy or not s.running: continue
-            elif not s.on_client and (poked or now >= s.next_due or s.next_due - now > self.CLOCK_BACK): self.tick(s)
+            elif not s.on_client and (poked or s.key in keys or now >= s.next_due
+                                      or s.next_due - now > self.CLOCK_BACK): self.tick(s)
             elif s.thread_due: s.thread_due = False; self.tick(s, "thread_tick")
             else: continue
             if self.stopping(): return
-            try: API.ProcessCallbacks()
-            except Exception: pass
+            self.drain()
+        if self.load_jobs and not self.stack: self._run_load_jobs()
         cfg = self.config
         if cfg is not None and cfg.prof_stale and not self.stack: cfg.refresh_profiles()
-    LOOKAHEAD = HOST_TICK + 0.035; CLOCK_BACK = 60.0; EARLY = 0.008
+    LOOKAHEAD = HOST_TICK + 0.035; CLOCK_BACK = 60.0; EARLY = 0.008; MOB_AGE = 0.1; PACK_CAP = 6000; PREFS_EVERY = 1.0
     def _client_due(self, now):
-        if now >= self.ui_next or Kit.pending or Picker.jobs: return True
+        if now >= self.ui_next or Picker.jobs or (Kit.pending and self.config is not None): return True
+        if self.ui_next - now > UI_TICK and SNAP.pressed(): self.ui_next = now; return True
         if self.ui_next - now > 1.0: self.ui_next = now; return True
-        soon = now + self.LOOKAHEAD
+        soon = now + self.look
         for s in self.client_run:
             if soon >= s.next_due: return True
             if s.next_due - now > self.CLOCK_BACK: s.next_due = now; return True
         return False
+    def drain(self, hop=False):
+        lk = self._drain_lk
+        if not lk.acquire(False): return
+        try:
+            if hop: self.draining = True
+            API.ProcessCallbacks()
+        except Exception: pass
+        finally:
+            if hop: self.draining = False
+            lk.release()
+    FRAME_MIN = 1.0 / 60; NAP_MIN = 0.002
+    def nap(self, began):
+        now = time.time()
+        if (self.poked or self.poke_keys or self.poke_user or (Kit.pending and self.config is not None)
+                or Picker.due() or 0 <= now - self.input_at <= self.INPUT_FAST):
+            self.look = self.EARLY; return max(self.NAP_MIN, self.FRAME_MIN - max(0.0, now - began))
+        self.look = self.LOOKAHEAD; return HOST_TICK
+    def _stop_free(self):
+        f = self._stop_fi
+        if f is None:
+            try:
+                from System.Reflection import BindingFlags
+                f = API.GetType().GetField("_onStopScheduled", BindingFlags.NonPublic | BindingFlags.Instance)
+            except Exception: f = None
+            f = self._stop_fi = f or False
+        if f is False: return False
+        try: return not f.GetValue(API)
+        except Exception: return False
+    def _drop_offs(self):
+        q, self.off_q = self.off_q, []
+        for e in q:
+            s = dict.get(self.by_key, e[1])
+            if s is None: continue
+            if e[2] is not None: s.parts_on[e[2]] = False
+            if e[2] is None or not s.parts_wanted(): s.enabled = False; self.held_on.discard(s.key)
     def _client_pass(self, poked=None):
         self.in_hop = True
         try:
-            if poked is None: poked = self.pass_poked
             self.client_idles = 0
+            if self._stop_free(): self.drain(True)
+            if self.stopping(): return
+            if poked is None: poked = self.pass_all
+            keys = self.pass_keys; offs = set(e[1] for e in self.off_q if e[2] is None) if self.off_q else ()
             if Kit._texts_sweep: Kit._prune_texts()
-            self.ui_tick()
+            self.ui_pending(); self.fight_sample(time.time())
             if Picker.jobs:
                 try: Picker.tick()
                 except Exception as ex: self._tell("%s: target cursor error: %s" % (APP_NAME, ex))
             now = time.time()
             for s in self.client_run:
-                if s.running and not s.busy and not s.pending_stop and (
-                        poked or now + self.EARLY >= s.next_due or s.next_due - now > self.CLOCK_BACK):
+                if s.running and not s.busy and not s.pending_stop and s.key not in offs and (poked or s.key in keys
+                        or now + self.EARLY >= s.next_due or s.next_due - now > self.CLOCK_BACK):
                     self.tick(s)
                     if self.stopping(): return
+            self.ui_tick()
             if ALERTS.pending:
                 try: ALERTS.tick(time.time())
                 except Exception as ex: self._tell("%s: alert error: %s%s" % (APP_NAME, ex, _error_where()))
@@ -3281,6 +3640,31 @@ class Host(object):
         if self.cursor_busy(key) is not None: return False
         try: return bool(API.HasTarget(kind))
         except Exception: return False
+    def harm_ok(self, serial, key, title, harmful=None, again="press again to confirm", odd=False, now=None):
+        if harmful is None:
+            try: harmful = bool(API.HasTarget("harmful"))
+            except Exception: harmful = False
+        if not harmful: return True
+        gz = self.guarded()
+        if gz is False: return True
+        try: m = API.FindMobile(serial) if serial else None
+        except Exception: m = None
+        noto = Kit.noto_name(m) if m is not None else ("odd" if odd and serial else "unknown")
+        if noto not in HARM_NOTO: return True
+        now = time.time() if now is None else now; c = self.harm_conf
+        if c[0] == key and c[1] == serial:
+            age = now - c[2]
+            if 0 <= age < HARM_DOUBLE: return False
+            if 0 <= age <= HARM_SECS: self.harm_conf = (None, 0, 0.0); return True
+        self.harm_conf = (key, serial, now)
+        try: name = str(m.Name or "") if m is not None else ""
+        except Exception: name = ""
+        who = "%s is %s" % (name or "they", "green" if noto == "ally" else "blue") if m is not None else \
+            "your target is not a mobile"
+        API.SysMsg("%s: %s and you %s in a guard zone: %s." % (title, who, "are" if gz else "may be", again),
+                   Kit.HUE_BAD)
+        if m is not None: API.HeadMsg("* %s *" % again, serial, 0x22)
+        return False
     def guard_hold(self):
         try: g = GUARD.guarded()
         except Exception: g = None
@@ -3303,18 +3687,26 @@ class Host(object):
         try: name = Kit.on_client(look)
         except Exception: name = None
         self.foe_seen = (now + FOE_EVERY, name); return name
+    def fight_sample(self, now):
+        try: p = self.me(); who = int(p.Serial); hits = int(p.Hits)
+        except Exception: return
+        if who != self.hurt_who: self.hurt_hp = None; self.hurt_who = who
+        if self.hurt_hp is not None and hits < self.hurt_hp: self.hurt_until = now + HURT_SECS
+        self.hurt_hp = hits
     def fight_hold(self, now=None):
         if now is None: now = time.time()
         dead = war = False
-        try: p = self.me(); dead = bool(p.IsDead); war = bool(p.InWarMode); hits = int(p.Hits)
-        except Exception: hits = None
-        if hits is not None:
-            if (self.hurt_hp is not None and hits < self.hurt_hp and 0 <= now - self.hurt_at <= 2.0):
-                self.hurt_until = now + HURT_SECS
-            self.hurt_hp = hits; self.hurt_at = now
+        try: p = self.me(); dead = bool(p.IsDead); war = bool(p.InWarMode)
+        except Exception: pass
         if dead: return "dead"
         if war: return "war"
+        if self.attack_rd is None: self.attack_rd = Journal.reader()
+        else:
+            for ln in self.attack_rd.new():
+                if ln.hue == ATTACK_HUE and str(ln.kind).upper() != "CLIENT" and Journal.ATTACK_RE.search(ln.text):
+                    self.attacked_until = max(self.attacked_until, min(ln.at, now) + HURT_SECS)
         if 0 < self.hurt_until - now <= HURT_SECS: return "hurt"
+        if 0 < self.attacked_until - now <= HURT_SECS: return "attacked"
         if self.foe_near(): return "foe"
         if Kit.held_item(): return "item"
         up = self.services.get("attention.up")
@@ -3328,7 +3720,8 @@ class Host(object):
         if self.in_hop: self._me_pid = self.pass_id; self._me = m
         return m
     def _mob_scan(self):
-        if self.in_hop and self._mob_pid == self.pass_id: return self._mob_list
+        if self._mob_pid == self.pass_id and (self.in_hop or time.time() - self._mob_at <= self.MOB_AGE):
+            return self._mob_list
         out = []; byser = None
         if self.in_hop:
             if self._one_pid != self.pass_id: self._one = {}; self._one_pid = self.pass_id
@@ -3340,8 +3733,7 @@ class Host(object):
                 d = r.Distance; m = _Memo(r); m.__dict__["Distance"] = d; out.append((d, m))
                 if byser is not None: byser[int(r.Serial)] = m
             except Exception: continue
-        if self.in_hop: self._mob_pid = self.pass_id; self._mob_list = out
-        return out
+        self._mob_pid, self._mob_list, self._mob_at = self.pass_id, out, time.time(); return out
     def mobiles(self, distance=None):
         lst = self._mob_scan()
         if distance is None: return [e[1] for e in lst]
@@ -3363,17 +3755,39 @@ class Host(object):
         if ent is not None and ((self.in_hop and ent[0] == self.pass_id)
                                 or (max_age > 0 and 0 <= now - ent[1] <= max_age)):
             return list(ent[2])
-        bp = API.Backpack; lst = list(API.ItemsInContainer(bp, k) or []) if bp else []
+        bp = API.Backpack
+        lst = list((API.FindTypeAll(0xFFFFFFFF, bp) if k else API.ItemsInContainer(bp, False)) or []) if bp else []
+        if bp and self._pack_hook["on"]:
+            try: ks = set(int(i.Serial) for i in lst); ks.add(int(bp))
+            except Exception: ks = set()
+            if not k and len(self._pack_keys) <= self.PACK_CAP: ks |= self._pack_keys
+            self._pack_keys = ks if len(ks) <= self.PACK_CAP else set([int(bp)])
         self._pack[k] = (self.pass_id if self.in_hop else -1, now, lst); return list(lst)
     def pack_dirty(self): self._pack.clear()
+    def pack_ver(self):
+        Kit.hook_once(self._pack_hook, "on", ("OnItemCreated", self._pack_fn), ("OnItemUpdated", self._pack_fn))
+        return self._pack_v
+    def _pack_event(self, *args):
+        keys = self._pack_keys
+        for a in args:
+            try: s, c = int(a.Serial), int(a.Container)
+            except Exception: continue
+            if c in keys or s in keys: self._pack_v += 1; self._pack.clear()
+            return
     def pick_target(self, timeout, on_done, owner=None): Picker.ask(timeout, on_done, owner)
-    def ui_tick(self):
-        if self.ui_busy or self.config is None: return
+    def ui_pending(self):
+        if self.ui_busy or self.config is None or not Kit.pending: return
         self.ui_busy = True
         try:
             while Kit.pending:
                 lst, Kit.pending = Kit.pending, []
                 for fn in lst: safe(fn)
+        finally: self.ui_busy = False
+    def ui_tick(self):
+        self.ui_pending()
+        if self.ui_busy or self.config is None: return
+        self.ui_busy = True
+        try:
             now = time.time()
             if now >= self.ui_next:
                 self.ui_next = now + UI_TICK; self.config.poll()
@@ -3381,8 +3795,9 @@ class Host(object):
                     self.alive_at = now + 1.0; API.SetSharedVar(ALIVE_KEY, str(now))
                 if self.hub is not None: self.hub.poll()
                 self.dock_tick(); SNAP.tick()
+                if now - self.input_at > UI_IDLE_AFTER and not (SNAP.down or LAYOUT.arrange):
+                    self.ui_next = now + UI_IDLE
                 if self.grid is not None: self.grid.tick()
-                LAYOUT.poll()
                 try: ALERTS.tick(now)
                 except Exception as ex: self._tell("%s: alert error: %s%s" % (APP_NAME, ex, _error_where()))
                 try: GUARD.tick(now)
@@ -3396,12 +3811,13 @@ class Host(object):
         prefs = self.prefs = Kit.codec_load(Kit.get_var(SETTINGS_KEY))
         on = [k for k in prefs.get("modules", "").split(",") if k]
         seen = set(k for k in prefs.get("seen", "").split(",") if k); was = prefs.get("seen", "")
-        changed = self._migrate_parts(prefs, on, seen)
+        changed = self._migrate_parts(prefs, on, seen); held = self.held_on = set()
         for s in self.slots:
             if s.default_on and s.key not in seen: on.append(s.key); seen.add(s.key); self._parts_fill(s)
             s.enabled = s.key in on and (s.api is not None or s.lazy is not None)
+            if s.key in on and not s.enabled: held.add(s.key)
             if s.enabled: self._parts_fill(s)
-        prefs["seen"] = ",".join(sorted(seen))
+        prefs["seen"] = ",".join(sorted(seen)); Kit.set_dark(self.pref_int("dark", 0) == 1)
         if prefs["seen"] != was or changed: self.save_prefs()
     def _migrate_parts(self, prefs, on, seen):
         def by_module(key):
@@ -3445,12 +3861,12 @@ class Host(object):
     def pref_int(self, key, default):
         try: return int(self.prefs.get(key, default))
         except Exception: return default
-    def save_prefs(self):
+    def save_prefs(self, now=False):
         if self.config is not None: self.config.box_hit = True
         if self.prefs_frozen: return None
         mods, parts, off = [], [], []
         for s in self.slots:
-            if not s.enabled:
+            if not s.enabled and s.key not in self.held_on:
                 for p in s.parts:
                     if s.parts_on.get(p[0]): off.append("%s.%s" % (s.key, p[0]))
                 continue
@@ -3466,19 +3882,25 @@ class Host(object):
         else: self.prefs.pop("parts_off", None)
         if self.config is not None: self.config.store_prefs(self.prefs)
         if self.hub is not None: self.hub.store_prefs(self.prefs)
-        data = ";".join("%s=%s" % (k, v) for k, v in sorted(self.prefs.items())); Kit.put_var(SETTINGS_KEY, data)
+        data = ";".join("%s=%s" % (k, v) for k, v in sorted(self.prefs.items())); t = time.time()
+        if not now and t < self.prefs_at: self.prefs_due = True; return data
+        self.prefs_due = False; self.prefs_at = t + self.PREFS_EVERY; Kit.put_var(SETTINGS_KEY, data)
         return data
+    def prefs_flush(self, force=False):
+        if self.prefs_due and not self.prefs_frozen and (force or time.time() >= self.prefs_at): self.save_prefs(True)
     def profile_job(self, req):
         kind, name = req
         try: getattr(self, "_profile_" + kind)(name)
-        except Exception as ex: Kit.say("profile %s failed: %s%s" % (kind, Tz.why(ex), _error_where()), Kit.HUE_BAD)
+        except Exception as ex:
+            what = {"fav": "set the favourite profile"}.get(kind, kind + " the profile")
+            Kit.say("couldn't %s (%s%s)." % (what, Tz.why(ex), _error_where()), Kit.HUE_BAD)
         if kind != "load" and self.config is not None and not self.stopping():
             self.config.refresh_profiles()
             if self.config.mode == "full": self.config.prof_redraw = False; self.config.redraw()
     def _profile_save(self, name):
         name = PROFILES.clean(name)
         if not name: raise Exception("type a name for the profile in the box")
-        Kit.say('saving profile "%s".' % name, Kit.HUE_INFO); data = self.save_prefs()
+        Kit.say('saving profile "%s".' % name, Kit.HUE_INFO); data = self.save_prefs(True)
         stamp, n, saved, failed = PROFILES.save(name, data); fav = PROFILES.favorite()
         PROFILES.set_state("fav" if name == fav else "pick", name, stamp)
         if name == fav:
@@ -3488,24 +3910,24 @@ class Host(object):
         PROFILES.report(name, "saved", n, True, saved, failed)
     def _profile_load(self, name):
         if PROFILES.info(name) is None: raise Exception('there is no profile "%s"' % name)
-        Kit.say('loading profile "%s".' % name, Kit.HUE_INFO); self.prefs_frozen = True
+        Kit.say('loading profile "%s".' % name, Kit.HUE_INFO); self.prefs_flush(True); self.prefs_frozen = True
         try:
-            LAYOUT.close()
+            if self.config is not None: safe(self.config.close)
             for s in self.slots:
                 if s.running: self._stop(s)
-            if self.config is not None: safe(self.config.close)
             if self.hub is not None: safe(self.hub.close)
+            Kit._vars.clear()
             mode = "fav" if name == PROFILES.favorite() else "pick"; result = PROFILES.apply(name, mode)
-            for c in set(Binds.saved.values()): self.hotkey_drop(c, Binds.OWNER)
-            Binds.saved.clear(); Binds.loaded = False; self._zone_was_d = None
-            ALERTS.loaded = False; GUARD.saved = None; Kit.read_screen(); LAYOUT.load(); Binds.load()
+            for c in set(Binds.saved.values()) | Binds.hooked: Binds.unhook(c)
+            Binds.saved.clear(); Binds.loaded = False; self._zone_was_d = None; Kit._vars.clear()
+            ALERTS.loaded = False; GUARD.saved = None; Kit.read_screen(); Binds.load()
             for s in self.slots:
                 if s.api is not None and s.lazy is None and s.factory is not None:
                     try: s.api = s.factory(); s.broken = None
                     except Exception as ex:
                         s.api, s.broken = None, str(ex) + _error_where()
-                        Kit.say("%s could not be loaded: %s" % (s.title, s.broken), Kit.HUE_BAD)
-            self.load_prefs()
+                        Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
+            self.load_prefs(); LAYOUT.load()
         finally:
             self.prefs_frozen = False; self.config = ConfigWindow(self); self.config.prof_sel = name; self.config.open()
             self.hub = HubWindow(self)
@@ -3543,9 +3965,7 @@ class Host(object):
         API.SysMsg("%s %s running. %s" % (APP_NAME, APP_VERSION, ("On: " + ", ".join(names)) if names else
                    "Tick a module on the Modules tab."), Kit.HUE_GOOD)
         API.SetSharedVar(ALIVE_KEY, str(time.time())); Binds.load()
-        for s in self.slots:
-            if s.enabled: self.start(s)
-        Kit.note_screen()
+        self.load_jobs.extend(s for s in self.slots if s.enabled and s not in self.load_jobs); Kit.note_screen()
         try: self.whats_new.open()
         except Exception as ex: self._tell("%s: couldn't make the What's new window: %s" % (APP_NAME, ex))
         self.loop()
@@ -3561,40 +3981,42 @@ class Host(object):
     def loop(self):
         try:
             while not self.stopping() and (self.alone is None or self.alone.enabled):
-                try: API.ProcessCallbacks()
-                except Exception: pass
+                began = time.time(); self.drain()
                 try: self.run_due()
                 except Exception as ex:
                     if self.stopping(): break
                     self._tell("%s: main loop error: %s%s" % (APP_NAME, ex, _error_where()))
-                API.Pause(HOST_TICK)
+                API.Pause(self.nap(began))
         finally: self.shutdown()
     def shutdown(self):
         if self.shut: return
         self.shut = self.quitting = True; safe(Picker.drop)
+        if self.off_q: self._drop_offs()
         if not VA_ALONE:
             safe(lambda: Kit.on_client(LAYOUT.game_view_restore)); safe(lambda: LAYOUT.set_arrange(False, tell=False))
             safe(lambda: Kit.on_client(lambda: [cw.free() for cw in list(ClientWin.found.values()) + [
                 LAYOUT.journal_held] if cw is not None]))
+        if self.config is not None: safe(lambda: self.save_prefs(True)); safe(self.config.close)
+        else: safe(lambda: self.prefs_flush(True))
         for s in reversed(self.slots):
             if s.running:
                 try: self._stop(s)
                 except Exception: s.running = False
         self._refresh_active()
-        if self.config is not None: safe(self.save_prefs); safe(self.config.close)
         if self.hub is not None: safe(self.hub.close)
-        for fn in (ALERTS.close, self.whats_new.close, LAYOUT.close, GUARD.store, Kit.note_screen): safe(fn)
+        for fn in (ALERTS.close, self.whats_new.close, GUARD.store, Kit.note_screen): safe(fn)
         if self.grid is not None: safe(self.grid.hide)
         safe(lambda: API.SysMsg("%s stopped." % APP_NAME, Kit.HUE_INFO))
 
 
 class PartSet(object):
     OFF_LINE = "%s is off: tick it under PARTS to see its settings."
-    def __init__(self, key, title, parts):
+    def __init__(self, key, title, parts, shared=None):
         self.key = key; self.specs = [[sp[0], sp[1], float(sp[2]), sp[3] if len(sp) > 3 else None] for sp in parts]
         self._owner = {sp[0]: sp[3] or ("%s.%s" % (key, sp[0])) for sp in self.specs}
         self._iv = {sp[0]: sp[2] for sp in self.specs}; self._fns = {}; self.api = {}; self.running = []; self.due = {}
         self.thread_due = {}; self.want = self._slot = None; self.busy = 0; self.stopping = False
+        self.shared = shared or {}
     def slot(self):
         if self._slot is None: self._slot = dict.get(HOST.by_key, self.key)
         return self._slot
@@ -3633,15 +4055,14 @@ class PartSet(object):
         api = self.part_api(pk)
         if not api: self.api.pop(pk, None); return
         self.running.append(pk); self._sync_slot()
-        if HOST.config is not None: HOST.config.forget_measure(self.key)
         self.due[pk] = 0.0; self.thread_due[pk] = False; s = self.slot()
         if s is not None: s.next_due = 0.0
         self._call(pk, "start")
     def stop_part(self, pk):
         if pk not in self.running: return
         self.running.remove(pk); self._sync_slot()
-        if HOST.config is not None: HOST.config.forget_measure(self.key)
         owner = self.owner(pk); Picker.drop(owner); HOST.release_cursor(owner); self._call(pk, "stop")
+        Kit.unhook(owner)
     def wanted(self): s = self.slot(); return set(s.parts_wanted()) if s is not None else set()
     def reconcile(self, want=None):
         if want is None: want = self.wanted()
@@ -3656,10 +4077,12 @@ class PartSet(object):
     _NOFN = (None, False, None)
     def _tick(self):
         now = time.time(); poked = HOST.pass_poked; running = self.running; due = self.due
+        keys = HOST.pass_keys if self.key in HOST.pass_keys else None
         for pk in list(running):
             if pk not in running: continue
             d = due.get(pk, 0.0)
-            if poked or now + Host.EARLY >= d or d - now > Host.CLOCK_BACK:
+            if poked or now + Host.EARLY >= d or d - now > Host.CLOCK_BACK or (
+                    keys is not None and self.key + "." + pk in keys):
                 self._call(pk, "tick"); nxt, has_thread, want = self._fns.get(pk, self._NOFN)
                 due[pk] = time.time() + Host._ask(nxt, self._iv.get(pk, 0.1))
                 self.thread_due[pk] = has_thread and Host._ask(want, True, bool)
@@ -3714,10 +4137,20 @@ class PartSet(object):
             api = self.api.get(pk[0])
             if api and api.get("config_closed"): self._call(pk[0], "config_closed")
     def hooks(self):
-        return {"start": self._start, "tick": self._tick, "stop": self._stop, "client_tick": True,
-                "thread_tick": self._thread_tick, "thread_wanted": self._thread_wanted, "interval": self._interval,
-                "parts": self.reconcile, "config_height": self._config_height, "build_config": self._build_config,
-                "poll_config": self._poll_config, "config_closed": self._config_closed}
+        h = {"start": self._start, "tick": self._tick, "stop": self._stop, "client_tick": True,
+             "thread_tick": self._thread_tick, "thread_wanted": self._thread_wanted, "interval": self._interval,
+             "parts": self.reconcile, "config_height": self._config_height, "build_config": self._build_config,
+             "poll_config": self._poll_config, "config_closed": self._config_closed}
+        sh = self.shared
+        if not sh: return h
+        def tick(): self._tick(); sh["tick"]()
+        def stop():
+            try: self._stop()
+            finally: sh["stop"]()
+        def thread_tick(): self._thread_tick(); sh["thread_tick"]()
+        def thread_wanted(): return bool(sh["thread_wanted"]()) or self._thread_wanted()
+        wrap = {"tick": tick, "stop": stop, "thread_tick": thread_tick, "thread_wanted": thread_wanted}
+        h.update((k, wrap[k]) for k in sh); return h
 
 
 class Tz(object):
@@ -3811,17 +4244,19 @@ class Tz(object):
 class Profiles(object):
     PROFILE_SKIP = ("Username", "ServerName", "CharacterName", "Serial", "LastLoaded", "FollowingTarget")
     BAG_OWN = ("slot.", "trapsel=", "trapextra="); SERIAL_KEY = re.compile(r"_[0-9A-Fa-f]{8}$")
+    VA_KEYS = ("ActionBar_", "Attention_", "BandageAgent", "Character_", "CombatBars_", "CorpseRun_", "EMPings.",
+               "Grimoire_", "Harvest_", "Interface_", "Layout_", "Lookout_", "Meters_", "Mongotchi_", "Pets_",
+               "PropertyButler_", "Restock_", "SkillBags_", "Skills_", "Social_", "SpellTimers_", "StorageIndex_",
+               "SwingTimer_", "swingtimer_", "SystemStats_", "TrapHL_", "TreasureHunter_", "UltimaTracker_",
+               "UnifiedBag_", "UnitFrames_", "VirtueAssistant_", "WorldMap_")
+    OWN_VARS = ("CorpseRun_corpse", "SkillBags_rules", "SkillBags_done", "UnitFrames_tracked", "Social_names",
+                "TreasureHunter_maps", "Restock_settings", "PropertyButler_visits", "SpellTimers_active")
     MISSING = "\x01VA-missing"
     def __init__(self): self.base = os.path.join(Kit.data_dir(), PROFILE_DIR)
     @staticmethod
-    def _read(path):
-        import System
-        try:
-            if path and System.IO.File.Exists(path): return str(System.IO.File.ReadAllText(path))
-        except Exception: pass
-        return None
+    def _read(path): return Kit.read_safe(path, None) if path else None
     @staticmethod
-    def _write(path, text): import System; System.IO.File.WriteAllText(path, text, System.Text.UTF8Encoding(False))
+    def _write(path, text): Kit.write_safe(path, text)
     @staticmethod
     def _esc(s): return s.replace("\\", "\\\\").replace("\t", "\\t").replace("\r", "\\r") .replace("\n", "\\n")
     @staticmethod
@@ -3858,15 +4293,20 @@ class Profiles(object):
         name = (self._read(os.path.join(self.base, "_favorite.txt")) or "").strip()
         return name if name and self.info(name) is not None else ""
     def set_favorite(self, name):
-        import System; System.IO.Directory.CreateDirectory(self.base)
+        if not os.path.isdir(self.base): os.makedirs(self.base)
         self._write(os.path.join(self.base, "_favorite.txt"), name or "")
     def state(self):
         p = Kit.get_var(PROFILE_STATE_KEY).split("|"); return (p[0], p[1], p[2]) if len(p) >= 3 else ("", "", "")
     def set_state(self, mode, name, stamp): Kit.put_var(PROFILE_STATE_KEY, "%s|%s|%s" % (mode, name, stamp))
     SESSION_VARS = ("Layout_gameview_own", "Layout_gameview_lock", "Layout_zone_was", "VirtueAssistant_reclaim_undo")
-    def keep_var(self, key):
-        return key != PROFILE_STATE_KEY and not self.SERIAL_KEY.search(key) and (
-            key not in self.SESSION_VARS and not key.startswith("Layout_client_locked_"))
+    def keep_var(self, key, extra=()):
+        if key == PROFILE_STATE_KEY or self.SERIAL_KEY.search(key) or key in self.SESSION_VARS: return False
+        if key in self.OWN_VARS or key.startswith(("Grimoire_H_", "Layout_client_locked_")): return False
+        return key.startswith(self.VA_KEYS + tuple(extra))
+    def profile_vars(self, found):
+        mods = set(s.key for s in HOST.slots)
+        extra = tuple(set(k[:-8] for k in found if k.endswith("_settings") and k[:-9].lower() in mods))
+        return dict((k, v) for k, v in found.items() if self.keep_var(k, extra))
     @staticmethod
     def char_vars():
         import System; t = Tz.T("ClassicUO.LegionScripting.PersistentVars")
@@ -3881,8 +4321,8 @@ class Profiles(object):
         for line in text.split("\n"):
             if "\t" in line:
                 k, v = line.split("\t", 1); k = self._unesc(k)
-                if k and self.keep_var(k): out[k] = self._unesc(v.rstrip("\r"))
-        return out
+                if k: out[k] = self._unesc(v.rstrip("\r"))
+        return self.profile_vars(out)
     def wait_vars(self, wanted, timeout=5.0):
         left = dict(wanted); end = time.time() + timeout
         while left and not API.StopRequested:
@@ -4007,7 +4447,7 @@ class Profiles(object):
         import System; D = System.IO.Directory; final = self.folder(name); tmp, old = final + ".saving", final + ".old"
         if D.Exists(tmp): D.Delete(tmp, True)
         D.CreateDirectory(os.path.join(tmp, "tazuo")); stamp = "%d" % int(time.time())
-        va = dict((k, v) for k, v in self.char_vars().items() if self.keep_var(k)); va[SETTINGS_KEY] = prefs_data
+        va = self.profile_vars(self.char_vars()); va[SETTINGS_KEY] = prefs_data
         self._write(os.path.join(tmp, "va_vars.txt"),
                     "".join("%s\t%s\n" % (self._esc(k), self._esc(va[k])) for k in sorted(va)))
         bag = self.bag_path(); text = self._read(bag) if bag else None
@@ -4038,10 +4478,12 @@ class Profiles(object):
         folder = self.folder(name); va = self.read_vars(name)
         for k in sorted(va): Kit.put_var(k, va[k])
         ok = self.wait_vars(va); lay = self._read(os.path.join(folder, "unified_bag.cfg")); bag = self.bag_path()
-        if lay is not None and bag:
-            own = [l for l in (self._read(bag) or "").splitlines() if l.startswith(self.BAG_OWN)]
+        cur = Kit.read_safe(bag) if lay is not None and bag else None
+        if cur is not None:
+            own = [l for l in cur.splitlines() if l.startswith(self.BAG_OWN)]
             self._write(bag, "\n".join([l for l in lay.splitlines() if l.strip()] + own))
         done, failed = self._on_client(lambda: self._client_import(os.path.join(folder, "tazuo")))
+        if lay is not None and bag and cur is None: failed = list(failed) + ["bag layout (couldn't read the bag file)"]
         self.set_state(mode, name, info.get("saved", "")); return len(va), ok, done, failed
     def report(self, name, verb, n, ok, done, failed):
         Kit.say('profile "%s" %s: %d Virtue Assistant settings; TazUO: %s.'
@@ -4065,8 +4507,8 @@ class ConfigWindow(object):
     LINK_STALE = 10.0; LINK_ENABLE = "VirtueAssistant_enable"
     def __init__(self, host):
         self.host = host; self.g = self.mode = self._pp_key = self.shown_page = self.request = self.request_tab = None
-        self.snap_cb = self.lag_lbl = self.grid_tb = self.dirty = self.gear_pos = None
-        self.link_state = self.prof_sel = self.grid_text = self.prof_cache = self.prof_shown = None
+        self.lag_lbl = self.dirty = self.gear_pos = None
+        self.link_state = self.prof_sel = self.prof_cache = self.prof_shown = None
         self.loading = self.stale_page = self.search_tb = self.search_text = None
         self.gear_clicked = self.closing = self.docked = self.prof_stale = self.prof_redraw = False
         self.box_hit = self.redraw_req = self.search_focus = False
@@ -4185,6 +4627,7 @@ class ConfigWindow(object):
     def _settings_error(self, s, what, ex):
         msg = "%s: %s settings %s error: %s%s" % (APP_NAME, s.title, what, ex, _error_where())
         if msg not in self.reported: self.reported.add(msg); API.SysMsg(msg, Kit.HUE_BAD)
+        self.host.count_error(s, page=True)
     def _leave_page(self):
         key, self.shown_page = self.shown_page, None; stale, self.stale_page = self.stale_page == key, None
         s = self.host.page_slot(key)
@@ -4196,9 +4639,9 @@ class ConfigWindow(object):
     COL_W = W - 2 * Kit.MARGIN; MIN_W = W; MIN_H = 200; SETTLE = 0.35; SCALES = (70, 80, 90, 100, 110, 125, 150)
     ART_LESS = (5401, 5401, 5401); ART_MORE = (5402, 5402, 5402)
     HELP_LINES = ("Tick a module to turn it on; closing its window turns it off. Settings are on the Settings tab.",
-                  "Drag a corner to resize; - and + scale the window.")
-    SNAP_CAP = "Snap windows together"; BROKEN = "couldn't load: see the journal"
-    LAG_SAMPLE = "12 modules on; slowest lately: Ultima Tracker, 999 ms"
+                  "Drag a corner to resize; - and + scale the window.",
+                  "Zones, layout and snapping: Settings > Interface.")
+    BROKEN = "couldn't load: see the journal"; LAG_SAMPLE = "12 modules on; slowest lately: Ultima Tracker, 999 ms"
     def _context(self):
         host = self.host; pages = self.settings_slots(); page = None
         if self.tab == "settings" and pages:
@@ -4265,7 +4708,7 @@ class ConfigWindow(object):
         for s in slots:
             hit, parts = self._matches(s, q)
             if not hit: continue
-            found[s.key] = parts; cat = getattr(s, "category", None) or "Other"
+            found[s.key] = parts; cat = s.category or "Other"
             if cat not in groups: groups[cat] = []; order.append(cat)
             groups[cat].append(s)
         cats = [c for c in CATEGORY_ORDER if c in groups] + sorted(c for c in order if c not in CATEGORY_ORDER)
@@ -4286,16 +4729,16 @@ class ConfigWindow(object):
         return 24
     def _units_modules(self, slots):
         CW = self.COL_W; rows = self._mod_rows(slots, CW)
-        lines = [l for para in self.HELP_LINES for l in Kit.wrap(para, CW - 42)]
-        split = CW < 30 + Kit.text_w(self.LAG_SAMPLE) + 12 + Kit.text_w("Grid px") + 8 + 48 + 12
-        h_opts = 8 + 22 * len(lines) + 48 + (24 if split else 0)
+        lines = [l for para in self.HELP_LINES for l in Kit.wrap(para, CW - 42)]; h_opts = 8 + 22 * len(lines) + 24
         units = [{"rows": [self._row_h(r) for r in rows], "head": 34, "tail": 4,
                   "draw": lambda g, x, y, h, i, j: self._draw_mods(g, x, y, CW, h, rows[i:j], i == 0)}, {"h": h_opts,
-                  "draw": lambda g, x, y, h, i, j: self._draw_opts(g, x, y, CW, h, lines, split)}]
+                  "draw": lambda g, x, y, h, i, j: self._draw_opts(g, x, y, CW, h, lines)}]
         return units, CW
     PAGE_MAX_W = 1100
     def _measure_page(self, page, x0, y0, CW):
-        ck = (page.key, CW)
+        try: hp = int(page.api["config_height"](CW))
+        except Exception: hp = None
+        ck = (page.key, CW, hp, bool(page.running), tuple(p[0] for p in page.parts if page.parts_on.get(p[0])))
         if ck in self.measured: return self.measured[ck]
         measure = PageCanvas(None); out = None
         try:
@@ -4320,7 +4763,7 @@ class ConfigWindow(object):
         if self.loading is not None and self.loading.key == key: self.redraw_req = True
     def _pick_unit(self, pages, CW, lit):
         slot = 35 + max([Kit.text_w(s.title) for s in pages] or [80]) + 12; per = max(1, 1 + (CW - 30 - slot) // 196)
-        self.page_keys = [("page_" + s.key, s.key) for s in pages]
+        self.page_keys = [("page_" + s.key, s.key) for s in pages]; n = (len(pages) + per - 1) // per
         def draw_pick(g, x, y, h, i, j):
             Kit.add_section(g, x, y, CW, h)
             for k, s in enumerate(pages):
@@ -4329,7 +4772,7 @@ class ConfigWindow(object):
                     Kit.art_button(g, self.store, "page_" + s.key, Kit.ART_PAGE, x + 30 + (k % per) * 196,
                                    y + 6 + (r - i) * 28, s.title, "Show %s settings" % s.title,
                                    Kit.HUE_TITLE if lit(s) else Kit.HUE_TEXT)
-        return {"rows": [28] * ((len(pages) + per - 1) // per), "head": 6, "tail": 4, "draw": draw_pick}
+        return {"rows": [28] * n, "head": 6, "tail": 4, "draw": draw_pick}
     def _units_loading(self, pages, title):
         CW = self.COL_W
         def draw_note(g, x, y, h, i, j):
@@ -4347,7 +4790,7 @@ class ConfigWindow(object):
         if page.parts:
             units.append({"h": 34 + 26 * len(page.parts) + 6,
                           "draw": lambda g, x, y, h, i, j: self._draw_parts(g, x, y, CW, h, page)})
-        wins = LAYOUT.windows_of(page.key)
+        wins = LAYOUT.windows_of(page.key) if LAYOUT.enabled else ()
         if wins:
             units.append({"h": 34 + 26 * len(wins) + 6, "draw": lambda g, x, y, h, i,
                           j: self._draw_windows(g, x, y, CW, h, wins)})
@@ -4399,7 +4842,7 @@ class ConfigWindow(object):
     def _part_box(self, g, s, p, x, ry):
         on = bool(s.parts_on.get(p[0])); cb = Kit.add_check(g, p[1], x, ry, on, "%s: %s" % (s.title, p[2] or p[1]))
         self._hook_box(cb); self.part_boxes.append((s, p[0], cb)); self.seen["%s.%s" % (s.key, p[0])] = on
-    ZONE_TIP = "Click: next zone (free: stays where you put it; Settings > Layout lists them all)"
+    ZONE_TIP = "Click: next zone (free: stays where you put it; Settings > Interface lists them all)"
     def _draw_windows(self, g, x, y, w, h, wins):
         Kit.add_section(g, x, y, w, h, "WINDOWS  (the zone each sits in)"); zones = LAYOUT.zone_choices(); ry = y + 32
         for key, title in wins:
@@ -4447,17 +4890,10 @@ class ConfigWindow(object):
         store = self.store
         def hit(): Kit.clicks_seen = True; store[1]["fold_" + key] = True; HOST.poke()
         return hit
-    def _draw_opts(self, g, x, y, w, h, lines, split):
-        host = self.host; Kit.add_section(g, x, y, w, h); ly = y + 8
+    def _draw_opts(self, g, x, y, w, h, lines):
+        Kit.add_section(g, x, y, w, h); ly = y + 8
         for line in lines: Kit.add_label(g, line, x + 30, ly, Kit.HUE_INFO); ly += 22
-        self.snap_cb = Kit.add_check(g, self.SNAP_CAP, x + 30, ly, SNAP.enabled); self._hook_box(self.snap_cb)
-        ly += 24; self.lag_lbl = Kit.add_label(g, "", x + 30, ly, Kit.HUE_INFO)
-        self.lag_next = 0.0
-        if split:
-            ly += 24; Kit.add_label(g, "Grid px", x + 30, ly, Kit.HUE_INFO); gx = x + 30 + Kit.text_w("Grid px") + 8
-        else: gx = x + w - 12 - 50; Kit.add_label(g, "Grid px", gx - Kit.text_w("Grid px") - 8, ly, Kit.HUE_INFO)
-        self.grid_tb = Kit.with_tip(Kit.add_textbox(g, str(host.grid_size()), gx, ly - 2, 44),
-                                    "Grid spacing for snapping (8-512; the Action Bar's Grid button shows it)")
+        self.lag_lbl = Kit.add_label(g, "", x + 30, ly, Kit.HUE_INFO); self.lag_next = 0.0
     def _on_resized(self, *args):
         first = not self.resize_at; self.resize_at = time.time(); g = self.g
         if first and self.mode == "full" and Kit.is_open(g): g.SetAlpha(0.55)
@@ -4477,10 +4913,10 @@ class ConfigWindow(object):
         if pcts[i] != cur: self.scale = pcts[i] / 100.0; self.redraw()
     def _reset(self):
         self._leave_page(); self.search_tb, self.search_text, self.search_at = None, None, 0.0; self.store = ({}, {})
-        self.page_keys, self.box_list, self.zone_keys = [], [], []; self.snap_cb = self.lag_lbl = None
+        self.page_keys, self.box_list, self.zone_keys = [], [], []; self.lag_lbl = None
         self._prof_reset()
     def _build_full(self, x, y):
-        self._reset(); self.seen, self.grid_tb, self.resize_at, self.grid_text = {}, None, 0.0, None
+        self._reset(); self.seen, self.resize_at = {}, 0.0
         self.part_boxes, self.fold_keys = [], []; M, GAP = Kit.MARGIN, Kit.GAP; L = M
         slots, pages, page = self._context(); y_title = M; y_prof = y_title + 34 + GAP; y_body = self._body_y()
         if self.tab == "settings" and page is not None: units, CW = self._units_settings(pages, page, L, y_body)
@@ -4638,16 +5074,6 @@ class ConfigWindow(object):
                 text = "%d modules on; slowest lately: %s, %d ms" % (len(running), worst.title, worst.worst_ms)
             else: text = "No modules on"
             Kit.set_text(self.lag_lbl, text)
-        if self.grid_tb is not None and self._fld_due:
-            try: t = self.grid_tb.Text
-            except Exception: t = None
-            if t != self.grid_text:
-                self.grid_text = t
-                try: v = int(str(t or "").strip() or 0)
-                except Exception: v = 0
-                if 8 <= v <= 512 and v != self.host.grid_size():
-                    self.host.prefs["grid"] = str(v); self.host.save_prefs()
-                    if self.host.grid is not None: self.host.grid.redraw()
         now = time.time()
         if self.box_hit or now >= self.box_next or not Kit.clicks_seen:
             self.box_hit = False; self.box_next = now + self.BOX_EVERY
@@ -4678,13 +5104,6 @@ class ConfigWindow(object):
         def hit(*args): Kit.clicks_seen = True; self.box_hit = True; HOST.poke()
         G.AddControlOnClick(cb, hit)
     def _poll_boxes(self):
-        if self.snap_cb is not None:
-            try: v = bool(self.snap_cb.IsChecked)
-            except Exception: v = SNAP.enabled
-            if v != SNAP.enabled:
-                SNAP.enabled = v
-                if not v: SNAP.links.clear()
-                self.host.save_prefs()
         seen = self.seen
         for s, pk, cb in self.box_list + self.part_boxes:
             sk, cur = (s.key, s.enabled) if pk is None else ("%s.%s" % (s.key, pk), bool(s.parts_on.get(pk)))
@@ -4732,7 +5151,8 @@ class AlonePage(object):
         self.st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
         self.win = {"g": None, "c": {}, "store": ({}, {})}
         self.wnd = Kit.Window(s.key + "_alone", s.title + " settings", self.st, self.win, self.build,
-                              "VirtueAssistant_alone_pos", mini=(260, 46), lock=False, owner=False, close_tip="Close")
+                              "VirtueAssistant_alone_pos", mini=(260, 46), lock=False, owner=False,
+                              close_tip="Close these settings")
     def __getattr__(self, name): return lambda *args, **kw: None
     def api(self): return self.s.api if self.s.api and self.s.api.get("build_config") else None
     def show_settings(self, key): self.want, self.st["minimized"] = True, False
@@ -4748,6 +5168,9 @@ class AlonePage(object):
         self.wnd.end(g)
     def poll_parts(self):
         s = self.s; new = self.parts.read(); changed = [k for k in new if s.parts_on.get(k) != new[k]]
+        if changed and s.parts and not any(new.get(p[0], s.parts_on.get(p[0])) for p in s.parts):
+            self.dirty = True
+            API.SysMsg("%s: keep one part ticked; close the window to turn it off." % s.title, Kit.HUE_INFO); return
         for k in changed: HOST.part_set(s.key, k, new[k])
         if changed: Kit.put_var(ALONE_PARTS % s.key, ",".join(s.parts_wanted())); self.dirty = True
     def poll(self):
@@ -4768,7 +5191,8 @@ class AlonePage(object):
         elif not self.st["minimized"]:
             if self.parts is not None: self.poll_parts()
             try: self.s.api["poll_config"]()
-            except Exception as ex: HOST._tell("%s: settings error: %s" % (self.s.title, ex))
+            except Exception as ex:
+                HOST._tell("%s: settings error: %s" % (self.s.title, ex)); HOST.count_error(self.s, page=True)
     def close(self):
         if self.win["g"] is None: return
         if self.api().get("config_closed"): self.s.api["config_closed"]()
@@ -4784,7 +5208,8 @@ class HubWindow(object):
         self.docked = self.dirty = self.closing = False; self._gates = {}
         host.dock_add("hub", {"title": "Ultima Tracker", "icon": 0x1057, "always": True,
                               "state": self.state, "show": self.show, "dock": self.dock,
-                              "undock": self.undock, "minimize": self.minimize, "on": self.open_modules})
+                              "undock": self.undock, "minimize": self.minimize, "on": self.open_modules,
+                              "gump": lambda: self.g, "redraw": self.refresh})
     def add(self, key, title, hooks): self.remove(key); self.sections.append((key, title, hooks)); self.dirty = True
     def remove(self, key):
         keep = [s for s in self.sections if s[0] != key]
@@ -4815,7 +5240,7 @@ class HubWindow(object):
         if Kit.is_open(g): Kit.set(g, "IsVisible", bool(on))
     def _pos(self):
         g = self.g
-        if Kit.is_open(g):
+        if Kit.is_open(g) and not self.host.layout_holds("hub"):
             try: self.x, self.y = int(g.GetX()), int(g.GetY())
             except Exception: pass
     def _leave(self):
@@ -4833,12 +5258,12 @@ class HubWindow(object):
     def _error(self, key, ex):
         mk, pk = self._part_of(key); s = dict.get(self.host.by_key, mk)
         if s is not None: self.host.report(s, ex, None, pk)
-    def build(self): Kit.on_client(self._build)
+    def build(self): Kit.on_client(lambda: Binds.scoped("va.hub", self._build))
     def _build(self):
         self.dirty = False
         if not self.sections: self._close_window(); return
         self._pos(); self._leave(); old = self.g; M, GAP = Kit.MARGIN, Kit.GAP; store = ({}, {})
-        g = G.CreateGump(True, True); title = self.title().upper()
+        g = G.CreateGump(True, True); title = self.title().upper(); held = self.host.layout_holds("hub")
         close_tip = "Close %s (turns %s off; the Modules tab turns %s back on)" % (
             self.title(), "them" if len(self.sections) > 1 else "it", "them" if len(self.sections) > 1 else "it")
         if self.minimized:
@@ -4851,20 +5276,25 @@ class HubWindow(object):
             w = self.W; IW = w - 2 * M
             heights = [max(20, int(safe(lambda: hooks["height"](IW), 40) or 40)) for key, t, hooks in self.sections]
             h = M + 30 + GAP + sum(heights) + GAP * (len(heights) - 1) + M; Kit.add_window_frame(g, w, h, corners=False)
-            Kit.add_section(g, M, M, IW, 30); Kit.add_label(g, title, M + 10, M + 7, Kit.HUE_TITLE)
-            Kit.title_catcher(g, M, M, IW - 70 - Kit.DOCK_DX, 30, self.toggle_min, key="hub")
-            Kit.dock_button(g, store, w - M - 66, M + 7)
-            Kit.art_button(g, store, "min", Kit.ART_MIN, w - M - 66, M + 7, None, Kit.MIN_TIP)
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 44, M + 4, None, close_tip); y = M + 30 + GAP
+            if held: Kit.title_bar(g, store, w, self.title(), "hub", None, None)
+            else:
+                Kit.add_section(g, M, M, IW, 30); Kit.add_label(g, title, M + 10, M + 7, Kit.HUE_TITLE)
+                Kit.title_catcher(g, M, M, IW - 70 - Kit.DOCK_DX, 30, self.toggle_min, key="hub")
+                Kit.dock_button(g, store, w - M - 66, M + 7)
+                Kit.art_button(g, store, "min", Kit.ART_MIN, w - M - 66, M + 7, None, Kit.MIN_TIP)
+                Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 44, M + 4, None, close_tip)
+            y = M + 30 + GAP
             for (key, t, hooks), sh in zip(self.sections, heights):
                 st_ = self.stores[key] = ({}, {})
-                try: hooks["build"](g, M, y, IW, st_)
+                try: Binds.scoped(key, hooks["build"], g, M, y, IW, st_)
                 except Exception as ex:
                     Kit.add_section(g, M, y, IW, sh); Kit.add_label(g, "%s: %s" % (t, ex), M + 10, y + 10, Kit.HUE_BAD)
                     self._error(key, ex)
                 y += sh + GAP
-        self.H = h; self.x, self.y = Kit.place(g, self.x, self.y, w, h); self.g, self.store = g, store
-        G.AddControlOnDisposed(g, lambda *a: self._disposed(g)); G.AddGump(g); g.SetInScreen()
+        if held: xy = LAYOUT.placed.get("hub") or (self.x, self.y); g.SetPos(int(xy[0]), int(xy[1]))
+        else: self.x, self.y = Kit.place(g, self.x, self.y, w, h)
+        self.H = h; self.g, self.store = g, store; G.AddControlOnDisposed(g, lambda *a: self._disposed(g)); G.AddGump(g)
+        if not held: g.SetInScreen()
         Kit.on_moved(g, self._moved); Kit.dispose(old)
         if self.docked: self._visible(False)
     def _moved(self): self._pos(); self.host.save_prefs()
@@ -4918,6 +5348,7 @@ class Snap(object):
         self.attached = {}; self._fmap = None; self.no_snap = set()
         self.keep_at = 0.0; self.screen = None; self.by_code = {}; self.dragged = set(); self.droppers = []
         self.drag_end = {}; self.drag_key = {}; self.drag_rect = {}; self.lost = {}
+        self.down = True; self.sweep_at = 0.0; self.keep_sig = None
     def add(self, g):
         if g is not None and g not in self.members: self.members.add(g); self.gumps.append(g)
     def on_moved(self, g, fn):
@@ -5021,10 +5452,13 @@ class Snap(object):
         if now < self.next and self.next - now <= SNAP_EVERY: return
         self.next = now + SNAP_EVERY
         if LAYOUT.arrange and not self.drag and API.IsKeyPressed("ESCAPE"): LAYOUT.set_arrange(False)
-        pressed = self.pressed()
+        pressed = self.pressed(); self.down = pressed is not False or bool(self.drag)
         if pressed is not True:
-            if now >= self.keep_at: self.keep_at = now + KEEP_EVERY; self.keep()
-            elif (LAYOUT.fresh or LAYOUT.fresh_adds) and LAYOUT.assign:
+            if now >= self.keep_at:
+                self.keep_at = now + KEEP_EVERY
+                if now >= self.sweep_at or self._keep_sig() != self.keep_sig:
+                    self.sweep_at = now + KEEP_SWEEP; self.keep(); self.keep_sig = self._keep_sig()
+            elif LAYOUT.assign and (LAYOUT.fresh or LAYOUT.fresh_adds or LAYOUT.retry_due(now)):
                 self.keep(light=bool(LAYOUT.fresh_adds) and not LAYOUT.fresh)
         if pressed is False and not self.drag:
             self.last = None
@@ -5115,6 +5549,14 @@ class Snap(object):
             self.move(g, nx, ny)
             if self.last is not None: self.last[g] = (nx, ny)
             self.follow(g, nx - x, ny - y, set([g]))
+    def _keep_sig(self):
+        if self.down or Kit._pend or LAYOUT.arrange or LAYOUT.dirty or LAYOUT.fresh or LAYOUT.fresh_adds:
+            return object()
+        out = [Kit.screen(), safe(LAYOUT.occupied)]
+        for g in self.gumps + list(self.attached) + [cw for cw in ClientWin.found.values() if cw is not None]:
+            try: out.append((id(g), Kit.is_open(g), Kit.rect(g), bool(g.IsVisible)))
+            except Exception: out.append(id(g))
+        return out
     def keep(self, light=False):
         W, H = Kit.screen()
         if W <= 0 or H <= 0: return
@@ -5154,7 +5596,7 @@ class Snap(object):
         for g in live:
             if new is not None and g not in new: continue
             if g not in self.drag and g not in held: self.keep_one(g)
-        try: LAYOUT.keep(W, H)
+        try: LAYOUT.keep(W, H, new)
         except Exception as ex: HOST._tell("%s: layout error: %s%s" % (APP_NAME, ex, _error_where()))
         if (self.moved or self.lost) and not self.drag: self._tell_moved()
     def keep_one(self, g):
@@ -5245,7 +5687,6 @@ FRAMES_ACTIVE = "VirtueAssistant_frames_active"
 FRAMES_LIST = "VirtueAssistant_frames_list"
 FRAMES_NAMED = "VirtueAssistant_frames_%s"
 LAYOUT_OPTS = "VirtueAssistant_layout_opts"
-LAYOUT_EDITOR_POS = "VirtueAssistant_layout_editor_pos"
 LAYOUT_DEFAULT = "Default"
 LAYOUT_MIRRORED = "Mirrored"
 LAYOUT_MINE = "Default (mine)"
@@ -5266,6 +5707,12 @@ ZONE_COLORS = {"w": "#3A78C8", "k": "#3AA060", "r": "#C88A3A"}
 ZONE_KINDS = (("w", "window"), ("k", "keep clear"), ("r", "reserved"))
 ZONE_STACKS = (("d", "down"), ("u", "up"), ("r", "right"), ("l", "left"))
 SHRINK_MAX = 6
+LAYOUT_OWNER = "interface"
+SEAM_PAD = 6
+REVEAL_H = 14
+REVEAL_HOLD = 0.6
+SEAM_WAIT = 2.0
+SEAM_RETRY = 0.1
 
 
 def ratio_class(W, H):
@@ -5285,21 +5732,22 @@ def _ordinal(n):
 
 class Zone(object):
     __slots__ = ("id", "kind", "rect", "pins", "min", "stack", "prio", "px", "squeezed", "fit",
-                 "hug", "arch", "overlap", "lock")
+                 "hug", "arch", "overlap", "lock", "solo", "free", "exact")
     def __init__(self, id, kind="w", rect=(0, 0, 200, 200), pins="", mins=(0, 0), stack="d",
-                 prio=0, fit="w", hug=False, arch=False, overlap=False, lock=False):
+                 prio=0, fit="w", hug=False, arch=False, overlap=False, lock=False, solo=False, free=False):
         self.id = str(id); self.kind = kind if kind in ("w", "k", "r") else "w"; self.rect = tuple(int(v) for v in rect)
         self.pins = "".join(c for c in str(pins or "").upper() if c in "LTRBXY")
         self.min = (int(mins[0]), int(mins[1])); self.stack = stack if stack in ("d", "u", "r", "l") else "d"
         self.prio = max(0, min(SHRINK_MAX, int(prio))); self.fit = fit if fit in ("w", "s", "n") else "w"
         self.hug = bool(hug) and self.kind == "w"; self.arch = bool(arch) and self.kind == "k"
-        self.overlap = bool(overlap); self.lock = bool(lock); self.px = None; self.squeezed = False
+        self.overlap = bool(overlap); self.lock = bool(lock); self.solo = bool(solo); self.free = bool(free)
+        self.px = None; self.squeezed = False; self.exact = None
     def kind_name(self): return dict(ZONE_KINDS)[self.kind]
     def stack_name(self): return dict(ZONE_STACKS)[self.stack]
     def copy(self):
         z = Zone(self.id, self.kind, self.rect, self.pins, self.min, self.stack, self.prio,
-                 self.fit, self.hug, self.arch, self.overlap, self.lock)
-        z.px = tuple(self.px) if self.px else None; return z
+                 self.fit, self.hug, self.arch, self.overlap, self.lock, self.solo, self.free)
+        z.px = tuple(self.px) if self.px else None; z.exact = self.exact; return z
     def set_px(self, x, y, w, h, W, H):
         w, h = max(1, int(w)), max(1, int(h))
         if W > 0: w = min(w, W); x = _clampv(int(x), 0, W - w)
@@ -5308,15 +5756,19 @@ class Zone(object):
         if W > 0 and H > 0:
             self.rect = (int(round(1000.0 * x / W)), int(round(1000.0 * y / H)),
                          int(round(1000.0 * w / W)), int(round(1000.0 * h / H)))
+            self.exact = self.px + (int(W), int(H))
     def note_pins(self, W, H):
         if not self.px or W <= 0 or H <= 0: return
-        x, y, w, h = self.px
+        x, y, w, h = self.px; lim = 0.5 if self.free else SNAP_DIST
         self.pins = "".join(c for c, d in (("L", x), ("T", y), ("R", W - (x + w)), ("B", H - (y + h)),
                                            ("X", abs((x + w / 2.0) - W / 2.0)), ("Y", abs((y + h / 2.0) - H / 2.0)))
-                            if d <= SNAP_DIST)
+                            if d <= lim)
     def save_text(self):
-        n = 4 if self.overlap or self.lock else (2 if self.hug or self.arch else 0)
-        extra = "".join(":%d" % v for v in (self.hug, self.arch, self.overlap, self.lock)[:n])
+        flags = (self.hug, self.arch, self.overlap, self.lock, self.solo, self.free)
+        n = (6 if self.free else 5 if self.solo else 4 if self.overlap or self.lock else
+             2 if self.hug or self.arch else 0)
+        extra = "".join(":%d" % v for v in flags[:n])
+        if self.free and self.exact: extra += ":%d,%d,%d,%d,%d,%d" % self.exact
         return "%s:%s:%d,%d,%d,%d:%s:%d,%d:%s:%d:%s%s" % (
             self.id.replace(":", " ").replace(";", " "), self.kind, self.rect[0], self.rect[1],
             self.rect[2], self.rect[3], self.pins, self.min[0], self.min[1], self.stack, self.prio, self.fit, extra)
@@ -5328,9 +5780,14 @@ class Zone(object):
             rect = [int(v) for v in f[2].split(",")]; mn = [int(v) for v in f[4].split(",")]
             if len(rect) != 4 or len(mn) != 2 or rect[2] <= 0 or rect[3] <= 0: return None
             fit = f[7].strip() if len(f) > 7 else "w"
-            hug, arch, overlap, lock = [len(f) > i and f[i].strip() == "1" for i in (8, 9, 10, 11)]
-            return Zone(f[0].strip(), f[1].strip(), rect, f[3], mn, f[5].strip(), int(f[6]), fit,
-                        hug, arch, overlap, lock)
+            hug, arch, overlap, lock, solo, free = [len(f) > i and f[i].strip() == "1" for i in range(8, 14)]
+            z = Zone(f[0].strip(), f[1].strip(), rect, f[3], mn, f[5].strip(), int(f[6]), fit,
+                     hug, arch, overlap, lock, solo, free)
+            e = f[14].strip() if free and len(f) > 14 else ""
+            if re.match(r"^\d+(,\d+){5}$", e):
+                e = tuple(int(v) for v in e.split(","))
+                if e[2] > 0 and e[3] > 0 and e[4] > 0 and e[5] > 0: z.exact = e
+            return z
         except Exception: return None
 
 
@@ -5445,16 +5902,23 @@ class ZoneSet(object):
         if W <= 0 or H <= 0: return
         step = max(8, int(step or GRID_DEFAULT))
         if self.needs:
-            drawn = [(z, z.rect) for z in self.zones]; self.needs, needs = {}, self.needs; self.reflow(W, H, step)
-            self.needs = needs; self._apply_needs(W, H); self._keep_clear(W, H)
-            for z, r in drawn: z.rect = r
+            drawn = [(z, z.rect, z.exact) for z in self.zones]; self.needs, needs = {}, self.needs
+            self.reflow(W, H, step); self.needs = needs; self._apply_needs(W, H); self._keep_clear(W, H)
+            for z, r, e in drawn: z.rect, z.exact = r, e
             return
         oldW, oldH = self.screen if self.screen[0] > 0 and self.screen[1] > 0 else (W, H)
         flush = self._flush_pairs(oldW, oldH)
-        def on_grid(v, limit): v = int(round(float(v) / step)) * step; return _clampv(v, 0, limit)
+        def on_grid(v, limit, free):
+            st = 1 if free else step; return _clampv(int(round(float(v) / st)) * st, 0, limit)
+        exact = set()
         for z in self.zones:
-            l, t, w, h = z.rect; x0, y0 = on_grid(W * l / 1000.0, W), on_grid(H * t / 1000.0, H)
-            x1, y1 = on_grid(W * (l + w) / 1000.0, W), on_grid(H * (t + h) / 1000.0, H)
+            l, t, w, h = z.rect; f = z.free; e = z.exact if f and z.exact and z.exact[4:] == (W, H) else None
+            if e is not None: exact.add(z.id); x0, y0, x1, y1 = e[0], e[1], e[0] + e[2], e[1] + e[3]
+            else:
+                x0, y0 = on_grid(W * l / 1000.0, W, f), on_grid(H * t / 1000.0, H, f)
+                x1, y1 = on_grid(W * (l + w) / 1000.0, W, f), on_grid(H * (t + h) / 1000.0, H, f)
+            if f: z.pins = "".join(c for c, on in (("L", x0 <= 0), ("T", y0 <= 0), ("R", x1 >= W), ("B", y1 >= H))
+                                   if on)
             if "L" in z.pins: x0 = 0
             if "T" in z.pins: y0 = 0
             if "R" in z.pins: x1 = W
@@ -5466,7 +5930,7 @@ class ZoneSet(object):
             z.px = (x0, y0, max(1, x1 - x0), max(1, y1 - y0))
         for a, b, side in flush:
             za, zb = self.by_id(a), self.by_id(b)
-            if za is None or zb is None or za.px is None or zb.px is None: continue
+            if za is None or zb is None or za.px is None or zb.px is None or (a in exact and b in exact): continue
             ax, ay, aw, ah = za.px; bx, by, bw, bh = zb.px
             if side == "h":
                 nx = ax + aw; right = W if "R" in zb.pins else bx + bw
@@ -5508,9 +5972,10 @@ class ZoneSet(object):
             ax, ay, aw, ah = px[a.id]
             for b in self.zones:
                 if a is b: continue
-                bx, by, bw, bh = px[b.id]
-                if abs(bx - (ax + aw)) <= SNAP_DIST and by < ay + ah and ay < by + bh: out.append((a.id, b.id, "h"))
-                if abs(by - (ay + ah)) <= SNAP_DIST and bx < ax + aw and ax < bx + bw: out.append((a.id, b.id, "v"))
+                bx, by, bw, bh = px[b.id]; f = a.free or b.free
+                tw, th = (1.0 + W / 1000.0, 1.0 + H / 1000.0) if f else (SNAP_DIST, SNAP_DIST)
+                if abs(bx - (ax + aw)) <= tw and by < ay + ah and ay < by + bh: out.append((a.id, b.id, "h"))
+                if abs(by - (ay + ah)) <= th and bx < ax + aw and ax < bx + bw: out.append((a.id, b.id, "v"))
         def rank(zid): z = self.by_id(zid); return -len(z.pins) if z else 0
         out.sort(key=lambda p: (rank(p[0]), rank(p[1]))); return out
     def _free(self, z, i, lim):
@@ -5594,13 +6059,12 @@ class ZoneSet(object):
         order = sorted(self.zones, key=lambda z: {"w": 0, "r": 1, "k": 2}[z.kind])
         for z in order:
             if z.overlap or z.lock: continue
-            r = list(z.px)
+            r = list(z.px); st = 1 if z.free else step
             for i, lo, hi, S in ((0, "L", "R", W), (1, "T", "B", H)):
                 lim = max([0] + [o.px[i] + o.px[i + 2] for o in self.overlaps_side(z, lo)])
-                n = 0 if lim == 0 else ((lim + step - 1) // step) * step
+                n = 0 if lim == 0 else ((lim + st - 1) // st) * st
                 if n < r[i]: r[i], r[i + 2] = n, r[i + 2] + (r[i] - n)
-                lim = min([S] + [o.px[i] for o in self.overlaps_side(z, hi)])
-                e = S if lim == S else (lim // step) * step
+                lim = min([S] + [o.px[i] for o in self.overlaps_side(z, hi)]); e = S if lim == S else (lim // st) * st
                 if e > r[i] + r[i + 2]: r[i + 2] = e - r[i]
             z.set_px(r[0], r[1], r[2], r[3], W, H)
     def overlaps_side(self, z, side):
@@ -5820,13 +6284,17 @@ class Layout(object):
         self.wins = {}; self.assign = {}; self.frames = None; self.frames_name = LAYOUT_DEFAULT; self.layout_name = ""
         self.game_grows = True; self.fit_view = True; self.screen = None; self.dirty = True
         self.occ = None; self.gump_key = {}
-        self.placed = {}; self.squeezed_told = set(); self.editor = None; self.loaded = False; self.page_refresh = False
+        self.placed = {}; self.titles = {}; self.min_seen = {}; self.loaded = False; self.page_refresh = False
+        self.enabled = True; self.seamless = False; self.gv_off_done = False; self.seam_skip = {}; self.seam_wait = {}
         self.hooks = {}; self.owner = {}; self.fitted = {}; self.base = {}; self.fresh = False; self.fresh_adds = set()
         self.client_seen = {}; self.journal_held = None; self.pair_tried = None; self.client_settle = {}
         self.misfit = {}; self.fallback = {}; self.client_told = set(); self.chat_seen = (0.0, None); self.held = {}
         self.arrange = False; self.arrange_last = 0.0; self.arrange_g = None; self.arrange_lit = {}
         self.arrange_hot = None; self.client_target = {}; self.repair_at = 0.0; self.repair_told = set()
         self.freed = None; self.page_preview = ""; self.homes = None; self.back_told = False; self._arrange_sig = None
+        self.rev = {}; self.retry_at = 0.0; self.slot_was = {}; self.bags_swept = False
+        self.reclaim_undo = self._vp_fields = self.gv_applied = self.small_said = None
+        self._undo_read = self.gv_small_told = self.gv_checked = self.need_due = self.migrating = False
     def _client_getter(self, kind, key):
         def get():
             cw = ClientWin.of(kind)
@@ -5906,6 +6374,8 @@ class Layout(object):
         cw.report(); self.journal_held = cw
     def load(self):
         self.freed = None; self.homes = None; self.repair_told = set(); self.back_told = False; self.loaded = True
+        self.bags_swept = False
+        self.seam_skip = {}; self.seam_wait = {}
         if "worldmap" not in self.wins:
             self.add("worldmap", self._client_getter("worldmap", "worldmap"), "TazUO's World Map",
                      {"fit": self._client_fit("worldmap"), "exact": True, "client": True,
@@ -5915,6 +6385,8 @@ class Layout(object):
             self.frames_name = LAYOUT_DEFAULT
         self.layout_name = Kit.get_var(LAYOUT_ACTIVE, ""); opts = Kit.get_var(LAYOUT_OPTS, "game=1")
         self.game_grows = "game=0" not in opts; self.fit_view = "fit=0" not in opts; raw = Kit.get_var(LAYOUT_VAR, "")
+        self.seamless = "seam=1" in opts; owner = dict.get(HOST.by_key, LAYOUT_OWNER)
+        self.enabled = bool(owner is not None and owner.enabled and owner.api is not None)
         self.assign = self.parse_windows(raw)[1]
         if raw and raw != self.windows_text() and any(k.strip() in LAYOUT_GONE for part in str(raw).split(";")
                 if "=" in part and part.split("=", 1)[0].strip() != "frames" for k in part.split("=", 1)[1].split(",")):
@@ -5923,10 +6395,10 @@ class Layout(object):
     def save_assign(self): Kit.put_var(LAYOUT_VAR, self.windows_text()); self._note_homes()
     RECLAIM_VAR = "VirtueAssistant_reclaim_undo"; RECLAIM_FIXED = "VirtueAssistant_reclaim_fixed"
     def _undo_load(self):
-        if getattr(self, "reclaim_undo", None) is None and not getattr(self, "_undo_read", False):
+        if self.reclaim_undo is None and not self._undo_read:
             self._undo_read = True; p = str(Kit.get_var(self.RECLAIM_VAR, "") or "").split("|", 2)
             if len(p) == 3 and p[0]: self.reclaim_undo = (p[0], p[2], None, p[1] == "1")
-        return getattr(self, "reclaim_undo", None)
+        return self.reclaim_undo
     def _undo_set(self, undo):
         self.reclaim_undo = undo; self._undo_read = True
         Kit.put_var(self.RECLAIM_VAR, "" if undo is None else "%s|%d|%s" % (undo[0], 1 if undo[3] else 0, undo[1]))
@@ -5991,10 +6463,30 @@ class Layout(object):
         self._undo_set((zs.name, zs.save_text(), None, False)); top = int(_clampv(STRIP_SHARE * H, TOP_MIN, TOP_MAX))
         for z in tall: z.set_px(z.px[0], z.px[1], z.px[2], top, W, H)
         self.save_frames(zs, zs.name, W, H)
-        Kit.say("%d frame zone%s Reclaim space stretched in layout \"%s\" put right; Settings > Layout's "
+        Kit.say("%d frame zone%s Reclaim space stretched in layout \"%s\" put right; Settings > Interface's "
                    "Undo puts it back." % (len(tall), "" if len(tall) == 1 else "s", zs.name), Kit.HUE_GOOD)
-    def refit_all(self): self.dirty = self.fresh = self.page_refresh = True
-    def save_opts(self): Kit.put_var(LAYOUT_OPTS, "game=%d;fit=%d;art=plain" % (self.game_grows, self.fit_view))
+    def refit_all(self): self.dirty = self.fresh = self.page_refresh = True; self.seam_skip = {}; self.seam_wait = {}
+    def save_opts(self):
+        Kit.put_var(LAYOUT_OPTS, "game=%d;fit=%d;seam=%d;art=plain" % (self.game_grows, self.fit_view, self.seamless))
+    def set_enabled(self, on):
+        on = bool(on)
+        if on == self.enabled: return
+        if not on: self.set_arrange(False, tell=False)
+        self.enabled, self.gv_off_done = on, False; self.refit_all(); HOST.poke()
+    def _off(self):
+        Seam.undo_all()
+        for key in list(self.fitted): self._unfit(key)
+        for key in list(self.placed):
+            g = self.gump_of(key); info = Kit.scroll_info(g) if g is not None else None
+            if info is not None:
+                try:
+                    Kit.place(g, int(g.GetX()), int(g.GetY()), info["w"], info["h"], info["head"]); Kit.moved_by_code(g)
+                except Exception: pass
+        self.placed = {}
+        if self.held: self._release(set())
+        held, self.journal_held = self.journal_held, None
+        if held is not None: held.free()
+        if not self.gv_off_done: self.gv_off_done = True; self.game_view_restore()
     @staticmethod
     def parse_windows(text):
         frames, out = LAYOUT_DEFAULT, {}
@@ -6018,12 +6510,14 @@ class Layout(object):
     def add(self, key, getter, title=None, hooks=None, owner=None):
         key = str(key)
         if key in LAYOUT_GONE: return
-        self.wins[key] = (getter, str(title or key)); self.hooks[key] = hooks if hasattr(hooks, "get") else {}
+        t = self.titles[key] = str(title or key); self.wins[key] = (getter, t)
+        self.hooks[key] = hooks if hooks is not None else {}
         if owner is not None: self.owner[key] = owner
         self.fitted.pop(key, None); self.dirty = True
     def remove(self, key):
         key = str(key)
-        for d in (self.wins, self.placed, self.hooks, self.owner, self.fitted, self.base): d.pop(key, None)
+        for d in (self.wins, self.placed, self.hooks, self.owner, self.fitted, self.base, self.slot_was, self.min_seen):
+            d.pop(key, None)
         self.dirty = True
     def owner_of(self, key):
         o = self.owner.get(key)
@@ -6040,10 +6534,10 @@ class Layout(object):
                       key=lambda kt: kt[1].lower())
     def all_windows(self):
         out = []
-        for key in self.wins:
+        for key in list(self.wins) + sorted(set(k for ks in self.assign.values() for k in ks if k not in self.wins)):
             mk = self.owner_of(key)[0]; s = dict.get(HOST.by_key, mk) if mk else None; t = self.title_of(key)
             if s is not None and s.title != t: t = "%s: %s" % (s.title, t)
-            out.append((key, t))
+            out.append((key, t if key in self.wins else t + " (not open)"))
         out.sort(key=lambda kt: kt[1].lower()); return out
     def zone_choices(self):
         W, H = Kit.screen(); zs = self.frames_in_use(W, H) if W > 0 and H > 0 else self.frames; out = [None]
@@ -6062,17 +6556,19 @@ class Layout(object):
             if not self.assign[old]: del self.assign[old]
         if zid: self.assign.setdefault(zid, []).append(key); self.unfree(key)
         elif tell: self.free_by_you([key])
-        self.save_assign()
+        self.save_assign(); W, H = Kit.screen(); empty = old is not None and not self.assign.get(old)
+        if key == "bag" and empty and W > 0 and H > 0 and self.drop_empty_bags(self.frames_in_use(W, H), W, H, (old,)):
+            self.frames, self.dirty = None, True
         if not zid: self.free_scrolled()
-        self.placed.pop(key, None); self.dirty = True; self.squeezed_told.discard(key); self.page_refresh = True
+        self.placed.pop(key, None); self.dirty = True; self.page_refresh = True
         if tell:
             API.SysMsg(('%s: %s is in zone "%s".' % (APP_NAME, self.title_of(key), zid)) if zid else
                        ("%s: %s is free (it stays where you put it)." % (APP_NAME, self.title_of(key))), Kit.HUE_GOOD)
         HOST.poke()
     def zone_of(self, key):
-        for zid, keys in self.assign.items():
-            if key in keys: return zid
-        return None
+        zid = self.rev.get(key)
+        if zid is not None and key in self.assign.get(zid, ()): return zid
+        self.rev = dict((k, z) for z, keys in self.assign.items() for k in keys); return self.rev.get(key)
     def need(self, key, w, h):
         zid = self.zone_of(str(key)); zs = self.frames
         if zid is None or zs is None: return
@@ -6089,6 +6585,7 @@ class Layout(object):
         if W <= 0 or H <= 0: W, H = Kit.screen()
         return (max(1, int(W * z.rect[2] / 1000.0)), max(1, int(H * z.rect[3] / 1000.0)))
     def holds(self, key):
+        if not self.enabled: return False
         zid = self.zone_of(str(key))
         if zid is None: return False
         zs = self.frames; return zs is None or zs.by_id(zid) is not None
@@ -6110,7 +6607,7 @@ class Layout(object):
                 own = True
             if bool(g.CanMove) != own: g.CanMove = own
     def set_arrange(self, on, tell=True):
-        on = bool(on)
+        on = bool(on) and self.enabled
         if on == self.arrange: return
         self.arrange = on; self.arrange_last = time.time(); self.arrange_hot = None
         if not on: old, self.arrange_g = self.arrange_g, None; self.arrange_lit = {}; Kit.dispose(old)
@@ -6137,6 +6634,9 @@ class Layout(object):
             name = Kit.fit(z.id, max(20, w - 28)); pw = Kit.text_w(name) + 12
             Kit.add_box(g, x + 6, y + h - 6 - 22, pw, 22, 0.85, "#000000")
             Kit.add_label(g, name, x + 12, y + h - 6 - 20, Kit.HUE_TITLE)
+        tip = "Drag windows onto zones; Esc or Done to finish"; tw = Kit.text_w(tip) + 24
+        Kit.add_box(g, (W - tw) // 2, 6, tw, 26, 0.85, "#000000")
+        Kit.add_label(g, tip, (W - tw) // 2 + 12, 10, Kit.HUE_TITLE)
         Grid.show_overlay(g, 0, 0, W, H); self.arrange_g = g; self.arrange_hot = None
     def arrange_hover(self, g, r=None):
         if not self.arrange or not self.arrange_lit or self.frames is None: return
@@ -6164,9 +6664,21 @@ class Layout(object):
         if z.px[2] >= mn[0] and z.px[3] >= mn[1]: return False
         Kit.say("%s needs a zone at least %d x %d." % (self.title_of(key), mn[0], mn[1]), Kit.HUE_BAD); return True
     def title_of(self, key):
-        w = self.wins.get(key)
-        if w is not None: return w[1]
-        s = HOST.page_slot(key); return s.title if s is not None else key
+        t = self.titles.get(key)
+        if t is not None: return t
+        mk, part = self.owner_of(key); s = dict.get(HOST.by_key, mk) if mk else None
+        if s is None: s = HOST.page_slot(key); return s.title if s is not None else key
+        p = s.part(part) if part else None; return p[1] if p else s.title
+    def drop_empty_bags(self, zs, W, H, ids):
+        gone = [z for z in zs.zones if z.id in ids and z.id.endswith(" bags") and z.kind == "w"
+                and not self.assign.get(z.id)]
+        if not gone or zs.generated or zs.name == LAYOUT_DEFAULT: return False
+        zs.zones = [z for z in zs.zones if z not in gone]
+        for z in gone: zs.needs.pop(z.id, None)
+        self.save_frames(zs, zs.name, W, H)
+        Kit.say('empty zone%s %s removed; frame layout "%s" saved.' % ("" if len(gone) == 1 else "s", ", ".join(
+            '"%s"' % z.id for z in gone), zs.name), Kit.HUE_INFO)
+        return True
     PAIR_MIN_H = 120
     def _flush_below(self, top, z):
         if top is None or z is None or top is z or top.px is None or z.px is None: return False
@@ -6181,7 +6693,7 @@ class Layout(object):
             if oy + oh > ty + th and ox < tx + tw and tx < ox + ow: lim = min(lim, max(oy, ty + th))
         return lim
     def pair_below(self, top_key, bottom_key):
-        if not self.loaded: return None
+        if not self.loaded or not self.enabled: return None
         W, H = Kit.screen()
         if W <= 0 or H <= 0: return None
         zs = self.frames_in_use(W, H); top_key, bottom_key = str(top_key), str(bottom_key)
@@ -6195,7 +6707,8 @@ class Layout(object):
         for z in zs.zones:
             if z.kind == "w" and self._flush_below(tz, z):
                 tx, ty, tw, th = tz.px; ov = min(tx + tw, z.px[0] + z.px[2]) - max(tx, z.px[0])
-                if best is None or ov > best[0]: best = (ov, z)
+                rank = (z.id == "%s bags" % tz.id, ov)
+                if best is None or rank > best[0]: best = (rank, z)
         if best is not None:
             self.assign_to(bottom_key, best[1].id, tell=False)
             if moved:
@@ -6210,6 +6723,9 @@ class Layout(object):
             zs.name, zs.generated = LAYOUT_MINE, False; name = LAYOUT_MINE; tz = zs.by_id(tz.id)
             if tz is None or tz.px is None: return None
         else: zs = zs.copy(); tz = zs.by_id(tz.id)
+        old = zs.by_id("%s bags" % tz.id)
+        if old is not None and old.kind == "w" and not [k for k in self.assign.get(old.id, []) if k != bottom_key]:
+            zs.zones.remove(old)
         tx, ty, tw, th = tz.px; room = self._free_under(zs, tz, H) - (ty + th); split = False
         if room >= max(ZONE_MIN_H, self.PAIR_MIN_H): nx, ny, nw, nh = tx, ty + th, tw, room
         elif th >= 2 * ZONE_MIN_H:
@@ -6241,7 +6757,9 @@ class Layout(object):
     def frames_in_use(self, W, H):
         if self.frames is not None and not self.dirty and self.screen == (W, H): return self.frames
         zs = self.load_frames(self.frames_name, W, H) if self.frames_name != LAYOUT_DEFAULT else None
-        if zs is not None: self._repair_stretched(zs, W, H)
+        if zs is not None:
+            self._repair_stretched(zs, W, H)
+            if not self.bags_swept: self.bags_swept = True; self.drop_empty_bags(zs, W, H, zs.ids())
         elif self.frames_name != LAYOUT_DEFAULT:
             self.frames_name = LAYOUT_DEFAULT; Kit.put_var(FRAMES_ACTIVE, LAYOUT_DEFAULT)
         if zs is None: zs = ZoneSet.default(W, H, self.occupied(), self.game_grows)
@@ -6249,7 +6767,7 @@ class Layout(object):
     @staticmethod
     def _overlap_shape(zs):
         for k in zs.zones:
-            if k.kind == "k" and k.overlap and k.px is not None: k.arch = False; k.px = ZoneSet.cut_clear(k, zs.zones)
+            if k.kind == "k" and k.overlap: k.arch = False
     GV_VAR = "Layout_gameview_own"; GV_LOCK_VAR = "Layout_gameview_lock"; GV_MIN = (640, 480)
     def _viewport(self): t = Tz.T("ClassicUO.Game.UI.Gumps.WorldViewportGump"); return t, Tz.get(None, "Instance", t)
     def _vp_border(self): return 0 if self._vp_full() else 5
@@ -6266,7 +6784,7 @@ class Layout(object):
         cur = self._profile()
         return bool(Typing._get(cur, "GameWindowFullSize", default=False)) if cur is not None else False
     def _vp_chrome(self, on):
-        t, vp = self._viewport(); fs = getattr(self, "_vp_fields", None)
+        t, vp = self._viewport(); fs = self._vp_fields
         if fs is None:
             fs = self._vp_fields = [t.GetField(n, Client.flags(public=False)) for n in ("_borderControl", "_button")]
         for f in fs:
@@ -6279,15 +6797,15 @@ class Layout(object):
     def _game_view(self, zs):
         want = self._game_px(zs) if self.fit_view and self.assign and not self._vp_full() else None
         if want is not None and (want[2] < self.GV_MIN[0] or want[3] < self.GV_MIN[1]):
-            if not getattr(self, "gv_small_told", False):
+            if not self.gv_small_told:
                 self.gv_small_told = True
                 Kit.say("the game view would be %d x %d, under the client's smallest (%d x %d); left as you "
                            "set it." % (want[2], want[3], self.GV_MIN[0], self.GV_MIN[1]), Kit.HUE_INFO)
             want = None
-        if not getattr(self, "gv_checked", False):
+        if not self.gv_checked:
             self.gv_checked = True
             if want is None and Kit.get_var(self.GV_VAR, ""): self.game_view_restore(); return
-        if want == getattr(self, "gv_applied", None):
+        if want == self.gv_applied:
             if want is not None: self._vp_chrome(False)
             return
         if want is None: self.game_view_restore(); return
@@ -6352,7 +6870,7 @@ class Layout(object):
         if name: self.unfree(None)
         else: self.free_by_you(list(self.wins) + [k for ks in self.assign.values() for k in ks])
         self.layout_name = name; Kit.put_var(LAYOUT_ACTIVE, name); self.assign = assign; self.save_assign()
-        self.free_scrolled(); self.placed = {}; self.squeezed_told = set()
+        self.free_scrolled(); self.placed = {}
         if name and name not in (LAYOUT_DEFAULT, LAYOUT_MIRRORED) and frames != self.frames_name:
             self.use_frames(frames, tell=False)
         else: self.dirty = True
@@ -6369,9 +6887,9 @@ class Layout(object):
         self.layout_name = name; Kit.put_var(LAYOUT_ACTIVE, name)
         Kit.say('window layout "%s" saved.' % name, Kit.HUE_GOOD); self.page_refresh = True
     def free_scrolled(self):
-        for key in [k for k in self.fitted if self.zone_of(k) is None]: self._unfit(key)
+        for key in [k for k in self.fitted if not self.holds(k)]: self._unfit(key)
         for key, rect in list(self.placed.items()):
-            if self.zone_of(key) is None:
+            if not self.holds(key):
                 g = self.gump_of(key); info = Kit.scroll_info(g) if g is not None else None
                 if info is not None:
                     try:
@@ -6379,26 +6897,28 @@ class Layout(object):
                         Kit.moved_by_code(g)
                     except Exception: pass
                 self.placed.pop(key, None)
-    def keep(self, W, H):
+    def keep(self, W, H, only=None):
         if not self.loaded or W <= 0 or H <= 0: return
+        if not self.enabled: self.fresh_adds.clear(); self._off(); return
         occ = self.occupied()
         if occ != self.occ:
             self.occ = occ
             if self.frames_name == LAYOUT_DEFAULT: self.dirty = True
-        zs = self.frames_in_use(W, H)
-        if self.editor is not None: self.editor.keep(W, H)
+        zs = self.frames_in_use(W, H); Kit.flush()
         self.fresh = False; self.fresh_adds.clear(); Fill.prune()
-        for key in [k for k in self.fitted if self.zone_of(k) is None]: self._unfit(key)
+        for key in [k for k in self.fitted if not self.holds(k)]: self._unfit(key)
         now = time.time()
         jobs = [(self._hold_journal, (zs, H)), (self._client_drops, ()), (self._arrange_tick, (zs, W, H))]
         if now >= self.repair_at and not SNAP.drag: self.repair_at = now + 2.0; jobs.append((self._repair, (zs,)))
         for fn, args in jobs:
             try: fn(*args)
             except Exception: pass
-        drag = SNAP.drag; told = []; seen = set(); self.gump_key = {}
+        drag = SNAP.drag; told = []; seen = set(); jobs = []
+        if only is None: self.gump_key = {}
         for z in (zs.zones if self.assign else ()):
             keys = self.assign.get(z.id)
             if not keys or z.kind != "w" or z.px is None: continue
+            if only is not None and not any(self.gump_of(k) in only for k in keys): continue
             items = []
             for key in keys:
                 g = self.gump_of(key)
@@ -6411,7 +6931,6 @@ class Layout(object):
                         if riding(): continue
                     except Exception: pass
                 seen.add(g); self._hold(g, key)
-                if z.squeezed and key not in self.squeezed_told: self.squeezed_told.add(key); self._minimize(key)
                 r = Snap.rect(g)
                 if r is None:
                     if isinstance(g, ClientWin):
@@ -6430,16 +6949,34 @@ class Layout(object):
                     try: mini = state() == "minimized"
                     except Exception: pass
                 items.append((key, g, r, ext, fol, hooks, mini, self._base(key, g, ext, mini)))
-            if not items: continue
-            for it, slot in zip(items, self._slots(z, items)):
-                if it[1] in drag: continue
-                try:
-                    if self._fit_slot(it, slot, z): told.append(it[1])
-                except Exception: self.placed[it[0]] = slot
-        self._release(seen)
+            if items: jobs.extend((it, slot, z) for it, slot in zip(items, self._slots(z, items)))
+        thin, full = (Seam.pad(),) * 4, (Kit.MARGIN,) * 4; small = set()
+        for it, slot, z in jobs:
+            if it[1] in drag: continue
+            if self._small(it[0], z, it[1]):
+                small.add(it[1]); self.placed[it[0]] = slot
+                if it[0] in self.fitted: self._unfit(it[0])
+                if self._move_all(it[1], it[4], it[2], slot[0], slot[1]): told.append(it[1])
+                continue
+            try:
+                if self._fit_slot(it, slot, z, (full if z.solo else thin) if self.seamless else None):
+                    told.append(it[1])
+            except Exception: self.placed[it[0]] = slot
+        if only is None:
+            self._release(seen)
+            for g in [g for g in Seam.recs if g not in seen]: Seam.undo(g)
+        bare = set()
+        if self.seamless and self.enabled:
+            for it, slot, z in [j for j in jobs if j[0][1] not in small]:
+                for g in [it[1]] + list(it[4]):
+                    try:
+                        if not isinstance(g, ClientWin) and Seam.strip(g, g is it[1] and it[5].get("untitled")):
+                            bare.add(g)
+                    except Exception: pass
+        for g in ([g for g in Seam.bare if g not in bare] if only is None else ()): Seam.unstrip(g)
         try: self._game_view(zs)
         except Exception: pass
-        if self.assign and getattr(self, "need_due", False): self.need_due = False; zs.reflow(W, H, HOST.grid_size())
+        if self.assign and self.need_due: self.need_due = False; zs.reflow(W, H, HOST.grid_size())
         if told:
             Kit.flush()
             for g in told:
@@ -6477,9 +7014,54 @@ class Layout(object):
             out.append((zx, pos, zw, ln) if down else (pos, zy, ln, zh))
             if not back: pos += ln
         return out
-    def _fit_slot(self, it, slot, z=None):
+    def retry_due(self, now):
+        if not self.seam_wait or now < self.retry_at: return False
+        self.retry_at = now + SEAM_RETRY
+        for key, was in list(self.seam_wait.items()):
+            g = self.gump_of(key)
+            if g is None or not Snap.visible(g) or not self.holds(key) or now - was[1] > 2 * SEAM_WAIT:
+                self.seam_wait.pop(key, None)
+            else: self.fresh_adds.add(g)
+        return bool(self.fresh_adds)
+    def fit_now(self, key, g):
+        was = self.slot_was.get(key)
+        if (was is None or not (self.seamless and self.enabled) or self.dirty or self.fresh or g in SNAP.drag
+                or g in SNAP.attached or not Client.on_client_thread()): return
+        Kit.flush(); hooks = self.hooks.get(key) or {}; r = Snap.rect(g)
+        if r is None or hooks.get("riding") is not None or SNAP.followers(g): return
+        try: mini = hooks.get("state") is not None and hooks["state"]() == "minimized"
+        except Exception: mini = False
+        slot, z, pads = was; self.gump_key[g] = key
+        try:
+            self._fit_slot((key, g, r, r, [], hooks, mini, self._base(key, g, r, mini)), slot, z, pads)
+            if not isinstance(g, ClientWin): Seam.strip(g, hooks.get("untitled"))
+        except Exception: pass
+    def _fit_slot(self, it, slot, z=None, pads=None):
         key, g, r, ext, fol, hooks, mini, base = it; ins = int(hooks.get("inset") or 0)
+        if g in Seam.recs and not Client.on_client_thread(): return False
+        self.slot_was[key] = (slot, z, pads)
         slot = (slot[0] - ins, slot[1] - ins, slot[2] + 2 * ins, slot[3] + 2 * ins); self.placed[key] = slot
+        if pads is not None: pads = Seam.clip(slot, pads)
+        grown = Seam.grow(slot, pads) if pads is not None else None
+        if (grown is not None and self.seam_skip.get(key) != slot and Seam.can(g, hooks, mini)
+                and grown[3] <= Kit.screen()[1]):
+            self.placed[key] = grown
+            if Seam.holds(g, slot, pads, grown, r): return False
+            Seam.undo(g); Seam.unstrip(g); self._fit_at(it, grown, z, ins); r2 = Snap.rect(g)
+            rec = Fill.recs.get(g); S = self.MISFIT_SLACK
+            if r2 is not None and (rec is None or rec.get("k", 1.0) >= 0.995):
+                if r2[:2] != grown[:2]: self._move_all(g, fol, r2, grown[0], grown[1])
+                if fol or (abs(r2[2] - grown[2]) <= S and abs(r2[3] - grown[3]) <= S):
+                    self.seam_wait.pop(key, None); return Seam.trim(g, slot, pads)
+                was = self.seam_wait.get(key); now = time.time()
+                if was is None or was[0] != slot: was = self.seam_wait[key] = (slot, now)
+                if now - was[1] < SEAM_WAIT: return False
+            self.seam_skip[key] = slot; self.placed[key] = slot
+        self.seam_wait.pop(key, None)
+        if g in Seam.recs: Seam.undo(g)
+        return self._fit_at(it, slot, z, ins)
+    def _fit_at(self, it, slot, z, ins):
+        key, g, r, ext, fol, hooks, mini, base = it
         sx, sy, sw, sh = slot; fit_fn = hooks.get("fit"); rec = self.fitted.get(key)
         if fit_fn is not None:
             tw, th = sw, sh
@@ -6543,7 +7125,7 @@ class Layout(object):
         rw, rh = max(sw, mw), max(sh, mh)
         if rw <= sw and rh <= sh: return gx, gy
         zs = self.frames; W, H = Kit.screen()
-        if (z is not None and z.px is not None and (key, z.id, z.px) != getattr(self, "small_said", None)):
+        if (z is not None and z.px is not None and (key, z.id, z.px) != self.small_said):
             self.small_said = (key, z.id, z.px)
             Kit.say('%s needs zone "%s" to be at least %d x %d; it is %d x %d.' % (
                 self.title_of(key), z.id, max(z.px[2], mw - 2 * ins), max(z.px[3], mh - 2 * ins), z.px[2],
@@ -6576,7 +7158,7 @@ class Layout(object):
             except Exception: pass
     def _unfit(self, key):
         rec = self.fitted.pop(key, None)
-        for d in (self.base, self.misfit, self.fallback, self.client_settle): d.pop(key, None)
+        for d in (self.base, self.misfit, self.fallback, self.client_settle, self.slot_was): d.pop(key, None)
         if rec is None: return
         hooks = self.hooks.get(key) or {}
         if rec.get("kind") == "fit":
@@ -6585,10 +7167,12 @@ class Layout(object):
                 try: fn(None, None, None)
                 except Exception: pass
         g = self.gump_of(key)
+        if g is not None and g in Seam.recs: Seam.undo(g)
         if g is not None: Fill.unfit(g)
-    def _minimize(self, key):
-        fn = (dict(HOST.docks).get(key) or {}).get("minimize")
-        if fn is not None: safe(fn)
+    def _small(self, key, z, g):
+        sig = (z.id, tuple(z.px)); was = self.min_seen.get(key)
+        if was is None or was[0] != sig: was = self.min_seen[key] = (sig, self._too_small(key, z, g))
+        return was[1]
     def report_fit(self):
         W, H = Kit.screen(); zs = self.frames_in_use(W, H) if W > 0 and H > 0 else None; n = bad = 0; ridden = []
         for z in (zs.zones if zs is not None else []):
@@ -6596,7 +7180,13 @@ class Layout(object):
             rides = [safe((self.hooks.get(k) or {}).get("riding") or (lambda: False), False) for k in keys]
             if keys and all(rides) and z.px is not None: ridden.append(z.px)
         for z in (zs.zones if zs is not None else []):
-            for key in self.assign.get(z.id, []):
+            keys = self.assign.get(z.id, []); shut = [k for k in keys if self.gump_of(k) is None]
+            if z.kind == "w" and not keys: Kit.say('zone "%s": empty.' % z.id, Kit.HUE_INFO)
+            if shut:
+                names = ", ".join(self.title_of(k) for k in shut)
+                Kit.say('zone "%s": %s.' % (z.id, ("empty (%s not open)" if len(shut) == len(keys) else "%s not open")
+                                            % names), Kit.HUE_BAD)
+            for key in keys:
                 g = self.gump_of(key); slot = self.placed.get(key)
                 if g is None or slot is None: continue
                 r = Snap.rect(g)
@@ -6614,6 +7204,12 @@ class Layout(object):
                 if k < 0.995 and full is not None:
                     Kit.say('%s is drawn at %d%% in zone "%s"; %d x %d shows it at 100%%.'
                                % (self.title_of(key), int(round(k * 100)), z.id, full[0], full[1]), Kit.HUE_INFO)
+        if self.seamless:
+            Kit.say("One panel: on; %s without a title row, %s with its title hidden in place, %s left as is." % (
+                Kit.count(len(Seam.recs), "window"),
+                Kit.count(sum(1 for r in Seam.bare.values() if r["title"]), "window"),
+                Kit.count(max(0, n - len(Seam.recs) - sum(1 for r in Seam.bare.values() if r["title"])), "window")),
+                Kit.HUE_INFO)
         if not n: Kit.say("no window sits in a zone.", Kit.HUE_INFO)
         else:
             Kit.say("%d of %d windows fill their zone; screen %d x %d (UI scale %.2f)." % (
@@ -6665,15 +7261,14 @@ class Layout(object):
         mz = self._map_zone(); squat = [k for k in (self.assign.get(mz, []) if mz else []) if k != "worldmap"]
         freed = self._freed(); todo = list(squat); listed = None
         for key in ("ultima.friend", "ultima.neutral", "ultima.foe", "ultima.combat", "meters", "worldmap"):
-            if (key not in self.wins or key in freed or key in squat or self.zone_of(key) is not None): continue
+            if (key not in self.wins or key in freed or key in squat or self.holds(key)): continue
             if listed is None:
                 listed = set()
                 if self.layout_name:
                     for ks in self.parse_windows(self.window_layout_text(self.layout_name))[1].values():
                         listed.update(ks)
             mod = key.split(".")[0]; kin = any(k.split(".")[0] == mod for ks in self.assign.values() for k in ks)
-            if key in homes or key in listed or (kin and key != "worldmap") \
-                    or (getattr(self, "migrating", False) and key != "worldmap"):
+            if key in homes or key in listed or (kin and key != "worldmap") or (self.migrating and key != "worldmap"):
                 todo.append(key)
         changed = []
         for key in todo:
@@ -6724,7 +7319,7 @@ class Layout(object):
             return empty[0].id
         return None
     def _refit(self, key):
-        self.placed.pop(key, None); rec = self.fitted.get(key)
+        self.placed.pop(key, None); self.min_seen.pop(key, None); rec = self.fitted.get(key)
         if rec is not None and rec.get("kind") == "fit": rec.pop("told", None)
     def _key_of(self, g):
         key = self.gump_key.get(g)
@@ -6775,7 +7370,7 @@ class Layout(object):
             self._back()
             if not self.back_told:
                 self.back_told = True
-                Kit.say("%s stays in its zone; drop it on another zone to move it (Settings > Layout frees "
+                Kit.say("%s stays in its zone; drop it on another zone to move it (Settings > Interface frees "
                            "windows)." % self.title_of(key), Kit.HUE_INFO)
             return
         if old == hit.id and len(self.assign.get(old, [])) <= 1: self._back(); return
@@ -6800,7 +7395,6 @@ class Layout(object):
             if swap is not None:
                 self.assign[old].insert(min(at, len(self.assign[old])), swap)
                 self.assign[hit.id] = [k for k in self.assign[hit.id] if k != swap]; self.placed.pop(swap, None)
-                self.squeezed_told.discard(swap)
             if not self.assign[old]: del self.assign[old]
         keys = self.assign.setdefault(hit.id, []); pos = len(keys)
         for i, k in enumerate(keys):
@@ -6809,7 +7403,7 @@ class Layout(object):
             if hit.stack in ("d", "u"): mid = p[1] + p[3] // 2; before = cy < mid if hit.stack == "d" else cy > mid
             else: mid = p[0] + p[2] // 2; before = cx < mid if hit.stack == "r" else cx > mid
             if before: pos = i; break
-        keys.insert(pos, key); self.unfree(key); self.save_assign(); self.dirty = True; self.squeezed_told.discard(key)
+        keys.insert(pos, key); self.unfree(key); self.save_assign(); self.dirty = True
         HOST.poke()
     def _size_of(self, key):
         base = self.base.get(key)
@@ -6841,920 +7435,214 @@ class Layout(object):
             sc = min(1.0, float(w) / base[0], float(h) / base[1])
             if sc < 0.995: shown = " (shown at %d%%)" % int(round(sc * 100))
         return "%s: %d x %d here%s." % (t, w, h, shown)
-    def edit(self, fresh=False):
-        if self.editor is not None: return
-        W, H = Kit.screen()
-        if W <= 0 or H <= 0: return
-        if fresh:
-            names = self.frame_names(); n, name = 2, "Mine"
-            while name in names or name == LAYOUT_DEFAULT: name = "Mine %d" % n; n += 1
-            zs = ZoneSet(name, [], HOST.grid_size(), (W, H)); z = Zone("Zone 1", "w", (0, 0, 1, 1), "", (0, 0), "d", 0)
-            z.set_px((W - 320) // 2, (H - 240) // 2, 320, 240, W, H); zs.zones.append(z)
-        elif self.frames_name == LAYOUT_DEFAULT:
-            zs = ZoneSet.default(W, H, self.occupied(), False); zs.generated = False
-        else: zs = self.load_frames(self.frames_name, W, H) or self.frames_in_use(W, H).copy()
-        self.editor = LayoutEditor(self, zs); self.editor.open()
-    def poll(self):
-        if self.editor is not None: self.editor.poll()
     def status_text(self):
         W, H = Kit.screen(); step = HOST.grid_size()
         if W <= 0 or H <= 0: return "Screen: not known yet"
         return "Screen: %d x %d, %s; grid %d px, %d x %d squares" % (
             W, H, ratio_class(W, H), step, (W + step - 1) // step, (H + step - 1) // step)
-    def close(self):
-        if self.editor is not None: self.editor.close(keep=False, quiet=True)
 
 
-class LayoutEditor(object):
-    BAR_W = 720; SETTLE = 0.3; FIELD_W = 52; ROW = 28
-    KEYS = {"up": ("UP",), "down": ("DOWN",), "left": ("LEFT",), "right": ("RIGHT",),
-            "delete": ("DELETE",), "z": ("Z",), "y": ("Y",), "enter": ("RETURN", "KP_ENTER"), "esc": ("ESCAPE",)}
-    FIELDS = ("col", "row", "w", "h")
-    def __init__(self, layout, zs):
-        self.layout = layout; self.zs = zs; self.frames = {}; self.bar = None; self.store = ({}, {}); self.c = {}
-        self.renames = {}; self.sel = zs.zones[0].id if zs.zones else None; self.multi = set(); self.grid_was = None
-        self.fields = None; self.saveas_text = ""; self.bar_pos = None; self.rebuild = False; self.closed = False
-        self.W, self.H = Kit.screen(); self.px_mode = False; self.undo, self.redo = [], []; self.keys_was = {}
-        self.focus_was = None; self.raws = {}; self.said = None; self.del_armed = None; self.marks = None
-        self.marks_sig = None; self.counts = (0, 0); self.handles = []; self.handles_sig = None; self.edge = None
-        self.edge_g = None; self.edge_at = 0.0; self.pressed_was = False; self.pick = 0; self.pick_keys = []
-        self.preview = ""; self.raws_ok = False
-    def open(self):
-        self.grid_was = HOST.grid_shown()
-        if not self.grid_was: safe(HOST.grid_toggle)
-        for z in self.zs.zones: self.build_zone(z)
-        self.build_bar(); self.draw_marks()
-    def close(self, keep, quiet=False):
-        if self.closed: return
-        self.closed = True
-        for zid, fr in list(self.frames.items()): Kit.dispose(fr.get("g"))
-        self.frames = {}; self._drop_handles()
-        for a in ("bar", "marks", "edge_g"): Kit.dispose(getattr(self, a)); setattr(self, a, None)
-        if self.grid_was is not None and HOST.grid_shown() != self.grid_was: safe(HOST.grid_toggle)
-        self.layout.editor = None; self.layout.dirty = True; self.layout.page_refresh = True
-        if not keep and not quiet: Kit.say("the saved zones are back.", Kit.HUE_INFO)
-    def _snap(self): return ([z.copy() for z in self.zs.zones], self.sel, dict(self.renames))
-    def push(self):
-        self.undo.append(self._snap())
-        if len(self.undo) > 50: del self.undo[0]
-        self.redo = []
-    def _restore(self, snap):
-        zones, sel, renames = snap
-        for zid in list(self.frames): Kit.dispose(self.frames[zid].get("g"))
-        self.frames = {}; self.zs.zones = [z.copy() for z in zones]; self.renames = dict(renames)
-        self.sel = (sel if self.zs.by_id(sel) is not None else (self.zs.zones[0].id if self.zs.zones else None))
-        self.multi = set()
-        for z in self.zs.zones: self.build_zone(z)
-        self.rebuild = True
-    def _hist(self, a, b, word):
-        if not a: self.say("nothing to %s." % word, Kit.HUE_INFO); return
-        b.append(self._snap()); self._restore(a.pop())
-    def do_undo(self): self._hist(self.undo, self.redo, "undo")
-    def do_redo(self): self._hist(self.redo, self.undo, "redo")
-    def say(self, text, hue=None):
-        if text == self.said: return
-        self.said = text; Kit.say(text, Kit.HUE_BAD if hue is None else hue)
-    def _windows_in(self, z):
-        L = self.layout; zid = self.orig_id(z.id); return [L.title_of(k) for k in L.assign.get(zid, [])]
-    def orig_id(self, zid):
-        for was, now in self.renames.items():
-            if now == zid: return was
-        return zid
-    def build_zone(self, z):
-        old = self.frames.get(z.id, {}).get("g"); x, y, w, h = z.px; M = Kit.MARGIN
-        fr = {"g": None, "resize_at": 0.0, "size": (w, h)}
-        g = G.CreateModernGump(x, y, w, h, not z.lock, ZONE_MIN_W, ZONE_MIN_H, self._resized(z.id)); g.SetAlpha(0)
-        if z.lock: g.CanMove = False
-        Kit.add_window_frame(g, w, h, corners=False, mouse=False)
-        Kit.add_box(g, M, M, w - 2 * M, h - 2 * M, 0.25, ZONE_COLORS.get(z.kind, "#FFFFFF")); self._draw_overlaps(g, z)
-        if z.kind == "k": self._draw_game(g, z)
-        if z.id == self.sel and self.pick: self._draw_preview(g, z)
-        Kit.add_section(g, M, M, w - 2 * M, 30); sel = z.id == self.sel or z.id in self.multi
-        fr["lbl"] = Kit.add_label(g, Kit.fit(z.id + ("  (locked)" if z.lock else ""), w - 2 * M - 24),
-                                  M + 12, M + 7, Kit.HUE_TITLE if sel else Kit.HUE_TEXT)
-        wins = self._windows_in(z) if z.kind == "w" else []
-        fr["wins"] = Kit.add_label(g, Kit.fit(", ".join(wins), w - 2 * M - 24) if wins else "",
-                                   M + 12, M + 30 + 6, Kit.HUE_TEXT)
-        fr["sum"] = Kit.add_label(g, "", M + 12, M + 30 + 6 + (20 if wins else 0), Kit.HUE_INFO)
-        Kit.catcher(g, M, M, w - 2 * M, 30, self._select(z.id), "Select the zone (Shift+click: pick more)" + (
-            "; locked" if z.lock else "; drag to move it on the grid"), movable=not z.lock)
-        Kit.place(g, x, y, w, h); G.AddGump(g); Kit.no_snap(g); Kit.on_moved(g, self._moved(z.id))
-        fr["g"] = g; self.frames[z.id] = fr; self.update_zone(z); Kit.dispose(old)
-    def _draw_overlaps(self, g, z):
-        x, y, w, h = z.px
-        for o in self.zs.zones:
-            if o is z or o.px is None or not (z.overlap or o.overlap): continue
-            ox, oy, ow, oh = o.px; ax, ay = max(x, ox), max(y, oy); bx, by = min(x + w, ox + ow), min(y + h, oy + oh)
-            if bx - ax < 4 or by - ay < 4: continue
-            for sx in range(ax, bx, 12): Kit.add_box(g, sx - x, ay - y, min(4, bx - sx), by - ay, 0.45, "#E8C15A")
-    def _draw_game(self, g, z):
-        zs = self.zs.copy(); Layout._overlap_shape(zs); kx, ky, kw, kh = zs.by_id(z.id).px; kx -= z.px[0]; ky -= z.px[1]
-        for r in ((kx, ky + kh - 2, kw, 2), (kx, ky, 2, kh), (kx + kw - 2, ky, 2, kh), (kx, ky, kw, 2)):
-            Kit.add_box(g, r[0], r[1], r[2], r[3], 0.9, "#E8C15A")
-    def _draw_preview(self, g, z):
-        key = self.pick_keys[self.pick] if 0 < self.pick < len(self.pick_keys) else None
-        if key is None or z.kind != "w": return
-        L = self.layout; keys = [k for k in L.assign.get(self.orig_id(z.id), []) if k != key] + [key]
-        x, y = z.px[0], z.px[1]
-        for k, (sx, sy, sw, sh) in L.slots_for(z, keys):
-            Kit.add_box(g, sx - x, sy - y, max(1, sw), max(1, sh), 0.55, "#E8C15A" if k == key else "#202020")
-            Kit.add_label(g, Kit.fit(L.title_of(k), max(20, sw - 16)), sx - x + 8, sy - y + sh - 26, Kit.HUE_TEXT)
-    def update_zone(self, z):
-        fr = self.frames.get(z.id)
-        if fr is None: return
-        step = HOST.grid_size(); x, y, w, h = z.px
-        text = "%s, %d x %d squares" % (z.kind_name(), max(1, int(round(float(w) / step))),
-                                        max(1, int(round(float(h) / step))))
-        if z.overlap: text += ", overlaps"
-        Kit.set_text(fr["sum"], Kit.fit(text, w - 2 * Kit.MARGIN - 24))
-        Kit.set_text(fr["lbl"], Kit.fit(z.id + ("  (locked)" if z.lock else ""), w - 2 * Kit.MARGIN - 24),
-                     Kit.HUE_TITLE if (z.id == self.sel or z.id in self.multi) else Kit.HUE_TEXT)
-    def _select(self, zid):
-        def hit():
-            shift = bool(Client.key_held("shift"))
-            if shift and self.sel is not None and zid != self.sel:
-                if zid in self.multi: self.multi.discard(zid)
-                else: self.multi.add(zid); self.multi.add(self.sel)
-                self.rebuild = True; HOST.poke(); return
-            if zid != self.sel or self.multi:
-                self.multi = set(); self.sel = zid; self.pick = 0; self.rebuild = True; HOST.poke()
-        return hit
-    def _resized(self, zid):
-        def hit(*args):
-            fr = self.frames.get(zid)
-            if fr is not None: fr["resize_at"] = time.time()
-        return hit
-    def _moved(self, zid):
-        def hit():
-            z = self.zs.by_id(zid); fr = self.frames.get(zid)
-            if z is None or fr is None or not Kit.is_open(fr["g"]): return
-            r = Snap.rect(fr["g"])
-            if r is None: return
-            if (r[0], r[1]) == (z.px[0], z.px[1]): return
-            if z.lock:
-                self.place_zone(z); self.say('zone "%s" is locked; click Lock to move it.' % z.id, Kit.HUE_INFO); return
-            self.landed(z, r[0], r[1], z.px[2], z.px[3], resized=False)
-        return hit
-    def _blocker(self, z): hits = self.zs.overlaps(z); return hits[0] if hits else None
-    def landed(self, z, x, y, w, h, resized=True):
-        W, H = self.W, self.H; step = HOST.grid_size()
-        if resized:
-            w = max(ZONE_MIN_W, int(round(float(w) / step)) * step)
-            h = max(ZONE_MIN_H, int(round(float(h) / step)) * step)
-        w, h = min(w, W), min(h, H); best = Snap.near_anchor(x, y, w, h)
-        if best is not None: nx, ny = best[1], best[2]
-        else:
-            nx = ny = None
-            for tx in (0, max(0, W - w)):
-                if abs(tx - x) <= SNAP_DIST: nx = tx
-            for ty in (0, max(0, H - h)):
-                if abs(ty - y) <= SNAP_DIST: ny = ty
-            for o in self.zs.zones:
-                if o is z or o.px is None: continue
-                ox, oy, ow, oh = o.px
-                if nx is None and oy < y + h + SNAP_DIST and y < oy + oh + SNAP_DIST:
-                    for tx in (ox + ow, ox - w, ox, ox + ow - w):
-                        if abs(tx - x) <= SNAP_DIST: nx = tx
-                if ny is None and ox < x + w + SNAP_DIST and x < ox + ow + SNAP_DIST:
-                    for ty in (oy + oh, oy - h, oy, oy + oh - h):
-                        if abs(ty - y) <= SNAP_DIST: ny = ty
-            if nx is None: nx = int(round(float(x) / step)) * step
-            if ny is None: ny = int(round(float(y) / step)) * step
-        was = z.px; self.push(); z.set_px(nx, ny, w, h, W, H)
-        if not self.zs.push_clear(z, W, H, step):
-            z.set_px(was[0], was[1], was[2], was[3], W, H); self.undo.pop(); o = self._blocker(z)
-            self.say('no room for zone "%s" there%s; it stays where it was.' % (
-                z.id, (' (it would cover "%s")' % o.id) if o is not None else ""))
-        z.note_pins(W, H); self.place_zone(z); self.changed()
-    def _refields(self): self.fields = None; self.show_fields()
-    def changed(self): self._refields(); self.draw_marks()
-    def place_zone(self, z):
-        fr = self.frames.get(z.id)
-        if fr is None: return
-        x, y, w, h = z.px
-        if ((w, h) != fr["size"] or z.overlap or z.kind == "k" or any(o.overlap for o in self.zs.zones)):
-            self.build_zone(z); return
-        try: Kit.place(fr["g"], x, y, w, h); Kit.moved_by_code(fr["g"])
-        except Exception: pass
-        self.update_zone(z)
-    def keep(self, W, H):
-        if (W, H) != (self.W, self.H):
-            self.W, self.H = W, H; self.zs.reflow(W, H, HOST.grid_size())
-            for z in self.zs.zones: self.place_zone(z)
-            self.draw_marks()
-    def gaps(self):
-        W, H = self.W, self.H; zs = [z.px for z in self.zs.zones if z.px is not None]
-        xs = [v for v in sorted(set([0, W] + [p[0] for p in zs] + [p[0] + p[2] for p in zs])) if 0 <= v <= W]
-        ys = [v for v in sorted(set([0, H] + [p[1] for p in zs] + [p[1] + p[3] for p in zs])) if 0 <= v <= H]
-        nx, ny = len(xs) - 1, len(ys) - 1; free = {}
-        for j in range(ny):
-            cy = (ys[j] + ys[j + 1]) / 2.0
-            for i in range(nx):
-                cx = (xs[i] + xs[i + 1]) / 2.0
-                if not any(p[0] <= cx < p[0] + p[2] and p[1] <= cy < p[1] + p[3] for p in zs): free[(i, j)] = True
-        seen, n = set(), 0
-        for cell in free:
-            if cell in seen: continue
-            n += 1; stack = [cell]; seen.add(cell)
-            while stack:
-                i, j = stack.pop()
-                for nb in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
-                    if nb in free and nb not in seen: seen.add(nb); stack.append(nb)
-        rects = []
-        for j in range(ny):
-            i = 0
-            while i < nx:
-                if (i, j) in free:
-                    i0 = i
-                    while i < nx and (i, j) in free: i += 1
-                    rects.append((xs[i0], ys[j], xs[i] - xs[i0], ys[j + 1] - ys[j]))
-                else: i += 1
-        merged = []
-        for r in rects:
-            for k, m in enumerate(merged):
-                if m[0] == r[0] and m[2] == r[2] and m[1] + m[3] == r[1]:
-                    merged[k] = (m[0], m[1], m[2], m[3] + r[3]); break
-            else: merged.append(r)
-        return merged, n
-    def bad_overlaps(self):
-        out = []; zones = self.zs.zones
-        for i, a in enumerate(zones):
-            for b in zones[i + 1:]:
-                if a.px is None or b.px is None or b not in self.zs.overlaps(a): continue
-                if a in self.zs.overlaps(b) or not b.overlap:
-                    x0, y0 = max(a.px[0], b.px[0]), max(a.px[1], b.px[1])
-                    x1 = min(a.px[0] + a.px[2], b.px[0] + b.px[2]); y1 = min(a.px[1] + a.px[3], b.px[1] + b.px[3])
-                    if x1 > x0 and y1 > y0: out.append((a, b, (x0, y0, x1 - x0, y1 - y0)))
-        return out
-    def draw_marks(self):
-        sig = (self.W, self.H, tuple((z.id, z.kind, z.overlap, tuple(z.px or ())) for z in self.zs.zones))
-        if sig == self.marks_sig and Kit.is_open(self.marks): return
-        self.marks_sig = sig; gaps, n = self.gaps(); bad = self.bad_overlaps(); counts = (n, len(bad))
-        old, self.marks = self.marks, None; Kit.dispose(old)
-        if gaps or bad:
-            g = G.CreateGump(False, False)
-            for (x, y, w, h) in gaps: Kit.add_box(g, x, y, w, h, 0.45, "#C83030")
-            for a, b, (x, y, w, h) in bad: Kit.add_box(g, x, y, w, h, 0.55, "#C83030")
-            Grid.show_overlay(g, 0, 0, self.W, self.H); self.marks = g
-        if counts != self.counts: self.counts = counts; self.rebuild = True
-    def _drop_handles(self):
-        for g, side, r in self.handles: Kit.dispose(g)
-        self.handles = []; self.handles_sig = None
-    def _sync_handles(self):
-        z = self.zs.by_id(self.sel) if self.sel else None; fr = self.frames.get(z.id) if z is not None else None
-        sig = (z.id, tuple(z.px), z.lock, fr.get("g") if fr else None) if z is not None and z.px is not None else None
-        if sig == self.handles_sig: return
-        self._drop_handles(); self.handles_sig = sig
-        if z is None or z.lock: return
-        x, y, w, h = z.px; T = 10; L_ = max(24, min(80, w // 3)); V_ = max(24, min(80, h // 3))
-        for side, r in (("l", (x, y + (h - V_) // 2, T, V_)), ("r", (x + w - T, y + (h - V_) // 2, T, V_)),
-                        ("t", (x + (w - L_) // 2, y + Kit.MARGIN + 30, L_, T)),
-                        ("b", (x + (w - L_) // 2, y + h - T, L_, T))):
-            g = G.CreateGump(True, False); Kit.add_box(g, 0, 0, r[2], r[3], 0.9, "#E8C15A")
-            Kit.catcher(g, 0, 0, r[2], r[3], lambda: None, "Drag to move this edge on the grid")
-            g.SetRect(r[0], r[1], r[2], r[3]); G.AddGump(g); SNAP.skip_gump(g); self.handles.append((g, side, r))
-    def _edge_tick(self, pressed):
-        now = time.time()
-        if self.edge is None:
-            if pressed and not self.pressed_was and self.handles:
-                m = Kit.mouse_pos()
-                if m is not None:
-                    for g, side, r in self.handles:
-                        if r[0] <= m[0] < r[0] + r[2] and r[1] <= m[1] < r[1] + r[3]:
-                            z = self.zs.by_id(self.sel)
-                            if z is not None: self.edge = (z.id, side, m, tuple(z.px))
-                            break
-            return
-        zid, side, m0, p0 = self.edge; z = self.zs.by_id(zid); m = Kit.mouse_pos()
-        if z is None or m is None: self.edge = None; Kit.dispose(self.edge_g); self.edge_g = None; return
-        x, y, w, h = p0; dx, dy = m[0] - m0[0], m[1] - m0[1]
-        if side == "l": nx = min(x + w - ZONE_MIN_W, max(0, x + dx)); x, w = nx, w + (x - nx)
-        elif side == "r": w = max(ZONE_MIN_W, min(self.W - x, w + dx))
-        elif side == "t": ny = min(y + h - ZONE_MIN_H, max(0, y + dy)); y, h = ny, h + (y - ny)
-        else: h = max(ZONE_MIN_H, min(self.H - y, h + dy))
-        if pressed:
-            if now - self.edge_at >= 0.05:
-                self.edge_at = now; step = HOST.grid_size(); old, self.edge_g = self.edge_g, None; Kit.dispose(old)
-                g = G.CreateGump(False, False)
-                for bx, by, bw_, bh in ((0, 0, w, 2), (0, h - 2, w, 2), (0, 0, 2, h), (w - 2, 0, 2, h)):
-                    Kit.add_box(g, bx, by, bw_, bh, 0.95, "#E8C15A")
-                t = "%d x %d squares (%d x %d)" % (max(1, int(round(float(w) / step))),
-                                                    max(1, int(round(float(h) / step))), w, h)
-                Kit.add_box(g, 6, 6, Kit.text_w(t) + 12, 22, 0.85, "#000000"); Kit.add_label(g, t, 12, 8, Kit.HUE_TITLE)
-                Grid.show_overlay(g, x, y, w, h); self.edge_g = g
-            return
-        self.edge = None; Kit.dispose(self.edge_g); self.edge_g = None
-        if (x, y, w, h) != p0: self.landed_rect(z, x, y, w, h)
-    def landed_rect(self, z, x, y, w, h):
-        step = HOST.grid_size(); x0, y0, x1, y1 = [int(round(float(v) / step)) * step for v in (x, y, x + w, y + h)]
-        x1, y1 = min(x1, self.W), min(y1, self.H)
-        if x + w >= self.W - SNAP_DIST: x1 = self.W
-        if y + h >= self.H - SNAP_DIST: y1 = self.H
-        self.apply_rect(z, x0, y0, max(ZONE_MIN_W, x1 - x0), max(ZONE_MIN_H, y1 - y0))
-    def apply_rect(self, z, x, y, w, h, typed=None):
-        W, H = self.W, self.H
-        if w > W or h > H or x < 0 or y < 0 or x + w > W or y + h > H:
-            self.say('zone "%s" can\'t be %s there: it would run off the screen; make it '
-                     'smaller or move it.' % (z.id, typed or "that size"))
-            return False
-        was = z.px; z.set_px(x, y, w, h, W, H); o = self._blocker(z)
-        if o is not None:
-            z.set_px(was[0], was[1], was[2], was[3], W, H)
-            self.say('zone "%s" can\'t be %s there: it would cover "%s"; make it %s or move ' 'it.' % (
-                z.id, typed or "that size", o.id,
-                "shorter" if (h > was[3] and w <= was[2]) else "narrower" if w > was[2] else "smaller"))
-            return False
-        nw = z.px; z.set_px(was[0], was[1], was[2], was[3], W, H); self.push()
-        z.set_px(nw[0], nw[1], nw[2], nw[3], W, H); z.note_pins(W, H); self.said = None; self.place_zone(z)
-        self.changed(); return True
+class Seam(object):
+    recs = {}; bare = {}; titled_n = {}; edge = [None]; catchers = {}; seen = [None, 0.0]
     @staticmethod
-    def _cap_w(cap): return 35 + Kit.text_w(cap)
-    def _flow(self, g, store, items, x0, y, x_max):
-        x = x0
-        for key, art, cap, tip in items:
-            cw = self._cap_w(cap)
-            if x > x0 and x + cw > x_max: x = x0; y += self.ROW
-            if g is not None: Kit.art_button(g, store, key, art, x, y - 2, cap, tip)
-            x += cw + 16
-        return y
-    def build_bar(self):
-        old = self.bar; W = self.BAR_W; M, GAP = Kit.MARGIN, Kit.GAP; store = ({}, {}); c = {}
-        g = G.CreateGump(True, True); IW = W - 2 * M; x_max = M + IW - 12
-        z = self.zs.by_id(self.sel) if self.sel else None; L = self.layout; step = HOST.grid_size(); ops = []
-        y1 = M + 30 + GAP; ry = y1 + 32; body = []
-        if z is None:
-            body.append(("label", "Click Add zone, then drag it into place.", M + 12, ry + 3, Kit.HUE_INFO))
-            ry += self.ROW
-        else:
-            nx = M + 12 + Kit.text_w("Name:") + 8; body.append(("label", "Name:", M + 12, ry + 3, None))
-            body.append(("box", "name", z.id, nx, ry, 130, False,
-                         "Zone name, unique in this frame layout; Enter uses it"))
-            items = [("kind", Kit.ART_PAGE, "Kind: " + z.kind_name(), "Switch kind: window, keep clear, reserved"),
-                     ("stack", Kit.ART_PAGE, "Stack: " + z.stack_name(), "Switch the way windows stack in this zone"),
-                     ("prio", Kit.ART_PAGE, "Shrinks: " + _ordinal(z.prio),
-                      "Change when this zone shrinks to minimized bars on a small screen"),
-                     ("overlap", Kit.ART_PAGE, "Overlap: " + ("on" if z.overlap else "off"),
-                      "Let this zone lie over others (on) or keep clear of them (off)"),
-                     ("lock", Kit.ART_PAGE, "Lock: " + ("on" if z.lock else "off"),
-                      "Lock the zone against moving and resizing, or unlock it"),
-                     ("dup", Kit.ART_OK, "Duplicate", "Add a copy of this zone beside it"),
-                     ("remove", Kit.ART_CLOSE, "Remove", "Remove this zone (or Delete twice); its windows become free")]
-            ops.append(("flow", items, nx + 130 + 16, ry))
-            ry = self._flow(None, None, items, nx + 130 + 16, ry, x_max) + self.ROW; fx = M + 12
-            unit = "px" if self.px_mode else "squares"
-            for key, label, tip in (("col", "X:" if self.px_mode else "Col:", "Left edge in %s from the screen's left"),
-                                    ("row", "Y:" if self.px_mode else "Row:", "Top edge in %s from the screen's top"),
-                                    ("w", "W:", "Width in %s"), ("h", "H:", "Height in %s")):
-                hi = (self.W if key in ("col", "w") else self.H)
-                if not self.px_mode: hi = (hi + step - 1) // step
-                body.append(("label", label, fx, ry + 3, None)); fx += Kit.text_w(label) + 6
-                body.append(("box", key, "", fx, ry, self.FIELD_W, True,
-                             (tip % unit) + " (%d-%d); Enter or Apply uses it, "
-                             "Esc puts it back" % (0 if key in ("col", "row") else 1, hi)))
-                fx += self.FIELD_W + 14
-            items = [("apply", Kit.ART_OK, "Apply", "Use the typed values (Enter does too)"),
-                     ("units", Kit.ART_PAGE, "Units: " + unit, "Switch between grid squares and pixels")]
-            ops.append(("flow", items, fx + 4, ry)); ry = self._flow(None, None, items, fx + 4, ry, x_max) + self.ROW
-            c["px_y"] = ry + 3; body.append(("px", M + 12, ry + 3)); ry += 20
-            pins = ", ".join(n for p, n in (("L", "left"), ("T", "top"), ("R", "right"), ("B", "bottom"),
-                                            ("X", "centre"), ("Y", "middle")) if p in z.pins)
-            body.append(("pins", "Pinned: " + (pins or "none"), M + 12, ry + 3)); ry += 28
-            items = [("even", Kit.ART_PLAY, "Even out", "Give this zone and those flush beside it in its row (or "
-                      "column) equal sizes")]
-            if len(self.multi) >= 2:
-                items += [("al_" + e[0], Kit.ART_PLAY, "Align " + e,
-                           "Line the picked zones' %s edges up with this zone's" % e)
-                          for e in ("left", "top", "right", "bottom")]
-                items.append(("same", Kit.ART_PLAY, "Same size", "Make the picked zones this zone's size"))
-            ops.append(("flow", items, M + 12, ry)); ry = self._flow(None, None, items, M + 12, ry, x_max) + self.ROW
-            if len(self.multi) >= 2:
-                body.append(("label", Kit.fit("%d zones picked (Shift+click picks more or fewer)."
-                                              % len(self.multi), IW - 24), M + 12, ry + 3, Kit.HUE_INFO))
-                ry += 20
-        ZH = ry - y1 + 6; y2 = y1 + ZH + GAP; wins_rows = []; WH = 0
-        if z is not None and z.kind == "w":
-            wins_rows = list(L.assign.get(self.orig_id(z.id), []))
-            WH = 30 + 28 + 26 * len(wins_rows) + (20 if self.preview else 0) + 14
-            if not wins_rows: WH += 20
-        y3 = y2 + (WH + GAP if WH else 0); cls = ratio_class(self.W, self.H)
-        others = [k for k in ("narrow", "wide", "ultrawide") if k != cls]
-        presets = [("undo", Kit.ART_PAGE, "Undo", "Undo the last change (Ctrl+Z)"),
-                   ("redo", Kit.ART_PAGE, "Redo", "Redo the last undo (Ctrl+Y)"),
-                   ("from_default", Kit.ART_PLAY, "New from Default", "Start again from the Default layout"),
-                   ("mirror", Kit.ART_PLAY, "Mirror", "Swap the zones left and right"),
-                   ("copyto", Kit.ART_OK, "Copy to others",
-                    "Use these zones on %s and %s screens too (save them first)" % tuple(others))]
-        saved_other = [k for k in others if Kit.get_var((FRAMES_NAMED % self.zs.name) + "@" + k, "")]
-        if saved_other:
-            presets.append(("reflow", Kit.ART_PLAY, "Reflow from: " + saved_other[0],
-                            "Rebuild from this layout's %s-screen version" % saved_other[0]))
-            c["reflow_from"] = saved_other[0]
-        prow = self._flow(None, None, presets, M + 12, 0, x_max); FH = 30 + 28 * 2 + prow + 20 * 3 + 10; H = y3 + FH + M
-        Kit.add_window_frame(g, W, H); Kit.add_section(g, M, M, IW, 30)
-        Kit.add_label(g, "ZONES", M + 30, M + 7, Kit.HUE_TITLE)
-        Kit.add_label(g, Kit.fit('frame layout "%s"' % self.zs.name, IW - 250),
-                      M + 30 + Kit.text_w("ZONES") + 12, M + 7, Kit.HUE_INFO)
-        Kit.art_button(g, store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None,
-                       "Close the editor and bring back the saved zones")
-        Kit.add_section(g, M, y1, IW, ZH, "ZONE  (selected)"); boxes = []
-        for item in body:
-            if item[0] == "label": Kit.add_label(g, item[1], item[2], item[3], item[4])
-            elif item[0] == "box":
-                key, text, bx, by, bw_, num, tip = item[1:]
-                c[key] = Kit.with_tip(Kit.add_textbox(g, text, bx, by, bw_, numbers=num), tip); boxes.append(key)
-            elif item[0] == "px": c["px"] = Kit.add_label(g, "", item[1], item[2], Kit.HUE_INFO); c["px_x"] = item[1]
-            elif item[0] == "pins":
-                Kit.with_tip(Kit.add_label(g, item[1], item[2], item[3], Kit.HUE_INFO),
-                             "Edges kept on the screen's edge (or centre line) on other screen sizes")
-        for op in ops: self._flow(g, store, op[1], op[2], op[3], x_max)
-        if WH:
-            Kit.add_section(g, M, y2, IW, WH, "WINDOWS  (in this zone, top to bottom)"); ry = y2 + 32
-            Kit.add_label(g, "Window:", M + 12, ry + 3); dd_x = M + 12 + Kit.text_w("Window:") + 8; dd_w = 300
-            bx = dd_x + dd_w + 16
-            Kit.art_button(g, store, "w_add", Kit.ART_OK, bx, ry - 2, "Put it here",
-                           "Put the picked window in this zone (no Arrange mode needed)")
-            ry += 28
-            if not wins_rows:
-                Kit.add_label(g, "Pick a window above, then click Put it here.", M + 12, ry + 3, Kit.HUE_INFO); ry += 20
-            for i, k in enumerate(wins_rows):
-                Kit.add_label(g, Kit.fit(L.title_of(k), 300), M + 12, ry + 3)
-                self._flow(g, store, [("w_%s_%d" % (w_, i), art, cap, tip % L.title_of(k)) for w_, art, cap, tip in (
-                    ("up", Kit.ART_PAGE, "Up", "Move %s up the zone's stack"),
-                    ("down", Kit.ART_PAGE, "Down", "Move %s down the zone's stack"),
-                    ("out", Kit.ART_CLOSE, "Take out", "Free %s from the zone (it stays where it is)"))],
-                    M + 12 + 310, ry, 1 << 30)
-                ry += 26
-            c["wins_rows"] = wins_rows
-            if self.preview:
-                Kit.add_label(g, Kit.fit(self.preview.lstrip("!"), IW - 24), M + 12, ry + 3,
-                              Kit.HUE_BAD if self.preview.startswith("!") else Kit.HUE_INFO)
-        Kit.add_section(g, M, y3, IW, FH, "FRAME LAYOUT"); ry = y3 + 32; x = M + 12
-        for key, art, cap, tip in (("add", Kit.ART_OK, "Add zone", "Add a zone mid-screen to drag into place"),
-                                   ("fill", Kit.ART_PLAY, "Fill the gaps", "Grow every zone into empty room beside it"),
-                                   ("save", Kit.ART_OK, "Save",
-                                    "Save as the frame layout in use (Default saves as Default (mine))"),
-                                   ("saveas", Kit.ART_OK, "Save as", "Save under the name in the box")):
-            Kit.art_button(g, store, key, art, x, ry - 2, cap, tip); x += self._cap_w(cap) + 16
-        c["saveas"] = Kit.with_tip(Kit.add_textbox(g, self.saveas_text, x, ry, max(
-            60, W - M - 12 - self._cap_w("Discard") - 16 - x), numbers=False),
-            "A name for Save as (letters, digits, spaces)")
-        cap = "Discard"
-        Kit.art_button(g, store, "discard", Kit.ART_CLOSE, W - M - 12 - self._cap_w(cap), ry - 2,
-                       cap, "Close the editor and bring back the saved zones")
-        ry += 28; ry = self._flow(g, store, presets, M + 12, ry, x_max) + 28; n = len(self.zs.zones)
-        nk = sum(1 for zz in self.zs.zones if zz.kind == "k"); nr = sum(1 for zz in self.zs.zones if zz.kind == "r")
-        gaps, over = self.counts
-        status = "%s, %d keep clear, %d reserved; %s, %s; %d x %d, %s" % (
-            Kit.count(n, "zone"), nk, nr, Kit.count(gaps, "gap"), Kit.count(over, "overlap"), self.W, self.H, cls)
-        Kit.add_label(g, Kit.fit(status, IW - 24), M + 12, ry + 3, Kit.HUE_BAD if (gaps or over) else Kit.HUE_INFO)
-        ry += 20; lx = M + 12
-        for col, name in ((ZONE_COLORS["w"], "window"), (ZONE_COLORS["k"], "keep clear"),
-                          (ZONE_COLORS["r"], "reserved"), ("#C83030", "gap or overlap"),
-                          ("#E8C15A", "overlap allowed")):
-            Kit.add_box(g, lx, ry + 6, 12, 12, 0.9, col); Kit.add_label(g, name, lx + 16, ry + 3, Kit.HUE_INFO)
-            lx += 16 + Kit.text_w(name) + 14
-        ry += 20
-        Kit.add_label(g, Kit.fit("Arrows nudge the zone a square; Shift+arrows resize it; Delete "
-                                 "twice removes it.", IW - 24), M + 12, ry + 3, Kit.HUE_INFO)
-        if WH:
-            wl = L.all_windows(); names = ["(pick a window)"]; self.pick_keys = [None]
-            for k, t in wl:
-                zid = L.zone_of(k); names.append(Kit.fit(t + (' (in "%s")' % zid if zid else ""), 290))
-                self.pick_keys.append(k)
-            if self.pick >= len(names): self.pick = 0
-            dd = G.CreateDropDown(dd_w, names, self.pick); dd.SetPos(dd_x, y2 + 32); g.Add(dd)
-            c["w_pick"] = Kit.with_tip(dd, "A window for this zone; the zone shows where it would sit")
-        ax, ay = Kit.anchor_pos("B", W, H)
-        x, y = self.bar_pos or Kit.load_pos(LAYOUT_EDITOR_POS, (ax or 200, ay or 200), (W, H))
-        if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-        Kit.place(g, x, y, W, H); G.AddGump(g); Kit.on_moved(g, self._bar_moved)
-        self.bar, self.store, self.c = g, store, c; self.raws = {}
-        for key in boxes + ["saveas"]:
-            raw = Kit.client_control(c[key]) if key in c else None
-            if raw is not None: self.raws[key] = raw
-        self.fields = None; self.focus_was = None; self.show_fields(); Kit.dispose(old)
-    def _bar_moved(self): Kit.save_pos(LAYOUT_EDITOR_POS, self.bar); self.bar_pos = Snap.pos(self.bar)
-    def _values(self, z):
-        x, y, w, h = z.px
-        if self.px_mode: return tuple(str(v) for v in (x, y, w, h))
-        step = HOST.grid_size()
-        return tuple(str(v) for v in (int(round(float(x) / step)), int(round(float(y) / step)),
-                                      max(1, int(round(float(w) / step))), max(1, int(round(float(h) / step)))))
-    def show_fields(self):
-        c = self.c; z = self.zs.by_id(self.sel) if self.sel else None
-        if z is None or "col" not in c: return
-        texts = self._values(z)
-        if texts != self.fields:
-            self.fields = texts
-            for key, t in zip(self.FIELDS, texts): c[key].SetText(t)
-        x, y, w, h = z.px
-        if self.px_mode:
-            step = HOST.grid_size()
-            text = "%d x %d squares at square %d, %d" % (
-                max(1, int(round(float(w) / step))), max(1, int(round(float(h) / step))),
-                int(round(float(x) / step)), int(round(float(y) / step)))
-        else: text = "%d x %d px at %d, %d" % (w, h, x, y)
-        Kit.set_text(c["px"], Kit.fit(text, self.BAR_W - Kit.MARGIN - 12 - c["px_x"]))
-    def _key(self, name):
-        down = False
-        for k in self.KEYS[name]:
-            if API.IsKeyPressed(k): down = True; break
-        was = self.keys_was.get(name, False); self.keys_was[name] = down; return down and not was
-    def _focus(self):
-        if not self.raws: return None
+    def pad():
+        if Seam.edge[0] is None:
+            s = [Kit.pic_size(Kit.WINDOW_BG + i) for i in (1, 3, 5, 7)]
+            Seam.edge[0] = min(Kit.MARGIN, max([SEAM_PAD, s[0][1], s[1][0], s[2][0], s[3][1]]) + 1)
+        return Seam.edge[0]
+    @staticmethod
+    def title_of(raw, w):
+        M = Kit.MARGIN; rects = [(c, Kit._raw_rect(c)) for c in Kit._children(raw)]
+        if not any(r is not None and abs(r[0] - M) <= 2 and abs(r[1] - M) <= 2 and abs(r[3] - 30) <= 1
+                   and r[2] >= w - 2 * M - 6 for c, r in rects): return []
+        return [c for c, r in rects if r is not None and M - 4 <= r[1] < M + 34 and r[1] + r[3] <= M + 36]
+    @staticmethod
+    def titled(g):
+        if g in Seam.recs: return True
+        raw = Kit._raw_gump(g); r = Kit.rect(g)
+        if raw is None or r is None: return False
+        n = int(raw.Children.Count); had = Seam.titled_n.get(g)
+        if had is not None and had[0] == n: return had[1]
+        Kit._prune(Seam.titled_n, 32); on = bool(Seam.title_of(raw, r[2])); Seam.titled_n[g] = (n, on); return on
+    @staticmethod
+    def strip(g, untitled=False):
+        parts = Kit._frame_parts.get(g); raw = Kit._raw_gump(g)
+        if not parts or raw is None: return False
+        rec = Seam.bare.get(g); n = int(raw.Children.Count)
+        if rec is not None and rec["parts"] is parts:
+            if rec["n"] != n:
+                cur = Kit._children(raw); have = set(cur); M = Kit.MARGIN
+                for p in parts: Kit.set(p, "IsVisible", False)
+                rec["title"] = [t for t in rec["title"] if t[0] in have]
+                for c in [c for c in cur if c not in rec["kids"]] if rec["band"] else ():
+                    r = Kit._raw_rect(c)
+                    if r is None or not (M - 4 <= r[1] < M + 34 and r[1] + r[3] <= M + 36): continue
+                    v = bool(c.IsVisible); rec["title"].append([c, None, None, v]); c.IsVisible = v and rec["open"]
+                rec["kids"], rec["n"] = have, len(cur)
+            Seam.watch(rec, False); return True
+        keep = (rec["open"], rec["until"]) if rec is not None else (False, 0.0)
+        if rec is not None: Seam.unstrip(g)
+        r = Kit.rect(g); free = r is not None and g not in Seam.recs and not untitled
+        title = Seam.title_of(raw, r[2]) if free else []
+        frame = set(c for c in map(Kit.client_control, parts) if c is not None)
+        title = [[c, None, None, bool(c.IsVisible)] for c in title if c not in frame]
+        for p in parts: Kit.set(p, "IsVisible", False)
+        for t in title: t[0].IsVisible = False
+        Kit._prune(Seam.bare, 32)
+        Seam.bare[g] = {"parts": parts, "n": n, "title": title, "open": keep[0], "until": keep[1], "band": bool(title),
+                        "kids": set(Kit._children(raw))}
+        for t in title: t[0].IsVisible = t[3] and keep[0]
+        return True
+    @staticmethod
+    def unstrip(g):
+        rec = Seam.bare.pop(g, None)
+        if rec is None or not Kit.is_open(g): return
+        on = Kit._frame_want.get(g, True)
+        for p in rec["parts"]: Kit.set(p, "IsVisible", on)
+        for t in rec["title"]:
+            try: t[0].IsVisible = t[3]
+            except Exception: pass
+    @staticmethod
+    def cut(pads):
+        M = Kit.MARGIN; return M - pads[0], M + 30 + Kit.GAP - pads[1], M - pads[2], M - pads[3]
+    @staticmethod
+    def clip(slot, pads):
+        W, H = Kit.screen(); M = Kit.MARGIN
+        if W <= 0 or H <= 0: return pads
+        return (min(M, max(pads[0], M - slot[0])), pads[1], min(M, max(pads[2], M - (W - slot[0] - slot[2]))),
+                min(M, max(pads[3], M - (H - slot[1] - slot[3]))))
+    @staticmethod
+    def grow(slot, pads):
+        l, t, r, b = Seam.cut(pads); return slot[0] - l, slot[1] - t, slot[2] + l + r, slot[3] + t + b
+    @staticmethod
+    def can(g, hooks, mini):
+        return not (mini or isinstance(g, ClientWin) or hooks.get("untitled")) and bool(Kit._frame_parts.get(g)) \
+            and g not in Kit._scrolled and Client.on_client_thread() and Seam.titled(g)
+    @staticmethod
+    def holds(g, slot, pads, grown, r):
+        rec = Seam.recs.get(g)
+        if rec is None or rec["slot"] != tuple(slot) or rec["pads"] != pads or r is None or r[:2] != grown[:2]:
+            return False
         try:
-            Typing._find()
-            f = (Typing._get(None, "KeyboardFocusControl", Typing.uim) if Typing.uim is not None else None)
-        except Exception: f = None
-        self.raws_ok = Typing.uim is not None; n = 0
-        while f is not None and n < 4:
-            for key, raw in self.raws.items():
-                if Typing._same(f, raw): return key
-            f = Typing._get(f, "Parent"); n += 1
-        return None
-    def _box_texts(self):
-        c = self.c
-        try: return tuple(str(c[k].Text or "").strip() for k in self.FIELDS)
-        except Exception: return None
-    def poll(self):
-        if self.closed: return
-        if not Kit.is_open(self.bar): self.close(keep=False); return
-        now = time.time()
-        for zid, fr in list(self.frames.items()):
-            z = self.zs.by_id(zid); g = fr.get("g")
-            if z is None or not Kit.is_open(g): continue
-            if fr["resize_at"]:
-                r = Snap.rect(g)
-                if r is not None and (r[2], r[3]) != fr["size"]:
-                    step = HOST.grid_size()
-                    Kit.set_text(fr["sum"], Kit.fit("%d x %d squares" % (max(1, int(round(float(r[2]) / step))),
-                        max(1, int(round(float(r[3]) / step)))), max(40, r[2] - 2 * Kit.MARGIN - 24)), Kit.HUE_TITLE)
-                if now - fr["resize_at"] >= self.SETTLE:
-                    fr["resize_at"] = 0.0
-                    if r is not None and (r[2], r[3]) != fr["size"]:
-                        if z.lock: self.build_zone(z)
-                        else: self.landed(z, r[0], r[1], r[2], r[3], resized=True)
-        pressed = SNAP.pressed() is True; self._sync_handles(); self._edge_tick(pressed); self.pressed_was = pressed
-        store, c = self.store, self.c; z = self.zs.by_id(self.sel) if self.sel else None
-        if Kit.was_clicked(store, "close") or Kit.was_clicked(store, "discard"): self.close(keep=False); return
-        focus = self._focus(); typing = Client.typing(); enter = self._key("enter")
-        esc = self._key("esc")
-        if not typing and not self.edge:
-            ctrl = bool(Client.key_held("ctrl")); shift = bool(Client.key_held("shift"))
-            if self._key("z") and ctrl: self.do_undo()
-            elif self._key("y") and ctrl: self.do_redo()
-            elif z is not None:
-                for name, d in (("left", (-1, 0)), ("right", (1, 0)), ("up", (0, -1)), ("down", (0, 1))):
-                    if self._key(name): self.nudge(z, d, shift)
-                if self._key("delete"): self.delete_pressed(z)
-        if Kit.was_clicked(store, "add"):
-            self.push(); zid = self.zs.new_id(); nz = Zone(zid, "w", (0, 0, 1, 1), "", (0, 0), "d", 0)
-            nz.set_px((self.W - 320) // 2, (self.H - 240) // 2, 320, 240, self.W, self.H); self.zs.zones.append(nz)
-            if not self.zs.push_clear(nz, self.W, self.H, HOST.grid_size()):
-                self.zs.zones.remove(nz); self.undo.pop()
-                self.say("no room for another zone; remove one or make one smaller."); return
-            nz.note_pins(self.W, self.H); self.sel, self.multi = zid, set(); self.build_zone(nz); self.changed()
-            self.rebuild = True
-        elif Kit.was_clicked(store, "undo"): self.do_undo()
-        elif Kit.was_clicked(store, "redo"): self.do_redo()
-        elif Kit.was_clicked(store, "even") and z is not None:
-            self.push(); n = self.zs.even_out(z, self.W, self.H, HOST.grid_size())
-            if n < 2: self.undo.pop(); self.say("no zone sits flush beside this one in its row or column.")
-            else: self._all_moved()
-        elif Kit.was_clicked(store, "fill"):
-            self.push(); self.zs.fill_gaps(self.W, self.H, HOST.grid_size()); self._all_moved()
-        elif Kit.was_clicked(store, "save"):
-            self.save(self.zs.name if self.zs.name != LAYOUT_DEFAULT else LAYOUT_MINE); return
-        elif Kit.was_clicked(store, "saveas"):
-            name = Layout.clean_name(safe(lambda: c["saveas"].Text, ""), "")
-            if not name: self.say("type a name in the box, then click Save as.")
-            else: self.save(name if name != LAYOUT_DEFAULT else LAYOUT_MINE); return
-        elif Kit.was_clicked(store, "reflow") and c.get("reflow_from"):
-            other = ZoneSet.parse(self.zs.name, Kit.get_var((FRAMES_NAMED % self.zs.name) + "@" + c["reflow_from"], ""))
-            if other is not None:
-                other.reflow(self.W, self.H, HOST.grid_size()); self.push()
-                self._restore(([zz.copy() for zz in other.zones], self.sel, {})); self.changed()
-        elif Kit.was_clicked(store, "from_default"):
-            self.push(); d = ZoneSet.default(self.W, self.H, (), False)
-            self._restore(([zz.copy() for zz in d.zones], self.sel, {})); self.changed()
-        elif Kit.was_clicked(store, "mirror"):
-            self.push()
-            for zz in self.zs.zones:
-                x, y, w, h = zz.px; zz.set_px(self.W - x - w, y, w, h, self.W, self.H)
-            self._all_moved()
-        elif Kit.was_clicked(store, "copyto"): self.copy_to()
-        elif Kit.was_clicked(store, "units"):
-            self.commit_rect(z, quiet=True) if z is not None else None; self.px_mode = not self.px_mode
-            self.rebuild = True
-        if z is not None and not self.rebuild: self.poll_zone(z, store)
-        if z is not None and z.kind == "w" and not self.rebuild: self.poll_windows(z, store, c)
-        if not self.rebuild: self.poll_fields(z, focus, enter, esc, Kit.was_clicked(store, "apply"))
-        self.focus_was = focus; self.draw_marks()
-        if self.rebuild:
-            self.rebuild = False; self.saveas_text = str(safe(lambda: c["saveas"].Text, self.saveas_text) or "")
-            for zz in self.zs.zones: self.update_zone(zz)
-            self.build_bar()
-    def _all_moved(self):
-        for zz in self.zs.zones: zz.note_pins(self.W, self.H); self.place_zone(zz)
-        self.changed()
-    def poll_zone(self, z, store):
-        if Kit.was_clicked(store, "kind"):
-            self.push(); kinds = [k for k, n in ZONE_KINDS]; z.kind = kinds[(kinds.index(z.kind) + 1) % len(kinds)]
-            z.hug = z.hug and z.kind == "w"; self.build_zone(z); self.changed()
-            self.rebuild = True
-        elif Kit.was_clicked(store, "stack"):
-            self.push(); stacks = [k for k, n in ZONE_STACKS]
-            z.stack = stacks[(stacks.index(z.stack) + 1) % len(stacks)]; self.rebuild = True
-        elif Kit.was_clicked(store, "prio"): self.push(); z.prio = (z.prio + 1) % (SHRINK_MAX + 1); self.rebuild = True
-        elif Kit.was_clicked(store, "overlap"):
-            self.push(); z.overlap = not z.overlap
-            if not z.overlap:
-                if not self.zs.push_clear(z, self.W, self.H, HOST.grid_size()):
-                    o = self._blocker(z)
-                    self.say('zone "%s" still lies over "%s"; move it or make it smaller.'
-                             % (z.id, o.id if o is not None else "a zone"), Kit.HUE_INFO)
-                z.note_pins(self.W, self.H)
-            for zz in self.zs.zones: self.build_zone(zz)
-            self.changed(); self.rebuild = True
-        elif Kit.was_clicked(store, "lock"): self.push(); z.lock = not z.lock; self.build_zone(z); self.rebuild = True
-        elif Kit.was_clicked(store, "dup"): self.duplicate(z)
-        elif Kit.was_clicked(store, "remove"): self.remove(z)
-        else:
-            for key, edge in (("al_l", "l"), ("al_t", "t"), ("al_r", "r"), ("al_b", "b"), ("same", "s")):
-                if Kit.was_clicked(store, key): self.align(z, edge); break
-    def poll_windows(self, z, store, c):
-        L = self.layout; dd = c.get("w_pick"); now = time.time(); add = Kit.was_clicked(store, "w_add")
-        if dd is not None and (now >= getattr(self, "_pick_next", 0.0) or now - HOST.input_at <= HOST.INPUT_FAST):
-            self._pick_next = now + 0.2; i = LayoutPage._pick(dd, self.pick)
-            if i != self.pick:
-                self.pick = i; key = self.pick_keys[i] if 0 < i < len(self.pick_keys) else None
-                self.preview = self.preview_text(key, z) if key else ""; self.build_zone(z); self.rebuild = True
-                if not add: return
-        zid = self.orig_id(z.id)
-        if add:
-            key = self.pick_keys[self.pick] if 0 < self.pick < len(self.pick_keys) else None
-            if key is None: self.say("pick a window in the list first, then click Put it here.", Kit.HUE_INFO); return
-            if L.frames is None or L.frames.by_id(zid) is None:
-                self.say('zone "%s" isn\'t saved yet; click Save, then put the window in it.' % z.id); return
-            if L.zone_of(key) == zid: self.say("%s already sits in this zone." % L.title_of(key), Kit.HUE_INFO); return
-            mz = L._map_zone()
-            if (key != "worldmap" and zid == mz) or (key == "worldmap" and L.assign.get(zid)):
-                self.say("TazUO's World Map keeps its zone to itself; pick another zone for %s."
-                         % (L.title_of(key) if key != "worldmap" else "it"))
-                return
-            if L._too_small(key, L.frames.by_id(zid)): return
-            L.assign_to(key, zid); self.pick, self.preview = 0, ""; self.build_zone(z); self.rebuild = True; return
-        rows = c.get("wins_rows") or []
-        for i, k in enumerate(rows):
-            for what in ("up", "down", "out"):
-                if not Kit.was_clicked(store, "w_%s_%d" % (what, i)): continue
-                keys = L.assign.get(zid, [])
-                if k not in keys: break
-                if what == "out": L.assign_to(k, None)
-                else:
-                    j = keys.index(k); t = j - 1 if what == "up" else j + 1
-                    if 0 <= t < len(keys):
-                        keys[j], keys[t] = keys[t], keys[j]
-                        for kk in keys: L._refit(kk)
-                        L.save_assign(); L.dirty = L.fresh = True; HOST.poke()
-                self.build_zone(z); self.rebuild = True; return
-    def preview_text(self, key, z):
-        return self.layout.preview_text(key, z, self.layout.assign.get(self.orig_id(z.id), []))
-    def poll_fields(self, z, focus, enter, esc, apply):
-        c = self.c
-        if z is None or "name" not in c: return
-        left = self.focus_was if (self.focus_was is not None and focus != self.focus_was) else None
-        if esc and (focus is not None or self._edited(z)): self._refields(); c["name"].SetText(z.id); return
-        if (enter and focus == "name") or left == "name" or apply:
-            name = str(safe(lambda: c["name"].Text, z.id) or "").strip()
-            if name != z.id: self.rename(z, name); return
-        if focus is None and left is None and enter and not self.raws_ok:
-            name = str(safe(lambda: c["name"].Text, z.id) or "").strip()
-            if name != z.id: self.rename(z, name); return
-            self.commit_rect(z); return
-        if ((enter and focus in self.FIELDS) or (left in self.FIELDS and focus not in self.FIELDS) or apply):
-            self.commit_rect(z)
-    def _edited(self, z):
-        texts = self._box_texts(); name = str(safe(lambda: self.c["name"].Text, z.id) or "").strip()
-        return (texts is not None and texts != self._values(z)) or name != z.id
-    def commit_rect(self, z, quiet=False):
-        texts = self._box_texts()
-        if texts is None or texts == self._values(z): return
-        try: col, row, w, h = [int(t) for t in texts]
-        except Exception:
-            if not quiet: self.say("type whole numbers in Col, Row, W and H.")
-            self._refields(); return
-        step = 1 if self.px_mode else HOST.grid_size(); x, y = max(0, col) * step, max(0, row) * step
-        w, h = max(1, w) * step, max(1, h) * step
-        typed = "%d x %d %s" % (max(1, int(texts[2])), max(1, int(texts[3])), "px" if self.px_mode else "squares")
-        if w < ZONE_MIN_W or h < ZONE_MIN_H:
-            if not quiet:
-                self.say('zone "%s" can\'t be %s: the smallest zone is %d x %d px.' % (
-                    z.id, typed, ZONE_MIN_W, ZONE_MIN_H))
-            self._refields(); return
-        if z.lock:
-            self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); self._refields(); return
-        if not self.apply_rect(z, x, y, w, h, typed): self._refields()
-    def rename(self, z, name):
-        name = Layout.clean_name(name, "")
-        if not name or name.lower() == "frames" or self.zs.by_id(name) is not None:
-            self.say('zone "%s" can\'t be called "%s": %s.' % (
-                z.id, name, "a name needs letters or digits" if not name else
-                "the name is taken" if self.zs.by_id(name) is not None else "that name is kept"))
-            self.c["name"].SetText(z.id); return
-        self.push(); old = z.id; z.id = name
-        for k, v in self.renames.items():
-            if v == old: self.renames[k] = name; break
-        else: self.renames[old] = name
-        fr = self.frames.pop(old, None)
-        if fr is not None: self.frames[name] = fr
-        self.sel = name; self.multi = set(name if m == old else m for m in self.multi); self.said = None
-        self.build_zone(z); self.rebuild = True
-    def nudge(self, z, d, resize):
-        if z.lock: self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); return
-        step = HOST.grid_size(); x, y, w, h = z.px
-        if resize: self.apply_rect(z, x, y, max(ZONE_MIN_W, w + d[0] * step), max(ZONE_MIN_H, h + d[1] * step))
-        else: self.apply_rect(z, x + d[0] * step, y + d[1] * step, w, h)
-    def delete_pressed(self, z):
-        now = time.time()
-        if (self.del_armed is not None and self.del_armed[0] == z.id and now - self.del_armed[1] <= 3.0):
-            self.del_armed = None; self.remove(z); return
-        self.del_armed = (z.id, now); Kit.say('press Delete again to remove zone "%s".' % z.id, Kit.HUE_INFO)
-    def remove(self, z):
-        if z.lock: self.say('zone "%s" is locked; click Lock to remove it.' % z.id, Kit.HUE_INFO); return
-        self.push(); self.zs.zones = [zz for zz in self.zs.zones if zz is not z]; fr = self.frames.pop(z.id, None)
-        if fr is not None: Kit.dispose(fr.get("g"))
-        self.multi.discard(z.id); self.sel = self.zs.zones[0].id if self.zs.zones else None; self.changed()
-        self.rebuild = True
-    def duplicate(self, z):
-        self.push(); nz = z.copy(); nz.id = self.zs.new_id(); nz.lock = False; step = HOST.grid_size()
-        x, y, w, h = z.px; nz.set_px(x + step, y + step, w, h, self.W, self.H); self.zs.zones.append(nz)
-        if not nz.overlap and not self.zs.push_clear(nz, self.W, self.H, step):
-            self.zs.zones.remove(nz); self.undo.pop()
-            self.say("no room for a copy of zone \"%s\"; make room first." % z.id); return
-        nz.note_pins(self.W, self.H); self.sel, self.multi = nz.id, set(); self.build_zone(nz); self.changed()
-        self.rebuild = True
-    def align(self, z, edge):
-        picked = [p for p in [self.zs.by_id(i) for i in self.multi if i != z.id] if p is not None and not p.lock]
-        if not picked: return
-        self.push(); x, y, w, h = z.px; refused = []
-        for p in picked:
-            px, py, pw, ph = p.px
-            r = {"l": (x, py, pw, ph), "t": (px, y, pw, ph), "r": (x + w - pw, py, pw, ph),
-                 "b": (px, y + h - ph, pw, ph)}.get(edge, (px, py, w, h))
-            was = p.px; p.set_px(r[0], r[1], r[2], r[3], self.W, self.H)
-            if self._blocker(p) is not None:
-                p.set_px(was[0], was[1], was[2], was[3], self.W, self.H); refused.append(p.id)
-            p.note_pins(self.W, self.H)
-        if refused:
-            self.say("%s would cover another zone, so %s stayed where %s %s." % (
-                ", ".join('"%s"' % r for r in refused), "it" if len(refused) == 1 else "they",
-                "it" if len(refused) == 1 else "they", "was" if len(refused) == 1 else "were"), Kit.HUE_INFO)
-        self._all_moved()
-    def copy_to(self):
-        name = self.zs.name
-        if self.zs.generated or name == LAYOUT_DEFAULT or name not in self.layout.frame_names():
-            self.say("save these zones first (Save or Save as), then click Copy to.", Kit.HUE_INFO); return
-        cls = ratio_class(self.W, self.H); zs = self.zs.copy(name); zs.screen = (self.W, self.H)
-        zs.grid = HOST.grid_size()
-        for zz in zs.zones: zz.note_pins(self.W, self.H)
-        text = zs.save_text(); others = [k for k in ("narrow", "wide", "ultrawide") if k != cls]
-        for k in others: Kit.put_var((FRAMES_NAMED % name) + "@" + k, text)
-        Kit.say('frame layout "%s" copied to %s screens.' % (name, " and ".join(others)), Kit.HUE_GOOD)
-    def warnings(self):
-        out = []; L = self.layout
-        for z in self.zs.zones:
-            if z.kind != "w" or z.px is None: continue
-            for k in L.assign.get(self.orig_id(z.id), []):
-                mn = L._min_of(k)
-                if mn and (z.px[2] < mn[0] or z.px[3] < mn[1]):
-                    out.append('zone "%s" is %d x %d, smaller than %s can be (%d x %d)' % (
-                        z.id, z.px[2], z.px[3], L.title_of(k), mn[0], mn[1]))
-        gaps, over = self.counts
-        if gaps: out.append("the zones leave %s (Fill the gaps closes them)" % Kit.count(gaps, "gap"))
-        if over: out.append("%s of zones without Overlap on" % Kit.count(over, "overlap"))
-        if not any(z.kind == "k" for z in self.zs.zones): out.append("no keep-clear zone: nothing marks the game view")
-        return out
-    def save(self, name):
-        for w in self.warnings(): Kit.say("note: %s." % w, Kit.HUE_INFO)
-        zs = self.zs.copy(name); zs.generated = False; zs.ver = 2; self.layout.save_frames(zs, name, self.W, self.H)
-        L, moved = self.layout, False
-        for was, now in self.renames.items():
-            if was != now and was in L.assign and now not in L.assign: L.assign[now] = L.assign.pop(was); moved = True
-        if moved: L.save_assign()
-        Kit.say('frame layout "%s" saved.' % name, Kit.HUE_GOOD); self.close(keep=True)
-        self.layout.use_frames(name, tell=False)
-
-
-class LayoutPage(_Page):
-    H, DD_W = 200, 170
-    def page(self, w):
-        L = LAYOUT; lbl = {"hue": Kit.HUE_TEXT, "ndy": 3}; wins = L.all_windows()
-        out = (("LAYOUT  (where each window sits)", (("note", "Zones:", dict(lbl, stay=True)),
-            ("buttons", (("edit", Kit.ART_PAGE, "Edit zones", "Drag, resize, add or remove zones on the screen grid"),
-                         ("new", Kit.ART_OK, "New zones", "Start a new frame layout with one zone"),
-                         ("remove", Kit.ART_CLOSE, "Remove zones", "Delete the frame layout in use (not Default)")),
-             {"dx": 278}), ("note", "Windows:", dict(lbl, stay=True)), ("buttons", (("save", Kit.ART_OK, "Save windows",
-                          "Save where every window sits as the window layout in use"),
-                         ("reset", Kit.ART_CLOSE, "Reset", "Go back to the Default window layout"),
-                         ("free", Kit.ART_CLOSE, "Free all", "Take every window out of its zone")), {"dx": 278}),
-            ("check", "game", "Give an empty zone's room to the game area",
-             "Widens the game area beside an empty zone"),
-            ("check", "fit_view", "Fit the game view to the keep-clear zone",
-             "Borderless, sized and locked to that zone; "
-             "unticked or stopped, your own view comes back", {"stay": True}),
-            ("buttons", (("check", Kit.ART_PLAY, "Check fit", "Print where each window in a zone sits and whether it "
-                          "fills it"),), {"dx": w - 47 - Kit.text_w("Check fit"), "h": 26}),
-            ("buttons", (("arrange", Kit.ART_OK if L.arrange else Kit.ART_PLAY,
-                          "Done" if L.arrange else "Arrange windows", "Lock every window in its zone" if L.arrange else
-                          "Unlock windows to move them between zones (Esc or Done locks them)"),), {"stay": True}),
-            ("buttons", (("reclaim", Kit.ART_PLAY, "Reclaim space", "Give the game area every gap beside it; windows "
-                          "keep their size"),) +
-             ((("reclaim_undo", Kit.ART_CLOSE, "Undo", "Put the zones back as before Reclaim space"),)
-              if L._undo_load() is not None else ()), {"dx": 278}),
-            ("note", Kit.fit(L.status_text(), w - 24)), ("custom", 0, self._drops)), {"top": 32, "pad": 12}),)
-        if not wins: return out
-        pv = L.page_preview; rows = [("note", Kit.fit(t, 270), dict(lbl, h=26)) for k, t in wins]
-        if pv: rows.append(("note", Kit.fit(pv.lstrip("!"), w - 24),
-                            {"ndy": 3, "hue": Kit.HUE_BAD if pv.startswith("!") else Kit.HUE_INFO}))
-        rows.append(("custom", 0, lambda f, x, y: self._zone_drops(f, x, wins)))
-        return out + (("WINDOWS  (the zone each sits in)", rows, {"top": 32, "pad": 8}),)
-    def height(self, w): return Kit.Form.height(self.page(w), w, bgap=16)
-    def build(self, g, x, y, w):
-        f = Kit.Form(g, x, y, w, {"game": LAYOUT.game_grows, "fit_view": LAYOUT.fit_view}, self.page(w), bgap=16)
-        self.store, self.c = f.store, f.c
-    def _drop(self, g, names, i, x, y, tip):
-        dd = G.CreateDropDown(self.DD_W, names, i); dd.SetPos(x, y); g.Add(dd); return Kit.with_tip(dd, tip)
-    def _drops(self, f, x, y):
-        L, c, y = LAYOUT, f.c, f.top + 32; self.frame_names = [LAYOUT_DEFAULT] + L.frame_names()
-        fi = self.frame_names.index(L.frames_name) if L.frames_name in self.frame_names else 0
-        c["zones"] = (self._drop(f.g, self.frame_names, fi, x + 92, y, "The frame layout in use (its zones)"), fi)
-        self.layout_names = ["(none)", LAYOUT_DEFAULT, LAYOUT_MIRRORED] + L.layout_names()
-        cur = L.layout_name or "(none)"; li = self.layout_names.index(cur) if cur in self.layout_names else 0
-        c["windows"] = (self._drop(f.g, self.layout_names, li, x + 92, y + 28,
-                                   "The window layout in use; pick one to place every window"), li)
-        c["zone_dd"] = []
-    def _zone_drops(self, f, x, wins):
-        L, ry = LAYOUT, f.top + self.H + Kit.GAP + 32; zones = ["free"] + [z for z in L.zone_choices() if z]
-        for key, title in wins:
-            zid = L.zone_of(key); ids, labels = zones, zones
-            if zid is not None and zid not in zones:
-                ids, labels = zones + [zid], zones + [Kit.fit("%s (missing)" % zid, self.DD_W - 30)]
-            zi = ids.index(zid) if zid in ids else 0
-            f.c["zone_dd"].append((key, self._drop(f.g, labels, zi, x + 302, ry,
-                                                   "The zone %s sits in (free: stays where you put it)" % title),
-                                        zi, ids))
-            ry += 26
+            kids = rec["raw"].Children; n = int(kids.Count)
+            if (n != rec["n"] or (n and kids[n - 1] is not rec["last"])) and not Seam.refresh(g, rec): return False
+            rb = rec["catch"]
+            if rb is not None and bool(rb.CanMove) != bool(LAYOUT.arrange): rb.CanMove = bool(LAYOUT.arrange)
+        except Exception: return False
+        Seam.watch(rec, True); return True
     @staticmethod
-    def _pick(dd, was):
-        try: return int(dd.GetSelectedIndex())
-        except Exception: return was
-    def poll(self):
-        c = self.c
-        if c is None: return
-        L = LAYOUT
-        if L.page_refresh: L.page_refresh = False; HOST.refresh_settings(LAYOUT_PAGE); return
-        for n, (key, dd3, zi, ids) in enumerate(c["zone_dd"]):
-            i = self._pick(dd3, zi)
-            if i != zi and 0 <= i < len(ids):
-                c["zone_dd"][n] = (key, dd3, i, ids); zid = None if i == 0 else ids[i]; L.page_preview = ""
-                if zid:
-                    W, H = Kit.screen(); zs = L.frames_in_use(W, H) if W > 0 and H > 0 else None
-                    z = zs.by_id(zid) if zs is not None else None; L.page_preview = L.preview_text(key, z)
-                L.assign_to(key, zid); L.page_refresh = True; return
-        dd, fi = c["zones"]; i = self._pick(dd, fi)
-        if i != fi and 0 <= i < len(self.frame_names): c["zones"] = (dd, i); L.use_frames(self.frame_names[i]); return
-        dd2, li = c["windows"]; i = self._pick(dd2, li)
-        if i != li and 0 <= i < len(self.layout_names):
-            c["windows"] = (dd2, i); L.use_windows("" if i == 0 else self.layout_names[i]); return
-        for k, attr in (("game", "game_grows"), ("fit_view", "fit_view")):
-            v = bool(c[k].IsChecked)
-            if v != getattr(L, attr):
-                setattr(L, attr, v); L.save_opts(); L.dirty = True
-                if k != "game": L.fresh = True
-        if Kit.was_clicked(self.store, "reclaim"): L.reclaim_space(); return
-        if Kit.was_clicked(self.store, "reclaim_undo"): L.reclaim_back(); return
-        if Kit.was_clicked(self.store, "check"): L.report_fit()
-        if Kit.was_clicked(self.store, "arrange"): L.set_arrange(not L.arrange); return
-        if Kit.was_clicked(self.store, "edit"): L.edit(fresh=False)
-        elif Kit.was_clicked(self.store, "new"): L.edit(fresh=True)
-        elif Kit.was_clicked(self.store, "remove"):
-            if not L.remove_frames(L.frames_name):
-                Kit.say("Default can't be deleted; pick another frame layout first.", Kit.HUE_BAD)
-        elif Kit.was_clicked(self.store, "save"): L.save_windows()
-        elif Kit.was_clicked(self.store, "reset"): L.use_windows(LAYOUT_DEFAULT)
-        elif Kit.was_clicked(self.store, "free"): L.use_windows("")
+    def refresh(g, rec):
+        cur = Kit._children(rec["raw"]); have = set(cur)
+        if rec["catch"] is not None and rec["catch"] not in have: return False
+        frame = set(c for c in map(Kit.client_control, Kit._frame_parts.get(g) or ()) if c is not None)
+        rec["frame"] = [fv for fv in rec["frame"] if fv[0] in have]
+        rec["title"] = [t for t in rec["title"] if t[0] in have]; new = [c for c in cur if c not in rec["kids"]]
+        for c in new:
+            if c in frame: rec["frame"].append((c, bool(c.IsVisible))); c.IsVisible = False
+        Seam.adopt(rec, [c for c in new if c not in frame])
+        rec["kids"], rec["n"], rec["last"] = have, len(cur), cur[-1] if cur else None; return True
+    @staticmethod
+    def adopt(rec, new):
+        M = Kit.MARGIN; down = 30 + Kit.GAP
+        for c in new:
+            r = Kit._raw_rect(c)
+            if r is None or not (M - 4 <= r[1] < M + 34 and r[1] + r[3] <= M + 36): continue
+            rec["title"].append([c, r[0], r[1], bool(c.IsVisible)]); c.Location = ClientWin.point(r[0], r[1] + down)
+            c.IsVisible = rec["open"] and rec["title"][-1][3]
+    @staticmethod
+    def watch(rec, trimmed):
+        M = Kit.MARGIN; down = 30 + Kit.GAP
+        for c, v in rec.get("frame", ()) if trimmed else ():
+            try:
+                if c.IsVisible: c.IsVisible = False
+            except Exception: pass
+        for t in rec["title"]:
+            c = t[0]
+            try:
+                r = Kit._raw_rect(c) if trimmed else None
+                if r is not None and r[1] < M + 34:
+                    t[1], t[2], t[3] = r[0], r[1], bool(c.IsVisible); c.Location = ClientWin.point(r[0], r[1] + down)
+                    c.IsVisible = rec["open"] and t[3]
+                elif not rec["open"] and bool(c.IsVisible): t[3] = True; c.IsVisible = False
+            except Exception: pass
+    @staticmethod
+    def trim(g, slot, pads):
+        raw = Kit._raw_gump(g)
+        if raw is None: return False
+        M = Kit.MARGIN; down = 30 + Kit.GAP
+        frame = set(c for c in map(Kit.client_control, Kit._frame_parts.get(g) or ()) if c is not None)
+        hid, title = [], []
+        for c in Kit._children(raw):
+            r = Kit._raw_rect(c)
+            if r is None: continue
+            vis = bool(c.IsVisible)
+            if c in frame: c.IsVisible = False; hid.append((c, vis))
+            elif M - 4 <= r[1] < M + 34 and r[1] + r[3] <= M + 36:
+                c.IsVisible = False; c.Location = ClientWin.point(r[0], r[1] + down); title.append([c, r[0], r[1], vis])
+        l, t = Seam.cut(pads)[:2]; box = G.CreateGumpColorBox(0.01, "#000000"); box.SetRect(l, t, slot[2], slot[3])
+        g.Add(box); Kit.flush(); rb = Kit.client_control(box)
+        if rb is not None and raw.Children.Remove(rb):
+            raw.Children.Insert(0, rb); rb.AcceptMouseInput = True; rb.CanMove = bool(LAYOUT.arrange)
+            if len(Seam.catchers) > 64:
+                for k in [k for k in Seam.catchers if k.IsDisposed]: Seam.catchers.pop(k, None)
+            Seam.catchers[rb] = g
+        was = bool(raw.AcceptMouseInput); Kit._prune(Seam.recs, 32)
+        if rb is not None and rb in Seam.catchers: raw.AcceptMouseInput = False
+        cur = Kit._children(raw); n = len(cur)
+        Seam.recs[g] = {"slot": tuple(slot), "pads": pads, "raw": raw, "n": n, "frame": hid, "title": title,
+                        "open": False, "until": 0.0, "box": box, "catch": rb, "mouse": was,
+                        "last": cur[-1] if n else None, "kids": set(cur)}
+        return True
+    @staticmethod
+    def undo(g):
+        rec = Seam.recs.pop(g, None)
+        if rec is None or not Kit.is_open(g): return False
+        Seam.bare.pop(g, None); on = Kit._frame_want.get(g)
+        for c, x, y, vis in [(c, None, None, v if on is None else on) for c, v in rec["frame"]] + rec["title"]:
+            try:
+                if x is not None: c.Location = ClientWin.point(x, y)
+                c.IsVisible = vis
+            except Exception: pass
+        rec["raw"].AcceptMouseInput = rec["mouse"]; Seam.catchers.pop(rec.get("catch"), None); Kit.dispose(rec["box"])
+        return True
+    @staticmethod
+    def undo_all():
+        for g in list(Seam.recs): Seam.undo(g)
+        for g in list(Seam.bare): Seam.unstrip(g)
+    @staticmethod
+    def hover(all_on=False):
+        if not (Seam.recs or Seam.bare): return
+        m = Kit.mouse_pos(); now = time.time(); sig = (m, all_on, len(Seam.recs), len(Seam.bare))
+        if sig == Seam.seen[0] and now < Seam.seen[1]: return
+        Seam.seen[0], Seam.seen[1] = sig, now + 0.25
+        for d, trimmed in ((Seam.recs, True), (Seam.bare, False)):
+            for g, rec in list(d.items()):
+                if not rec["title"]: continue
+                if not Kit.is_open(g): d.pop(g, None); continue
+                r = rec["slot"] if trimmed else Kit.rect(g)
+                if r is None: continue
+                x, y, w, h = r; top = rec["pads"][1] if trimmed else Kit.MARGIN + 4
+                band = 30 + top if rec["open"] else REVEAL_H
+                if all_on or (m is not None and x <= m[0] < x + w and y <= m[1] < y + band):
+                    rec["until"] = now + REVEAL_HOLD
+                want = now < rec["until"]
+                if want: Seam.seen[1] = min(Seam.seen[1], rec["until"])
+                if want != rec["open"]:
+                    rec["open"] = want
+                    for t in rec["title"]:
+                        try: t[0].IsVisible = want and t[3]
+                        except Exception: pass
 
 
-LAYOUT_PAGE = "va.layout"
 SNAP = Snap()
 ALERTS = Alerts()
 GUARD = Guard()
 LAYOUT = Layout()
 HOST = Host()
 MODULE_FILES = (("actionbar", "Action Bar", "ActionBarModule.py"), ("hud", "Character HUD", "CharacterHudModule.py"),
-    ("inventory", "Inventory", "InventoryModule.py"), ("grimoire", "Grimoire", "GrimoireModule.py"),
-    ("worldmap", "World Map", "WorldMapModule.py"), ("ultima", "Ultima Tracker", "UltimaTrackerModule.py"),
+    ("interface", "Interface", "InterfaceModule.py"), ("inventory", "Inventory", "InventoryModule.py"),
+    ("grimoire", "Grimoire", "GrimoireModule.py"), ("worldmap", "World Map", "WorldMapModule.py"),
+    ("ultima", "Ultima Tracker", "UltimaTrackerModule.py"),
     ("social", "Social", "SocialModule.py"), ("skills", "Skills", "SkillsModule.py"),
     ("butler", "Property Butler", "PropertyButlerModule.py"), ("meters", "Meters", "MetersModule.py"),
     ("mongotchi", "Mongotchi", "MongotchiModule.py"),)
@@ -7835,9 +7723,7 @@ def load_modules():
     for d in folders:
         for n in sorted(n for n in safe(lambda: os.listdir(d), []) or [] if n.endswith("Module.py")):
             if n not in taken: taken.add(n); entries.append((d, n))
-    entries.sort(key=lambda e: order.get(e[1], len(order)))
-    titles = dict((f, (k, t)) for k, t, f in MODULE_FILES); prefs = Kit.codec_load(Kit.get_var(SETTINGS_KEY))
-    on = set(k for k in prefs.get("modules", "").split(",") if k)
+    entries.sort(key=lambda e: order.get(e[1], len(order))); titles = dict((f, (k, t)) for k, t, f in MODULE_FILES)
     for where, name in entries:
         path = os.path.join(where, name)
         if not os.path.isfile(path): continue
@@ -7853,9 +7739,7 @@ def load_modules():
                 continue
             if m is not None and dict.__contains__(HOST.by_key, m.key):
                 API.SysMsg(HOST.TWICE % (APP_NAME, m.title, m.key), Kit.HUE_BAD); continue
-            wanted = m is not None and (m.key in on or any(
-                old in on for p in m.parts for old in (p[4] if len(p) > 4 else ())))
-            if m is not None and m.interval is not None and not wanted:
+            if m is not None and m.interval is not None:
                 HOST.add_lazy(m.key, m.title, m.desc, path, m.interval, m.default_on, m.category, m.parts, m.aliases)
                 continue
             exec(compile(text, path, "exec"), globals())
@@ -7863,7 +7747,7 @@ def load_modules():
             line = getattr(ex, "lineno", None)
             if line: msg = "%s (%s line %s)" % (getattr(ex, "msg", None) or ex, name, line)
             else: msg = "%s%s" % (ex, _error_where())
-            Kit.say("%s could not be loaded: %s" % (name, msg), Kit.HUE_BAD)
+            Kit.say("couldn't load %s (%s)." % (name, msg), Kit.HUE_BAD)
             kt = (m.key, m.title) if m is not None else titles.get(name)
             if kt is not None and not dict.__contains__(HOST.by_key, kt[0]):
                 key, title = kt; s = HOST.add(key, title, "", lambda: None, 0.1); s.api, s.broken = None, msg
@@ -7874,7 +7758,7 @@ PROFILES = Profiles()
 if not VA_ALONE:
     try: PROFILES.startup()
     except Exception as _ex:
-        Kit.say("the favourite profile could not be put on this character: %s%s"
+        Kit.say("couldn't put the favourite profile on this character (%s%s)."
                    % (Tz.why(_ex), _error_where()), Kit.HUE_BAD)
 
 
@@ -7920,7 +7804,7 @@ def _module_sysstats():
                 c[name] = Kit.add_label(g, "", M + 90, yb + 6 + i * 20, Kit.HUE_TEXT)
         wnd.end(g); refresh()
     wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, default=(70, 200), mini=(MINI_W, MINI_H),
-                     icon=TRAY_ICON, close_tip="Close")
+                     icon=TRAY_ICON)
     def refresh():
         v = st["vals"]; c = win["c"]
         if st["minimized"]:
@@ -7950,6 +7834,7 @@ def _module_sysstats():
             else: Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY)
         if st["open"] and Kit.was_clicked(win["store"], "close"): close_window()
         if not 0 <= st["next"] - now <= EVERY:
+            if not st["open"] and HOST.layout_holds(KEY): open_window()
             st["next"] = now + EVERY; v = st["vals"] = read()
             tip = "Ping %s, %s FPS, memory %s; click to open or close the window" % (
                 v.get("Ping", "-"), v.get("FPS", "-"), v.get("Memory", "-"))

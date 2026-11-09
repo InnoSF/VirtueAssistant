@@ -12,6 +12,7 @@ Key "actionbar", On screen. Cells for items, spells, skills and windows.
 - Keys starts keybind mode; Lock locks the bar (with zones, toggles Arrange mode); Grid shows the snap grid.
 - Bag slots, Grimoire, Virtue Assistant and Module windows buttons show their window, or fold it into the bar's tray.
 - Travel cells go to a runebook destination through Grimoire.
+- Thin gold lines (3 px) edge the slot frames and separate the cells, bag slots and window buttons; they stay gold in Dark mode.
 
 ## Character HUD (CharacterHudModule.py)
 
@@ -31,6 +32,20 @@ Bandages never bandages by itself: one press, one bandage (shard rules).
 
 Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, charge or scroll, star favourite destinations and search every runebook.
 
+## Interface (InterfaceModule.py)
+
+Key "interface", On screen. Zones, layout and the unified UI. On by default.
+
+- Its settings page (Settings > Interface) holds everything about zones, layouts and snapping: Set up, Arrange windows, Edit zones, the look, saved frame and window layouts, the zone of each window, snapping and the grid.
+- **Set up** opens a three-step window: a ready-made screen, the zone of each window, the look. It opens by itself once, when no layout has been chosen yet.
+- **One panel** (Join windows in zones into one panel): one frame over every zone, no corners or dividing lines, a gold border round the game view; windows drop their frames and title rows (hover a window's top edge for it).
+- **Dark mode** (Settings > Interface, LOOK): tints every window's stone frame charcoal; it stays on with Interface off.
+- The zone editor (Edit zones) adds Split, Join and Apart to the zone tools.
+- Windows in zones (2.7.0.12): every window that holds a list or rows draws at its zone's size and shows as many rows as fit; a window too small for its zone keeps its own size and says so once. A window assigned to a zone opens there even if it was closed, and its own buttons don't close it. Windows that can sit in a zone include the Ultima Tracker panel, Supplies (and Supplies Rows), the killer window, Mongotchi's Shop, Playpen, Journeys and Achievements, the Property Butler Log and Skill Bags Results.
+- The Paperdoll pairs with a "<zone> bags" zone below it for the bags; an empty bags zone left behind when the Paperdoll moves is removed.
+- **Check fit** (Settings > Interface > LAYOUTS) lists every zoned window and whether it fills its zone, plus empty zones and windows assigned but not open. Windows assigned but not open stay in the window lists, marked "(not open)".
+- Off: zones stop; every window is free and your own game view comes back. The settings page stays for snapping. Running alone it does nothing (zones need the full Virtue Assistant).
+
 ## Inventory (InventoryModule.py)
 
 Key "inventory", Your things. Bags, paperdoll, storage, restock, supplies.
@@ -43,7 +58,7 @@ Key "inventory", Your things. Bags, paperdoll, storage, restock, supplies.
    Supplies         Pack supplies, low counts marked
 ```
 
-Paperdoll joins the Bags window.
+Paperdoll joins the Bags window. Storage re-reads an open container soon after its items change (and every 15 s while it is open); a Name or Forget shows a moment later.
 
 ## Meters (MetersModule.py)
 
@@ -99,7 +114,7 @@ Key "skills", Skills and home. Skills, training and AFK alarms.
    Skill Bags       A skill on each item in a bag, once
 ```
 
-Skill Bags pauses while the Training Alarm is raised.
+Skill Bags pauses while the Training Alarm is raised. It uses only bags in your backpack, and opens a closed bag only on Run (Auto shows it as closed). A custom tool rule runs only on Run and stops at its count. The Training Alarm ignores a gump another module said it was opening, once that module knows the gump's id.
 
 ## Social (SocialModule.py)
 
@@ -126,4 +141,4 @@ Key "worldmap", The world. Pings, corpse, dig and dry spots, traps, also shown o
    Traps & Fields   Traps and magic fields recoloured
 ```
 
-The other parts send their pings through Map Pings.
+The other parts send their pings through Map Pings. Corpse uses only a corpse named "corpse of <your name>" (or "remains of"); a nameless one waits until you click it once, and Get my things refuses a corpse that isn't yours.

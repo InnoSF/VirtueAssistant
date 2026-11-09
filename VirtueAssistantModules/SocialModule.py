@@ -33,10 +33,13 @@ def _module_social():
     DATE_RE = re.compile(r"(\d{1,4})\s*([-/.])\s*(\d{1,2})\s*[-/.]\s*(\d{1,4})")
     settings = {"tab": "friends", "rows": DEFAULT_ROWS, "bars": True, "announce": True,
                 "gevery": GUILD_EVERY_MIN, "ghide": True, "dbutton": DIPLOMACY_BUTTON, "left": False, "gsort": "online"}
-    st = {"shutting": False, "minimized": False, "docked": False, "friends": [], "names_dirty": False, "party": None,
-          "profile": None, "msg": {}, "gids": {}, "me_s": 0, "fserials": []}
-    win = {"g": None}; cleanup = Kit.Cleanup(); jobs = []; NOTES = {}; notes_st = {"dirty": False, "ver": 0}
-    ed = {"g": None, "c": {}, "store": ({}, {}), "name": ""}; M = Kit.MARGIN; tell = Kit.sayer(TITLE)
+    DEFAULTS = dict(settings)
+    st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "friends": [], "names_dirty": False,
+          "party": None, "profile": None, "msg": {}, "gids": {}, "me_s": 0, "fserials": []}
+    win = {"g": None, "c": {}, "store": ({}, {})}
+    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    jobs = []; NOTES = {}; notes_st = {"dirty": False, "ver": 0, "chg": {}}
+    ed = {"g": None, "c": {}, "store": ({}, {}), "name": ""}; M = Kit.MARGIN
     def load_settings():
         p = Kit.get_var(SETTINGS_KEY).split("|")
         def num(i, lo, hi, dflt):
@@ -98,28 +101,45 @@ def _module_social():
     def load_notes():
         try: raw = str(API.GetPersistentVar(NOTES_KEY, "", API.PersistentVar.Account) or "")
         except Exception: raw = ""
-        NOTES.clear(); notes_st["ver"] += 1
+        notes_from(raw)
+    def notes_from(raw):
+        new = {}
         for rec in raw.split(PR):
             f = [unclean(x).strip() for x in rec.split(PF)]
-            if len(f) >= 2 and f[0] and f[1] and len(NOTES) < NOTES_MAX: NOTES[f[0].lower()] = (f[0], f[1])
+            if len(f) >= 2 and f[0] and f[1] and len(new) < NOTES_MAX: new[f[0].lower()] = (f[0], f[1])
+        for k, v in list(notes_st["chg"].items()):
+            if v is None: new.pop(k, None)
+            else: new[k] = v
+        for k in [k for k in NOTES if k not in new]: del NOTES[k]
+        NOTES.update(new); notes_st["ver"] += 1
     def save_notes():
         if not notes_st["dirty"]: return
-        notes_st["dirty"] = False
-        data = PR.join(PF.join([clean(n), clean(t)]) for n, t in sorted(NOTES.values(), key=lambda e: e[0].lower()))
-        try: API.SavePersistentVar(NOTES_KEY, data, API.PersistentVar.Account)
-        except Exception: pass
+        notes_st["dirty"] = False; chg = dict(notes_st["chg"])
+        entries = dict((k, None if v is None else PF.join([clean(v[0]), clean(v[1])])) for k, v in chg.items())
+        try:
+            raw = str(API.GetPersistentVar(NOTES_KEY, "", API.PersistentVar.Account) or "")
+            data = Kit.merge_text(raw, entries, lambda rec: unclean(rec.split(PF)[0]).strip().lower(), PR)[0]
+            API.SavePersistentVar(NOTES_KEY, data, API.PersistentVar.Account)
+        except Exception as ex:
+            notes_st["dirty"] = True
+            say("couldn't save the notes (%s); they're saved with the next change." % ex, Kit.HUE_BAD); return
+        for k, v in chg.items():
+            if notes_st["chg"].get(k, 0) == v: notes_st["chg"].pop(k, None)
+        notes_from(data)
     def note_of(player_name): e = NOTES.get(str(player_name or "").strip().lower()); return e[1] if e else ""
     def notes_changed(): notes_st["dirty"] = True; notes_st["ver"] += 1; jobs.append(save_notes)
     def set_note(name, text):
         name = " ".join(str(name or "").split()); text = " ".join(str(text or "").split())[:NOTE_CHARS]
-        if not name: tell("type a name first."); return False
+        if not name: say("type a name first."); return False
         k = name.lower()
         if not text:
-            if NOTES.pop(k, None) is not None: tell("note on %s deleted." % name); notes_changed()
+            if NOTES.pop(k, None) is not None:
+                notes_st["chg"][k] = None; say("note on %s deleted." % name); notes_changed()
             return True
         if k not in NOTES and len(NOTES) >= NOTES_MAX:
-            tell("at most %d notes; delete one first." % NOTES_MAX, Kit.HUE_BAD); return False
-        NOTES[k] = (name, text); notes_changed(); tell("note on %s saved." % name, Kit.HUE_GOOD); return True
+            say("at most %d notes; delete one first." % NOTES_MAX, Kit.HUE_BAD); return False
+        NOTES[k] = notes_st["chg"][k] = (name, text); notes_changed()
+        say("note on %s saved." % name, Kit.HUE_GOOD); return True
     fit = Kit.fit
     def shift_held(): return bool(Client.key_held("shift"))
     def set_vis(part, on):
@@ -447,17 +467,15 @@ def _module_social():
     def last_gump(): return safe(lambda: Kit.on_client(_last_gump_run)) or (0, "")
     def guild_test(raw): return may_be_guild(raw) and classify(raw) in ("guild", "roster")
     def hide_next(gid=0):
-        if not settings["ghide"]: return
-        if gid: API.ConfigNextGump(serial=gid, isVisible=False)
-        else: st["hid_any"] = True; API.ConfigNextGump(isVisible=False)
-    def reset_hide(): st["hid_any"] = False; API.ConfigNextGump()
+        exp = HOST.services.get("gump.expect")
+        if exp is not None and gid: exp(gid, GUMP_WAIT + 1.0)
+        if settings["ghide"] and gid: API.ConfigNextGump(serial=gid, isVisible=False)
+    def reset_hide(): API.ConfigNextGump()
     def unknown_gump(had):
         gid, raw = last_gump()
         if not gid or gid == had: return "the guild window didn't come"
         dump = " ".join(raw.split())[:DUMP_CHARS] if raw else "(empty layout)"
-        if st["hid_any"]: API.CloseGump(gid); st["hid_any"] = False; what = "closed again"
-        else: what = "left open"
-        tell("gump 0x%08X came instead of the guild window (%s); it begins: %s." % (gid, what, dump))
+        say("gump 0x%08X came instead of the guild window (left open); it begins: %s." % (gid, dump))
         return "the guild window didn't come (another gump did)"
     def wait_gump(check):
         deadline = time.time() + GUMP_WAIT
@@ -487,12 +505,12 @@ def _module_social():
             st["guild"] = gd; st["guild_busy"] = False; st["guild_dirty"] = True
             if gd["ok"] and not failed: save_guild()
         if gd["note"]:
-            if not failed: tell("%s." % gd["note"])
+            if not failed: say("%s." % gd["note"])
             elif gd["note"] != st["guild_said"]:
                 st["guild_said"] = gd["note"]; again = ""
                 if settings["gevery"] and settings["tab"] == "guild":
                     again = " (retry in %d min)" % max(1, int((st["guild_next"] - time.time()) / 60 + 0.5))
-                tell("%s%s." % (gd["note"], again), Kit.HUE_BAD)
+                say("%s%s." % (gd["note"], again), Kit.HUE_BAD)
     def read_guild_window(old):
         gd = empty_guild(); gd["members"] = list(old["members"]); gids = st["gids"]
         def fail(note, stamp=False):
@@ -556,7 +574,6 @@ def _module_social():
         if had_open: press(gid, INFO_TAB, INFO_BUTTON)
         else: API.CloseGump(gid); st["ghid"] = 0
         return gd
-    queue = Kit.queuer(st)
     def win_w(tab): return GUILD_W if tab == "guild" else W
     def layout_fit(fw, fh, mode):
         new = (int(fw), int(fh)) if (fw is not None and fh is not None) else None
@@ -566,7 +583,9 @@ def _module_social():
             if sig != st["again_for"] or not 0 <= now - st.get("again_at", 0.0) < 5.0:
                 st.update({"again_for": sig, "again_at": now, "again_build": True}); queue("redraw")()
     def min_title_w(): return max(160, M + 30 + Kit.text_w(TITLE.upper()) + 6 + 94 + M)
-    def min_w(): return (M + 30 + Kit.text_w(TITLE.upper()) + 16 + 84 + Kit.DOCK_DX + 35 + Kit.text_w("Settings") + M)
+    def min_w():
+        return (M + 30 + Kit.text_w(TITLE.upper()) + 16 + (0 if Kit.zone_up(KEY) else 84 + Kit.DOCK_DX) + 35
+                + Kit.text_w("Settings") + M)
     def tab_lines(iw):
         out, tx, line = [], 10, 0
         for key, cap in TABS:
@@ -590,6 +609,7 @@ def _module_social():
         else: st["again_for"] = None
         if not st["minimized"]:
             fit = st.get("fit")
+            if fit is not None and fit[1] < min_size()[1]: fit = None
             if fit is not None: w, h = max(min_title_w(), fit[0]), fit[1]
             IW = w - 2 * M; c["iw"] = IW; wnd.frame(g, w, h, settings=w >= min_w())
             yt = M + 30 + Kit.GAP; places, nlines = tab_lines(IW); Kit.add_section(g, M, yt, IW, 30 * nlines)
@@ -606,8 +626,10 @@ def _module_social():
     def build_tab(g, store, c, rows, tab, x, y, w, h, fit=False):
         info, bars, nrows = tab_layout(tab); TOOL_RIGHT[0] = x + w - 6
         def list_rows(yy): return max(1, (y + h - 12 - yy) // ROW_H) if fit else nrows
-        c["info"] = [Kit.add_label(g, "", x + 10, y + 8 + 22 * i, Kit.HUE_INFO) for i in range(info)]
-        yy = y + 8 + 22 * info + (8 if info else 0)
+        vis = max(1, min(info, (h - 16 - bars * 30 - (ROW_H + 12 if nrows else 4)) // 22)) if fit and info else info
+        c["info"] = [Kit.add_label(g, "", x + 10, y + 8 + 22 * min(i, vis - 1), Kit.HUE_INFO) for i in range(info)]
+        for lbl in c["info"][vis:]: lbl.IsVisible = False
+        yy = y + 8 + 22 * vis + (8 if vis else 0)
         if tab == "friends":
             items = [("add", Kit.ART_PLAY, ["Add friend...", None], "Target someone to add to TazUO's friends list"),
                      ("add_last", Kit.ART_OK, ["Add last target", None],
@@ -1046,7 +1068,7 @@ def _module_social():
         notew.close(); w, h = NOTE_W, NOTE_H; dx, dy = 240, 180
         if Kit.is_open(win["g"]): dx, dy = win["g"].GetX() + 40, win["g"].GetY() + 60
         g, store, c = notew.begin(w, h, (dx, dy)); Kit.add_window_frame(g, w, h)
-        Kit.add_section(g, M, M, w - 2 * M, 30); Kit.add_label(g, "NOTE ON A PLAYER", M + 30, M + 7, Kit.HUE_TITLE)
+        Kit.add_section(g, M, M, w - 2 * M, 30); Kit.add_label(g, "PLAYER NOTE", M + 30, M + 7, Kit.HUE_TITLE)
         Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close without saving",
                        on_click=queue("note_close"))
         IW = w - 2 * M; yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, NOTE_BODY_H); lx = M + 12
@@ -1079,28 +1101,28 @@ def _module_social():
         if tb is not None: tb.SetText("")
         st["msg"].pop(settings["tab"], None)
     SAY = {"psend": "PartyMsg", "gsend": "GuildMsg", "asend": "AllyMsg"}
-    def say(fn, txt):
-        if not txt: tell("type something first."); return
+    def send_chat(fn, txt):
+        if not txt: say("type something first."); return
         getattr(API, fn)(txt); clear_msg()
     def add_friend(serial):
         serial = int(serial or 0)
-        if not serial: tell("nothing targeted."); return
-        if serial == player_serial(): tell("that's you."); return
+        if not serial: say("nothing targeted."); return
+        if serial == player_serial(): say("that's you."); return
         m = API.FindMobile(serial)
-        if m is None: tell("target a player or creature in view.", Kit.HUE_BAD); return
+        if m is None: say("target a player or creature in view.", Kit.HUE_BAD); return
         name = str(m.Name or ""); who = name or "0x%08X" % serial
         if serial in [int(s) for s in API.GetAllFriends() or ()] or any(s == serial for s, _ in st["friends"]):
-            tell("%s is already a friend." % who)
+            say("%s is already a friend." % who)
         elif API.AddFriend(serial):
             if name: st["names"][serial] = name; st["names_dirty"] = True
-            tell("%s added to friends." % who, Kit.HUE_GOOD)
+            say("%s added to friends." % who, Kit.HUE_GOOD)
             if st["seen"] is not None: st["seen"] = st["seen"] | {serial}
-        else: tell("couldn't add %s to friends." % who, Kit.HUE_BAD)
+        else: say("couldn't add %s to friends (the client refused)." % who, Kit.HUE_BAD)
         st["next_friends"] = 0.0
     def remove_friend(serial):
         name = st["names"].get(serial, "") or "0x%08X" % serial
-        if API.RemoveFriend(serial): tell("%s removed from friends." % name)
-        else: tell("couldn't remove %s." % name, Kit.HUE_BAD)
+        if API.RemoveFriend(serial): say("%s removed from friends." % name)
+        else: say("couldn't remove %s from friends (the client refused)." % name, Kit.HUE_BAD)
         if st["seen"]: st["seen"].discard(serial)
         st["next_friends"] = 0.0
     def row_remove(serial):
@@ -1110,8 +1132,8 @@ def _module_social():
             party = st["party"]
             if party and party[0] and party[0] == player_serial():
                 if not CL.game_action("RequestPartyRemoveMember", [to_uint(serial)], False):
-                    tell("couldn't remove them (%s)." % CL.error, Kit.HUE_BAD)
-            else: tell("only the leader can remove members.")
+                    say("couldn't remove them (%s)." % CL.error, Kit.HUE_BAD)
+            else: say("only the leader can remove members.")
     def clear_inviter():
         try:
             import System; party = Typing._get(CL.world, "Party") if CL.world is not None else None
@@ -1129,11 +1151,11 @@ def _module_social():
         e = WINS[what]
         if e is None: ok = CL.open_ignore_list()
         else: ok = CL.game_action(e[0], [to_uint(player_serial())] if e[1] else (), e[2])
-        if not ok: tell("couldn't open that (%s)." % (CL.error or "no client access"), Kit.HUE_BAD)
+        if not ok: say("couldn't open that (%s)." % (CL.error or "no client access"), Kit.HUE_BAD)
         return ok
     def party_window():
         world = CL.world
-        if world is None: tell("couldn't open the party window (no client access: %s)." % CL.error, Kit.HUE_BAD); return
+        if world is None: say("couldn't open the party window (no client access: %s)." % CL.error, Kit.HUE_BAD); return
         def run():
             import System; mgr = Typing._get(world, "Macros"); asm = mgr.GetType().Assembly
             mo_t, mt_t, ms_t = [asm.GetType("ClassicUO.Game.Managers." + n)
@@ -1141,24 +1163,26 @@ def _module_social():
             mo = System.Activator.CreateInstance(mo_t, System.Array[object]([System.Enum.Parse(mt_t, "Open", True),
                  System.Enum.Parse(ms_t, "PartyManifest", True)]))
             CL.call(mgr, "SetMacroToExecute", [mo]); CL.call(mgr, "Update"); return True
-        if not CL.on_main(run): tell("couldn't open the party window (%s)." % CL.error, Kit.HUE_BAD)
+        if not CL.on_main(run): say("couldn't open the party window (%s)." % CL.error, Kit.HUE_BAD)
     def diplomacy_job():
         gid, raw = last_gump()
         if not (gid and classify(raw) in ("guild", "roster")): gid = CL.find_server_gump(guild_test)[0]
         if not gid:
             if not CL.game_action("OpenGuildGump"):
-                tell("couldn't ask for the guild window (%s)." % CL.error, Kit.HUE_BAD); return
+                say("couldn't ask for the guild window (%s)." % CL.error, Kit.HUE_BAD); return
             gid, _raw, _kind = wait_gump(lambda r2: classify(r2) in ("guild", "roster") and "ok")
         if not gid:
-            tell("the guild window didn't come (are you in a guild?).", Kit.HUE_BAD); return
+            say("the guild window didn't come (are you in a guild?).", Kit.HUE_BAD); return
         if not press(gid, DIPLOMACY_LABEL, settings["dbutton"]):
-            tell("no %s button found; press it in the guild window (or set its id in Social settings)."
+            say("no %s button found; press it in the guild window (or set its id in Social settings)."
                  % DIPLOMACY_LABEL)
     def click_mobile(serial):
-        if API.HasTarget("any") and not HOST.cursor_busy(KEY): API.Target(serial); return
+        if API.HasTarget("any") and not HOST.cursor_busy(KEY):
+            if HOST.harm_ok(serial, "social.row", TITLE): API.Target(serial)
+            return
         API.SetLastTarget(to_uint(serial)); m = API.FindMobile(serial)
-        if m is None: tell("%s isn't in view." % (st["names"].get(serial, "") or "they"))
-        else: tell("%s is your last target." % (str(m.Name or "") or "that"))
+        if m is None: say("%s isn't in view." % (st["names"].get(serial, "") or "they"))
+        else: say("%s is your last target." % (str(m.Name or "") or "that"))
     def start_guild_read():
         if st["guild_busy"]: return False
         st["guild_busy"] = True; st["guild_next"] = time.time() + GUILD_RETRY; jobs.append(guild_job); return True
@@ -1166,10 +1190,46 @@ def _module_social():
         now_in = st["inview"]
         if not (settings["announce"] or settings["left"]) or st["seen"] is None: st["seen"] = now_in; return
         if settings["announce"]:
-            for s in now_in - st["seen"]: tell("%s is in view." % mob_name(s, "a friend"), Kit.HUE_GOOD)
+            for s in now_in - st["seen"]: say("%s is in view." % mob_name(s, "a friend"), Kit.HUE_GOOD)
         if settings["left"]:
-            for s in st["seen"] - now_in: tell("%s left view." % mob_name(s, "a friend"))
+            for s in st["seen"] - now_in: say("%s left view." % mob_name(s, "a friend"))
         st["seen"] = now_in
+    def party_action(action):
+        party = st["party"]
+        if not in_party(party): say("not in a party.")
+        elif action == "leave":
+            if not CL.game_action("RequestPartyRemoveMember", [to_uint(player_serial())], False):
+                say("couldn't leave (%s)." % CL.error, Kit.HUE_BAD)
+        elif CL.game_action("RequestPartyLootState", [not party[2]], False):
+            say("party %s loot your corpse." % ("may not" if party[2] else "may"))
+        else: say("couldn't change looting (%s)." % CL.error, Kit.HUE_BAD)
+    def answer_invite(action):
+        inv = to_uint(st["party"][1])
+        if action == "accept":
+            def accept():
+                if not CL.game_action("RequestPartyAccept", [inv], False): return None
+                clear_inviter(); return True
+            if CL.on_main(accept) is None: say("couldn't accept (%s)." % CL.error, Kit.HUE_BAD)
+            return
+        net = Client._type("ClassicUO.Network.AsyncNetClient"); ext = Client._type("ClassicUO.Network.NetClientExt")
+        def decline():
+            CL.call(None, "Send_PartyDecline", [Typing._get(None, "Socket", net), inv], ext)
+            clear_inviter(); return True
+        if net is None or ext is None or CL.on_main(decline) is None:
+            say("couldn't decline (%s)." % CL.error, Kit.HUE_BAD)
+    def next_sort():
+        i = SORT_CODES.index(settings["gsort"]) if settings["gsort"] in SORT_CODES else 0
+        settings["gsort"] = SORT_CODES[(i + 1) % len(SORT_CODES)]; save_settings(); c = win["c"]; lbl = c.get("gsort")
+        if lbl is not None: Kit.set_text(lbl, sort_caption(c))
+        btn = c.get("gsort_btn")
+        if btn is not None and c.get("gsort_bare"): Kit.with_tip(btn, sort_tip(c))
+        st["page"]["guild"] = 0; st["next_list"] = 0.0
+    def guild_refresh():
+        st["guild_said"] = ""
+        if start_guild_read(): refresh()
+        else: say("already reading the guild window.")
+    WITH_ARG = {"click": click_mobile, "rm": row_remove}
+    ACTIONS = {"pwin": party_window, "note_close": notew.close, "gsort": next_sort, "grefresh": guild_refresh}
     PAGE_OPTS = {"ldy": 4, "fw": 40, "ltip": True, "clamp": False}
     def page_table(w):
         return (("WINDOW", (("note", fit("Shift+click a row to note that player; %d saved for this account."
@@ -1195,54 +1255,19 @@ def _module_social():
             st["rebuild"] = True
         if (new["announce"] or new["left"]) and not (old["announce"] or old["left"]): st["seen"] = None
     cfg = Kit.Page(settings, page_table, save_settings, on_change, PAGE_OPTS)
+    LOADED_FOR = [0]; load_settings(); LOADED_FOR[0] = player_serial()
     def _start():
         st.update({"shutting": False, "docked": False, "queue": [], "page": {}, "mobs": {},
                    "inview": set(), "seen": None, "next_list": 0.0, "next_friends": 0.0,
                    "next_profile": 0.0, "guild_busy": False, "guild_dirty": False,
                    "guild_next": 0.0, "guild_fails": 0, "guild_said": "", "guild_pages": 0,
-                   "ghid": 0, "hid_any": False, "view": {}, "view_serials": None, "allies": [], "fit": None,
+                   "ghid": 0, "view": {}, "view_serials": None, "allies": [], "fit": None,
                    "me_s": 0, "friends_raw": None, "kept": {}, "prof_part": False,
                    "again_for": None, "again_build": False, "minimized": wnd.start_min()})
         del jobs[:]
         if not (LOADED_FOR[0] and LOADED_FOR[0] == player_serial()): load_settings()
         LOADED_FOR[0] = 0; CL.find(); build_window()
         wnd.dock(layout_fit, exact=True, verify=True, min=min_size); cleanup.service("social.note", note_of)
-    def party_action(action):
-        party = st["party"]
-        if not in_party(party): tell("not in a party.")
-        elif action == "leave":
-            if not CL.game_action("RequestPartyRemoveMember", [to_uint(player_serial())], False):
-                tell("couldn't leave (%s)." % CL.error, Kit.HUE_BAD)
-        elif CL.game_action("RequestPartyLootState", [not party[2]], False):
-            tell("party %s loot your corpse." % ("may not" if party[2] else "may"))
-        else: tell("couldn't change looting (%s)." % CL.error, Kit.HUE_BAD)
-    def answer_invite(action):
-        inv = to_uint(st["party"][1])
-        if action == "accept":
-            def accept():
-                if not CL.game_action("RequestPartyAccept", [inv], False): return None
-                clear_inviter(); return True
-            if CL.on_main(accept) is None: tell("couldn't accept (%s)." % CL.error, Kit.HUE_BAD)
-            return
-        net = Client._type("ClassicUO.Network.AsyncNetClient"); ext = Client._type("ClassicUO.Network.NetClientExt")
-        def decline():
-            CL.call(None, "Send_PartyDecline", [Typing._get(None, "Socket", net), inv], ext)
-            clear_inviter(); return True
-        if net is None or ext is None or CL.on_main(decline) is None:
-            tell("couldn't decline (%s)." % CL.error, Kit.HUE_BAD)
-    def next_sort():
-        i = SORT_CODES.index(settings["gsort"]) if settings["gsort"] in SORT_CODES else 0
-        settings["gsort"] = SORT_CODES[(i + 1) % len(SORT_CODES)]; save_settings(); c = win["c"]; lbl = c.get("gsort")
-        if lbl is not None: Kit.set_text(lbl, sort_caption(c))
-        btn = c.get("gsort_btn")
-        if btn is not None and c.get("gsort_bare"): Kit.with_tip(btn, sort_tip(c))
-        st["page"]["guild"] = 0; st["next_list"] = 0.0
-    def guild_refresh():
-        st["guild_said"] = ""
-        if start_guild_read(): refresh()
-        else: tell("already reading the guild window.")
-    WITH_ARG = {"click": click_mobile, "rm": row_remove}
-    PLAIN = {"pwin": party_window, "note_close": notew.close, "gsort": next_sort, "grefresh": guild_refresh}
     def _tick():
         if win["g"] is None: return
         if Kit.closed(win): return
@@ -1255,7 +1280,7 @@ def _module_social():
             elif wnd.action(action): continue
             elif kind in WITH_ARG: WITH_ARG[kind](action[1])
             elif action in ("leave", "loot"): party_action(action)
-            elif action in PLAIN: PLAIN[action]()
+            elif action in ACTIONS: ACTIONS[action]()
             elif kind == "tab":
                 if action[1] != settings["tab"]:
                     st["msg"][settings["tab"]] = read_msg(); settings["tab"] = action[1]; save_settings()
@@ -1264,21 +1289,21 @@ def _module_social():
                 st["page"][settings["tab"]] = max(0, st["page"].get(settings["tab"], 0) + action[1])
                 st["next_list"] = 0.0
             elif kind == "follow": Follow.toggle(action[1], TITLE)
-            elif kind == "noview": tell("%s isn't in view." % action[1])
+            elif kind == "noview": say("%s isn't in view." % action[1])
             elif action == "add":
-                tell("target the friend to add.")
-                HOST.pick_target(PICK_TIMEOUT, lambda serial: st["queue"].append(("picked", int(serial or 0))))
+                say("target the friend to add.")
+                HOST.pick_target(PICK_TIMEOUT, lambda serial: queue.add(("picked", int(serial or 0)), dup=True))
             elif kind == "picked":
                 if action[1]: add_friend(action[1])
             elif action == "add_last": add_friend(int(API.LastTargetSerial or 0))
             elif action in WINS:
-                if open_window(action) and action == "invite": tell("target who to invite.")
+                if open_window(action) and action == "invite": say("target who to invite.")
             elif action in ("accept", "decline") and st["party"] and st["party"][1]: answer_invite(action)
-            elif action in SAY: say(SAY[action], read_msg())
+            elif action in SAY: send_chat(SAY[action], read_msg())
             elif action == "diplo": jobs.append(diplomacy_job)
             elif action == "war": API.SetWarMode(not API.Player.InWarMode)
             elif kind == "note":
-                if str(action[1]).startswith("0x"): tell("name not known yet.")
+                if str(action[1]).startswith("0x"): say("name not known yet.")
                 else: open_note(action[1])
             elif action in ("note_save", "note_delete"):
                 if ed["g"] is not None:
@@ -1331,10 +1356,9 @@ def _module_social():
         while jobs and not st["shutting"]: jobs.pop(0)()
     def _stop():
         st["shutting"] = True; save_settings(); st["names_dirty"] = True; save_names(); save_notes(); cleanup.close()
-    LOADED_FOR = [0]; load_settings(); LOADED_FOR[0] = player_serial()
-    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-            "thread_wanted": lambda: bool(jobs), "config_height": cfg.height, "build_config": cfg.build,
-            "poll_config": cfg.poll, "config_closed": cfg.closed}
+    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
+            "thread_tick": _thread_tick, "thread_wanted": lambda: bool(jobs)}
 
 
 if "HOST" not in globals():

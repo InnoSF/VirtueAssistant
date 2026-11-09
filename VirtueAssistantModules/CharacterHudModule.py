@@ -23,8 +23,8 @@ def _module_hud():
         elif pkey in PIECES["piece"]: g = PIECES["piece"][pkey][2]()
         bare = PIECES["bare"]
         if g is None or not bare or not bare.pop(g, False) or not Kit.is_open(g): return
-        for ctrl in list(Kit._frame_parts.get(g) or ()) + list(PIECES["bg"].get(g) or ()):
-            Kit.set(ctrl, "IsVisible", True)
+        Kit.frame_show(g, True)
+        for ctrl in PIECES["bg"].get(g) or (): Kit.set(ctrl, "IsVisible", True)
     def pieces_frame(fkey):
         fn = PIECES["anchor"].get(fkey); g = fn() if fn is not None else None
         return g if Kit.is_open(g) and g.IsVisible else None
@@ -131,8 +131,8 @@ def _module_hud():
             if bare.get(g, False) != want:
                 bare[g] = want
                 if want: Kit.pin_size(g)
-                for ctrl in list(Kit._frame_parts.get(g) or ()) + list(PIECES["bg"].get(g) or ()):
-                    Kit.set(ctrl, "IsVisible", not want)
+                Kit.frame_show(g, not want)
+                for ctrl in PIECES["bg"].get(g) or (): Kit.set(ctrl, "IsVisible", not want)
         PIECES["inside"] = inside
         if inside: pieces_raise(inside)
     PIECES_TARGET = {"fn": None}; READOUT_WORDS = ("Ready", "Done", "Out!", "Dead", "Paused")
@@ -140,12 +140,9 @@ def _module_hud():
     def skill_value(name, default=0.0):
         try: return float(API.GetSkill(name).Value or 0)
         except Exception: return default
-    def part_dict(start, tick, stop, height, build, poll, closed, **more):
-        more.update({"start": start, "tick": tick, "stop": stop, "client_tick": True, "config_height": height,
-                     "build_config": build, "poll_config": poll, "config_closed": closed})
-        return more
     def _part_frames():
-        KEY = "unitframes"; TITLE = "Frames"; ROWS = ("hits", "mana", "stam"); BAR_BG = "#17171a"
+        KEY = "unitframes"; TITLE = "Frames"; SETTINGS_KEY = "UnitFrames_settings"; POS_KEY = "UnitFrames_pos"
+        MIN_KEY = "UnitFrames_min"; ROWS = ("hits", "mana", "stam"); BAR_BG = "#17171a"
         BAR_COLOR = {"hits": "#c22d2d", "poison": "#2f9a3c", "yellow": "#cfae2a", "mana": "#2f62cc", "stam": "#d39a1c"}
         NOTO_COLOR = {"innocent": (46, 104, 214), "ally": (40, 160, 70), "gray": (120, 120, 126),
                       "criminal": (120, 120, 126), "enemy": (222, 118, 30),
@@ -167,11 +164,11 @@ def _module_hud():
         PARROT_ROBES = (0xA2CA, 0xA2CB); OPEN_ROBES = (0x9985, 0x9986, 0xA412, 0xA2CB, 0xA2CA)
         PLATE_ARMS = (0x1410, 0x1417); SNAP_DEPTH = 110; SNAP_RETRY = 2.0; THREAD_BUDGET = 0.008; TEX_PREFIX = "vauf_"
         MAX_TRACKED = 12; SCALE_MIN, SCALE_MAX, SCALE_DEFAULT = 50, 150, 70; LABEL_H = 14; PICK_TIMEOUT = 10
-        PREVIEW = 100; SETTINGS_KEY = "UnitFrames_settings"; TRACKED_KEY = "UnitFrames_tracked"
-        FRAMEPOS_KEY = "UnitFrames_framepos"; POS_KEY = "UnitFrames_pos"; MIN_KEY = "UnitFrames_min"; W = 350
+        PREVIEW = 100; TRACKED_KEY = "UnitFrames_tracked"
+        FRAMEPOS_KEY = "UnitFrames_framepos"; W = 350
         CLOSE_ART = (0x0FB1, 0x0FB2, 0x0FB1); CLOSE_INSET = 3; MINI_W, MINI_H = 240, 46; DRAG_SETTLE = 0.4
         TICK_EVERY = 0.05; FRAME_SNAP = SNAP_DIST; CAST_H = 24; CAST_GAP = 2; CAST_HOLD = 1.5; CAST_FAIL_WINDOW = 10.0
-        CAST_COLOR = {"cast": "#cfae2a", "done": "#2f9a3c", "fail": "#c22d2d"}
+        CAST_EVERY = 0.025; CAST_COLOR = {"cast": "#cfae2a", "done": "#2f9a3c", "fail": "#c22d2d"}
         CAST_FAIL_TEXTS = (("the spell fizzles", "fizzled"), ("your concentration is disturbed", "disturbed"),
                            ("insufficient mana", "no mana"), ("more reagents are needed", "no reagents"))
         SPELLS = Kit.SPELL_WORDS; TEXT_PX = Kit.text_px; ART_W, ART_H = 502, 194
@@ -184,15 +181,15 @@ def _module_hud():
         RIVETS = ((483.5, 45.8, (188, 188, 193)), (483.5, 148.6, (128, 128, 133)))
         OUTLINE_RGB, INNER_RGB = (20, 20, 22), (16, 16, 18); ART_ROWS_X = (182, 474)
         ART_ROWS_Y = ((51, 79), (83, 111), (115, 143)); SQRT_HALF = 0.70710678
-        DEFAULTS = {"player": True, "target": True, "hide_empty": False, "numbers": True,
+        settings = {"player": True, "target": True, "hide_empty": False, "numbers": True,
                     "lock": False, "click": True, "party": False, "ignore_self": True,
                     "attack": False, "status": True, "scale": SCALE_DEFAULT, "pdx": 0, "pdy": 0,
                     "pscale_on": False, "pscale": SCALE_DEFAULT, "pzoom": 100, "mirror": False, 
                     "sup_open": False, "sup_deep": True, "sup_hide0": False, "sup_follow": True,
                     "sup_low": 10, "sup_side": 0, "cast": True, "guard": True, "hide_bar": True}
+        DEFAULTS = dict(settings)
         NUMBERS = {"scale": (SCALE_MIN, SCALE_MAX), "pscale": (SCALE_MIN, SCALE_MAX),
                    "pdx": (-60, 60), "pdy": (-60, 60), "pzoom": (50, 200), "sup_low": (0, 9999), "sup_side": (0, 2)}
-        settings = dict(DEFAULTS)
         def st_reset():
             st.update({"shutting": False, "queue": [], "rebuild": False, "docked": False, "target": 0,
                        "next_party": 0.0, "snaps": {}, "stale": set(), "snap_queue": [], "art_scales": set(),
@@ -200,12 +197,14 @@ def _module_hud():
                        "recent": [], "next_prune": 0.0, "art_dirty": True, "snap_tries": {}, "guard": None,
                        "next_guard": 0.0, "jr": None, "dismissed": set(), "removing": False, "full_at": 0.0,
                        "mirror_now": False, "pos_save_at": 0.0})
-        st = {"minimized": False, "me": 0, "names": {}, "pos": {}, "next_save": 0.0, "pos_dirty": False,
-              "crop_changed": 0.0, "art": None, "textures": set(), "running": False}
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "me": 0, "names": {}, "pos": {},
+              "next_save": 0.0, "pos_dirty": False, "crop_changed": 0.0, "art": None, "textures": set(),
+              "running": False}
         st_reset(); tracked = []; anchor = {"sig": None, "at": None}
         cast = {"g": None, "c": {}, "spell": None, "start": 0.0, "secs": 1.0, "state": None,
                 "until": 0.0, "pct": 0, "word": "", "shown": None, "at": None, "leader": None, "s": None, "w": 0}
-        frames = {}; win = {"g": None, "store": ({}, {})}; cleanup = Kit.Cleanup(); say = Kit.sayer(TITLE)
+        frames = {}; win = {"g": None, "c": {}, "store": ({}, {})}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         page = {"store": ({}, {}), "next_preview": 0.0, "layers": None}; item_info = {}
         _get, _put = Kit.get_var, Kit.put_var
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ",", settings, NUMBERS)
@@ -239,7 +238,7 @@ def _module_hud():
             for key, fr in frames.items():
                 if Kit.is_open(fr.get("g")):
                     p = frame_at(fr)
-                    if p is not None: note_pos(key, p)
+                    if p is not None and not layout_held(key): note_pos(key, p)
         def my_serial(): return int(safe(lambda: API.Player.Serial, 0) or 0)
         def noto_name(n):
             if n is None: return ""
@@ -495,7 +494,7 @@ def _module_hud():
             if s in st["art_scales"]: return True
             if s in st["art_failed"]: return False
             if not any(j["kind"] == "art" and j["s"] == s for j in st["art_jobs"]):
-                st["art_jobs"].append({"kind": "art", "s": s, "gen": art_steps(s)})
+                st["art_jobs"] = st["art_jobs"] + [{"kind": "art", "s": s, "gen": art_steps(s)}]
             return None
         def scales_in_use():
             out = set([settings["scale"] / 100.0])
@@ -524,28 +523,33 @@ def _module_hud():
             name = noto_name_of(rgb, s)
             if name in st["textures"]: return name
             if name not in st["art_failed"] and not any(j.get("name") == name for j in st["art_jobs"]):
-                st["art_jobs"].append({"kind": "noto", "s": s, "name": name, "gen": ring_steps(rgb, s, name)})
+                job = {"kind": "noto", "s": s, "name": name, "gen": ring_steps(rgb, s, name)}
+                st["art_jobs"] = st["art_jobs"] + [job]
             return None
+        def art_left(): return any("out" not in j for j in st["art_jobs"])
         def art_work(budget):
-            jobs = st["art_jobs"]
-            if not jobs: return False
-            keep = scales_in_use(); keep.update(fr.get("s") for fr in frames.values())
-            jobs[:] = [j for j in jobs if j["s"] in keep]; deadline = time.time() + budget
-            while jobs:
-                j = jobs[0]
-                try: r = next(j["gen"])
-                except Exception: r = False
-                if r is None:
-                    if time.time() >= deadline: return True
-                    continue
-                jobs.pop(0); ok = r is not False and bool(safe(lambda: Bridge.on_main(r) or True, False))
+            deadline = time.time() + budget
+            for j in st["art_jobs"]:
+                while "out" not in j:
+                    try: r = next(j["gen"])
+                    except Exception: r = False
+                    if r is not None: j["out"] = r
+                    elif time.time() >= deadline: return True
+                if time.time() >= deadline: break
+            return art_left()
+        def art_take():
+            jobs = st["art_jobs"]; keep = scales_in_use(); keep.update(fr.get("s") for fr in frames.values()); left = []
+            done = False
+            for j in jobs:
+                if j["s"] not in keep: continue
+                if done or "out" not in j: left.append(j); continue
+                r = j["out"]; done = True; ok = r is not False and bool(safe(lambda: r() or True, False))
                 if j["kind"] == "art":
                     (st["art_scales"] if ok else st["art_failed"]).add(j["s"]); st["art_dirty"] = True
                 elif not ok: st["art_failed"].add(j["name"])
                 else:
                     for fr in frames.values(): fr["last"] = None
-                if time.time() >= deadline: break
-            return bool(jobs)
+            if len(left) != len(jobs): st["art_jobs"] = left
         def snap_size(s): return int(math.ceil(2 * (HOLE_R + 2) * s))
         def snap_px(): return snap_size(max(scales_in_use()))
         def item_details(graphic, item):
@@ -688,28 +692,37 @@ def _module_hud():
                     pixels[i] = ramp[r >> 3] | a
             job["layers"] = [(pixels, w, h)]
             for r in compose_steps(job["layers"], 0, job["size"]): yield r
+        def snap_left():
+            job = st["snap_job"]; return job is not None and "out" not in job
         def snapshot_work(now, budget=0.008):
             job = st["snap_job"]
-            if job is None: return False
+            if job is None or "out" in job: return False
             deadline = now + budget
-            while st["snap_job"] is job:
+            while True:
                 try: r = next(job["gen"])
-                except StopIteration: st["snap_job"] = None; return False
-                except Exception:
-                    st["snap_job"] = None
-                    if not any(q[0] == job["serial"] for q in st["snap_queue"]):
-                        st["snap_queue"].append((job["serial"], now + SNAP_RETRY))
-                    return False
-                if r is not None:
-                    st["snap_job"] = None
-                    serial, name, size = job["serial"], "%ssnap_%d" % (TEX_PREFIX, job["serial"]), job["size"]
-                    if safe(lambda: Bridge.on_main(lambda: Bridge.put_texture(name, size, size, r)) or True, False):
-                        st["snaps"][serial] = {"name": name, "creature": False}
-                        if serial == st["me"] and cfg.f is not None: page["layers"] = (job["layers"], job["body"])
-                        mark_frames(serial)
-                    return False
+                except StopIteration: job["out"] = False; return False
+                except Exception: job["out"] = None; return False
+                if r is not None: job["out"] = r; return False
                 if time.time() >= deadline: return True
+        def snap_take(now):
+            job = st["snap_job"]
+            if job is None or "out" not in job: return
+            st["snap_job"] = None; r = job["out"]
+            if r is None:
+                if not any(q[0] == job["serial"] for q in st["snap_queue"]):
+                    st["snap_queue"].append((job["serial"], now + SNAP_RETRY))
+                return
+            if r is False: return
+            serial, name, size = job["serial"], "%ssnap_%d" % (TEX_PREFIX, job["serial"]), job["size"]
+            if size != snap_px():
+                if not any(q[0] == serial for q in st["snap_queue"]): st["snap_queue"].append((serial, now))
+                return
+            if safe(lambda: Bridge.put_texture(name, size, size, r) or True, False):
+                st["snaps"][serial] = {"name": name, "creature": False}
+                if serial == st["me"] and cfg.f is not None: page["layers"] = (job["layers"], job["body"])
+                mark_frames(serial)
         def take_next_snapshot(now):
+            snap_take(now)
             if st["snap_job"] is not None: return
             for i, (serial, due) in enumerate(st["snap_queue"]):
                 if due <= now: del st["snap_queue"][i]; break
@@ -846,7 +859,7 @@ def _module_hud():
             def handler(*args):
                 fr = frames.get(key)
                 if fr is not None and fr.get("g") is g and not st["shutting"]:
-                    fr["g"] = None; st["queue"].append(("closed", key))
+                    fr["g"] = None; queue.add(("closed", key), dup=True)
             return handler
         def color_box(g, x, y, w, h, rgb, alpha=1.0):
             box = G.CreateGumpColorBox(alpha, "#%02x%02x%02x" % rgb); box.SetRect(x, y, w, h); g.Add(mute(box))
@@ -862,8 +875,12 @@ def _module_hud():
             if Kit.is_open(old): x, y = old.GetX(), old.GetY()
             if key in frames: frames[key]["g"] = None
             sx = lambda v: int(round(v * s)); art = bool(st["art"]) and s in st["art_scales"]
-            W, H, ox, oy, zoned = frame_box(key, w, h); g = G.CreateGump(True, not settings["lock"])
-            x, y = Kit.place(g, x, y, W, H); c = {}
+            W, H, ox, oy, zoned = frame_box(key, w, h)
+            free = not settings["lock"] and not HOST.layout_locked(KEY + "." + key); g = G.CreateGump(True, free)
+            if layout_held(key):
+                x, y = int(x), int(y); g.SetRect(x, y, W, H); Kit.note_rect(g, x, y, W, H); Kit.pin_size(g)
+            else: x, y = Kit.place(g, x, y, W, H)
+            c = {}
             if zoned: M = Kit.MARGIN; Kit.add_window_frame(g, W, H); Kit.add_section(g, M, M, W - 2 * M, H - 2 * M)
             cx = ox + (sx(RING_C[0]) if style == "player" else w - sx(RING_C[0])); cy = oy + sx(RING_C[1])
             rx0, rx1 = mirror_x(style, w, sx(ART_ROWS_X[0]), sx(ART_ROWS_X[1]))
@@ -888,12 +905,13 @@ def _module_hud():
                 add_bars(g, c, [(a, b + 1, cc, d - 1) for a, b, cc, d in rows])
             c["strip"] = color_box(g, cx - 22, cy + int(hole * 0.42), 44, LABEL_H + 4, (0, 0, 0), 0.65)
             c["strip"].IsVisible = False
-            tip = None if key == "player" else ("Click: make them your target. Alt+click: auto-follow (again to stop)"
-                 if settings["click"] else "Alt+click: auto-follow (again to stop)")
-            Kit.catcher(g, ox, oy, w, h, frame_clicked(key), None, movable=not settings["lock"])
+            if key == "player": tip = "Click: target yourself" if settings["click"] else "Your character's frame"
+            else: tip = ("Click: make them your target. Alt+click: auto-follow (again to stop)" if settings["click"]
+                         else "Alt+click: auto-follow (again to stop)")
+            Kit.catcher(g, ox, oy, w, h, frame_clicked(key), None, movable=free)
             px0, px1 = mirror_x(style, w, sx(PANEL[0]), sx(PANEL[2]))
             Kit.catcher(g, ox + px0, oy + sx(PANEL[1]), px1 - px0, sx(PANEL[3]) - sx(PANEL[1]),
-                        frame_clicked(key), tip, movable=not settings["lock"])
+                        frame_clicked(key), tip, movable=free)
             add_close_x(g, key, ox, oy)
             for name in ("name", "hits", "mana", "stam", "status", "portrait_text"):
                 c["lbl_" + name] = mute(Kit.add_label(g, "", 0, 0))
@@ -914,7 +932,9 @@ def _module_hud():
                 fr = frames.get(key)
                 if fr is None or not Kit.is_open(fr.get("g")): return
                 p = frame_at(fr)
-                if p is not None and p != fr.get("seen"): fr["seen"] = p; fr["code_move"] = True; note_pos(key, p)
+                if p is not None and p != fr.get("seen"):
+                    fr["seen"] = p; fr["code_move"] = True
+                    if not layout_held(key): note_pos(key, p)
                 save_positions()
             return handler
         def add_close_x(g, key, ox, oy):
@@ -933,7 +953,7 @@ def _module_hud():
                 st["art_dirty"] = True; g = fr.get("g")
                 if Kit.is_open(g):
                     p = frame_at(fr)
-                    if p is not None: note_pos(key, p)
+                    if p is not None and not layout_held(key): note_pos(key, p)
                 fr["g"] = None; Kit.dispose(g)
         def supplies_spot(w, h, side, p=None):
             fr = frames.get("player")
@@ -957,25 +977,28 @@ def _module_hud():
             if W > 0: x = max(0, min(x, W - w))
             if H > 0: y = max(0, min(y, H - h))
             return (x, y)
-        HBAR_VAR = "UnitFrames_hbar_held"; HBAR_EVERY = 1.0; hbar = {"at": 0.0}
+        HBAR_VAR = "UnitFrames_hbar_held"; HBAR_EVERY = 1.0; hbar = {"at": 0.0, "held": None}
         def hbar_profile():
             try: return Tz.get(None, "CurrentProfile", Tz.T("ClassicUO.Configuration.ProfileManager"))
             except Exception: return None
         def hbar_sync(want):
             prof = hbar_profile()
             if prof is None: return
-            held = _get(HBAR_VAR) == "1"
+            if hbar["held"] is None: hbar["held"] = _get(HBAR_VAR) == "1"
+            held = hbar["held"]
             if want:
                 if not held and not bool(Tz.get(prof, "OpenHealthBarForLastAttack")): return
-                if not held: Tz.put(prof, "OpenHealthBarForLastAttack", False); _put(HBAR_VAR, "1")
+                if not held: Tz.put(prof, "OpenHealthBarForLastAttack", False); _put(HBAR_VAR, "1"); hbar["held"] = True
                 try:
                     t = Tz.T("ClassicUO.Game.UI.Gumps.BaseHealthBarGump"); bar = Tz.get(None, "LastAttackBar", t)
                     if bar is not None and not bar.IsDisposed: bar.Dispose()
                 except Exception: pass
-            elif held: Tz.put(prof, "OpenHealthBarForLastAttack", True); _put(HBAR_VAR, "")
+            elif held: Tz.put(prof, "OpenHealthBarForLastAttack", True); _put(HBAR_VAR, ""); hbar["held"] = False
         def hbar_tick(now):
             if 0 <= hbar["at"] - now <= HBAR_EVERY: return
-            hbar["at"] = now + HBAR_EVERY; safe(lambda: hbar_sync(bool(settings["hide_bar"] and settings["target"])))
+            hbar["at"] = now + HBAR_EVERY
+            try: hbar_sync(bool(settings["hide_bar"] and settings["target"]))
+            except Exception: pass
         def player_anchor(w, h, side):
             fr = frames.get("player")
             if fr is None or not Kit.is_open(fr.get("g")): return None
@@ -1206,7 +1229,7 @@ def _module_hud():
                     else:
                         fr["drag_until"] = now + DRAG_SETTLE
                         if not layout_held(key): fr["moved"] = fr["dropped"] = True
-                    note_pos(key, p, now + DRAG_SETTLE)
+                    if not layout_held(key): note_pos(key, p, now + DRAG_SETTLE)
                 else:
                     fr["code_move"] = False
                     if fr.get("dropped") and now >= fr.get("drag_until", 0.0) and SNAP.pressed() is not True:
@@ -1265,7 +1288,8 @@ def _module_hud():
         def target_from_frame(key):
             serial = frame_serial(key)
             if not serial: return
-            if API.HasTarget(): API.Target(serial)
+            if API.HasTarget() and HOST.cursor_busy(KEY) in (None, "pick"):
+                if HOST.harm_ok(serial, "hud.frame", TITLE): API.Target(serial)
             else:
                 API.SetLastTarget(serial=serial)
                 if key != "target" and serial != st["me"]: st["target"] = serial
@@ -1288,26 +1312,29 @@ def _module_hud():
             build_window(); HOST.refresh_settings(KEY)
         def is_tracked(serial): return any(t["serial"] == serial for t in tracked)
         def pick_answer(kind):
-            def done(serial): st["queue"].append((kind, int(serial or 0)))
+            def done(serial): queue.add((kind, int(serial or 0)), dup=True)
             return done
-        queue = Kit.queuer(st)
         ADD_TIP = ("Frame your target, or pick someone with a target cursor. Alt+click a frame: auto-follow "
                    "(again to stop)")
         REMOVE_TIP = "Click a person or their frame with a target cursor to remove it (each frame has an X too)"
         BTN_H = 40
         def build_window():
             if st["shutting"]: return
-            M = Kit.MARGIN; n = len(tracked); g, store, c = wnd.begin(W, M + 30 + Kit.GAP + BTN_H + M)
-            if st["minimized"]: Kit.set_text(c["status"], "%s: %s" % (TITLE, Kit.count(n, "frame")))
-            else:
+            M = Kit.MARGIN; g, store, c = wnd.begin(W, M + 30 + Kit.GAP + BTN_H + M)
+            if not st["minimized"]:
                 wnd.frame(g); ya = M + 30 + Kit.GAP; Kit.add_section(g, M, ya, W - 2 * M, BTN_H)
                 Kit.art_button(g, store, "add", Kit.ART_CIRCLE, M + 12, ya + 12, "Add frame", ADD_TIP,
                                on_click=queue("add_frame"))
                 Kit.art_button(g, store, "remove", Kit.ART_CIRCLE, M + 56 + Kit.text_w("Add frame"), ya + 12,
                                "Remove frame", REMOVE_TIP, on_click=queue("remove_frame"))
-            wnd.end(g)
+            wnd.end(g); refresh()
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=0x1B74,
-                         cleanup=cleanup, lock=False)
+                         cleanup=cleanup, lock=True)
+        def refresh():
+            c = win["c"]
+            if "status" in c: Kit.set_text(c["status"], "%s: %s" % (TITLE, Kit.count(len(tracked), "frame")))
+        ACTIONS = {"rm": remove_tracked, "click": target_from_frame, "add_ext": add_tracked,
+                   "follow_serial": lambda serial: Follow.toggle(serial, TITLE)}
         CHECKS_LEFT = (("player", "Show your own frame", "Your HP, mana and stamina"),
                        ("target", "Show the target frame", "Your current target"),
                        ("hide_empty", "Hide the target frame with no target", "Shown only while you have a target"),
@@ -1443,6 +1470,7 @@ def _module_hud():
             if st["art"]:
                 if cfg.f is not None: draw_preview()
                 retake_all()
+        load_settings()
         def _start():
             st_reset(); st.update({"me": my_serial(), "running": True})
             cast.update({"spell": None, "state": None, "shown": None})
@@ -1450,7 +1478,7 @@ def _module_hud():
             cleanup.service("frames.player_anchor", player_anchor); st["minimized"] = wnd.start_min()
             st["art"] = Bridge.find()
             if not st["art"]: say("no drawn pictures on this client; using stone frames.")
-            build_window(); wnd.dock(scale=True)
+            build_window(); wnd.dock()
             cleanup.service("unitframes.add", lambda serial: queue(("add_ext", int(serial)))())
             fitst["player"] = fitst["target"] = None; fitbox["player"] = fitbox["target"] = None
             for fk in ("player", "target"):
@@ -1460,8 +1488,6 @@ def _module_hud():
                 pieces_anchor(fk, frame_gump(fk), frame_span(fk), frame_inner(fk))
                 cleanup.add(HOST.layout_remove, KEY + "." + fk); cleanup.add(pieces_anchor, fk, None)
             PIECES_TARGET["fn"] = lambda: st["target"]
-        BY_SERIAL = {"rm": remove_tracked, "click": target_from_frame, "add_ext": add_tracked,
-                     "follow_serial": lambda serial: Follow.toggle(serial, TITLE)}
         def last_target(): return st["target"] or int(API.LastTargetSerial or 0)
         def _tick():
             if win["g"] is None: return
@@ -1469,6 +1495,7 @@ def _module_hud():
             now = time.time()
             if now < st["full_at"] and not st["queue"] and not st["rebuild"] and now + 1.0 > st["full_at"]:
                 if st["art"]: take_next_snapshot(now)
+                if cast["state"] == "cast": cast_tick(now)
                 return
             st["full_at"] = now + TICK_EVERY - 0.005; st["me"] = st["me"] or my_serial(); update_target()
             while st["queue"]:
@@ -1518,7 +1545,7 @@ def _module_hud():
                         settings[key] = False; save_settings(); HOST.refresh_settings(KEY)
                         say("%s frame hidden; tick it again in settings." % key)
                     elif key[1:].isdigit(): remove_tracked(int(key[1:]))
-                elif kind in BY_SERIAL: BY_SERIAL[kind](action[1])
+                elif kind in ACTIONS: ACTIONS[kind](action[1])
             if st["rebuild"]:
                 st["rebuild"] = False; remember_positions()
                 for key in list(frames): close_frame(key)
@@ -1529,6 +1556,7 @@ def _module_hud():
                     if st["snaps"]: retake_all()
             now = time.time()
             if now >= st["next_party"]: st["next_party"] = now + 1.0; sync_party()
+            if st["art_jobs"]: art_take()
             sync_frames()
             if st["art"] and st["art_dirty"]: st["art_dirty"] = False; prune_art()
             if now >= st["next_prune"]: st["next_prune"] = now + 5.0; prune_people()
@@ -1543,38 +1571,39 @@ def _module_hud():
             if now >= st["next_save"]:
                 st["next_save"] = now + 10.0; remember_positions()
                 if st["pos_dirty"]: save_positions()
+        def _thread_tick():
+            if st["shutting"]: return
+            if art_left(): art_work(THREAD_BUDGET)
+            if snap_left(): snapshot_work(time.time(), THREAD_BUDGET)
+            if page.get("preview_want"):
+                page["preview_want"] = False
+                if cfg.f is not None: draw_preview_now()
+            if page.get("preview_gen") is not None: preview_work(THREAD_BUDGET)
+        def _thread_busy():
+            return bool(snap_left() or art_left() or page.get("preview_want") or page.get("preview_gen") is not None)
+        def _interval():
+            if cast["state"] == "cast": return CAST_EVERY
+            return 0.03 if st["art_jobs"] or st["snap_job"] is not None or _thread_busy() else TICK_EVERY
         def _stop():
             st.update({"shutting": True, "running": False, "removing": False, "snap_job": None, "art_jobs": []})
             page.update({"preview_want": False, "preview_gen": None}); PIECES_TARGET["fn"] = None; save_positions()
-            save_settings(); save_tracked(); safe(lambda: hbar_sync(False))
+            save_settings(); save_tracked(); safe(lambda: hbar_sync(False)); hbar["held"] = None
             for key in list(frames): fr = frames.pop(key); g, fr["g"] = fr.get("g"), None; Kit.dispose(g)
             drop_cast(); st["jr"] = None
             if st["art"] and st["textures"]:
                 names = list(st["textures"]); safe(lambda: Bridge.on_main(lambda: Tex.drop(names)))
                 st["textures"].clear(); st["art_scales"] = set()
             st["art"] = None; cleanup.close()
-        def _thread_tick():
-            if st["shutting"]: return
-            if st["art_jobs"]: art_work(THREAD_BUDGET)
-            if st["snap_job"] is not None: snapshot_work(time.time(), THREAD_BUDGET)
-            if page.get("preview_want"):
-                page["preview_want"] = False
-                if cfg.f is not None: draw_preview_now()
-            if page.get("preview_gen") is not None: preview_work(THREAD_BUDGET)
-        def _thread_busy():
-            return bool(st["snap_job"] or st["art_jobs"] or page.get("preview_want") or
-                        page.get("preview_gen") is not None)
-        def _interval(): return 0.03 if _thread_busy() else TICK_EVERY
-        load_settings()
-        return part_dict(_start, _tick, _stop, cfg.height, build_config, cfg.poll, config_closed,
-                         thread_tick=_thread_tick, interval=_interval, thread_wanted=_thread_busy)
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": build_config, "poll_config": cfg.poll, "config_closed": config_closed,
+                "thread_tick": _thread_tick, "interval": _interval, "thread_wanted": _thread_busy}
     def _part_timers():
         KEY = "spelltimers"; TITLE = "Buffs & Timers"; SETTINGS_KEY = "SpellTimers_settings"
         POS_KEY = "SpellTimers_pos"; MIN_KEY = "SpellTimers_min"; ACTIVE_KEY = "SpellTimers_active"; TRAY_ICON = 0x0EFA
         MINI_W, MINI_H = 320, 46; ROW_H = 28; ROWS_MIN, ROWS_MAX, ROWS_DEFAULT = 3, 16, 8; SAMPLE_EVERY = 0.1
         OTHERS_EVERY = 0.25; ICON_RESYNC = 5.0; SPELL_ICON_BASE = 0x08C0; ICON_PX = 22; LAND_WINDOW = 2.5
         STAT_MIN_STEP = 2; STAT_GROUP = 1.0; STAT_EFFECTS_MAX = 4; TRACK_MAX = 40; ALERT_KIND = "spelltimers.ending"
-        WARN_MAX = 120
+        WARN_MAX = 120; WIN_W = 360
         SPELLS = dict.fromkeys(("Clumsy", "Feeblemind", "Weaken", "Curse"),
                                ("target", "debuff", (0, 1.2, 0, 0, 0), 0, "stat"))
         SPELLS.update(dict.fromkeys(("Agility", "Cunning", "Strength", "Bless"),
@@ -1622,27 +1651,34 @@ def _module_hud():
         KEEP_SIDS = frozenset(norm(n) for n, v in SPELLS.items() if v[1] == "buff")
         settings = {"me": True, "debuff": True, "others": True, "stats": True, "icons": True,
                     "rows": ROWS_DEFAULT, "warn": 0}
+        DEFAULTS = dict(settings)
         def st_reset():
             st.update({"shutting": False, "docked": False, "queue": [], "rd": None, "pend": None, "landings": [],
                        "last_land": None, "para": None, "pois": None, "stats": None, "next_sample": 0.0,
                        "next_others": 0.0, "events": [], "icons_seen": False, "next_icons": 0.0, "warned": {},
                        "rebuild": False, "dead": False, "skills": (0.0, 0.0, -1e9)})
-        st = {"minimized": False, "me": 0, "name": "", "prev_name": ("", 0.0), "body": 0, "hooked": False,
-              "ct": None, "ct_looked": False, "ver": 0, "active": False, "redraw": False}
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "me": 0, "name": "",
+              "prev_name": ("", 0.0), "body": 0, "hooked": False, "ct": None, "ct_looked": False, "ver": 0,
+              "active": False, "redraw": False}
         st_reset(); rows = {}; effects = {"str": [], "dex": [], "int": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "nrows": 0}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         ROW_ICON = 24; ROW_PITCH = 30; ROW_LINE = 42; ROW_PAD = 3; ROW_MAX = 24; FORM_EVERY = 0.5
         rowui = {s: {"g": None, "cells": [], "per": 1, "lines": -1, "w": 0} for s in ("player", "target")}
         NUMS = {"rows": (ROWS_MIN, ROWS_MAX), "warn": (0, WARN_MAX)}
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings():
             Kit.kv_save(SETTINGS_KEY, ";", settings, ("me", "debuff", "others", "stats", "icons", "rows", "warn"), NUMS)
+        def raw_stats():
+            p = HOST.me()
+            try: return "%d,%d,%d" % (int(p.Strength), int(p.Dexterity), int(p.Intelligence))
+            except Exception: return ""
         def save_active():
-            now = time.time(); parts = ["t=%d" % int(now)]
+            now = time.time(); parts = ["t=%d" % int(now)]; raw = raw_stats()
             for stat in ("str", "dex", "int"):
                 for e in effects[stat]:
-                    parts.append("e:%s,%d,%d,%d,%d" % (stat, e["d"], int(e["t"]), int(e["end"] or 0),
-                                                       1 if e.get("hide") else 0))
+                    parts.append("e:%s,%d,%d,%d,%d,%s" % (stat, e["d"], int(e["t"]), int(e["end"] or 0),
+                                                          1 if e.get("hide") else 0, raw))
             for r in rows.values():
                 if r["who"] or "cast" not in r["srcs"] or "stat" in r["srcs"] or r["sid"] not in KEEP_SIDS: continue
                 parts.append("r:%s,%s,%d,%d,%d" % (r["sid"], r["kind"], int(r["start"]),
@@ -1653,13 +1689,14 @@ def _module_hud():
             try: saved = float(parts[0].split("=", 1)[1]) if parts[0].startswith("t=") else 0.0
             except (ValueError, IndexError): saved = 0.0
             if not saved or not 0 <= now - saved <= 1800.0: return
+            raw = raw_stats()
             for p in parts[1:]:
                 try:
                     tag, rest = p.split(":", 1); b = rest.split(",")
                     if tag == "e" and b[0] in effects and settings["stats"]:
                         if len(effects[b[0]]) >= STAT_EFFECTS_MAX: continue
                         d, t0, end = int(b[1]), float(b[2]), float(b[3])
-                        if (end and end > now) or not end:
+                        if (end and end > now) or (not end and raw and len(b) > 7 and ",".join(b[5:8]) == raw):
                             effects[b[0]].append({"d": d, "t": t0, "end": end or None,
                                                   "hide": len(b) > 4 and b[4] == "1"})
                     elif tag == "r" and b[0] in SPELL_OF:
@@ -2039,18 +2076,22 @@ def _module_hud():
                     st["warned"][key] = r["end"]
                     HOST.alert(ALERT_KIND, "%s runs out in %d s" % (SPELL_OF.get(r["sid"], r.get("label") or r["sid"]),
                                                                   int(left + 0.5)), "info", who=r["sid"])
-        queue = Kit.queuer(st)
+        def min_size(): return WIN_W, 2 * Kit.MARGIN + 30 + Kit.GAP + ROW_H + 12
+        def zone_size():
+            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None; mw, mh = min_size()
+            return z if z is not None and z[0] >= mw and z[1] >= mh else None
         def build_window():
-            n = settings["rows"]; slots = []
-            g, store, c = wnd.begin(360, 2 * Kit.MARGIN + 30 + Kit.GAP + n * ROW_H + 12)
+            zs = zone_size(); top = 2 * Kit.MARGIN + 30 + Kit.GAP + 12; w = zs[0] if zs else WIN_W; slots = []
+            n = wnd.rows(ROW_H, top, settings["rows"]) if zs else settings["rows"]
+            g, store, c = wnd.begin(w, zs[1] if zs else top + n * ROW_H)
             if not st["minimized"]:
-                M = Kit.MARGIN; IW = 360 - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP
-                Kit.add_section(g, M, yb, IW, n * ROW_H + 12)
+                M = Kit.MARGIN; IW = w - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP
+                Kit.add_section(g, M, yb, IW, (zs[1] - M - yb) if zs else n * ROW_H + 12)
                 c["empty"] = Kit.add_label(g, "", M + 12, yb + 10, Kit.HUE_INFO)
                 for i in range(n): slots.append(make_slot(g, i, M, yb + 6 + i * ROW_H, IW))
-            wnd.end(g, {"slots": slots, "nrows": n}); st["redraw"] = True; draw(time.time())
+            wnd.end(g, {"slots": slots, "nrows": n}); st["redraw"] = True; refresh(time.time())
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, default=(60, 260), mini=(MINI_W, MINI_H),
-                         icon=TRAY_ICON, lock=False, clear={"slots": []})
+                         icon=TRAY_ICON, lock=True, clear={"slots": []})
         def row_pic(g, x, y, px):
             pic = G.CreateGumpPic(SPELL_ICON_BASE, x, y); pic.SetPos(x, y); pic.SetWidth(px); pic.SetHeight(px)
             pic.SetAcceptMouseInput(False); g.Add(pic); return pic
@@ -2140,7 +2181,7 @@ def _module_hud():
                     fs = pieces_frame(side); r = _rect_of(fs) if fs is not None else None
                     build_row(side, r[2] if r is not None else 200, 0)
                 for side in SIDES: pieces_add(PIECE[side], side, 1, lambda s=side: rowui[s]["g"])
-            else: drop_rows(); build_window(); wnd.dock()
+            else: drop_rows(); build_window(); wnd.dock(fit=True, min=min_size)
             st["redraw"] = True
         def drop_rows():
             for side in SIDES:
@@ -2185,7 +2226,7 @@ def _module_hud():
                 if tk != c.get("tipk"):
                     c["tipk"] = tk; tip = "%s. %s" % (display_name(r), tip_of(r))
                     if tip != c["tip"]: c["tip"] = tip; c["hit"].SetTooltip(tip)
-        def draw(now):
+        def refresh(now):
             rm = row_mode()
             if not rm and (win["g"] is None or (st["minimized"] and st["docked"])): return
             if not st["redraw"] and st.get("drawn_at", 0.0) + 0.25 > now >= st.get("drawn_at", 0.0) \
@@ -2245,7 +2286,20 @@ def _module_hud():
             if tk != s.get("tipk"):
                 s["tipk"] = tk; tip = tip_of(r)
                 if tip != s["tip"]: s["tip"] = tip; s["hit"].SetTooltip(tip)
-        PAGE = (("WINDOW  (what it lists)", (
+        def clear_row(key):
+            r = rows.get(key)
+            if r is None: return
+            if "stat" in r["srcs"]:
+                for stat in ("str", "dex", "int"):
+                    for e in effects[stat]:
+                        sid = norm(STAT_SPELLS[(stat, 1 if e["d"] > 0 else -1)])
+                        if sid == key[1] or (key[1] in ("bless", "curse") and (e["d"] > 0) == (key[1] == "bless")):
+                            e["hide"] = True
+            drop_row(key)
+            if "stat" in r["srcs"]: sync_stat_rows()
+        ACTIONS = {"follow": lambda serial: Follow.toggle(serial, TITLE), "clear": clear_row}
+        def page_table(w):
+            return (("WINDOW  (what it lists)", (
                     ("check", "me", "Show the buffs on you", "Bless, Strength, Protection, Reactive Armor, Magic "
                      "Reflection, Night Sight and more"),
                     ("check", "debuff", "Show what is done to you (paralyze, poison, curses)",
@@ -2253,7 +2307,7 @@ def _module_hud():
                     ("check", "others", "Show your spells on others", "What you cast on someone else. Alt+click such "
                      "a row: auto-follow (again to stop)"),
                     ("num", "rows", "Rows shown:", "Rows the window has room for", None, ROWS_MIN, ROWS_MAX,
-                     {"clamp": False})), {"sh": 140}), ("HOW TIMERS ARE FOUND  (your casts always count)", (
+                     {"clamp": False})), {"sh": 140}), ("TIMER SOURCES  (your casts always count)", (
                     ("check", "stats", "Watch your stats for Bless, Curse and their kin",
                      "A Str, Dex or Int step of %d or more is a spell on you (all three: Bless / Curse); potions show "
                      "too" % STAT_MIN_STEP),
@@ -2267,7 +2321,7 @@ def _module_hud():
             if new["icons"] and not old["icons"]: st["next_icons"] = 0.0
             if new["rows"] != old["rows"]: st["rebuild"] = True
             if new["warn"] != old["warn"]: st["warned"] = {}
-        cfg = Kit.Page(settings, PAGE, save_settings, on_change, {"ldy": 4, "lgap": 12, "fw": 40})
+        cfg = Kit.Page(settings, page_table, save_settings, on_change, {"ldy": 4, "lgap": 12, "fw": 40})
         def svc_list(serial=None):
             now = time.time(); me = st["me"]; out = []
             for r in rows.values():
@@ -2279,6 +2333,7 @@ def _module_hud():
                             "left": (end - now) if end is not None else None, "icon": r["icon"],
                             "level": r["level"], "delta": r["delta"]})
             return out
+        load_settings()
         def _start():
             now = time.time(); st_reset(); st.update({"active": True, "redraw": True, "started": now,
                                                       "minimized": wnd.start_min()})
@@ -2287,7 +2342,7 @@ def _module_hud():
             load_settings(); restore_active(now); sync_stat_rows(); hook_events()
             HOST.alert_kind(ALERT_KIND, "Buff about to run out", 0x1EA); st["row_mode"], st["form_at"] = False, 0.0
             if pieces_frame("player") is not None: set_form(True)
-            else: build_window(); wnd.dock()
+            else: build_window(); wnd.dock(fit=True, min=min_size)
             HOST.services["spelltimers.list"] = svc_list
         def _tick():
             now = time.time(); form_tick(now)
@@ -2298,8 +2353,7 @@ def _module_hud():
                 if action == "redraw":
                     if not row_mode(): build_window()
                 elif wnd.action(action): pass
-                elif kind == "follow": Follow.toggle(action[1], TITLE)
-                elif kind == "clear": clear_row(action[1])
+                elif kind in ACTIONS: ACTIONS[kind](action[1])
             if st["rebuild"]:
                 st["rebuild"] = False
                 if not row_mode() and not st["minimized"] and settings["rows"] != win["nrows"]: build_window()
@@ -2308,31 +2362,21 @@ def _module_hud():
             read_journal(now); resolve_pending(now)
             if any_others() and not 0 <= st["next_others"] - now <= OTHERS_EVERY:
                 st["next_others"] = now + OTHERS_EVERY; watch_others(now)
-            expire(now); warn(now); draw(now)
+            expire(now); warn(now); refresh(now)
         def any_others():
             for k in rows:
                 if k[0]: return True
             return False
-        def clear_row(key):
-            r = rows.get(key)
-            if r is None: return
-            if "stat" in r["srcs"]:
-                for stat in ("str", "dex", "int"):
-                    for e in effects[stat]:
-                        sid = norm(STAT_SPELLS[(stat, 1 if e["d"] > 0 else -1)])
-                        if sid == key[1] or (key[1] in ("bless", "curse") and (e["d"] > 0) == (key[1] == "bless")):
-                            e["hide"] = True
-            drop_row(key)
-            if "stat" in r["srcs"]: sync_stat_rows()
         def _stop():
             st["shutting"] = True; st["active"] = False; HOST.dock_remove(KEY)
             if HOST.services.get("spelltimers.list") is svc_list: HOST.services.pop("spelltimers.list", None)
             drop_rows(); wnd.close(); save_settings(); save_active()
-        load_settings(); return part_dict(_start, _tick, _stop, cfg.height, cfg.build, cfg.poll, cfg.closed)
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
     def _part_swing():
+        KEY = "swing"; TITLE = "Swing Bar"
         try: from System import DateTime
         except Exception: DateTime = None
-        TITLE = "Swing Bar"
         SATIETY_TABLE = [(0,  4,  -10, "Starving"), (5,  9,   -5, "Hungry"), (10, 14,   0, "Fed"),
             (15, 19,   0, "Full"), (20, 20,   0, "Stuffed"),]
         HUNGER_DECAY_SECONDS = 300; DEFAULT_HUNGER = 20
@@ -2411,11 +2455,11 @@ def _module_hud():
             return pct
         def enemy_skill(mob, override, name=None):
             if override is not None: return override
-            if mob is None: return cfg["enemy_default"]
+            if mob is None: return settings["enemy_default"]
             name = (mob.Name or "" if name is None else name).lower()
             for key, val in ENEMY_SKILL_BY_NAME:
                 if key in name: return val
-            return 100 if mob.IsHuman else cfg["enemy_default"]
+            return 100 if mob.IsHuman else settings["enemy_default"]
         def load_var(key, default):
             try: return float(Kit.get_var(key, str(default)))
             except Exception: return float(default)
@@ -2423,18 +2467,29 @@ def _module_hud():
         def clamp_enemy(v):
             try: return int(max(ENEMY_SKILL_MIN, min(ENEMY_SKILL_MAX, int(round(float(v))))))
             except Exception: return DEFAULT_MONSTER_SKILL
-        cfg = {"enemy_default": clamp_enemy(load_var("swingtimer_enemy_default", DEFAULT_MONSTER_SKILL))}
+        settings = {"enemy_default": DEFAULT_MONSTER_SKILL}; DEFAULTS = dict(settings)
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
+        win = {"g": None, "c": {}, "store": ({}, {}), "bar_w": 109, "x1": 0, "row1": 0, "food_w": [0] * 21,
+               "fill_w": -1, "fill_state": None, "shown": {}, "tips": {}, "active": False, "closing": False}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        def load_settings():
+            settings["enemy_default"] = clamp_enemy(load_var("swingtimer_enemy_default", DEFAULT_MONSTER_SKILL))
+        def save_settings(): save_var("swingtimer_enemy_default", settings["enemy_default"])
+        load_settings()
         class State:
             last_swing = None; cycle_ms = None; gaps = []; gaps_weapon = None; history = {}; slow = []; dirty = False
             paused_at = None; target_serial = 0; enemy_override = None; hunger = DEFAULT_HUNGER; hunger_clock = now_ms()
             seen_sounds = set(); sounds = []; keys = []; notice = None
-        S = State(); say = Kit.sayer(TITLE)
+        S = State()
         def average_gap():
             if not S.gaps: return None
             return sum(S.gaps) / float(len(S.gaps))
+        def hist_name(name): return name.replace("|", "/").replace(";", "/")
         def match_weapon(weapon):
             wkey = (weapon[0], int(weapon[1]))
             if S.gaps_weapon == wkey: return False
+            old = (hist_name(wkey[0]), wkey[1])
+            if wkey not in S.history and old in S.history: S.history[wkey] = S.history.pop(old)
             S.gaps_weapon = wkey; S.gaps = S.history.setdefault(wkey, []); S.slow = []; return True
         files = {"saved_at": 0.0, "save": False, "import": False}
         def parse_history(text, sep):
@@ -2471,7 +2526,7 @@ def _module_hud():
             say("brought over learned swings of %s from the old data file." % Kit.count(n, "weapon"), Kit.HUE_GOOD)
         def save_history():
             files["save"] = False
-            recs = ["%s|%d|%s" % (name.replace("|", "/").replace(";", "/"), spd, ",".join("%.0f" % g for g in gaps))
+            recs = ["%s|%d|%s" % (hist_name(name), spd, ",".join("%.0f" % g for g in gaps))
                     for (name, spd), gaps in sorted(S.history.items()) if gaps]
             Kit.put_var(HISTORY_KEY, ";".join(recs)); S.dirty = False; files["saved_at"] = now_ms()
         def count_gap(gap, formula):
@@ -2590,10 +2645,8 @@ def _module_hud():
             return run
         def register_hotkeys(on):
             for key, fn, what in HOTKEYS:
-                if on:
-                    API.OnHotKey(key, not_typing(fn)); HOST.hotkeys_owned[key] = TITLE
-                    HOST.hotkey_note(key, TITLE, what)
-                else: API.OnHotKey(key); HOST.hotkeys_owned.pop(key, None); HOST.hotkey_drop(key, TITLE)
+                if on: HOST.hotkey_on(key, TITLE, not_typing(fn), what)
+                else: HOST.hotkey_off(key, TITLE)
         def resolve_target():
             for serial in (S.target_serial, API.LastTargetSerial):
                 if serial:
@@ -2607,61 +2660,59 @@ def _module_hud():
         KITE_HUE = {"close": Kit.HUE_TITLE, "turn": Kit.HUE_GOOD, "far": Kit.HUE_BAD, "idle": Kit.HUE_INFO}
         kite = {"on": bool(int(load_var(KITE_VAR, 1) or 0)), "steps": {}, "xy": None, "at": 0.0,
                 "stat0": None, "swing0": None, "px": None, "state": None, "tiles": None}
-        ROW1_Y, ROW2_Y = 16, 34; PAD = 3; LAYOUT_KEY = "swing"
-        bg_opacity = max(0.0, min(100.0, load_var("swingtimer_bg_opacity", 85)))
-        win = {"bar_w": 109, "x1": 0, "row1": 0, "food_w": [0] * 21, "fill_w": -1, "fill_state": None,
-               "shown": {}, "tips": {}, "active": False, "closing": False}
-        ctl = {}; cfgui = {"f": None}
-        def is_open(): return Kit.is_open(ctl.get("gump"))
+        ROW1_Y, ROW2_Y = 16, 34; PAD = 3
+        bg_opacity = max(0.0, min(100.0, load_var("swingtimer_bg_opacity", 85))); cfgui = {"f": None}
+        def is_open(): return Kit.is_open(win["c"].get("gump"))
         def make_fill(hue, color, h):
             if Kit.pic_size(Kit.LINE_BLUE)[0] > 0:
-                t = Kit.add_tiled(ctl["gump"], Kit.LINE_BLUE, win["x1"], ROW1_Y, 1, h, hue=hue)
+                t = Kit.add_tiled(win["c"]["gump"], Kit.LINE_BLUE, win["x1"], ROW1_Y, 1, h, hue=hue)
                 if t is not None: return t
             b = G.CreateGumpColorBox(1.0, color); b.SetRect(win["x1"] + 1, ROW1_Y + 1, 1, h)
-            b.SetAcceptMouseInput(False); ctl["gump"].Add(b); return b
+            b.SetAcceptMouseInput(False); win["c"]["gump"].Add(b); return b
         def window_size():
             win["row1"] = win["bar_w"] + 5 + max(Kit.text_w("15.0s"), readout_room())
             return win["row1"] + 2 * PAD + 16, 58
         def build_window(x=None, y=None):
             saved = x is None
             if saved: x = int(load_var("swingtimer_x", WINDOW_X)); y = int(load_var("swingtimer_y", WINDOW_Y))
-            old = ctl.get("gump"); ctl.clear(); bw = Kit.pic_size(Kit.LINE_RED)[0]
+            c = win["c"]; old = c.get("gump"); c.clear(); bw = Kit.pic_size(Kit.LINE_RED)[0]
             fh = Kit.pic_size(Kit.LINE_BLUE)[1] or 8; win["bar_w"] = bw or 109; w, h = window_size()
             win["x1"] = x1 = 8 + PAD
             if saved: x, y = Kit.adapt(x, y, w, h)
-            gump = G.CreateGump(True, True); Kit.place(gump, x, y, w, h); ctl["gump"] = gump
+            gump = G.CreateGump(True, True); Kit.place(gump, x, y, w, h); c["gump"] = gump
             Kit.add_window_frame(gump, w, h, corners=False)
-            ctl["section"] = Kit.add_section(gump, 8, 8, w - 16, h - 16); PIECES["bg"][gump] = [ctl["section"]]
-            apply_opacity()
+            c["section"] = Kit.add_section(gump, 8, 8, w - 16, h - 16); PIECES["bg"][gump] = [c["section"]]
+            refresh()
             if bw > 0: Kit.add_pic(gump, Kit.LINE_RED, x1, ROW1_Y)
             else: Kit.add_tiled(gump, Kit.SECTION_TILE, x1, ROW1_Y, 109, 9, 1.0)
-            ctl["fills"] = {"fill": make_fill(BAR_FILL_HUE, BAR_FILL_COLOR, fh),
-                            "ready": make_fill(BAR_READY_HUE, BAR_READY_COLOR, fh),
-                            "paused": make_fill(BAR_PAUSED_HUE, BAR_PAUSED_COLOR, fh)}
-            for f in ctl["fills"].values(): f.IsVisible = False
-            ctl["kite"] = {}
+            c["fills"] = {"fill": make_fill(BAR_FILL_HUE, BAR_FILL_COLOR, fh),
+                          "ready": make_fill(BAR_READY_HUE, BAR_READY_COLOR, fh),
+                          "paused": make_fill(BAR_PAUSED_HUE, BAR_PAUSED_COLOR, fh)}
+            for f in c["fills"].values(): f.IsVisible = False
+            c["kite"] = {}
             for name, colour in KITE_COLOR.items():
                 b = G.CreateGumpColorBox(1.0, colour); b.SetRect(x1, ROW1_Y - 1, 2, fh + 2)
                 b.SetAcceptMouseInput(False)
-                b.IsVisible = False; gump.Add(b); ctl["kite"][name] = b
-            ctl["kite_lbl"] = Kit.add_label(gump, "", x1, ROW1_Y - 2, HUE_TEXT)
-            ctl["kite_lbl"].SetAcceptMouseInput(False); kite.update({"px": None, "state": None, "tiles": None})
-            ctl["swing"] = Kit.add_label(gump, "", x1 + win["bar_w"] + 5, ROW1_Y - 2, HUE_TEXT)
-            ctl["notice"] = nl = Kit.add_label(gump, "", x1 + 4, ROW1_Y - 2, HUE_RED)
+                b.IsVisible = False; gump.Add(b); c["kite"][name] = b
+            c["kite_lbl"] = Kit.add_label(gump, "", x1, ROW1_Y - 2, HUE_TEXT)
+            c["kite_lbl"].SetAcceptMouseInput(False); kite.update({"px": None, "state": None, "tiles": None})
+            c["swing"] = Kit.add_label(gump, "", x1 + win["bar_w"] + 5, ROW1_Y - 2, HUE_TEXT)
+            c["notice"] = nl = Kit.add_label(gump, "", x1 + 4, ROW1_Y - 2, HUE_RED)
             nl.SetAcceptMouseInput(False); nl.IsVisible = False
-            ctl["hit"] = Kit.add_label(gump, "", x1, ROW2_Y, HUE_GREY)
-            ctl["food"] = Kit.add_label(gump, "", x1 + win["row1"] - Kit.text_w("Food 20/20"), ROW2_Y, HUE_TEXT)
+            c["hit"] = Kit.add_label(gump, "", x1, ROW2_Y, HUE_GREY)
+            c["food"] = Kit.add_label(gump, "", x1 + win["row1"] - Kit.text_w("Food 20/20"), ROW2_Y, HUE_TEXT)
             win["food_w"] = [Kit.text_px("Food %d/20" % i) for i in range(21)]; half = win["row1"] // 2
-            ctl["tip_bar"] = Kit.catcher(gump, x1 - 2, ROW1_Y - 4, win["row1"] + 4, 18,
-                                         target_click, bar_tip(None), movable=True)
-            ctl["tip_hit"] = Kit.catcher(gump, x1 - 2, ROW2_Y - 2, half, 18, target_click, hit_tip(None), movable=True)
-            ctl["tip_food"] = Kit.catcher(gump, x1 + half, ROW2_Y - 2, win["row1"] - half + 2, 18,
-                                          lambda *a: None, food_tip(), movable=True)
+            c["tip_bar"] = Kit.catcher(gump, x1 - 2, ROW1_Y - 4, win["row1"] + 4, 18,
+                                       target_click, bar_tip(None), movable=True)
+            c["tip_hit"] = Kit.catcher(gump, x1 - 2, ROW2_Y - 2, half, 18, target_click, hit_tip(None), movable=True)
+            c["tip_food"] = Kit.catcher(gump, x1 + half, ROW2_Y - 2, win["row1"] - half + 2, 18,
+                                        lambda *a: None, food_tip(), movable=True)
             win["fill_w"], win["fill_state"], win["shown"], win["tips"] = -1, None, {}, {}; win["notice_shown"] = None
             G.AddControlOnDisposed(gump, on_close(gump)); G.AddGump(gump); Kit.on_moved(gump, save_position)
             Kit.dispose(old)
+        wnd = None
         def set_tip(key, text):
-            c = ctl.get(key)
+            c = win["c"].get(key)
             if c is None or win["tips"].get(key) == text: return
             win["tips"][key] = text; c.SetTooltip(text)
         def target_click(*a):
@@ -2682,12 +2733,13 @@ def _module_hud():
             return ("Satiety estimate%s, %+d%% to hit: drops 1 every %d min, rises when you eat%s. Adjust: %s / %s." % (
                         (": " + label.lower()) if label else "", mod, HUNGER_DECAY_SECONDS // 60,
                         "" if FOOD_SEEN[0] else " (none seen yet, so grey)", HK_HUNGER_UP, HK_HUNGER_DOWN))
-        def apply_opacity(): ctl["section"].SetAlpha(bg_opacity / 100.0 * Kit.SECTION_ALPHA)
+        def refresh(): win["c"]["section"].SetAlpha(bg_opacity / 100.0 * Kit.SECTION_ALPHA)
         def set_fill(progress, state):
             fw = int(win["bar_w"] * max(0, min(1000, progress)) / 1000)
             old_w, old_state = win["fill_w"], win["fill_state"]
             if fw == old_w and state == old_state: return
-            win["fill_w"], win["fill_state"] = fw, state; fills = ctl["fills"]; was = old_state if old_w > 0 else None
+            win["fill_w"], win["fill_state"] = fw, state
+            fills = win["c"]["fills"]; was = old_state if old_w > 0 else None
             now = state if fw > 0 else None
             if now is not None: Kit.ui_w(fills[now], fw)
             if was != now:
@@ -2710,9 +2762,9 @@ def _module_hud():
             if dist is None: return "idle"
             return "close" if dist < ideal else ("turn" if dist == ideal else "far")
         def kite_draw(p, mob, cycle, stat, w_speed):
-            marks = ctl.get("kite")
+            marks = win["c"].get("kite")
             if not marks: return
-            lbl = ctl.get("kite_lbl")
+            lbl = win["c"].get("kite_lbl")
             if not kite["on"] or S.notice is not None:
                 if kite["state"] is not None:
                     marks[kite["state"]].IsVisible = False; kite["state"] = None; kite["tiles"] = None
@@ -2737,17 +2789,18 @@ def _module_hud():
             if tiles != kite["tiles"]: kite["tiles"] = tiles; Kit.set_text(lbl, str(tiles), KITE_HUE[state])
         def on_close(g):
             def handler(*args):
-                if win["closing"] or ctl.get("gump") is not g: return
-                save_position(); ctl.clear(); HOST.disable("swing")
+                if win["closing"] or win["c"].get("gump") is not g: return
+                save_position(); win["c"].clear(); HOST.disable("swing")
             return handler
         def save_position():
-            g = ctl.get("gump")
-            if Kit.is_open(g) and not pieces_on(LAYOUT_KEY):
+            g = win["c"].get("gump")
+            if Kit.is_open(g) and not pieces_on(KEY):
                 save_var("swingtimer_x", g.GetX()); save_var("swingtimer_y", g.GetY())
         FOOD_SEEN = [False]
         def satiety_text(): return "{:.0f}/20 {}".format(S.hunger, satiety_info(S.hunger)[1])
         def _pair(a, b): return "%s / %s" % (a, b.rsplit("+", 1)[1])
-        def page_table():
+        ACTIONS = {}
+        def page_table(w):
             keys = ((_pair(HK_SET_TARGET, HK_RESYNC), "pick the target / restart the bar"),
                     (_pair(HK_HUNGER_UP, HK_HUNGER_DOWN), "satiety estimate +1 / -1"),
                     (_pair(HK_ENEMY_UP, HK_ENEMY_DOWN), "enemy skill +5 / -5"))
@@ -2763,11 +2816,12 @@ def _module_hud():
                                      {"dx": 220, "lw": 150, "sdy": 8, "sw": 120, "unit": satiety_text()})),
                      {"sh": 68, "ldy": 4}), ("HOTKEYS", [r for k, what in keys for r in (("note", k, {"stay": True}),
                                                                  ("note", what, {"dx": 330}))], {"sh": 100}))
-        def config_height(w): return Kit.Form.height(page_table(), w)
+        cfg = Kit.Page(settings, page_table)
+        def config_height(w): return Kit.Form.height(page_table(w), w)
         def build_config(g, x, y, w):
             cfgui["f"] = Kit.Form(g, x, y, w, {"kite": kite["on"], "opacity": int(round(bg_opacity)),
-                                               "enemy": cfg["enemy_default"], "satiety": int(round(S.hunger))},
-                                  page_table())
+                                               "enemy": settings["enemy_default"], "satiety": int(round(S.hunger))},
+                                  page_table(w))
         def config_closed(): cfgui["f"] = None
         def poll_config():
             nonlocal bg_opacity; f = cfgui["f"]
@@ -2775,9 +2829,9 @@ def _module_hud():
             new, seen = f.read(), f.vals; f.vals = new
             if new["opacity"] != seen["opacity"]:
                 bg_opacity = float(new["opacity"]); save_var("swingtimer_bg_opacity", bg_opacity)
-                if is_open(): apply_opacity()
+                if is_open(): refresh()
             if new["enemy"] != seen["enemy"]:
-                cfg["enemy_default"] = new["enemy"]; save_var("swingtimer_enemy_default", new["enemy"])
+                settings["enemy_default"] = new["enemy"]; save_settings()
                 loop["slow_clock"] = 0.0
             if new["satiety"] != seen["satiety"]: set_hunger(new["satiety"])
             Kit.set_text(f.c["satiety_lbl"], satiety_text())
@@ -2791,20 +2845,13 @@ def _module_hud():
             S.hunger = max(0.0, min(20.0, load_var("swingtimer_hunger", DEFAULT_HUNGER))); S.hunger_clock = now_ms()
             kite["on"] = bool(int(load_var(KITE_VAR, 1) or 0)); kite["steps"].clear()
             kite["xy"], kite["stat0"], kite["swing0"] = None, None, None; build_window()
-            pieces_add(LAYOUT_KEY, "target", 0, lambda: ctl.get("gump")); register_hotkeys(True)
-            if not hooked[0]:
-                hooked[0] = True
-                try: API.Events.SoundPlayed(on_sound_event)
-                except Exception: pass
+            pieces_add(KEY, "target", 0, lambda: win["c"].get("gump")); register_hotkeys(True)
+            Kit.hook_once(hooked, 0, ("SoundPlayed", on_sound_event))
             loop.update({"slow_clock": 0.0, "eat_clock": 0.0, "weapon": current_weapon(), "mob": None, "my_skill": 0.0,
                          "mob_skill": enemy_skill(None, None), "mob_name": "",
-                         "skill_of": None, "skill_clock": 0.0, "timer_clock": 0.0, "timer_mode": None, "fast": False})
+                         "skill_of": None, "skill_clock": 0.0, "timer_clock": 0.0, "timer_mode": None, "fast": False,
+                         "react": None})
             say("on (%s picks the target, %s restarts the bar)." % (HK_SET_TARGET, HK_RESYNC), Kit.HUE_GOOD)
-        def _stop():
-            win["closing"], win["active"] = True, False; register_hotkeys(False); note["rd"] = None
-            if S.dirty: save_history()
-            save_position(); pieces_remove(LAYOUT_KEY); save_var("swingtimer_bg_opacity", bg_opacity)
-            g = ctl.get("gump"); ctl.clear(); Kit.dispose(g)
         def _tick():
             if not is_open(): loop["fast"] = False; return
             t = now_ms(); p = HOST.me()
@@ -2812,6 +2859,8 @@ def _module_hud():
             while S.sounds: handle_sound(S.sounds.pop(0), p)
             if S.keys: run_keys()
             if t - note["clock"] >= 100: note["clock"] = t; check_notices()
+            react = (S.target_serial, API.LastTargetSerial, bool(p.InWarMode))
+            if react != loop["react"]: loop["react"] = react; loop["slow_clock"] = t - 250
             if t - loop["slow_clock"] >= 250:
                 loop["slow_clock"] = t; loop["xy"] = (int(p.X), int(p.Y)); loop["weapon"] = current_weapon()
                 was = S.gaps_weapon
@@ -2847,15 +2896,15 @@ def _module_hud():
             set_fill(progress, "paused" if not in_combat else ("ready" if progress >= 1000 else "fill"))
             step_note(p, t); kite_draw(p, mob, cycle, stat, w_speed); loop["fast"] = in_combat and progress < 1000
             if nt is not win["notice_shown"]:
-                win["notice_shown"] = nt; nl = ctl["notice"]
+                win["notice_shown"] = nt; nl = win["c"]["notice"]
                 if nt is not None: set_label(nl, nt[0], nt[1])
                 nl.IsVisible = nt is not None
             mode = (in_combat, progress >= 1000, mob is None)
             if mode != loop["timer_mode"] or t - loop["timer_clock"] >= 100:
                 loop["timer_mode"], loop["timer_clock"] = mode, t
-                if not in_combat: set_label(ctl["swing"], "Paused" if mob is not None else "Ready", HUE_GREY)
-                elif progress >= 1000: set_label(ctl["swing"], "Ready", HUE_GREEN)
-                else: set_label(ctl["swing"], "%.1fs" % (max(0.0, remaining) / 1000.0), HUE_TEXT)
+                if not in_combat: set_label(win["c"]["swing"], "Paused" if mob is not None else "Ready", HUE_GREY)
+                elif progress >= 1000: set_label(win["c"]["swing"], "Ready", HUE_GREEN)
+                else: set_label(win["c"]["swing"], "%.1fs" % (max(0.0, remaining) / 1000.0), HUE_TEXT)
             key = (w_name, w_speed, "%.1f" % (predicted / 1000.0), len(gaps))
             if win["shown"].get("bar_tip") != key:
                 win["shown"]["bar_tip"] = key; set_tip("tip_bar", bar_tip((w_name, w_speed, predicted, len(gaps))))
@@ -2866,14 +2915,14 @@ def _module_hud():
                 shown["rows"] = key; chance = final_hit_chance(my_skill, their_skill, w_acc, S.hunger)
                 sat_mod, sat_label = satiety_info(S.hunger)
                 if mob is not None:
-                    set_label(ctl["hit"], "Hit %d%%" % int(round(chance * 100)),
+                    set_label(win["c"]["hit"], "Hit %d%%" % int(round(chance * 100)),
                               HUE_GREEN if chance >= 0.60 else (HUE_YELLOW if chance >= 0.40 else HUE_RED))
                     set_tip("tip_hit", hit_tip((loop["mob_name"], w_skill, my_skill, their_skill, w_acc, sat_mod)))
-                else: set_label(ctl["hit"], "Hit --%", HUE_GREY); set_tip("tip_hit", hit_tip(None))
+                else: set_label(win["c"]["hit"], "Hit --%", HUE_GREY); set_tip("tip_hit", hit_tip(None))
                 n = max(0, min(20, int(round(S.hunger))))
-                if set_label(ctl["food"], "Food %d/20" % n, Kit.HUE_INFO if not FOOD_SEEN[0] else
+                if set_label(win["c"]["food"], "Food %d/20" % n, Kit.HUE_INFO if not FOOD_SEEN[0] else
                              (HUE_RED if S.hunger < 5 else (HUE_YELLOW if S.hunger < 10 else HUE_TEXT))):
-                    Kit.ui_pos(ctl["food"], win["x1"] + win["row1"] - win["food_w"][n], ROW2_Y)
+                    Kit.ui_pos(win["c"]["food"], win["x1"] + win["row1"] - win["food_w"][n], ROW2_Y)
                 set_tip("tip_food", food_tip(sat_label, sat_mod))
         def _thread_tick():
             if files["import"] and not win["closing"]:
@@ -2883,9 +2932,16 @@ def _module_hud():
             files["save"] = False
         def _interval(): return 0.025 if loop.get("fast") else 0.1
         def _thread_wanted(): return bool(files["save"] or files["import"])
-        return part_dict(_start, _tick, _stop, config_height, build_config, poll_config, config_closed,
-                         thread_tick=_thread_tick, thread_wanted=_thread_wanted, interval=_interval)
+        def _stop():
+            win["closing"], win["active"] = True, False; register_hotkeys(False); note["rd"] = None
+            if S.dirty: save_history()
+            save_position(); pieces_remove(KEY); save_var("swingtimer_bg_opacity", bg_opacity)
+            g = win["c"].get("gump"); win["c"].clear(); Kit.dispose(g)
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": config_height,
+                "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
+                "thread_tick": _thread_tick, "thread_wanted": _thread_wanted, "interval": _interval}
     def _part_bandage():
+        KEY = "bandage"; TITLE = "Bandages"; POS_KEY = "BandageAgent_pos"
         BANDAGE_GRAPHIC = 0x0E21; BANDAGE_TIME    = 15.0; OTHER_TIME_DEF  = 7.5; TIME_BUFFER     = 0.5
         TIME_MIN, TIME_MAX = 1.0, 60.0; BUFFER_MIN, BUFFER_MAX = 0.0, 5.0; TARGET_TIMEOUT  = 3.0; OTHER_RANGE     = 1
         BAND_REFUSED_END = ("you did not stay close enough to heal", "you were unable to finish your work")
@@ -2900,24 +2956,29 @@ def _module_hud():
         DEFAULT_START_PCT = 50; PCT_MIN, PCT_MAX  = 0, 99; BAR_WIN_X, BAR_WIN_Y = 400, 300; CURE_HEALING    = 60.0
         CURE_ANATOMY    = 60.0; COUNT_AFTER_USE = 0.6; DEFAULT_LOW     = 10; LOW_MIN, LOW_MAX = 0, 999
         ALERT_LOW       = "bandage.low"; ALERT_HP        = "bandage.hp"; ALERT_POISON    = "bandage.poison"
-        ALERT_READY     = "bandage.ready"; OTHER_NAME_CHARS = 10; KEY             = "bandage"
-        TITLE           = "Bandages"; PERSIST_KEY     = "BandageAgentStartPct"; TIMING_KEY      = "BandageAgent_timing"
-        POS_KEY         = "BandageAgent_pos"; EXTRA_KEY       = "BandageAgent_extra"
+        ALERT_READY     = "bandage.ready"; OTHER_NAME_CHARS = 10
+        PERSIST_KEY     = "BandageAgentStartPct"; TIMING_KEY      = "BandageAgent_timing"
+        EXTRA_KEY       = "BandageAgent_extra"
         OTHER_KEY       = "BandageAgent_other"; TICK_COLOR      = "#E8C25A"; WIN_H = 62; ROW1_Y, ROW2_Y = 16, 35
         ICON = 18; ICON_GAP = 8; CFG_H1, CFG_H2, CFG_H3 = 120, 118, 104
         CFG_H = CFG_H1 + Kit.GAP + CFG_H2 + Kit.GAP + CFG_H3
+        settings = {"cure": True, "low": DEFAULT_LOW, "others": False, "other_pct": 80, "party": True, "pets": True}
+        DEFAULTS = dict(settings)
         def st_reset():
             st.update({"phase": "idle", "shutting": False, "queue": [], "rebuild": False, "skills": (0.0, 0.0, -1e9),
                        "count": None, "count_at": 0.0, "low_armed": True, "hp_armed": True, "poison_armed": True,
                        "target": None, "last": None, "pick": False, "begun": False, "by_buff": False, "buff": False,
                        "lt": (0, 0.0)})
-        st = {"start_pct": DEFAULT_START_PCT, "band_time": BANDAGE_TIME, "other_time": OTHER_TIME_DEF,
-              "buffer": TIME_BUFFER, "t0": 0.0, "deadline": 0.0, "rd": None}
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "start_pct": DEFAULT_START_PCT,
+              "band_time": BANDAGE_TIME, "other_time": OTHER_TIME_DEF, "buffer": TIME_BUFFER, "t0": 0.0,
+              "deadline": 0.0, "rd": None}
         st_reset()
-        settings = {"cure": True, "low": DEFAULT_LOW, "others": False, "other_pct": 80, "party": True, "pets": True}
-        win = {"g": None, "fill": None, "fill_box": None, "label": None,
-               "bar_w": 109, "fill_w": -1, "text": None, "count": None, "count_text": None, "wide": False}
-        cfg = {"f": None, "typed": None, "applied": None, "since": 0.0}; say = Kit.sayer(TITLE)
+        win = {"g": None, "c": {"fill": None, "fill_box": None, "label": None, "count": None}, "store": ({}, {}),
+               "bar_w": 109, "fill_w": -1, "text": None, "count_text": None, "wide": False}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        cfgui = {"f": None, "typed": None, "applied": None, "since": 0.0}
+        def load_settings(): load_pct(); load_timing(); load_extra()
+        def save_settings(): save_pct(); save_timing()
         def load_pct():
             try: st["start_pct"] = max(PCT_MIN, min(PCT_MAX, int(Kit.get_var(PERSIST_KEY, str(DEFAULT_START_PCT)))))
             except Exception: st["start_pct"] = DEFAULT_START_PCT
@@ -2950,7 +3011,6 @@ def _module_hud():
                 settings["other_pct"], int(settings["party"]), int(settings["pets"])))
         def save_pos():
             if not pieces_on(KEY): Kit.save_pos(POS_KEY, win["g"])
-        queue = Kit.queuer(st)
         def layout_size():
             bw = Kit.pic_size(Kit.LINE_RED)[0]; fw = Kit.pic_size(Kit.LINE_BLUE)[0]
             bar_w = bw if bw > 0 and fw > 0 else 109
@@ -2967,20 +3027,21 @@ def _module_hud():
             Kit.add_window_frame(g, WIN_W, WIN_H, corners=False)
             PIECES["bg"][g] = [Kit.add_section(g, 8, 8, L["sec_w"], WIN_H - 16)]
             g.SetTooltip("%s: one press, one bandage (x = bandages left)" % TITLE)
-            x1 = 8 + (L["sec_w"] - L["row1"]) // 2; win["fill"] = win["fill_box"] = None; win["bar_w"] = L["bar_w"]
+            x1 = 8 + (L["sec_w"] - L["row1"]) // 2; c = win["c"]
+            c["fill"] = c["fill_box"] = None; win["bar_w"] = L["bar_w"]
             if bw > 0 and fw > 0:
                 Kit.add_pic(g, Kit.LINE_RED, x1, ROW1_Y)
-                win["fill"] = Kit.add_tiled(g, Kit.LINE_BLUE, x1, ROW1_Y, 1, fh); win["fill"].SetWidth(0)
+                c["fill"] = Kit.add_tiled(g, Kit.LINE_BLUE, x1, ROW1_Y, 1, fh); c["fill"].SetWidth(0)
             else:
                 Kit.add_tiled(g, Kit.SECTION_TILE, x1, ROW1_Y, 109, 9, 1.0); box = G.CreateGumpColorBox(1.0, "#3A63A8")
-                box.SetRect(x1 + 1, ROW1_Y + 1, 1, 7); g.Add(box); win["fill_box"] = box
-            tx = x1 + L["bar_w"] + 5; win["label"] = Kit.add_label(g, "Ready", tx, ROW1_Y - 2, Kit.HUE_INFO)
+                box.SetRect(x1 + 1, ROW1_Y + 1, 1, 7); g.Add(box); c["fill_box"] = box
+            tx = x1 + L["bar_w"] + 5; c["label"] = Kit.add_label(g, "Ready", tx, ROW1_Y - 2, Kit.HUE_INFO)
             Kit.catcher(g, x1 - 2, ROW1_Y - 4, L["row1"] + 4, 18, _bar_click,
                         "Bandage in progress and its patient. Alt+click: auto-follow (again to stop)", movable=True)
             x2 = 8 + (L["sec_w"] - L["row2"]) // 2; y2 = ROW2_Y
             pic = G.CreateGumpItemPic(BANDAGE_GRAPHIC, ICON, ICON); pic.SetPos(x2, y2); pic.SetAcceptMouseInput(False)
             g.Add(pic); Kit.catcher(g, x2, y2, ICON, ICON, queue("me"), "Use one bandage on yourself")
-            xc = x2 + ICON + ICON_GAP; win["count"] = Kit.add_label(g, "", xc, y2 + 1, Kit.HUE_INFO)
+            xc = x2 + ICON + ICON_GAP; c["count"] = Kit.add_label(g, "", xc, y2 + 1, Kit.HUE_INFO)
             Kit.catcher(g, xc, y2, L["count_w"], ICON, lambda *a: None, "Bandages left in your backpack", movable=True)
             xt = xc + L["count_w"] + ICON_GAP; _reticle(g, xt, y2)
             Kit.catcher(g, xt, y2, ICON, ICON, _other_click, "Target someone within %d tile%s for one bandage. "
@@ -2990,7 +3051,8 @@ def _module_hud():
                         "One more bandage on your last patient. Alt+click: auto-follow (again to stop)")
             win.update({"fill_w": -1, "text": None, "count_text": None, "wide": wide, "g": g})
             G.AddControlOnDisposed(g, _closed(g)); G.AddGump(g); Kit.on_moved(g, save_pos); Kit.dispose(old)
-            show_count()
+            refresh()
+        wnd = None
         def _ring(g, x, y, art, ch):
             p = Kit.add_pic(g, art, x, y, hue=53, mouse=False)
             if p is None: Kit.add_label(g, ch, x + 5, y + 1, Kit.HUE_TEXT); return False
@@ -3018,8 +3080,8 @@ def _module_hud():
             def handler(*args):
                 if win["g"] is g and not st["shutting"]: save_pos(); win["g"] = None; HOST.disable(KEY)
             return handler
-        def show_count():
-            lbl = win["count"]; n = st["count"]
+        def refresh():
+            lbl = win["c"]["count"]; n = st["count"]
             if lbl is None: return
             if n is None: key = ("", Kit.HUE_INFO)
             else: low = settings["low"]; key = ("x%d" % n, Kit.HUE_BAD if low > 0 and n < low else Kit.HUE_INFO)
@@ -3027,12 +3089,12 @@ def _module_hud():
         def set_bar(fraction, text, hue=None):
             fraction = max(0.0, min(1.0, fraction)); w = int(win["bar_w"] * fraction); old_w = win["fill_w"]
             if w != old_w:
-                win["fill_w"] = w; fill = win["fill"]
+                win["fill_w"] = w; fill = win["c"]["fill"]
                 if fill is not None:
                     Kit.ui_w(fill, w)
                     if (w > 0) != (old_w > 0) or old_w < 0: fill.IsVisible = w > 0
-                elif win["fill_box"] is not None: Kit.ui_w(win["fill_box"], max(1, w - 2))
-            lbl = win["label"]
+                elif win["c"]["fill_box"] is not None: Kit.ui_w(win["c"]["fill_box"], max(1, w - 2))
+            lbl = win["c"]["label"]
             if lbl is not None and (text, hue) != win["text"]:
                 win["text"] = (text, hue); Kit.set_text(lbl, text, Kit.HUE_INFO if hue is None else hue)
         def alert(kind, text, level="warn"): HOST.alert(kind, text, level)
@@ -3064,7 +3126,7 @@ def _module_hud():
                     st["low_armed"] = False
                     alert(ALERT_LOW, "No bandages left" if n <= 0 else "Only %s left" % Kit.count(n, "bandage"))
             else: st["low_armed"] = True
-            show_count()
+            refresh()
         def near(m, px, py, reach): return max(abs(int(m.X) - px), abs(int(m.Y) - py)) <= reach
         def describe(m):
             name = str(m.Name or "") or "them"
@@ -3085,7 +3147,7 @@ def _module_hud():
             if serial: queue(("on", int(serial)))()
         def bandage_other(p, now, serial):
             m = API.FindMobile(serial)
-            if m is None: say("can't see them.", Kit.HUE_BAD); return
+            if m is None: say("couldn't bandage them (out of sight).", Kit.HUE_BAD); return
             if int(p.Serial) == int(m.Serial): start_bandage(p, now, None); return
             if m.IsDead: say("they are dead.", Kit.HUE_BAD); return
             if not near(m, int(p.X), int(p.Y), OTHER_RANGE):
@@ -3140,28 +3202,22 @@ def _module_hud():
                 API.CancelTarget(); say("%s is out of reach; cursor put down." % o["name"], Kit.HUE_BAD); return False
             API.Target(o["serial"]); st["last"] = o; say("bandaging %s." % o["name"])
             return True
-        def _queued(p, now):
-            if st["rebuild"]:
-                st["rebuild"] = False
-                if win["g"] is not None and win["wide"] != settings["others"]: build_window()
-            while st["queue"]:
-                action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-                if kind == "follow": Follow.toggle(action[1], TITLE)
-                elif action == "me": start_bandage(p, now, None)
-                elif action == "other":
-                    if not st["pick"] and st["phase"] == "idle": st["pick"] = True; HOST.pick_target(15.0, picked, KEY)
-                elif action == "again":
-                    if st["last"] is None: say("nobody bandaged yet; use the target icon first.")
-                    else: bandage_other(p, now, st["last"]["serial"])
-                elif kind == "on": bandage_other(p, now, action[1])
+        def pick_other(action, p, now):
+            if not st["pick"] and st["phase"] == "idle": st["pick"] = True; HOST.pick_target(15.0, picked, KEY)
+        def bandage_again(action, p, now):
+            if st["last"] is None: say("nobody bandaged yet; use the target icon first.")
+            else: bandage_other(p, now, st["last"]["serial"])
         def num_text(v): return ("%.2f" % v).rstrip("0").rstrip(".")
-        def build_config(g, x, y, w):
+        ACTIONS = {"follow": lambda action, p, now: Follow.toggle(action[1], TITLE),
+                   "me": lambda action, p, now: start_bandage(p, now, None), "other": pick_other,
+                   "again": bandage_again, "on": lambda action, p, now: bandage_other(p, now, action[1])}
+        def page_table(w):
             labels = ("On yourself:", "On someone else:", "Latency buffer:"); field = {"stay": True, "tw": 50}
             unit = ("note", "s", {"dx": 82 + max(Kit.text_w(t) for t in labels), "ndy": 4, "h": 28})
             help_text = ("Bandage: one on you. Target icon: one on whoever you click (within %d tile%s). "
                          "Arrow: one more on the last one." % (OTHER_RANGE, "" if OTHER_RANGE == 1 else "s"))
             limits = (int(TIME_MIN), int(TIME_MAX))
-            page = (("BANDAGE TIMES", (
+            return (("BANDAGE TIMES", (
                         ("text", "time", labels[0], "Seconds one on yourself takes; applied when you stop typing "
                          "(%d-%d)" % limits, field), unit,
                         ("text", "other", labels[1], "Seconds one on someone else takes, much faster on this shard "
@@ -3179,16 +3235,19 @@ def _module_hud():
                     ("WINDOW", [("check", "others", "Show who the bandage is on (a wider bar)", "The bar names your "
                                  "patient. Alt+click the name: auto-follow (again to stop)")] +
                      [("note", line, {"ndy": 2}) for line in Kit.wrap(help_text, w - 24)[:2]], {"sh": CFG_H3}))
+        cfg = Kit.Page(settings, page_table)
+        def build_config(g, x, y, w):
+            page = page_table(w)
             vals = dict(settings, time=num_text(st["band_time"]), other=num_text(st["other_time"]),
                         buffer=num_text(st["buffer"]), box=st["start_pct"])
-            cfg.update({"f": Kit.Form(g, x, y, w, vals, page, ldy=4, lgap=12, fw=40), "typed": None, "applied": None})
-        def config_closed(): cfg.update({"f": None, "typed": None, "applied": None})
+            cfgui.update({"f": Kit.Form(g, x, y, w, vals, page, ldy=4, lgap=12, fw=40), "typed": None, "applied": None})
+        def config_closed(): cfgui.update({"f": None, "typed": None, "applied": None})
         def parse_time(text, lo, hi):
             try: v = float(str(text).strip().replace(",", "."))
             except (ValueError, TypeError): return None
             return v if lo <= v <= hi else None
         def poll_config():
-            f = cfg["f"]
+            f = cfgui["f"]
             if f is None: return
             try: new = f.read(True)
             except Exception: config_closed(); return
@@ -3200,16 +3259,17 @@ def _module_hud():
                 if new[k] != settings[k]: settings[k] = new[k]; st[flag] = True; changed = True
             if changed: save_extra()
             now = time.time(); typed = (new["time"], new["other"], new["buffer"])
-            if typed != cfg["typed"]: cfg["typed"], cfg["since"] = typed, now; return
-            if cfg["applied"] == typed or now - cfg["since"] < 0.7: return
-            cfg["applied"] = typed; changed = False
+            if typed != cfgui["typed"]: cfgui["typed"], cfgui["since"] = typed, now; return
+            if cfgui["applied"] == typed or now - cfgui["since"] < 0.7: return
+            cfgui["applied"] = typed; changed = False
             for i, (k, lo, hi) in enumerate((("band_time", TIME_MIN, TIME_MAX), ("other_time", TIME_MIN, TIME_MAX),
                                              ("buffer", BUFFER_MIN, BUFFER_MAX))):
                 v = parse_time(typed[i], lo, hi)
                 if v is not None and abs(v - st[k]) > 0.001: st[k], changed = v, True
             if changed: save_timing()
+        load_settings()
         def _start():
-            st_reset(); st["rd"] = Journal.reader(); load_pct(); load_timing(); load_extra()
+            st_reset(); st["rd"] = Journal.reader(); load_settings()
             for k, label, sound in ((ALERT_LOW, "Bandages running low", 0x1EA), (ALERT_HP, "HP low: bandage?", 0x1F1),
                                     (ALERT_POISON, "Poisoned (a bandage cures)", 0x1E0),
                                     (ALERT_READY, "Bandage done", 0x202)):
@@ -3222,7 +3282,12 @@ def _module_hud():
             if p is None: return
             now = time.time()
             if st["queue"] or st["rebuild"]:
-                _queued(p, now)
+                if st["rebuild"]:
+                    st["rebuild"] = False
+                    if win["g"] is not None and win["wide"] != settings["others"]: build_window()
+                while st["queue"]:
+                    action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
+                    if kind in ACTIONS: ACTIONS[kind](action, p, now)
                 if win["g"] is None: return
             if p.IsDead:
                 if st["phase"] != "idle": HOST.release_cursor(KEY)
@@ -3262,17 +3327,17 @@ def _module_hud():
             t = win["text"]
             if t is None or t[0] not in ("Ready", "Done", "Out!") or (t[0] == "Out!" and (st["count"] or 0) > 0):
                 set_bar(0.0, "Ready")
-        def _stop():
-            st["shutting"] = True; HOST.release_cursor(KEY); save_pos(); pieces_remove(KEY); save_pct()
-            save_timing(); g, win["g"] = win["g"], None; win["label"] = win["count"] = None; Kit.dispose(g)
         def _interval():
             if st["phase"] == "cursor": return 0.01
             if st["phase"] != "heal": return 0.1
             band_time = st["other_time"] if st["target"] is not None else st["band_time"]
             return min(0.1, max(0.01, st["t0"] + band_time + st["buffer"] - time.time()))
-        load_pct(); load_timing(); load_extra()
-        return part_dict(_start, _tick, _stop, lambda w: CFG_H, build_config, poll_config, config_closed,
-                         interval=_interval)
+        def _stop():
+            st["shutting"] = True; HOST.release_cursor(KEY); save_pos(); pieces_remove(KEY); save_settings()
+            g, win["g"] = win["g"], None; win["c"]["label"] = win["c"]["count"] = None; Kit.dispose(g)
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": lambda w: CFG_H,
+                "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
+                "interval": _interval}
     def _part_pets():
         KEY = "pets"; TITLE = "Pets"; SETTINGS_KEY = "Pets_settings"; POS_KEY = "Pets_pos"; MIN_KEY = "Pets_min"
         W = 440; MINI_W, MINI_H = 280, 46; SCAN_EVERY = 0.25; FULL_EVERY = 1.0; not_pet = {}; LOOK_EVERY = 1.0
@@ -3292,11 +3357,14 @@ def _module_hud():
         BAR_HITS, BAR_POISON, BAR_STAM = "#c22d2d", "#2f9a3c", "#d39a1c"
         KILL_TIP = "then pick the enemy with the shard's cursor (only on a click)"
         settings = {"range": RANGE_DEFAULT, "low": 30, "heal": 0, "kill": False, "hidden": True}
+        DEFAULTS = dict(settings)
         def st_reset():
             st.update({"shutting": False, "docked": False, "queue": [], "heal": None, "confirm": None, "scan_at": 0.0,
                        "look_at": 0.0, "note": "", "full_at": 0.0, "note_until": 0.0, "order": []})
-        st = {"minimized": False, "followers": 0, "fmax": 0, "me": 0, "note_hue": Kit.HUE_INFO, "cmd_at": {}, "seq": 0}
-        st_reset(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "n_rows": -1}; cleanup = Kit.Cleanup()
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "followers": 0, "fmax": 0, "me": 0,
+              "note_hue": Kit.HUE_INFO, "cmd_at": {}, "seq": 0}
+        st_reset(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "n_rows": -1, "room": MAX_ROWS, "w": W}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         pets = {}; NUMS = {"range": (RANGE_MIN, RANGE_MAX), "low": (0, 99), "heal": (0, len(HEAL_WAYS) - 1)}
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ("range", "low", "heal", "kill", "hidden"), NUMS)
@@ -3409,7 +3477,6 @@ def _module_hud():
             if not st["order"] or len(st["order"]) != len(pets):
                 st["order"] = sorted(pets.values(), key=lambda r: r["seq"])
             return st["order"]
-        queue = Kit.queuer(st)
         def flow(g, store, items, x0, y0, xmax):
             x, y, lines = x0, y0, 1
             for key, art, caption, tip, fn, hue in items:
@@ -3426,11 +3493,18 @@ def _module_hud():
                 items.append(("all_kill", Kit.ART_PLAY, "Kill", "Say \"%s\", %s" % (ALL_KILL, KILL_TIP),
                               queue(("all", "kill")), Kit.HUE_BAD))
             return items
+        def all_height(w):
+            M = Kit.MARGIN; return 30 + flow(None, None, all_items(), M + 10, 0, w - M - 10) * 26 + 22
+        def min_size(): return W, 2 * Kit.MARGIN + 30 + 2 * Kit.GAP + all_height(W) + 30 + ROW_H + 2
+        def zone_size():
+            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None; mw, mh = min_size()
+            return z if z is not None and z[0] >= mw and z[1] >= mh else None
         def build_window():
-            M = Kit.MARGIN; IW = W - 2 * M; n_rows = min(MAX_ROWS, len(pets)); items = all_items()
+            M = Kit.MARGIN; zs = zone_size(); w = zs[0] if zs else W; IW = w - 2 * M; items = all_items()
             lines = flow(None, None, items, M + 10, 0, M + IW - 10); all_h = 30 + lines * 26 + 22
-            pets_h = 30 + max(1, n_rows) * ROW_H + 2
-            g, store, c = wnd.begin(W, M + 30 + Kit.GAP + all_h + Kit.GAP + pets_h + M); rows = []
+            top = 2 * M + 30 + 2 * Kit.GAP + all_h; room = wnd.rows(ROW_H, top + 32, MAX_ROWS) if zs else MAX_ROWS
+            n_rows = min(room, len(pets)); pets_h = zs[1] - top if zs else 30 + max(1, n_rows) * ROW_H + 2
+            g, store, c = wnd.begin(w, top + pets_h); rows = []
             if not st["minimized"]:
                 wnd.frame(g); ya = M + 30 + Kit.GAP
                 Kit.add_section(g, M, ya, IW, all_h, "ALL PETS  (said out loud)")
@@ -3473,9 +3547,9 @@ def _module_hud():
                         xb += 35 + Kit.text_w(cap) + 12
                     rows.append(row)
                 c["empty"] = (Kit.add_label(g, "", M + 12, yp + 33, Kit.HUE_INFO) if not n_rows else None)
-            wnd.end(g, {"rows": rows, "n_rows": n_rows, "count_w": None}); draw(time.time())
+            wnd.end(g, {"rows": rows, "n_rows": n_rows, "count_w": None, "room": room, "w": w}); refresh(time.time())
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=0x0E81,
-                         cleanup=cleanup, lock=False, clear={"rows": [], "c": {}, "n_rows": -1})
+                         cleanup=cleanup, lock=True, clear={"rows": [], "c": {}, "n_rows": -1})
         def set_vis(row, key, ctrl, on):
             if row.get(key) != on: row[key] = on; ctrl.IsVisible = on
         def set_progress(row, key, ctrl, v):
@@ -3500,12 +3574,12 @@ def _module_hud():
             lbl = c.get("note")
             if lbl is not None:
                 on = note_on(time.time())
-                Kit.set_text(lbl, Kit.fit(st["note"], W - 2 * Kit.MARGIN - 24) if on else "", st["note_hue"])
-        def draw(now):
+                Kit.set_text(lbl, Kit.fit(st["note"], win["w"] - 2 * Kit.MARGIN - 24) if on else "", st["note_hue"])
+        def refresh(now):
             if win["g"] is None or st["shutting"] or st["docked"]: return
             if st["minimized"]: show_note(); return
             order = ordered()
-            if min(MAX_ROWS, len(order)) != win["n_rows"]: build_window(); return
+            if min(win["room"], len(order)) != win["n_rows"]: build_window(); return
             c = win["c"]
             for row, r in zip(win["rows"], order):
                 Kit.row_set(row, (r["serial"],), now); where, pct = r["where"], r["pct"]
@@ -3516,9 +3590,9 @@ def _module_hud():
                 Kit.set_text(row["name_lbl"], Kit.fit(r["name"] or "(no name yet)", NAME_W), hue); bar = None
                 if where == "near" and not r["dead"]:
                     bar = "poison" if r["poison"] else "hits"
-                    info = "%s  %s" % ("%d%%" % pct if pct is not None else "?%", "here" if r["dist"] == 0 else "%d %s"
+                    info = "%s, %s" % ("%d%%" % pct if pct is not None else "?%", "here" if r["dist"] == 0 else "%d %s"
                                        % (r["dist"], r["dir"]))
-                elif r["dead"] and where != "gone": info = "dead  %d %s" % (r["dist"], r["dir"])
+                elif r["dead"] and where != "gone": info = "dead, %d %s" % (r["dist"], r["dir"])
                 elif where == "far": info = "far: %d %s" % (r["dist"], r["dir"])
                 else: info = ("out of range (%s)" % Kit.ago(now - r["seen"], Kit.AGO_SHORT) if r["seen"] else
                               "out of range")
@@ -3531,8 +3605,8 @@ def _module_hud():
             if lbl is not None:
                 if st["fmax"] > 0: txt = "%d / %d slots" % (st["followers"], st["fmax"])
                 else: txt = "%d known" % len(pets) if pets else ""
-                if len(order) > MAX_ROWS:
-                    more = "%d more  %s" % (len(order) - MAX_ROWS, txt)
+                if len(order) > win["room"]:
+                    more = ("%d more, %s" % (len(order) - win["room"], txt)).rstrip(", ")
                     if c["count_right"] - Kit.text_px(more) >= c["title_end"] + 8: txt = more
                 Kit.set_text(lbl, txt); tw = Kit.text_px(txt) if txt else 0
                 if win["count_w"] != tw: win["count_w"] = tw; Kit.ui_pos(lbl, c["count_right"] - tw, Kit.ui_y(lbl))
@@ -3549,7 +3623,7 @@ def _module_hud():
             if cf is not None and cf[0] == action and cf[1] <= now <= cf[2]: st["confirm"] = None; return True
             st["confirm"] = (action, now + 0.3, now + CONFIRM_SECS)
             note("That reveals you: click again to do it.", Kit.HUE_TITLE, CONFIRM_SECS); return False
-        def say(text, now):
+        def speak(text, now):
             last = st["cmd_at"].get(text)
             if last is not None and 0 <= now - last < 0.6: return
             if len(st["cmd_at"]) > 50: st["cmd_at"].clear()
@@ -3560,6 +3634,7 @@ def _module_hud():
             return r["name"]
         def do_target(serial):
             if API.HasTarget("any") and not HOST.cursor_busy(KEY):
+                if not HOST.harm_ok(serial, "hud.pets", TITLE): return
                 API.Target(serial)
                 if st["heal"] is not None: st["heal"] = None; HOST.release_cursor(KEY)
                 return
@@ -3607,7 +3682,7 @@ def _module_hud():
                 st["heal"] = None; HOST.release_cursor(KEY)
                 if API.HasTarget("any"): note("A target cursor is up: aim it or press Esc.", Kit.HUE_TITLE)
                 else: note("No target cursor came for %s." % j["name"], Kit.HUE_BAD)
-        def picked(serial): st["queue"].append(("added", int(serial or 0)))
+        def picked(serial): queue.add(("added", int(serial or 0)), dup=True)
         def add_pet(serial, p, now):
             if not serial: return
             if serial == st["me"] or serial == int(p.Serial): note("That's you.", Kit.HUE_BAD); return
@@ -3621,23 +3696,22 @@ def _module_hud():
             r["manual"] = True; r["own"] = bool(m.IsRenamable); update(r, m, int(p.X), int(p.Y), now, True)
             if r["dist"] > settings["range"]: r["where"] = "far"
             note("%s is listed for this session." % (r["name"] or "It"), Kit.HUE_GOOD)
-        def handle(action, p, now):
-            kind = action[0] if isinstance(action, tuple) else action
-            if wnd.action(action): return
-            if action == "add": HOST.pick_target(10.0, picked); note("Target the pet to list.")
-            elif kind == "follow": Follow.toggle(action[1], TITLE)
-            elif p is None: return
-            elif kind == "added": add_pet(action[1], p, now)
-            elif kind == "target": do_target(action[1])
-            elif kind == "heal": start_heal(action[1], p, now)
-            elif kind == "all" or kind in PET_SAY:
-                if (action[1] == "kill" if kind == "all" else kind == "pet_kill") and not settings["kill"]: return
-                if kind == "all": text = ALL_KILL if action[1] == "kill" else ALL_SAY.get(action[1])
-                else: text = pet_name(action[1]); text = text and PET_SAY[kind] % text
-                if text and not dead_now(p) and gate(action, p, now): say(text, now)
+        def pick_pet(action, p, now): HOST.pick_target(10.0, picked); note("Target the pet to list.")
+        def command(action, p, now):
+            kind = action[0]
+            if (action[1] == "kill" if kind == "all" else kind == "pet_kill") and not settings["kill"]: return
+            if kind == "all": text = ALL_KILL if action[1] == "kill" else ALL_SAY.get(action[1])
+            else: text = pet_name(action[1]); text = text and PET_SAY[kind] % text
+            if text and not dead_now(p) and gate(action, p, now): speak(text, now)
         def dead_now(p):
             if p.IsDead: note("You are dead: your pets can't hear you.", Kit.HUE_BAD); return True
             return False
+        NO_PLAYER = ("add", "follow")
+        ACTIONS = {"add": pick_pet, "follow": lambda action, p, now: Follow.toggle(action[1], TITLE),
+                   "added": lambda action, p, now: add_pet(action[1], p, now),
+                   "target": lambda action, p, now: do_target(action[1]),
+                   "heal": lambda action, p, now: start_heal(action[1], p, now), "all": command}
+        ACTIONS.update((k, command) for k in PET_SAY)
         HEAL_INFO = ("One heal per click, aimed at the pet when its cursor comes (bandage within %s, spell within %d)."
                      % (tiles(BANDAGE_RANGE), SPELL_RANGE))
         KILL_INFO = "Said only on a click; the shard's cursor then picks the enemy."
@@ -3666,11 +3740,12 @@ def _module_hud():
             f = cfg.build(g, x, y, w); dd = G.CreateDropDown(200, [label for _, label in HEAL_WAYS], settings["heal"])
             dd.SetPos(x + 22 + Kit.text_w("Heal with:"), y + 90 + Kit.GAP + 30); g.Add(dd); f.c["heal"] = dd
             dd.SetTooltip("What each row's Heal button uses")
+        load_settings()
         def _start():
             st_reset(); st["minimized"] = wnd.start_min(); load_settings()
             for r in pets.values(): r["where"] = "gone" if r["where"] == "gone" else "far"
             HOST.alert_kind(LOW_ALERT, "Pet HP low", 0x335); HOST.alert_kind(DEAD_ALERT, "Pet died", 0x1F1)
-            build_window(); wnd.dock(); cleanup.service("pets.list", svc_pets)
+            build_window(); wnd.dock(fit=True, min=min_size); cleanup.service("pets.list", svc_pets)
         def svc_pets(distance=None):
             if st["shutting"]: return None
             rng = settings["range"]
@@ -3683,17 +3758,21 @@ def _module_hud():
             if Kit.closed(win): return
             now = time.time(); p = API.Player
             while st["queue"]:
-                handle(st["queue"].pop(0), p, now)
+                action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
+                if not (wnd.action(action) or p is None and kind not in NO_PLAYER) and kind in ACTIONS:
+                    ACTIONS[kind](action, p, now)
                 if win["g"] is None: return
             if p is None: return
             if st["heal"] is not None: heal_tick(p, now)
             if now >= st["scan_at"] or st["scan_at"] - now > SCAN_EVERY:
-                st["scan_at"] = now + SCAN_EVERY; scan(p, now); draw(now)
+                st["scan_at"] = now + SCAN_EVERY; scan(p, now); refresh(now)
             elif st["note"] and not note_on(now): st["note"] = ""; show_note()
+        def _interval(): return 0.02 if st["heal"] is not None else 0.1
         def _stop():
             st["shutting"] = True; st["heal"] = None; HOST.release_cursor(KEY); save_settings(); cleanup.close()
-        load_settings(); return part_dict(_start, _tick, _stop, cfg.height, build_config, cfg.poll, cfg.closed,
-                                          interval=lambda: 0.02 if st["heal"] is not None else 0.1)
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": build_config, "poll_config": cfg.poll, "config_closed": cfg.closed,
+                "interval": _interval}
     PARTS = (("frames", _part_frames, 0.1, "unitframes"), ("timers", _part_timers, 0.1, "spelltimers"),
         ("swing", _part_swing, 0.025, "swing"), ("bandage", _part_bandage, 0.1, "bandage"),
         ("pets", _part_pets, 0.1, "pets"),)

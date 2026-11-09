@@ -8,8 +8,8 @@ def _module_skills():
                 API.SysMsg("%s: %s written to %s." % (title, what, path), Kit.HUE_GOOD)
             except Exception as ex: API.SysMsg("%s: couldn't write %s (%s)." % (title, path, ex), Kit.HUE_BAD)
     def _part_window():
-        say = Kit.sayer(TITLE)
-        SETTINGS_KEY = "Skills_settings"; POS_KEY = "Skills_pos"; MARKS_KEY = "Skills_marks"
+        KEY = "skills"; TITLE = "Skills"; SETTINGS_KEY = "Skills_settings"; POS_KEY = "Skills_pos"
+        MARKS_KEY = "Skills_marks"
         LOCKSETS_KEY = "Skills_locksets"; SESSION_KEY = "Skills_session"; SESSION_STALE_H = 6; TOTAL_CAP_DEFAULT = 7000
         VANILLA = ("StandardSkillsGump", "SkillGumpAdvanced"); DOCK_ICON = 0x13E3; ROW_H = 22; SEARCH_W = 110
         BAR_W = 56; BAR_GROW = 120; RESIZE_SETTLE = 0.35; MIN_IW = 380; ZONE_NAME_MIN = 60
@@ -127,14 +127,15 @@ def _module_skills():
                    ("up", "Set to go up"), ("down", "Set to go down"), ("locked", "Locked"),
                    ("below", "Below cap"), ("pinned", "Pinned")]
         SORTS = ("name", "real", "value", "cap", "gain", "lock")
-        DEFAULTS = {"replace": True, "x_hides": True, "bars": True, "col_cap": True,
+        settings = {"replace": True, "x_hides": True, "bars": True, "col_cap": True,
                     "col_gain": True, "journal": False, "lock_at_cap": False, "lock_at_target": True, "cap_warn": True,
                     "rows": 12, "total_cap": TOTAL_CAP_DEFAULT, "hl_secs": 30, "rate_min": 30,
                     "sec_summary": True, "sec_stats": True, "sec_locks": True,
                     "sec_detail": True, "sec_log": False, "log_lines": 5,
                     "sort": "name", "asc": True, "filter": 0, "groups": False, "minimized": False, "width": 0, 
                     "tips": True, "lock_stat_target": True}
-        LIMITS = {"rows": (4, 40), "total_cap": (100, 72000), "hl_secs": (0, 600),
+        DEFAULTS = dict(settings)
+        LIMITS ={"rows": (4, 40), "total_cap": (100, 72000), "hl_secs": (0, 600),
                   "rate_min": (5, 240), "log_lines": (2, 15), "filter": (0, len(FILTERS) - 1), "width": (0, 4000)}
         LAYOUT_KEYS = ("bars", "col_cap", "col_gain", "rows", "sec_summary", "sec_stats",
                        "sec_locks", "sec_detail", "sec_log", "log_lines", "tips", "x_hides", "replace")
@@ -146,11 +147,13 @@ def _module_skills():
                 for hi, text in rows: lst.append((hi * 10, "%g-%g" % (lo / 10.0, hi), text)); lo = hi * 10
                 out[name.lower()] = lst
             return out
-        TIP_TABLE = tip_table(); settings = dict(DEFAULTS); marks = {"pins": set(), "targets": {}}; locksets = []
+        TIP_TABLE = tip_table(); marks = {"pins": set(), "targets": {}}; locksets = []
         stat_tgt = [0, 0, 0]
-        st = {"sel": None, "last_click": (None, 0.0), "arm": {}, "search": "", "pc": {}, "save_at": 0.0, "to_write": [],
-              "ver": 0, "preview": False}
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "sel": None,
+              "last_click": (None, 0.0), "arm": {}, "search": "", "pc": {}, "save_at": 0.0, "to_write": [], "ver": 0,
+              "preview": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "rowmap": {}}; page = {"sync": False, "skip": False}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         UIC = {}; REF = {"world": None, "player": None, "how": ""}
         SK = {"objs": [], "names": [], "click": [], "collide": [], "n": 0, "cur": [], "low": [], "full": True, "rr": 0}
         STATS = {"cur": [0, 0, 0], "locks": [0, 0, 0], "cap": 0, "prev": [0, 0, 0]}
@@ -488,15 +491,11 @@ def _module_skills():
                 shut = st["pc"].get("other", False); out.append(("g", "other", shut))
                 if not shut: out += [("s", i) for i in sort_list(other)]
             return out
-        def queue(action):
-            def handler(*args):
-                if isinstance(action, tuple) or action not in st["queue"]: st["queue"].append(action)
-            return handler
         def row_click(i):
             def handler(*args):
                 now = time.time(); last, t = st["last_click"]
-                if last == i and now - t <= 0.6: st["last_click"] = (None, 0.0); st["queue"].append(("button", i))
-                else: st["last_click"] = (i, now); st["queue"].append(("pick", i))
+                if last == i and now - t <= 0.6: st["last_click"] = (None, 0.0); queue.add(("button", i), dup=True)
+                else: st["last_click"] = (i, now); queue.add(("pick", i), dup=True)
             return handler
         on_disposed = Kit.disposer("skills.window", st, win)
         def redraw(): st["rebuild"] = "window"
@@ -730,7 +729,7 @@ def _module_skills():
                                                           queue("settings"), STAT_NAMES[j]))
                         pic = Kit.add_pic(g, LOCK_ART[0], x0 + sx + slot, yy + 5)
                         if pic is not None:
-                            Kit.on_click(pic, queue(("stat", j)))
+                            Kit.on_click(pic, queue(("stat", j), dup=True))
                             Kit.with_tip(pic, "Click: %s up, down or locked" % nm)
                         c["stats"].append((lbl, pic))
                     c["stat_total_w"] = IW - 4 - tx
@@ -759,7 +758,7 @@ def _module_skills():
                 for v in range(3):
                     p = Kit.add_pic(g, LOCK_ART[v], lx + v * (aw + 10), ry + 5)
                     if p is not None:
-                        Kit.on_click(p, queue(("dlock", v))); Kit.with_tip(p, LOCK_SET[v])
+                        Kit.on_click(p, queue(("dlock", v), dup=True)); Kit.with_tip(p, LOCK_SET[v])
                     c["d_locks"].append(p)
                 ry += 24; c["d_lw"] = IW - 28; c["d_l1"] = zlabel("d_l1", x0 + 12, ry + 3, c["d_lw"]); ry += 24
                 c["d_l2"] = zlabel("d_l2", x0 + 12, ry + 3, c["d_lw"], Kit.HUE_INFO); ry += 24
@@ -787,7 +786,7 @@ def _module_skills():
             if settings["x_hides"]: return "Hide %s (%s brings it back)" % (
                 TITLE, "the client's Skills button" if settings["replace"] else "the Action Bar's Skills button")
             return Kit.CLOSE_TIP % TITLE
-        def _build_window():
+        def build_window():
             old, win["g"] = win["g"], None; UIC.clear(); st["desc"] = None; st["rebuild"] = None
             if st["hidden"]:
                 win.update({"c": {}, "rows": [], "rowmap": {}, "store": ({}, {})}); Kit.dispose(old); return
@@ -798,6 +797,8 @@ def _module_skills():
             else: L = layout(); w, h, IW = L["W"], L["H"], L["IW"]; win["L"] = L
             x, y = Kit.load_pos(POS_KEY, (160, 120), (w, h))
             if Kit.is_open(old): x, y = old.GetX(), old.GetY()
+            at = LAYOUT.placed.get(KEY) if HOST.layout_holds(KEY) else None
+            if at is not None: x, y = int(at[0]), int(at[1])
             if Z is not None:
                 g = G.CreateGump(True, True); Kit.add_window_frame(g, lw, lh)
                 Kit.title_bar(g, store, lw, TITLE, KEY, queue("toggle_min"), queue("to_bar"),
@@ -810,7 +811,7 @@ def _module_skills():
                 g = G.CreateGump(True, True)
                 c["mini"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"), close_tip=close_tip())
             else:
-                x, y = Kit.clamp(x, y, w, h)
+                if at is None: x, y = Kit.clamp(x, y, w, h)
                 g = G.CreateModernGump(x, y, w, h, True, L["min_w"], L["min_h"], on_resized)
                 g.SetAlpha(0); Kit.add_window_frame(g, w, h, mouse=False); Kit.add_section(g, M, M, IW, 30)
                 Kit.add_label(g, TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
@@ -825,10 +826,15 @@ def _module_skills():
                                    on_click=queue("toggle_min"))
                     Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, close_tip())
                 build_zone(g, store, c, plain_plan(L), 1.0, False)
-            Kit.show_window(g, x, y, w, h, KEY if Z is not None else None, st["docked"], on_disposed(g), save_pos, win,
-                            {"g": g, "c": c, "store": store, "rows": [], "rowmap": {}, "w": lw if Z is not None else w})
+            xy = Kit.show_window(g, x, y, w, h, KEY, st["docked"], on_disposed(g), save_pos, win,
+                                 {"g": g, "c": c, "store": store, "rows": [], "rowmap": {},
+                                  "w": lw if Z is not None else w})
+            if at is not None and xy is not None and tuple(xy) != (x, y):
+                g.SetPos(x, y); Kit.note_rect(g, x, y); Kit.moved_by_code(g)
+            if at is not None: LAYOUT.fit_now(KEY, g)
             if settings["minimized"] != st["minimized"]: settings["minimized"] = st["minimized"]; save_settings()
             show_target_text(); read_groups(); rebuild_rows(time.time()); refresh(time.time()); Kit.dispose(old)
+        wnd = None; hooks = Kit.dock_hooks(TITLE, DOCK_ICON, st, win, redraw)
         def on_resized(*args):
             st["resize_at"] = time.time(); g = win["g"]; L = win.get("L")
             if st["preview"] or L is None or not Kit.is_open(g) or st["minimized"] or st["docked"]: return
@@ -857,10 +863,10 @@ def _module_skills():
                 if cx is None: continue
                 c["hdr"][key] = Kit.add_label(g, text, sx + cx, y0 + 6, Kit.HUE_INFO)
                 Kit.catcher(g, sx + cx - 2, y0 + 3, (nxt[key] or cx + 40) - cx - 2, 20,
-                            queue(("sort", key)), tip + " (again to reverse)")
+                            queue(("sort", key), dup=True), tip + " (again to reverse)")
             lp = Kit.add_pic(g, LOCK_ART[2], sx + m["lock_x"], y0 + 7)
             if lp is not None:
-                Kit.on_click(lp, queue(("sort", "lock"))); Kit.with_tip(lp, "Sort by lock (again to reverse)")
+                Kit.on_click(lp, queue(("sort", "lock"), dup=True)); Kit.with_tip(lp, "Sort by lock (again to reverse)")
             c["hdr"]["lock_pic"] = lp; c["arrow"] = Kit.add_pic(g, LOCK_ART[1], sx, y0 + 8, mouse=False)
             c["sa"] = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * ROW_H); g.Add(c["sa"])
             c["sa_xy"] = (sx, y0 + 26)
@@ -926,7 +932,7 @@ def _module_skills():
             r["val"] = put(r, Kit.add_label(tgt, "", m["val_x"], ry + 3, Kit.HUE_INFO), m["val_x"], 3)
             r["gain"] = put(r, Kit.add_label(tgt, "", m["gain_x"], ry + 3, Kit.HUE_INFO),
                             m["gain_x"], 3) if m["gain_x"] is not None else None
-            put(r, Kit.catcher(tgt, 0, ry, m["row_w"], ROW_H - 1, queue(("fold", key)),
+            put(r, Kit.catcher(tgt, 0, ry, m["row_w"], ROW_H - 1, queue(("fold", key), dup=True),
                             "Fold or unfold this group"), 0, 0)
             return r
         def build_skill_row(tgt, ry, i, m):
@@ -956,11 +962,11 @@ def _module_skills():
             r["tip0"] = r["cat_tip"] = tip; r["use"] = None
             if SK["click"][i]:
                 b = G.CreateGumpButton("", Kit.HUE_TEXT, GEM[0], GEM[1], GEM[2]); b.SetPos(4, ry + 6); tgt.Add(b)
-                Kit.on_click(b, queue(("use", i))); Kit.with_tip(b, "Use " + SK["names"][i])
+                Kit.on_click(b, queue(("use", i), dup=True)); Kit.with_tip(b, "Use " + SK["names"][i])
                 r["use"] = put(r, b, 4, 6)
             r["lock"] = put(r, Kit.add_pic(tgt, LOCK_ART[0], m["lock_x"], ry + 4), m["lock_x"], 4); r["tip"] = None
             if r["lock"] is not None:
-                Kit.on_click(r["lock"], queue(("lock", i))); remember(r["lock"], "Graphic", LOCK_ART[0])
+                Kit.on_click(r["lock"], queue(("lock", i), dup=True)); remember(r["lock"], "Graphic", LOCK_ART[0])
             return r
         def row_name(i, m=None):
             nm = SK["names"][i] if i < SK["n"] else "?"; m = m or metrics()
@@ -1216,7 +1222,7 @@ def _module_skills():
         def bring_up():
             if st["hidden"] or st["minimized"] or st["docked"] or not Kit.is_open(win["g"]):
                 st["hidden"] = st["minimized"] = st["docked"] = False; settings["minimized"] = False; save_settings()
-                _build_window()
+                build_window()
             else:
                 ctl = Kit.client_control(win["g"])
                 if ctl is not None: Tz.call(None, "MakeTopMostGump", [ctl], Tz.T("ClassicUO.Game.Managers.UIManager"))
@@ -1253,7 +1259,7 @@ def _module_skills():
         def move_to_next_group(i):
             read_groups(True)
             if i is None or not GR["list"]:
-                say("the client's skill groups can't be read.", Kit.HUE_BAD); return
+                say("couldn't move the skill (the client's skill groups can't be read).", Kit.HUE_BAD); return
             gi = group_of(i); dst = 0 if gi is None else (gi + 1) % len(GR["list"])
             try:
                 import System
@@ -1295,6 +1301,7 @@ def _module_skills():
                     SK["names"][i], f1(b), f1(v), f1(cp), ("%+.1f" % (gn / 10.0)) if gn else "", LOCK_WORD[lk]))
             st["to_write"].append((path, "\n".join(lines) + "\n"))
         def write_files(): write_queue(st["to_write"], TITLE, "skill sheet")
+        def _thread_wanted(): return bool(st["to_write"])
         def pick(i):
             if st["sel"] != i:
                 st["sel"] = i; show_target_text()
@@ -1303,54 +1310,58 @@ def _module_skills():
         def picked(i):
             if i is None: say("pick a skill first.", Kit.HUE_INFO)
             return i is not None
-        def run_action(a, now):
-            kind = a[0] if isinstance(a, tuple) else a; arg = a[1] if isinstance(a, tuple) and len(a) > 1 else None
-            sel = st["sel"]; fn = ACTS.get(kind)
-            if fn is not None: fn(arg)
-            elif kind == "toggle_min":
-                st["minimized"] = not (st["minimized"] or st["docked"]); st["docked"] = False
-                safe(lambda: HOST.dock_forget(KEY)); settings["minimized"] = st["minimized"]; save_settings()
-                st["rebuild"] = "window"
-            elif kind == "filter":
-                settings["filter"] = (settings["filter"] + 1) % len(FILTERS); save_settings()
-                lbl = win["c"].get("filter")
-                if lbl is not None: Kit.set_text(lbl, FILTERS[settings["filter"]][1])
-            elif kind == "sort":
-                if settings["sort"] == arg: settings["asc"] = not settings["asc"]
-                else: settings["sort"] = arg; settings["asc"] = arg == "name"
-                save_settings()
-            elif kind == "button": pick(arg); make_button(arg)
-            elif kind == "mkbutton" and picked(sel): make_button(sel)
-            elif kind == "use":
-                i = arg if arg is not None else sel
-                if picked(i): use_skill(i)
-            elif kind == "lock" and arg is not None and arg < SK["n"]: set_lock(arg, (SK["cur"][arg][3] + 1) % 3)
-            elif kind == "dlock" and sel is not None: set_lock(sel, arg)
-            elif kind == "fold":
-                if not isinstance(arg, int): st["pc"][arg] = not st["pc"].get(arg, False)
-                elif arg < len(GR["list"]): g = GR["list"][arg]; g["obj"].IsMaximized = g["max"] = not g["max"]
-            elif kind == "pin" and picked(sel): marks["pins"] ^= {sel}; save_marks()
-            elif kind == "nextgrp" and picked(sel): move_to_next_group(sel)
-            elif kind == "all_down":
-                if armed("all_down", "click All down again to set every listed skill to go down."): bulk_lock(1)
-            elif kind == "newsess":
-                new_session(); say("new session; gains count from now.", Kit.HUE_GOOD)
-            elif kind == "ask":
-                if ask_server(): say("asked the server for your skills.", Kit.HUE_INFO)
-                else: say("couldn't ask the server.", Kit.HUE_BAD)
-            elif kind == "ls_del" and arg < len(locksets):
-                n = locksets.pop(arg)[0]; save_locksets()
-                say("lock set \"%s\" deleted." % n, Kit.HUE_INFO)
-            elif kind == "grp_reset":
-                if armed("grp_reset", "click Reset groups again for the default groups."):
-                    group_reset(); HOST.refresh_settings(KEY)
-            if kind in ("ls_save", "ls_del", "grp_new", "grp_del"): HOST.refresh_settings(KEY)
-        ACTS = {"settings": lambda arg: HOST.show_settings(KEY), "to_bar": lambda arg: HOST.dock_to_bar(KEY, TITLE),
-                "pick": pick, "stat": lambda arg: set_stat_lock(arg, (STATS["locks"][arg] + 1) % 3),
-                "all_up": lambda arg: bulk_lock(0), "all_locked": lambda arg: bulk_lock(2),
-                "lock_capped": lambda arg: bulk_lock(2, True), "export": lambda arg: export_sheet(),
-                "ls_save": save_lockset, "ls_apply": apply_lockset, "grp_new": lambda arg: group_new(),
-                "grp_del": group_delete, "grp_save": lambda arg: groups_save()}
+        def action_parts(a):
+            if not isinstance(a, tuple): return a, None
+            return a[0], a[1] if len(a) > 1 else None
+        def toggle_min(arg):
+            st["minimized"] = not (st["minimized"] or st["docked"]); st["docked"] = False
+            safe(lambda: HOST.dock_forget(KEY)); settings["minimized"] = st["minimized"]; save_settings()
+            st["rebuild"] = "window"
+        def cycle_filter(arg):
+            settings["filter"] = (settings["filter"] + 1) % len(FILTERS); save_settings()
+            lbl = win["c"].get("filter")
+            if lbl is not None: Kit.set_text(lbl, FILTERS[settings["filter"]][1])
+        def sort_by(arg):
+            if settings["sort"] == arg: settings["asc"] = not settings["asc"]
+            else: settings["sort"] = arg; settings["asc"] = arg == "name"
+            save_settings()
+        def use_action(arg):
+            i = arg if arg is not None else st["sel"]
+            if picked(i): use_skill(i)
+        def fold_row(arg):
+            if not isinstance(arg, int): st["pc"][arg] = not st["pc"].get(arg, False)
+            elif arg < len(GR["list"]): g = GR["list"][arg]; g["obj"].IsMaximized = g["max"] = not g["max"]
+        def pin_skill(arg):
+            sel = st["sel"]
+            if picked(sel): marks["pins"] ^= {sel}; save_marks()
+        def ask_skills(arg):
+            if ask_server(): say("asked the server for your skills.", Kit.HUE_INFO)
+            else: say("couldn't ask the server (the client's skills call failed).", Kit.HUE_BAD)
+        def lockset_delete(arg):
+            if arg < len(locksets):
+                n = locksets.pop(arg)[0]; save_locksets(); say("lock set \"%s\" deleted." % n, Kit.HUE_INFO)
+            HOST.refresh_settings(KEY)
+        def reset_groups(arg):
+            if armed("grp_reset", "click Reset groups again for the default groups."):
+                group_reset(); HOST.refresh_settings(KEY)
+        ACTIONS = {"settings": lambda arg: HOST.show_settings(KEY), "to_bar": lambda arg: HOST.dock_to_bar(KEY, TITLE),
+                   "pick": pick, "stat": lambda arg: set_stat_lock(arg, (STATS["locks"][arg] + 1) % 3),
+                   "all_up": lambda arg: bulk_lock(0), "all_locked": lambda arg: bulk_lock(2),
+                   "lock_capped": lambda arg: bulk_lock(2, True), "export": lambda arg: export_sheet(),
+                   "ls_save": lambda arg: (save_lockset(arg), HOST.refresh_settings(KEY)), "ls_apply": apply_lockset,
+                   "grp_new": lambda arg: (group_new(), HOST.refresh_settings(KEY)),
+                   "grp_del": lambda arg: (group_delete(arg), HOST.refresh_settings(KEY)),
+                   "grp_save": lambda arg: groups_save(), "toggle_min": toggle_min, "filter": cycle_filter,
+                   "sort": sort_by, "button": lambda arg: (pick(arg), make_button(arg)),
+                   "mkbutton": lambda arg: picked(st["sel"]) and make_button(st["sel"]), "use": use_action,
+                   "lock": lambda arg: arg is not None and arg < SK["n"] and set_lock(arg, (SK["cur"][arg][3] + 1) % 3),
+                   "dlock": lambda arg: st["sel"] is not None and set_lock(st["sel"], arg), "fold": fold_row,
+                   "pin": pin_skill, "nextgrp": lambda arg: picked(st["sel"]) and move_to_next_group(st["sel"]),
+                   "all_down": lambda arg: armed("all_down",
+                                                 "click All down again to set every listed skill to go down.")
+                   and bulk_lock(1),
+                   "newsess": lambda arg: (new_session(), say("new session; gains count from now.", Kit.HUE_GOOD)),
+                   "ask": ask_skills, "ls_del": lockset_delete, "grp_reset": reset_groups}
         MAIN_CHECKS = [("replace", "Replace the client's skills window",
              "The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),
             ("x_hides", "Close only hides it", "Off: Close turns Skills off"),
@@ -1484,10 +1495,10 @@ def _module_skills():
             store = f.store
             for key in list(store[0].keys()):
                 if not Kit.was_clicked(store, key): continue
-                if key == "ls_save": st["queue"].append(("ls_save", str(c["ls_name"].Text or "")))
+                if key == "ls_save": queue.add(("ls_save", str(c["ls_name"].Text or "")), dup=True)
                 elif key.startswith(("ls_apply_", "ls_del_", "grp_del_")):
-                    kind, _, n = key.rpartition("_"); st["queue"].append((kind, int(n)))
-                else: st["queue"].append((key,))
+                    kind, _, n = key.rpartition("_"); queue.add((kind, int(n)), dup=True)
+                else: queue.add((key,), dup=True)
                 HOST.poke()
         def page_adjust(f, new):
             if page["skip"]: new.update(settings); return
@@ -1517,16 +1528,33 @@ def _module_skills():
         def config_closed():
             if cfg.f is not None: poll_stat_targets(cfg.f.c, True)
             cfg.closed(); page["sync"] = False
-            if st.get("grp_dirty_at"): st["grp_dirty_at"] = 0.0; st["queue"].append(("grp_save",))
+            if st.get("grp_dirty_at"): st["grp_dirty_at"] = 0.0; queue.add(("grp_save",), dup=True)
         def set_ready():
             st["ready"] = True
             for i in range(SK["n"]): sess["base"].setdefault(i, SK["cur"][i][0])
             if sess["stats"] is None and any(STATS["cur"]): sess["stats"] = list(STATS["cur"])
-        def run_queue(now):
-            while st["queue"]: run_action(st["queue"].pop(0), now)
         def drop_window():
             g, win["g"] = win["g"], None; win.update({"c": {}, "rows": [], "rowmap": {}}); UIC.clear(); Kit.dispose(g)
-        def tick_body():
+        load_settings(); load_stat_targets()
+        def _start():
+            st.update({"shutting": False, "docked": False, "hidden": False, "queue": [],
+                       "rebuild": None, "desc": None, "m": None, "ready": False,
+                       "asked": 0.0, "swallow_until": 0.0, "warned_cap": False, "hl": {},
+                       "log": [], "gains": {}, "started": time.time(), "ref_at": 0.0,
+                       "grp_at": 0.0, "tgt_shown": None, "stat_pending": {}, "dirty": True,
+                       "redraw_at": 0.0, "desc_key": None, "cap_at": 0.0, "resize_at": 0.0, "grp_dirty_at": 0.0,
+                       "read_at": 0.0, "stats_at": 0.0})
+            VG.update({"gumps": None, "sig": None, "full_at": 0.0}); load_settings(); load_marks(); load_locksets()
+            load_stat_targets(); load_session()
+            st["minimized"] = settings["minimized"] or HOST.dock_wanted(KEY)
+            refresh_refs(True); read_skills(); read_stats(); read_groups(True)
+            if skills_loaded(): set_ready()
+            fitst.update({"width": None, "rows": None, "slot": None, "k": 1.0, "full": None}); build_window()
+            show_target_text()
+            HOST.dock_add(KEY, dict(hooks, on=bring_up, show=bring_up, fit=layout_fit, exact=True, verify=True,
+                                    drawn_at=drawn_at))
+            if settings["replace"]: vanilla_check()
+        def _tick():
             now = time.time()
             if win["g"] is not None and Kit.was_clicked(win["store"], "close"):
                 if settings["x_hides"]:
@@ -1540,8 +1568,11 @@ def _module_skills():
             if st["grp_dirty_at"] and now - st["grp_dirty_at"] >= GRP_SETTLE: st["grp_dirty_at"] = 0.0; groups_save()
             had = SK["n"]
             if not refresh_refs():
-                run_queue(now); vanilla_check()
-                if st["rebuild"] == "window": _build_window()
+                while st["queue"]:
+                    kind, arg = action_parts(st["queue"].pop(0)); fn = ACTIONS.get(kind)
+                    if fn is not None: fn(arg)
+                vanilla_check()
+                if st["rebuild"] == "window": build_window()
                 elif win["g"] is not None and win["c"] and st["desc"] is None: rebuild_rows(now)
                 return
             if SK["n"] != had: st["rebuild"] = "window"
@@ -1561,52 +1592,34 @@ def _module_skills():
             if st["ready"] and sess["stats"] is None and any(STATS["cur"]): sess["stats"] = list(STATS["cur"])
             read_groups(); ran = bool(st["queue"])
             if ran: touch()
-            run_queue(now)
+            while st["queue"]:
+                kind, arg = action_parts(st["queue"].pop(0)); fn = ACTIONS.get(kind)
+                if fn is not None: fn(arg)
             if changed or ran or now >= st["cap_at"]:
                 st["cap_at"] = now + CAP_EVERY; warned = st["warned_cap"]; cap_warning()
                 if warned != st["warned_cap"]: touch()
             vanilla_check()
             if st["rebuild"] == "window":
-                _build_window(); st["dirty"], st["redraw_at"] = False, now + REDRAW_EVERY; return
+                build_window(); st["dirty"], st["redraw_at"] = False, now + REDRAW_EVERY; return
             if win["g"] is None or not win["c"]: return
             if not (st["minimized"] or st["docked"]) and poll_fields(now): touch()
             if not st["dirty"] and now < st["redraw_at"]: return
             st["dirty"], st["redraw_at"] = False, now + REDRAW_EVERY
             if st["minimized"] or st["docked"]: refresh(now); return
             rebuild_rows(now); refresh(now)
-        def _start():
-            st.update({"shutting": False, "docked": False, "hidden": False, "queue": [],
-                       "rebuild": None, "desc": None, "m": None, "ready": False,
-                       "asked": 0.0, "swallow_until": 0.0, "warned_cap": False, "hl": {},
-                       "log": [], "gains": {}, "started": time.time(), "ref_at": 0.0,
-                       "grp_at": 0.0, "tgt_shown": None, "stat_pending": {}, "dirty": True,
-                       "redraw_at": 0.0, "desc_key": None, "cap_at": 0.0, "resize_at": 0.0, "grp_dirty_at": 0.0,
-                       "read_at": 0.0, "stats_at": 0.0})
-            VG.update({"gumps": None, "sig": None, "full_at": 0.0}); load_settings(); load_marks(); load_locksets()
-            load_stat_targets(); load_session()
-            st["minimized"] = settings["minimized"] or HOST.dock_wanted(KEY)
-            refresh_refs(True); read_skills(); read_stats(); read_groups(True)
-            if skills_loaded(): set_ready()
-            fitst.update({"width": None, "rows": None, "slot": None, "k": 1.0, "full": None}); _build_window()
-            show_target_text(); hooks = Kit.dock_hooks(TITLE, DOCK_ICON, st, win, redraw)
-            hooks.update({"on": bring_up, "fit": layout_fit, "exact": True, "verify": True, "drawn_at": drawn_at})
-            HOST.dock_add(KEY, hooks)
-            if settings["replace"]: vanilla_check()
         def _stop():
             st["shutting"] = True
             if st.get("grp_dirty_at"): st["grp_dirty_at"] = 0.0; safe(lambda: Kit.on_client(groups_save))
             write_files(); save_pos(); save_settings()
             if st["ready"]: save_session()
-            HOST.dock_remove(KEY); drop_window()
-        load_settings(); load_stat_targets()
-        return {"start": _start, "tick": tick_body, "stop": _stop, "client_tick": True, "thread_tick": write_files,
-                  "config_height": cfg.height, "build_config": cfg.build, "poll_config": cfg.poll,
-                  "config_closed": config_closed}
+            HOST.dock_remove(KEY); drop_window(); cleanup.close()
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": config_closed,
+                "thread_tick": write_files, "thread_wanted": _thread_wanted}
     def _part_alarm():
         KEY = "attention"; TITLE = "Training Alarm"; SETTINGS_KEY = "Attention_settings"; POS_KEY = "Attention_pos"
         MIN_KEY = "Attention_min"; W = 400; MINI_W, MINI_H = 300, 46; TRAY_ICON = 0x1C12; GUMP_EVERY = 0.25
         STAFF_EVERY = 1.0; STAFF_RANGE = 18; STAFF_RECHECK = 2.0; STAFF_GONE = 60.0; HIT_EVERY = 0.25; ASKED_SECS = 1.5
-        say = Kit.sayer(TITLE)
         TYPED_SECS = 5.0; SAME_GUMP_SECS = 60.0
         DEFAULT_MARKERS = ("GM, Counselor, Seer, Admin, Administrator, Developer, Staff, Game Master")
         DEFAULT_IGNORE = ""; WHISPER_TYPES = ("whisper", "8"); REPEAT_DEFAULT, REPEAT_MAX = 5, 120
@@ -1623,10 +1636,12 @@ def _module_skills():
         settings = {"gump": True, "staff": True, "name": True, "words": True, "whisper": True,
                     "hit": False, "markers": DEFAULT_MARKERS, "ignore": DEFAULT_IGNORE,
                     "repeat": REPEAT_DEFAULT, "hold": HOLD_DEFAULT, "anyalarm": True}
-        st = {"queue": [], "open_ids": {}, "last_gid": 0, "me": 0, "my_name": "", "name_re": None, "words_re": None,
-              "seq": 0}
+        DEFAULTS = dict(settings)
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "open_ids": {}, "last_gid": 0,
+              "me": 0, "my_name": "", "name_re": None, "words_re": None, "seq": 0}
         win = {"g": None, "c": {}, "store": ({}, {})}; page = {"skip": False}; hooks = {"done": False}
-        mouse = {"looked": False, "get": None}; cleanup = Kit.Cleanup()
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        mouse = {"looked": False, "get": None}
         rx = {"markers": None, "text": None, "ignore": frozenset(), "ignore_text": None}
         def _clean(text): return str(text or "").replace(";", ",").replace("=", " ").strip()
         def load_settings():
@@ -1683,8 +1698,8 @@ def _module_skills():
             st["resume_at"] = 0.0
             if fresh:
                 st["banner_seen"] = False; rep = settings["repeat"]; st["next_sound"] = now + rep if rep > 0 else 0.0
-            if again: draw(); return True
-            HOST.alert(ALERT_KEY[kind], text, "alarm", who="%s#%d" % (who or text, st["seq"])); draw(); return True
+            if again: refresh(); return True
+            HOST.alert(ALERT_KEY[kind], text, "alarm", who="%s#%d" % (who or text, st["seq"])); refresh(); return True
         def answer(how):
             if not st["alarm"]: return
             last = st["alarm"][-1]; st["alarm"] = []; hold = settings["hold"]
@@ -1693,7 +1708,7 @@ def _module_skills():
                 ALERTS.dismiss()
             say("answered; %s" % (("skill loops go on in %d s." % hold) if hold
                                              else "skill loops go on."), Kit.HUE_GOOD)
-            st["last_answered"] = last; draw()
+            st["last_answered"] = last; refresh()
         def alarm_tick(now):
             if not st["alarm"]: return
             if banner_up(): st["banner_seen"] = True
@@ -1704,7 +1719,7 @@ def _module_skills():
                 st["next_sound"] = now + rep; sid = sound_of(st["alarm"][-1]["kind"])
                 if sid: API.PlaySound(sid)
             if not 0 < st["flash_at"] - now <= FLASH_SECS:
-                st["flash_at"] = now + FLASH_SECS; st["flash_on"] = not st["flash_on"]; draw()
+                st["flash_at"] = now + FLASH_SECS; st["flash_on"] = not st["flash_on"]; refresh()
         def read_me(now, p):
             if st["my_name"] and 0 <= now - st["name_at"] < NAME_EVERY: return
             st["name_at"] = now; name = str(p.Name or "").strip(); st["me"] = int(p.Serial)
@@ -1765,6 +1780,7 @@ def _module_skills():
             opened = st["open_ids"]; seen_at = opened.get(gid); opened[gid] = now
             if len(opened) > OPEN_IDS_CAP:
                 for k in sorted(opened, key=opened.get)[:len(opened) - OPEN_IDS_CAP]: del opened[k]
+            if HOST.gump_expected(gid, now): return
             if not st["primed"] or not visible or gid in ignored_ids(): return
             if seen_at is not None and 0 <= now - seen_at <= SAME_GUMP_SECS: return
             if 0 <= now - st["asked_at"] <= ASKED_SECS: return
@@ -1849,13 +1865,16 @@ def _module_skills():
                     q = st["heard"]
                     if len(q) < QUEUE_CAP: q.append((text, name, m))
                 return
-        def hook_events(): Kit.hook_once(hooks, "done", ("ObjectUsed", on_used), ("JournalEntryAdded", on_entry))
+        def on_hits(*args):
+            if settings["hit"] and not st.get("hit_poke"): st["hit_poke"] = True; HOST.poke("skills.alarm", False)
+        def hook_events():
+            Kit.hook_once(hooks, "done", ("ObjectUsed", on_used), ("JournalEntryAdded", on_entry),
+                          ("OnPlayerHitsChanged", on_hits))
         def hit_tick(p):
             if not settings["hit"]: st["hp"] = None; return
             hp = int(p.Hits); prev = st["hp"]; st["hp"] = hp
             if prev is None or p.IsDead or p.InWarMode or hp >= prev: return
             raise_alarm("hit", "You took %d damage while not fighting" % (prev - hp), "hit")
-        queue = Kit.queuer(st)
         def on_alarm_click():
             if Follow.alt_held():
                 r = st["alarm"][-1] if st["alarm"] else st.get("last_answered")
@@ -1889,16 +1908,16 @@ def _module_skills():
                     b = Kit.art_button(g, store, key, art, xb, yb + 62, cap, tip, on_click=queue(act))
                     xb += 35 + Kit.text_w(cap) + 14
                 c["ignore"] = b
-            wnd.end(g); st["drawn"] = None; draw()
+            wnd.end(g); st["drawn"] = None; refresh()
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (240, 160), (MINI_W, MINI_H), TRAY_ICON,
-                         cleanup, lock=False)
+                         cleanup, lock=True)
         def watching_text():
             on = [w for k, w in (("gump", "gumps"), ("staff", "staff"), ("name", "your name"), ("whisper", "whispers"),
                                  ("hit", "hits")) if settings[k]]
             if st["minimized"]:
                 return "%s: %s" % (TITLE, ("watching " + ", ".join(on)) if on else "nothing ticked in settings")
             return ("Watching: " + ", ".join(on)) if on else "Nothing ticked in settings"
-        def draw():
+        def refresh():
             g = win["g"]
             if g is None or (st["minimized"] and st["docked"]): return
             c = win["c"]; lw = c.get("line_w", 200); al = st["alarm"]
@@ -1933,7 +1952,7 @@ def _module_skills():
                 settings["ignore"] = (cur + ", " if cur else "") + "0x%X" % gid; save_settings()
                 HOST.refresh_settings(KEY); say("gump 0x%X ignored." % gid, Kit.HUE_INFO)
         def ignore_and_answer(action): ignore_gump(True); answer("click")
-        ACTS = {"follow": lambda action: Follow.toggle(action[1], TITLE), "answer": lambda action: answer("click"),
+        ACTIONS = {"follow": lambda action: Follow.toggle(action[1], TITLE), "answer": lambda action: answer("click"),
                 "test": lambda action: raise_alarm("test", "Test alarm: answer it to go on", "test"),
                 "ignore_gump": ignore_and_answer, "ignore_last": lambda action: ignore_gump(False)}
         def page_table(w):
@@ -1974,6 +1993,7 @@ def _module_skills():
             Kit.set_text(f.c["last"], last_gump_text(), Kit.HUE_INFO)
         def page_changed(old, new): st["drawn"] = None
         cfg = Kit.Page(settings, page_table, save_settings, page_changed, adjust=page_adjust, clicks=page_clicks)
+        load_settings()
         def _start():
             st.update({"shutting": False, "docked": False, "active": True, "alarm": [],
                        "queue": [a for a in st["queue"] if a == "ignore_last"],
@@ -1987,7 +2007,7 @@ def _module_skills():
                        "minimized": wnd.start_min()})
             load_settings(); hook_events()
             for k, akey, label, snd in KINDS: HOST.alert_kind(akey, label, snd)
-            cleanup.service("attention.up", is_up); build_window(); wnd.dock(scale=True)
+            cleanup.service("attention.up", is_up); build_window(); wnd.dock()
         def _tick():
             if win["g"] is None: return
             if Kit.closed(win): return
@@ -1995,7 +2015,7 @@ def _module_skills():
             while st["queue"]:
                 action = st["queue"].pop(0)
                 if wnd.action(action): continue
-                fn = ACTS.get(action[0] if isinstance(action, tuple) else action)
+                fn = ACTIONS.get(action[0] if isinstance(action, tuple) else action)
                 if fn is not None: fn(action)
             p = HOST.me()
             if p is None: return
@@ -2005,22 +2025,21 @@ def _module_skills():
             if settings["staff"] and not 0 < st["next_staff"] - now <= STAFF_EVERY:
                 st["next_staff"] = now + STAFF_EVERY; staff_tick(now)
             speech_tick(now); heard_tick()
-            if not 0 < st["next_hit"] - now <= HIT_EVERY: st["next_hit"] = now + HIT_EVERY; hit_tick(p)
+            if st.pop("hit_poke", False) or not 0 < st["next_hit"] - now <= HIT_EVERY:
+                st["next_hit"] = now + HIT_EVERY; hit_tick(p)
             alarm_tick(now)
             if not st["alarm"] and st["resume_at"]:
                 if not is_up(): st["resume_at"] = 0.0
-                draw()
+                refresh()
         def _stop():
             st["shutting"] = True; st["active"] = False; st["alarm"] = []; st["resume_at"] = 0.0; save_settings()
             st["rd"] = None; st["gump_obj"] = None; cleanup.close()
-        load_settings()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                   "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
     def _part_bags():
-        KEY = "skillbags"; TITLE = "Skill Bags"; SETTINGS_KEY = "SkillBags_settings"; RULES_KEY = "SkillBags_rules"
-        DONE_KEY = "SkillBags_done"; POS_KEY = "SkillBags_pos"; MIN_KEY = "SkillBags_min"; W = 740
+        KEY = "skillbags"; TITLE = "Skill Bags"; SETTINGS_KEY = "SkillBags_settings"; POS_KEY = "SkillBags_pos"
+        MIN_KEY = "SkillBags_min"; RULES_KEY = "SkillBags_rules"; DONE_KEY = "SkillBags_done"; W = 740
         MINI_W, MINI_H = 240, 46; TRAY_ICON = 0x0E76; ROW_H = 42; MAX_RULES = 8; MAX_DONE = 300; NAME_SCANS_MAX = 6
-        say = Kit.sayer(TITLE)
         RELIST_EVERY = 5.0; BAG_NAME_EVERY = 2.0; TARGET_TIMEOUT = 3.0; OPEN_TIMEOUT = 2.5; OPEN_RETRY = 6.0
         BUSY_RETRY = 1.5; MAX_BUSY = 4; SKILL_TIMER = 10.0
         SKILL_TIMER_SHORT = {"item identification": 3.0, "arms lore": 3.0, "detect hidden": 3.0}
@@ -2030,6 +2049,8 @@ def _module_skills():
                       "can't see that", "cannot see that", "already casting", "you are busy")
         GUARD_STATUS = "Paused: guard zone"; UNKNOWN_STATUS = HOLD_TEXT["unknown"]
         RES_POS_KEY = "SkillBags_results_pos"; RES_KEEP = 200; RES_ROWS = 16; RES_W = 680; RES_ROW_H = 18
+        RES_KEY = "skillbags.results"; RES_TITLE = "Skill Bags Results"; RES_MIN_W = 500
+        RES_FIXED = 2 * Kit.MARGIN + 30 + Kit.GAP + 30 + 24 + 8; RES_EMPTY = "No results shown. Click a rule's Results."
         RES_ANSWER_MAX = 160; EXPORT_NAME = "SkillBags_%08X_rule%d.txt"
         ITEMID_MAGIC = ("durable", "substantial", "massive", "fortified", "indestructable",
                         "indestructible", "defense", "guarding", "hardening", "fortification",
@@ -2047,7 +2068,7 @@ def _module_skills():
                         "cartography": {1: "decoded", 2: "not decoded", 3: "can't decode"}}
         ITEMID_MAGIC_RE = re.compile(r"\b(" + "|".join(ITEMID_MAGIC) + r")\b")
         ITEMID_CHARGES_RE = re.compile(r"\[[^\]]*:\s*\d+\s*\]"); ITEMID_MAGIC_WORD = re.compile(r"\bmagic\b")
-        ACTIONS = [("itemid", "Item Identification", "skill", "Item Identification", 3.2, 0,
+        RULE_ACTIONS = [("itemid", "Item Identification", "skill", "Item Identification", 3.2, 0,
              (), ("not certain", "no idea how much", "tell much about it"), ()),
             ("armslore", "Arms Lore", "skill", "Arms Lore", 3.2, 0, (), ("not certain", "tell much about it"), ()),
             ("tasteid", "Taste Identification", "skill", "Taste Identification", 10.2, 0,
@@ -2064,26 +2085,30 @@ def _module_skills():
             ("use", "Double-click each item", "use", None, 1.0, 0, (), (), ()),
             ("cskill", "Custom skill (name in Custom)", "cskill", None, 10.2, 0, (), (), ()),
             ("ctool", "Custom tool (graphic in Custom)", "ctool", None, 1.5, 0, (), (), ()),]
-        ACTION_NAMES = [a[1] for a in ACTIONS]
+        ACTION_NAMES = [a[1] for a in RULE_ACTIONS]
         FILTERS = [("all", "Every item"), ("containers", "Containers only"),
                    ("graphics", "Graphics in Text (hex)"), ("name", "Name contains Text")]
         FILTER_NAMES = [f[1] for f in FILTERS]; CODE_TEXT = {1: "OK", 2: "failed", 3: "skipped", 4: "done"}
         settings = {"hidden": True, "war": True, "open": True, "retries": DEFAULT_RETRIES, "guard": True}
-        rules = []; st = {}; win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; cleanup = Kit.Cleanup()
+        DEFAULTS = dict(settings)
+        rules = []; st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         page = {"f": None, "rows": [], "next_read": 0.0}
-        resw = {"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False}
+        resw = {"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False, "minimized": False,
+                "shutting": False, "docked": False, "queue": []}
         def esc(s): return str(s or "").replace("|", "/").replace("~", "-")
         def clamp_delay(v, default):
             try: v = float(v)
             except Exception: return default
             return max(MIN_DELAY, min(MAX_DELAY, v))
         def new_rule(action=0):
-            a = ACTIONS[action]
+            a = RULE_ACTIONS[action]
             return {"action": action, "bag": 0, "filt": a[5], "text": "", "custom": "",
                     "delay": a[4], "deep": False, "auto": False, "done": {}, "order": []}
-        def rule_action(r): return ACTIONS[r["action"]]
+        def rule_action(r): return RULE_ACTIONS[r["action"]]
         def skill_floor(r):
-            a = ACTIONS[r["action"]]
+            a = RULE_ACTIONS[r["action"]]
             name = a[3] if a[2] == "skill" else r["custom"].strip() if a[2] == "cskill" else ""
             return SKILL_TIMER_SHORT.get(name.lower(), SKILL_TIMER) if name else 0.0
         def parse_graphics(text):
@@ -2108,7 +2133,7 @@ def _module_skills():
                     f = chunk.split("~")
                     if len(f) < 8: continue
                     try:
-                        r = new_rule(max(0, min(len(ACTIONS) - 1, int(f[0]))))
+                        r = new_rule(max(0, min(len(RULE_ACTIONS) - 1, int(f[0]))))
                         r.update({"bag": int(f[1]) if f[1] else 0, "filt": max(0, min(len(FILTERS) - 1, int(f[2]))),
                                   "text": f[3], "custom": f[4]})
                         r.update({"delay": max(clamp_delay(f[5], rule_action(r)[4]), skill_floor(r)),
@@ -2282,12 +2307,15 @@ def _module_skills():
             except Exception: pass
             try: return int(API.Contents(serial) or 0) > 0
             except Exception: return False
-        def ensure_open(r, now):
+        def due(t, now): return not 0 < t - now <= MAX_DELAY
+        def ensure_open(r, now, on_run=True):
             serial = r["bag"]
-            if not serial or bag_opened(serial): st["opening"].pop(serial, None); return True
-            if not settings["open"] or get_item(serial) is None: return False
+            if not serial or not Kit.in_pack(serial): return False
+            if bag_opened(serial): st["opening"].pop(serial, None); r["_closed"] = False; return True
+            r["_closed"] = True
+            if not settings["open"] or not on_run: return False
             o = st["opening"].get(serial)
-            if o is None or now > o + OPEN_TIMEOUT + OPEN_RETRY: st["opening"][serial] = now; API.UseObject(serial)
+            if o is None or due(o + OPEN_TIMEOUT + OPEN_RETRY, now): st["opening"][serial] = now; API.UseObject(serial)
             return False
         def blocked(now):
             if st["paused"]: return "Paused"
@@ -2310,19 +2338,35 @@ def _module_skills():
             start = st["rr"] % n; listed = False
             for k in range(n):
                 i = (start + k) % n; r = rules[i]
-                if not (r["auto"] or i in st["run"]) or not r["bag"]: continue
-                if not ensure_open(r, now): continue
+                if not (r["auto"] or i in st["run"]) or not r["bag"]: r.pop("_closed", None); continue
+                if rule_action(r)[2] == "ctool" and i not in st["run"]:
+                    if r["auto"]: auto_off(i, r); say("rule %d: a custom tool runs only on Run." % (i + 1), Kit.HUE_BAD)
+                    continue
+                if not Kit.in_pack(r["bag"]):
+                    st["run"].discard(i); st["budget"].pop(i, None)
+                    say("rule %d: its bag isn't in your backpack." % (i + 1), Kit.HUE_BAD)
+                    if r["auto"]: auto_off(i, r)
+                    continue
+                if not ensure_open(r, now, i in st["run"]): continue
                 got = bag_items(r, i, now, not listed)
                 if got is None: continue
                 items, unknown, did = got
                 if did: listed = True; st["rr"] = i + 1
                 r["_count"] = (sum(1 for s, it in items if s in r["done"]), len(items)); waiting = False
+                budget = st["budget"]
+                if i in st["run"] and rule_action(r)[2] == "ctool" and i not in budget:
+                    budget[i] = (r["_count"][1] - r["_count"][0] + unknown) * (1 + settings["retries"])
                 for serial, it in items:
                     if serial in r["done"]: continue
-                    if st["later"].get((i, serial), 0.0) > now: waiting = True; continue
+                    if not due(st["later"].get((i, serial), 0.0), now): waiting = True; continue
+                    if i in budget:
+                        if budget[i] <= 0:
+                            st["run"].discard(i); budget.pop(i, None)
+                            say("rule %d stopped at its count (%s)." % (i + 1, bag_name(r)), Kit.HUE_INFO); break
+                        budget[i] -= 1
                     return i, r, serial, it
                 if i in st["run"] and not unknown and not waiting and did is not None:
-                    st["run"].discard(i)
+                    st["run"].discard(i); st["budget"].pop(i, None)
                     say("%s on %s, %d of %d handled." % (
                         rule_action(r)[1], bag_name(r), r["_count"][0], r["_count"][1]), Kit.HUE_GOOD)
             return None
@@ -2349,7 +2393,7 @@ def _module_skills():
                         auto_off(i, r); return False
                 tool = API.FindType(int(graphic), API.Backpack)
                 if not tool:
-                    if st["no_tool"].get(i, 0.0) < now:
+                    if due(st["no_tool"].get(i, 0.0), now):
                         st["no_tool"][i] = now + 10.0
                         say("no tool 0x%04X in your backpack for rule %d." % (int(graphic), i + 1), Kit.HUE_BAD)
                     st["later"][(i, serial)] = now + 10.0; st["run"].discard(i); return False
@@ -2425,7 +2469,7 @@ def _module_skills():
                 r["_last"] = "%s, no phrase matched; the shard said: %s" % (res or "no answer", j["lines"][-1])
             else: r["_last"] = "%s, no journal line in %.1f s" % (res or "no answer", max(0.0, now - j.get("t", now)))
             if len(st["later"]) > 400:
-                for k in [k for k, t in st["later"].items() if t < now]: st["later"].pop(k, None)
+                for k in [k for k, t in st["later"].items() if due(t, now)]: st["later"].pop(k, None)
             if len(st["busy_n"]) > 400: st["busy_n"].clear()
             if len(r.get("_tries", {})) > MAX_DONE: r["_tries"].clear()
         def job_step(now):
@@ -2460,7 +2504,7 @@ def _module_skills():
         IDLE_LOOK = 1.5
         def run_jobs(now):
             if st["job"] is not None: job_step(now); return
-            if now < st["next_scan"]: return
+            if not due(st["next_scan"], now): return
             guard_check()
             if not st["run"] and not any(r["auto"] and r["bag"] for r in rules):
                 st["next_scan"] = now + SCAN_EVERY
@@ -2479,7 +2523,7 @@ def _module_skills():
         def pick_bag(i):
             if st["pick"] is not None: say("already targeting a bag.", Kit.HUE_INFO); return
             st["pick"] = i; say("target the bag for rule %d." % (i + 1), Kit.HUE_INFO)
-            def done(serial): st["queue"].append(("picked", i, int(serial or 0)))
+            def done(serial): queue.add(("picked", i, int(serial or 0)), dup=True)
             HOST.pick_target(20, done)
         def bag_picked(i, serial):
             st["pick"] = None
@@ -2487,19 +2531,20 @@ def _module_skills():
             if not serial: say("cancelled.", Kit.HUE_INFO); return
             it = get_item(serial)
             if it is None or not it.IsContainer: say("that isn't a container.", Kit.HUE_BAD); return
+            if not Kit.in_pack(serial): say("that bag isn't in your backpack.", Kit.HUE_BAD); return
             r = rules[i]
             if r["bag"] != serial:
                 r["bag"] = serial; r["done"].clear(); del r["order"][:]; st["later"].clear(); invalidate(r)
                 clear_results(r)
             save_settings(); say("rule %d uses %s." % (i + 1, bag_name(r, False)), Kit.HUE_GOOD)
             st["redraw"] = True; HOST.refresh_settings(KEY)
-        queue = Kit.queuer(st)
+        def bags_min(): return W, 2 * Kit.MARGIN + 30 + Kit.GAP + 40 + Kit.GAP + 30 + max(1, len(rules)) * ROW_H + 8
         def build_window():
-            g, store, c = wnd.begin(W, Kit.MARGIN + 30 + Kit.GAP + 40 + Kit.GAP + 30 + max(1, len(rules)) * ROW_H + 8 +
-                                    Kit.MARGIN)
-            M = Kit.MARGIN; rows = []
+            mw, mh = bags_min(); z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
+            w, h = z if z is not None and z[0] >= mw and z[1] >= mh else (mw, mh)
+            g, store, c = wnd.begin(w, h); M = Kit.MARGIN; rows = []
             if not st["minimized"]:
-                IW = W - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 40)
+                IW = w - 2 * M; wnd.frame(g); yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, 40)
                 c["pause"] = Kit.art_button(g, store, "pause", Kit.ART_PLAY, M + 12, yb + 9,
                                             "Resume" if st["paused"] else "Pause", "Stop or restart every rule",
                                             on_click=queue("pause"))
@@ -2509,7 +2554,7 @@ def _module_skills():
                 x_st = x_add + 35 + Kit.text_w("Add rule") + 14
                 c["status"] = Kit.add_label(g, "", x_st, yb + 12, Kit.HUE_INFO); c["status_w"] = M + IW - 4 - x_st
                 st["full_txt"] = None; yr = yb + 40 + Kit.GAP
-                Kit.add_section(g, M, yr, IW, 30 + max(1, len(rules)) * ROW_H + 8, "RULES  (a bag and an action each)")
+                Kit.add_section(g, M, yr, IW, h - yr - M, "RULES  (a bag and an action each)")
                 y0 = yr + 30; x_reset = M + IW - 12 - 35 - Kit.text_w("Reset")
                 x_run = x_reset - 35 - Kit.text_w("Run") - 6; x_bag = x_run - 35 - Kit.text_w("Bag...") - 6
                 x_res = x_bag - 35 - Kit.text_w("Results") - 6; c["last_w"] = IW - 36 - 16
@@ -2535,7 +2580,7 @@ def _module_skills():
                     row["text"] = (None, None, None, None); rows.append(row)
             wnd.end(g, {"rows": rows}); st["redraw"] = False; refresh()
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=(MINI_W, MINI_H), icon=TRAY_ICON,
-                         cleanup=cleanup, lock=False)
+                         cleanup=cleanup, lock=True)
         fit = Kit.fit
         def refresh():
             if st["minimized"] and st["docked"]: return
@@ -2553,7 +2598,8 @@ def _module_skills():
             st["next_rows"] = now + CHECK_EVERY
             for i, row in enumerate(win["rows"]):
                 if i >= len(rules): break
-                r = rules[i]; cnt = r.get("_count"); prog = "%d/%d" % cnt if cnt else ""
+                r = rules[i]; cnt = r.get("_count")
+                prog = "closed" if r.get("_closed") else "%d/%d" % cnt if cnt else ""
                 if st["job"] and st["job"]["rule"] == i: prog += "  working"
                 elif i in st["run"]: prog += "  pass"
                 last = r.get("_last") or ""; t = (bag_name(r), rule_action(r)[1], prog, last)
@@ -2575,17 +2621,28 @@ def _module_skills():
         def show_results(i):
             if i >= len(rules): return
             r = rules[i]
-            if resw["rule"] is r and Kit.is_open(resw["g"]): resultw.close(); return
+            if resw["rule"] is r and Kit.is_open(resw["g"]): res_close(); return
             resw["rule"], resw["page"] = r, 0
             if Kit.is_open(resw["g"]): resw["dirty"] = True
             else: build_results()
+        def res_min(): return RES_MIN_W, RES_FIXED + 4 * RES_ROW_H
+        def res_close():
+            resw["rule"] = None
+            if Kit.zone_up(RES_KEY): build_results()
+            else: resultw.close()
+        def res_redraw():
+            if Kit.zone_up(RES_KEY) or resw["rule"] is not None and resw["g"] is not None: build_results()
+            elif resw["g"] is not None: resultw.close()
         def build_results():
-            M = Kit.MARGIN; w = RES_W; IW = w - 2 * M; sh = 30 + 24 + RES_ROWS * RES_ROW_H + 8
-            h = M + 30 + Kit.GAP + sh + M; g, store, c = resultw.begin(w, h); Kit.add_window_frame(g, w, h)
-            Kit.add_section(g, M, M, IW, 30)
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close",
-                           on_click=queue("res_close"))
-            x_exp = w - M - 54 - 12 - 35 - Kit.text_w("Export")
+            M = Kit.MARGIN; held = Kit.zone_up(RES_KEY); z = resultw.slot if held else None; mw, mh = res_min()
+            if z is not None and (z[0] < mw or z[1] < mh): z = None
+            w = z[0] if z is not None else RES_W; n = resultw.rows(RES_ROW_H, RES_FIXED, RES_ROWS) if z else RES_ROWS
+            h = z[1] if z is not None else RES_FIXED + n * RES_ROW_H; IW = w - 2 * M; sh = h - M - 30 - Kit.GAP - M
+            g, store, c = resultw.begin(w, h); Kit.add_window_frame(g, w, h); Kit.add_section(g, M, M, IW, 30)
+            if not held:
+                Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close the results",
+                               on_click=queue("res_close"))
+            x_exp = w - M - (10 if held else 66) - 35 - Kit.text_w("Export")
             Kit.art_button(g, store, "export", Kit.ART_OK, x_exp, M + 4, "Export",
                            "Write the results to a file in the VirtueAssistantSettings folder",
                            on_click=queue("res_export"))
@@ -2606,29 +2663,32 @@ def _module_skills():
             c["counts"] = Kit.add_label(g, "", M + 12, ys + 28, Kit.HUE_TEXT)
             c["counts_w"] = x_new - (M + 12) - 16 - Kit.text_w("page 99 of 99")
             c["ans_w"] = IW - 12 - RES_NAME_W - RES_TAG_W - 8; rows = []; y0 = ys + 30 + 24
-            for k in range(RES_ROWS):
+            for k in range(n):
                 ry = y0 + k * RES_ROW_H
                 rows.append({"name": Kit.add_label(g, "", M + 12, ry, Kit.HUE_TEXT),
                              "tag": Kit.add_label(g, "", M + 12 + RES_NAME_W, ry, Kit.HUE_INFO),
                              "ans": Kit.add_label(g, "", M + 12 + RES_NAME_W + RES_TAG_W, ry, Kit.HUE_INFO),
                              "tip": None})
             resultw.end(g, {"rows": rows}); refresh_results()
-        resultw = Kit.Window(KEY, TITLE, None, resw, build_results, RES_POS_KEY, default=(260, 220), cleanup=cleanup,
-                             lock=False, owner=False, clear={"rows": [], "rule": None, "c": {}})
+        resultw = Kit.Window(RES_KEY, RES_TITLE, resw, resw, build_results, RES_POS_KEY, default=(260, 220),
+                             cleanup=cleanup, lock=True, owner=False, clear={"rows": [], "rule": None, "c": {}})
         RES_HUE = {1: Kit.HUE_GOOD, 2: Kit.HUE_BAD, 3: Kit.HUE_INFO, 4: Kit.HUE_TEXT}
         def refresh_results():
-            resw["dirty"] = False; r, rows = resw["rule"], resw["rows"]
-            if not rows or r is None: return
+            resw["dirty"] = False; r, rows, c = resw["rule"], resw["rows"], resw["c"]
+            if not rows: return
+            if r is None:
+                Kit.set_text(c["title"], fit(RES_TITLE.upper(), c["title_w"])); Kit.set_text(c["counts"], fit(
+                    RES_EMPTY, c["counts_w"])); return
             i = rule_index(r)
-            if i < 0: resultw.close(); return
-            c = resw["c"]; res = r.get("_res") or []; n = len(res); pages = max(1, (n + RES_ROWS - 1) // RES_ROWS)
+            if i < 0: res_close(); return
+            per = len(rows); res = r.get("_res") or []; n = len(res); pages = max(1, (n + per - 1) // per)
             pg = resw["page"] = max(0, min(resw["page"], pages - 1))
             Kit.set_text(c["title"], fit("RULE %d RESULTS: %s" % (i + 1, rule_action(r)[1]), c["title_w"]))
             Kit.set_text(c["counts"], fit(counts_text(r), c["counts_w"]))
             ptxt = "page %d of %d" % (pg + 1, pages) if pages > 1 else ""
             if Kit.set_text(c["page"], ptxt) and ptxt:
                 Kit.ui_pos(c["page"], c["page_x"] - Kit.text_w(ptxt), c["page_y"])
-            top = n - 1 - pg * RES_ROWS; today = time.localtime()[:3]
+            top = n - 1 - pg * per; today = time.localtime()[:3]
             for k, row in enumerate(rows):
                 idx = top - k
                 if idx >= 0:
@@ -2655,13 +2715,50 @@ def _module_skills():
                     time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)), s, name, tag, answer))
             st["writes"].append((path, "\n".join(lines) + "\n"))
         def write_files(): write_queue(st["writes"], TITLE, "results")
-        SEC_R = 118
+        def _thread_wanted(): return bool(st["writes"])
+        def toggle_pause(action):
+            st["paused"] = not st["paused"]; st["idle_at"] = 0.0
+            if st["paused"] and st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
+            lbl = win["c"].get("pause")
+            if lbl is not None: Kit.set_text(lbl, "Resume" if st["paused"] else "Pause")
+            say("%s." % ("paused" if st["paused"] else "resumed"), Kit.HUE_INFO)
+        def add_rule(action):
+            if len(rules) >= MAX_RULES: say("at most %d rules." % MAX_RULES, Kit.HUE_INFO); return
+            rules.append(new_rule()); save_settings(); build_window(); HOST.refresh_settings(KEY)
+            if page["f"] is None: HOST.show_settings(KEY)
+        def remove_rule(action):
+            i = action[1]
+            if st["job"] is not None and st["job"]["rule"] == i: HOST.release_cursor(KEY); st["job"] = None
+            elif st["job"] is not None and st["job"]["rule"] > i: st["job"]["rule"] -= 1
+            gone = rules.pop(i)
+            if resw["rule"] is gone: res_close()
+            elif resw["rule"] is not None: resw["dirty"] = True
+            st["rr"] = 0; st["run"] = set(k - 1 if k > i else k for k in st["run"] if k != i); st["budget"].clear()
+            st["later"].clear(); st["busy_n"].clear(); st["no_tool"].clear(); save_settings(); build_window()
+            HOST.refresh_settings(KEY)
+        def run_rule(action):
+            i = action[1]
+            if not rules[i]["bag"]:
+                say("set the bag for rule %d first (Bag button)." % (i + 1), Kit.HUE_BAD); return
+            st["run"].add(i); st["budget"].pop(i, None); st["later"].clear(); invalidate(rules[i])
+            st["next_scan"] = 0.0
+        def reset_rule(action):
+            i = action[1]; rules[i]["done"].clear(); del rules[i]["order"][:]; rules[i].pop("_tries", None)
+            rules[i].pop("_last", None); invalidate(rules[i]); st["later"].clear(); save_done()
+            say("rule %d will handle every item again (%s)." % (i + 1, bag_name(rules[i])), Kit.HUE_INFO)
+        def clear_shown(action):
+            if resw["rule"] is not None: clear_results(resw["rule"]); resw["page"] = 0
+        def page_step(action): resw["page"] += 1 if action == "res_older" else -1; resw["dirty"] = True
+        ACTIONS = {"pause": toggle_pause, "add": add_rule, "remove": remove_rule, "run": run_rule, "reset": reset_rule,
+                "bag": lambda action: pick_bag(action[1]), "picked": lambda action: bag_picked(action[1], action[2]),
+                "results": lambda action: show_results(action[1]), "res_close": lambda action: res_close(),
+                "res_export": lambda action: export_results(), "res_clear": clear_shown, "res_older": page_step,
+                "res_newer": page_step}
+        DONE_SAVE_EVERY = 5.0; SEC_R = 118
         HINT = ("The OK / FAIL / SKIP phrases that read the shard's answers are RunUO defaults, not checked on this "
                 "shard; the window's Last line shows each rule's last answer.")
-        TIP_TEXT = ("Graphics in Text: hex graphics, commas between (0x14FC, 0x0E76). Name contains Text: part of the "
-                    "name (treasure map)")
-        TIP_CUSTOM = ("Custom skill: its client name (Item Identification). Custom tool: its hex graphic "
-                      "(0x14FC: lockpicks)")
+        TIP_TEXT = "Hex graphics with commas (0x14FC, 0x0E76), or part of a name (treasure map)"
+        TIP_CUSTOM = "The skill's client name (Item Identification), or the tool's hex graphic (0x14FC: lockpicks)"
         TIP_DELAY = ("Seconds between items (%g-%g; a skill rule waits at least its 3 or 10 s timer)"
                      % (MIN_DELAY, MAX_DELAY))
         TIP_DEEP = "Also handle items in bags inside it"
@@ -2691,7 +2788,7 @@ def _module_skills():
                 return ("RULE %d  (%s)" % (i + 1, fit(bag_name(r, False), 300)), (("custom", 0, draw),), {"sh": SEC_R})
             return ([("OPTIONS", [("check", "hidden", "Pause while hidden", "Using a skill would reveal you"),
                         ("check", "open", "Open bags the client hasn't looked in",
-                         "Double-clicks the bag once so its contents are known", {"stay": True}),
+                         "On Run, double-clicks the bag once so its contents are known", {"stay": True}),
                         ("buttons", (("add", Kit.ART_OK, "Add rule", "Add a rule (a bag and an action)",
                                       queue("add")),), {"dx": 400}), ("num", "retries", "Extra tries after a failure:",
                          "Retries after a FAIL phrase (0-9)", None, 0, 9,
@@ -2700,7 +2797,7 @@ def _module_skills():
                          "unticked counts only while Skills > Training Alarm is on", {"dx": 380})] +
                      [("note", line, {"h": 18}) for line in Kit.wrap(HINT, w - 24) or [HINT]], {"pad": 6})] +
                     [rule_sec(i, r) for i, r in enumerate(rules)])
-        def config_height(w): return Kit.Form.height(page_table(w), w)
+        cfg = Kit.Page(settings, page_table)
         def build_config(g, x, y, w):
             prow, dds = [], []; f = Kit.Form(g, x, y, w, settings, page_table(w, prow, dds))
             for kind, i, dx, dy, dw, items, idx in sorted(dds, key=lambda d: -d[3]):
@@ -2717,12 +2814,12 @@ def _module_skills():
                 for i, row in enumerate(page["rows"]):
                     if i >= len(rules): break
                     r = rules[i]; act_new = False
-                    for kind, names in (("action", ACTIONS), ("filt", FILTERS)):
+                    for kind, names in (("action", RULE_ACTIONS), ("filt", FILTERS)):
                         idx = int(row[kind].GetSelectedIndex())
                         if 0 <= idx < len(names) and idx != r[kind]:
                             r[kind] = idx; changed = True; relist.append(r)
                             if kind == "action":
-                                act_new = True; r["filt"] = ACTIONS[idx][5]; r["delay"] = ACTIONS[idx][4]
+                                act_new = True; r["filt"] = RULE_ACTIONS[idx][5]; r["delay"] = RULE_ACTIONS[idx][4]
                                 r["done"].clear(); del r["order"][:]; clear_results(r); page["dirty"] = True; break
                     for k in ("custom", "text"):
                         v = str(row[k].Text or "").strip()
@@ -2746,15 +2843,17 @@ def _module_skills():
                         except Exception: st["redraw"] = True
                 if page.get("dirty"): page["dirty"] = False; HOST.refresh_settings(KEY)
         def config_closed(): page["f"] = None; page["rows"] = []
+        load_settings()
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "paused": False,
                        "job": None, "next_scan": 0.0, "next_check": 0.0, "status": "Idle",
-                       "run": set(), "opening": {}, "later": {}, "pick": None, "redraw": False,
+                       "run": set(), "budget": {}, "opening": {}, "later": {}, "pick": None, "redraw": False,
                        "save_done": False, "no_tool": {}, "busy_n": {}, "next_rows": 0.0,
                        "rr": 0, "guard_paused": None, "writes": [], "idle_at": 0.0, "done_at": 0.0,
                        "minimized": wnd.start_min()})
-            resw.update({"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False}); load_settings()
-            build_window(); wnd.dock(scale=True)
+            resw.update({"g": None, "rule": None, "c": {}, "rows": [], "page": 0, "dirty": False, "minimized": False,
+                         "shutting": False, "docked": False, "queue": []}); load_settings()
+            build_window(); wnd.dock(fit=True, min=bags_min); resultw.dock(fit=True, min=res_min)
             n = sum(1 for r in rules if r["auto"] and r["bag"])
             say("on, %s, %d watching." % (Kit.count(len(rules), "rule"), n), Kit.HUE_GOOD)
         def _tick():
@@ -2765,17 +2864,19 @@ def _module_skills():
                 action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
                 if wnd.action(action) or (kind in ("remove", "bag", "run", "reset") and action[1] >= len(rules)):
                     continue
-                fn = ACTS.get(kind)
+                fn = ACTIONS.get(kind)
                 if fn is not None: fn(action)
             if st.get("redraw"): build_window()
+            if resw["queue"]: del resw["queue"][:]; res_redraw()
             if resw["dirty"] and resw["g"] is not None: refresh_results()
             if not st["minimized"] and now >= st["next_check"]: st["next_check"] = now + CHECK_EVERY; read_checks()
             run_jobs(now)
             if st.get("save_done") and now >= st["done_at"]:
                 st["save_done"] = False; st["done_at"] = now + DONE_SAVE_EVERY; save_done()
             refresh()
+        def _interval(): j = st["job"]; return 0.05 if j is not None and j["phase"] == "target" else 0.1
         def _stop():
-            st["shutting"] = True
+            st["shutting"] = resw["shutting"] = True
             if st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
             save_settings(); cleanup.close()
             if st["writes"]:
@@ -2783,49 +2884,9 @@ def _module_skills():
                     say("the export wasn't written (the module stopped); export again.", Kit.HUE_INFO)
                     del st["writes"][:]
                 else: write_files()
-        def toggle_pause(action):
-            st["paused"] = not st["paused"]; st["idle_at"] = 0.0
-            if st["paused"] and st["job"] is not None: HOST.release_cursor(KEY); st["job"] = None
-            lbl = win["c"].get("pause")
-            if lbl is not None: Kit.set_text(lbl, "Resume" if st["paused"] else "Pause")
-            say("%s." % ("paused" if st["paused"] else "resumed"), Kit.HUE_INFO)
-        def add_rule(action):
-            if len(rules) >= MAX_RULES: say("at most %d rules." % MAX_RULES, Kit.HUE_INFO); return
-            rules.append(new_rule()); save_settings(); build_window(); HOST.refresh_settings(KEY)
-            if page["f"] is None: HOST.show_settings(KEY)
-        def remove_rule(action):
-            i = action[1]
-            if st["job"] is not None and st["job"]["rule"] == i: HOST.release_cursor(KEY); st["job"] = None
-            elif st["job"] is not None and st["job"]["rule"] > i: st["job"]["rule"] -= 1
-            gone = rules.pop(i)
-            if resw["rule"] is gone: resultw.close()
-            elif resw["rule"] is not None: resw["dirty"] = True
-            st["rr"] = 0; st["run"] = set(k - 1 if k > i else k for k in st["run"] if k != i)
-            st["later"].clear(); st["busy_n"].clear(); st["no_tool"].clear(); save_settings(); build_window()
-            HOST.refresh_settings(KEY)
-        def run_rule(action):
-            i = action[1]
-            if not rules[i]["bag"]:
-                say("set the bag for rule %d first (Bag button)." % (i + 1), Kit.HUE_BAD); return
-            st["run"].add(i); st["later"].clear(); invalidate(rules[i]); st["next_scan"] = 0.0
-        def reset_rule(action):
-            i = action[1]; rules[i]["done"].clear(); del rules[i]["order"][:]; rules[i].pop("_tries", None)
-            rules[i].pop("_last", None); invalidate(rules[i]); st["later"].clear(); save_done()
-            say("rule %d will handle every item again (%s)." % (i + 1, bag_name(rules[i])), Kit.HUE_INFO)
-        def clear_shown(action):
-            if resw["rule"] is not None: clear_results(resw["rule"]); resw["page"] = 0
-        def page_step(action): resw["page"] += 1 if action == "res_older" else -1; resw["dirty"] = True
-        ACTS = {"pause": toggle_pause, "add": add_rule, "remove": remove_rule, "run": run_rule, "reset": reset_rule,
-                "bag": lambda action: pick_bag(action[1]), "picked": lambda action: bag_picked(action[1], action[2]),
-                "results": lambda action: show_results(action[1]), "res_close": lambda action: resultw.close(),
-                "res_export": lambda action: export_results(), "res_clear": clear_shown, "res_older": page_step,
-                "res_newer": page_step}
-        DONE_SAVE_EVERY = 5.0
-        def _interval(): j = st["job"]; return 0.05 if j is not None and j["phase"] == "target" else 0.1
-        load_settings()
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": write_files,
-                  "interval": _interval, "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
+                "thread_tick": write_files, "thread_wanted": _thread_wanted, "interval": _interval}
     PARTS = (("window", _part_window, 0.25, "skills"), ("alarm", _part_alarm, 0.1, "attention"),
         ("bags", _part_bags, 0.1, "skillbags"),)
     return PartSet(KEY, TITLE, PARTS).hooks()

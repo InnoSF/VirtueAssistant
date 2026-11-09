@@ -1,9 +1,10 @@
 def _module_actionbar():
-    KEY = "actionbar"; TITLE = "Action Bar"; say = Kit.sayer(TITLE); TOP_SLOTS = 24; BOTTOM_SLOTS = 12; UI_SLOTS = 11
+    KEY = "actionbar"; TITLE = "Action Bar"; SETTINGS_KEY = "ActionBar_settings"; POS_KEY = "ActionBar_pos"
+    MIN_KEY = "ActionBar_min"; TOP_SLOTS = 24; BOTTOM_SLOTS = 12; UI_SLOTS = 11
     BAG_SLOTS = 5; ACTION_SLOTS = TOP_SLOTS + BOTTOM_SLOTS; PAGES = 12; PAGE_W = 22; SLOT_MIN, SLOT_MAX = 36, 64
     SCALE_MIN, SCALE_MAX = 50, 150; BAR_M = 8; CTRL_W = 44; UI_SHARE = 0.65; UI_GAP = 4; BAG_GAP = 3; TRAY_BTN = 30
-    TRAY_GAP = 4; SLOT_TILE = 2624; SLOT_ALPHA = 0.92; SLOT_FRAME = 2620; COUNT_EVERY = 0.75; HELD_KEY_STALE = 2.0
-    LOW_DEFAULT = 5
+    TRAY_GAP = 4; SLOT_TILE = 2624; SLOT_ALPHA = 0.92; COUNT_EVERY = 0.75; HELD_KEY_STALE = 2.0
+    LOW_DEFAULT = 5; COUNT_SOON = 0.1
     HARMFUL_SPELLS = set(("clumsy|feeblemind|magic arrow|weaken|harm|fireball|poison|curse|lightning|mana drain|"
                           "mind blast|paralyze|dispel|energy bolt|explosion|mass curse|chain lightning|flamestrike|"
                           "mana vampire|meteor swarm|earthquake|mass dispel|paralyze field").split("|"))
@@ -16,9 +17,9 @@ def _module_actionbar():
     TRAVEL_ITEM = {"charge": 0x22C5, "recall_scroll": 0x1F4C, "gate_scroll": 0x1F60}
     TRAVEL_SPELL = {"recall": "Recall", "gate": "Gate Travel", "sacred": "Sacred Journey"}; UB_MODULE_KEY = "bag"
     UB_LINK_ALIVE = "ActionBar_alive"; GRIM_MODULE_KEY = "grimoire"; GRIM_LINK_CMD = "Grimoire_cmd"
-    VA_LINK_CMD = "VirtueAssistant_cmd"; SETTINGS_KEY = "ActionBar_settings"; CELLS_KEY = "ActionBar_cells"
+    VA_LINK_CMD = "VirtueAssistant_cmd"; CELLS_KEY = "ActionBar_cells"
     PAGES_KEY = "ActionBar_pages"; EXTRA_KEY = "ActionBar_extra"; EXTRA_ROWS = 4; EXTRA_SLOTS = EXTRA_ROWS * TOP_SLOTS
-    POS_KEY = "ActionBar_pos"; MIN_KEY = "ActionBar_min"; MINI_W, MINI_H = 240, 46
+    MINI_W, MINI_H = 240, 46
     UI_ACTIONS = [("paperdoll",   "Paperdoll",         0x1F03, "paperdoll"),
         ("status",      "Status",            0x0F0C, "ga:OpenStatusBar"),
         ("journal",     "Journal",           0x0FF0, "ga:OpenJournal:ResizableJournal"),
@@ -97,17 +98,18 @@ def _module_actionbar():
     settings = {"slot": 44, "top": True, "keys": True, "lock": False,
                 "short": True, "hue": False, "bagmode": 0, "bags": "", "page": 0,
                 "scale": 100, "tray_open": True, "bagkeys": "", "extra": 0, "anchor": "", "vertical": False}
-    cells = {"a": [], "u": [], "x": [], "pages": []}
+    DEFAULTS = dict(settings); cells = {"a": [], "u": [], "x": [], "pages": []}
     def fresh():
         return {"shutting": False, "queue": [], "want_target": None, "next_count": 0.0, "next_scan": 0.0,
                 "rebuild_at": 0.0, "bag_sig": None, "ability_sig": None, "bind": None, "jobs": [], "redraw": set(),
-                "ub_job": False, "confirm": None, "cool": {"skill": 0.0, "spell": 0.0}, "cool_next": 0.0}
-    st = fresh()
-    st.update({"minimized": False, "ub_pending": False, "cnt": {}, "cnt_g": {}, "first": {},
-               "first_g": {}, "bags": [None] * BAG_SLOTS, "ub_found": None, "ub_cache": None, "ub_state": None,
-               "grim_state": None, "va_state": None, "pending_on": None, "right_ok": None, "dock_sig": None,
-               "watch_next": 0.0, "script_check": None, "ub_last": None})
-    win = {"g": None, "store": ({}, {}), "cells": {}, "bags": {}}; tray = {"g": None, "at": None}
+                "ub_job": False, "cool": {"skill": 0.0, "spell": 0.0}, "cool_next": 0.0}
+    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "em": False, "ub_pending": False,
+          "cnt": {}, "cnt_g": {}, "first": {}, "first_g": {}, "bags": [None] * BAG_SLOTS, "ub_found": None,
+          "ub_cache": None, "ub_state": None, "grim_state": None, "va_state": None, "pending_on": None,
+          "right_ok": None, "dock_sig": None, "watch_next": 0.0, "script_check": None, "ub_last": None}
+    st.update(fresh()); win = {"g": None, "c": {}, "store": ({}, {}), "cells": {}, "bags": {}}
+    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    tray = {"g": None, "at": None}
     menu = {"g": None, "ref": None, "level": "cats", "cat": None, "page": 0, "c": {}, "bag": None, "items": [],
             "anchor": None, "moved": None, "placed": None}
     page = {"sel": ACTION_SLOTS - BOTTOM_SLOTS, "dds": []}
@@ -166,10 +168,9 @@ def _module_actionbar():
         if safe(d.get("state")) == "open": HOST.dock_to_bar(key, s.title)
         else: safe(d.get("show")); HOST.dock_forget(key)
         return True
-    def norm_key(k): return str(k or "").strip().upper().replace(" ", "")
-    def key_owner(k): return HOST.hotkeys_owned.get(k)
+    def key_owner(k): return HOST.hotkeys_owned.get(_norm_key(k))
     def bar_keys():
-        return set(norm_key(c["k"]) for _, c in all_cells() if c["k"] and c["t"]) | set(k for k in bag_keys() if k)
+        return set(_norm_key(c["k"]) for _, c in all_cells() if c["k"] and c["t"]) | set(k for k in bag_keys() if k)
     def fit(text, width): return Kit.fit(str(text), width, ".")
     def short_key(k):
         return (k.upper().replace("CTRL+", "C").replace("SHIFT+", "S")
@@ -190,7 +191,7 @@ def _module_actionbar():
     def blank(): return {"t": "", "v": "", "g": 0, "h": 0, "tg": "", "k": "", "lo": LOW_DEFAULT, "n": ""}
     def cell(ref): return cells[ref[0]][ref[1]]
     def bag_keys():
-        ks = [norm_key(k) for k in settings["bagkeys"].split(",")]; return (ks + [""] * BAG_SLOTS)[:BAG_SLOTS]
+        ks = [_norm_key(k) for k in settings["bagkeys"].split(",")]; return (ks + [""] * BAG_SLOTS)[:BAG_SLOTS]
     def set_key_of(ref, k):
         if ref[0] == "b": ks = bag_keys(); ks[ref[1]] = k; settings["bagkeys"] = ",".join(ks); save_settings()
         else: cell(ref)["k"] = k; save_cells()
@@ -342,6 +343,7 @@ def _module_actionbar():
         lst = picked_bags(); lst[i] = serial; settings["bags"] = ",".join(("%X" % s) if s else "" for s in lst)
         save_settings()
     def save_pos():
+        if Kit.zone_up(KEY): return
         p = Kit.pos(win["g"]) if Kit.is_open(win["g"]) else None
         if p is not None and p != st.get("pos_saved"): st["pos_saved"] = p; Kit.put_var(POS_KEY, "%d,%d" % p)
     class ClientUI(object):
@@ -507,7 +509,7 @@ def _module_actionbar():
     def tray_sig():
         return tuple([(k, d.get("icon"), safe(d.get("state")) if d.get("always") else None) for k, d in tray_docks()])
     def heartbeat(on=True):
-        if on and not st["minimized"]: API.SetSharedVar(UB_LINK_ALIVE, time.time())
+        if on and not st["em"]: API.SetSharedVar(UB_LINK_ALIVE, time.time())
         else: API.RemoveSharedVar(UB_LINK_ALIVE)
     def watch_ub():
         now = time.time()
@@ -603,21 +605,24 @@ def _module_actionbar():
         if sig != st["ability_sig"]:
             st["ability_sig"] = sig; want_redraw([r for r, c in all_cells() if c["t"] == "ability"])
     def count_now(extra=(), max_age=0.0):
-        try: items = HOST.pack_items(deep=True, max_age=max_age)
+        ver = HOST.pack_ver()
+        try: items = HOST.pack_items(deep=True, max_age=max_age); bp = int(API.Backpack or 0)
         except Exception: return
         k = _cell_kinds(); wanted = k["items"]
         if extra or k["extra"]: wanted = wanted | k["extra"] | set(extra)
-        cnt, cnt_g, first, first_g = {}, {}, {}, {}
-        cget, gget, fset, fgset = cnt.get, cnt_g.get, first.setdefault, first_g.setdefault
+        cnt, cnt_g, first, first_g, top, top_g = {}, {}, {}, {}, {}, {}; cget, gget = cnt.get, cnt_g.get
         for it in items:
             try:
                 gr = int(it.Graphic)
                 if gr not in wanted: continue
                 hu, ser = int(it.Hue), int(it.Serial); amt = max(1, int(it.Amount or 0))
+                f, fg = (top, top_g) if int(it.Container) == bp else (first, first_g)
             except Exception: continue
-            key = (gr, hu); cnt[key] = cget(key, 0) + amt; cnt_g[gr] = gget(gr, 0) + amt; fset(key, ser); fgset(gr, ser)
+            key = (gr, hu); cnt[key] = cget(key, 0) + amt; cnt_g[gr] = gget(gr, 0) + amt
+            f.setdefault(key, ser); fg.setdefault(gr, ser)
+        first.update(top); first_g.update(top_g)
         st.update({"cnt": cnt, "cnt_g": cnt_g, "first": first, "first_g": first_g, "counted": wanted,
-                   "counted_at": time.time()})
+                   "counted_at": time.time(), "pack_v": ver})
     def _place(info, lbl, text, hue):
         if info.get("txt") != text:
             info["txt"] = text
@@ -627,9 +632,10 @@ def _module_actionbar():
             except Exception: pass
         if info.get("hue") != hue: info["hue"] = hue; Kit.set(lbl, "Hue", hue)
     def refresh_counts():
-        if st["minimized"]: return
+        if st["em"]: return
         k = _cell_kinds()
         if "item" in k["types"] or k["extra"]: count_now(max_age=0.5)
+        else: st["pack_v"] = None
         update_labels()
     _counters = [None]
     def update_labels():
@@ -744,11 +750,11 @@ def _module_actionbar():
         if c["t"] == "travel": return travel_what(c)
         tip = describe(ref).split("\n")[0]; return tip.replace("  [%s]" % c["k"], "") if c["k"] else tip
     def hotkeys_service():
-        out = [(norm_key(c["k"]), "%s: %s" % (ref_name(r), short_what(r))) for r, c in all_cells()
-               if norm_key(c["k"]) and c["t"] and shown(r)]
+        out = [(_norm_key(c["k"]), "%s: %s" % (ref_name(r), short_what(r))) for r, c in all_cells()
+               if _norm_key(c["k"]) and c["t"] and shown(r)]
         out += [(k, "bag slot %d" % (i + 1)) for i, k in enumerate(bag_keys()) if k]
         return [(k, what + ((" (left to %s)" % key_owner(k)) if key_owner(k) else "")) for k, what in out]
-    queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win)
+    on_disposed = Kit.disposer(KEY, st, win)
     def want_rebuild(delay=0.0): st["rebuild_at"] = time.time() + delay
     def cells_changed(recount=False, refresh=True, refs=None):
         save_cells(); register_hotkeys()
@@ -804,8 +810,16 @@ def _module_actionbar():
         fitst["scale"] = _fit_scale(along, across); fitst["sig"] = sig; tell_need()
     def layout_state():
         if win["g"] is None or st["shutting"]: return None
-        return "minimized" if st["minimized"] else "open"
-    LAYOUT_HOOKS = {"fit": layout_fit, "state": layout_state, "exact": True, "untitled": True}
+        return "minimized" if st["em"] else "open"
+    def layout_min():
+        keep, vt = fitst["scale"], _ctrl["vtmp"]; out = []
+        try:
+            fitst["scale"] = SCALE_MIN
+            for v in (False, True):
+                _ctrl["vtmp"] = v; G1 = _geom_base(); out.append((G1["H"], G1["W"]) if v else (G1["W"], G1["H"]))
+        finally: fitst["scale"], _ctrl["vtmp"] = keep, vt
+        return min(out[0][0], out[1][0]), min(out[0][1], out[1][1])
+    LAYOUT_HOOKS = {"fit": layout_fit, "state": layout_state, "min": layout_min, "exact": True, "untitled": True}
     def sc(v, lo=1): k = max(SCALE_MIN, min(SCALE_MAX, eff_scale())) / 100.0; return max(lo, int(round(v * k)))
     _geom = {"key": None, "L": None}
     def geom():
@@ -892,7 +906,7 @@ def _module_actionbar():
         return L
     def flat(): return not eff_vertical()
     def bar_size():
-        if st["minimized"]: return MINI_W, MINI_H
+        if st["em"]: return MINI_W, MINI_H
         L = geom(); return (L["W"], L["H"]) if flat() else (L["H"], L["W"])
     def R(x, y, w, h): ox, oy = fitst["off"]; return (x + ox, y + oy, w, h) if flat() else (y + ox, x + oy, h, w)
     def add_item_pic(g, graphic, hue, x, y, w, h):
@@ -913,9 +927,9 @@ def _module_actionbar():
                               Kit.HUE_TEXT if hue is None else hue) for i, l in enumerate(lines)]
     def click_handler(kind, menu_kind, arg):
         def fn():
-            if st["right_ok"] is False and Client.key_held("shift"): st["queue"].append((menu_kind, arg))
-            else: st["queue"].append((kind, arg))
-        return fn
+            if st["right_ok"] is False and Client.key_held("shift"): queue.add((menu_kind, arg), dup=True)
+            else: queue.add((kind, arg), dup=True)
+        return Kit.once(fn, (KEY, kind, arg), Kit.TWICE)
     _right = {"add": {}, "mods": None}
     def hook_right(api_ctrl, fn):
         if api_ctrl is None or st["right_ok"] is False: return False
@@ -945,6 +959,10 @@ def _module_actionbar():
         side = min(w, h) - 4; p = Kit.add_pic(g, icon, x + (w - side) // 2, y + (h - side) // 2)
         if p is not None: p.SetWidth(side); p.SetHeight(side); p.SetAcceptMouseInput(False)
         return p
+    def trims(g, xs, ws, y, h):
+        art = Kit.GOLD_V if flat() else Kit.GOLD_H
+        for a, b, w in zip(xs, xs[1:], ws):
+            gw = b - a - w; s = min(gw, Kit.GOLD_T); Kit.add_tiled(g, art, *R(a + w + (gw - s) // 2, y, s, h))
     def draw_cell(g, ref, x, y, w, h):
         if not cell(ref)["t"]:
             Kit.add_tiled(g, SLOT_TILE, x, y, w, h, SLOT_ALPHA * 0.3)
@@ -1017,16 +1035,6 @@ def _module_actionbar():
         win["bags"][i] = finish_cell(g, info, parts, b, bag_keys()[i] if settings["keys"] else "", bag_tip(i),
                                      ("bag", "bagmenu", i))
     def want_redraw(refs): st["redraw"].update(refs)
-    def redraw_now():
-        refs, st["redraw"] = st["redraw"], set(); g = win["g"]
-        if not refs or st["minimized"] or not Kit.is_open(g): return
-        for ref in sorted(refs):
-            bag = ref[0] == "b"; info = win["bags"].get(ref[1]) if bag else win["cells"].get(ref)
-            if info is None: continue
-            for p in info.get("parts") or (): Kit.dispose(p)
-            if bag: bag_content(g, ref[1], info["x"], info["y"], info["w"], info["h"])
-            else: cell_content(g, ref, info["x"], info["y"], info["w"], info["h"])
-        update_labels()
     def refresh_key(ref):
         g = win["g"]; bag = ref[0] == "b"
         info, k = (win["bags"].get(ref[1]), bag_keys()[ref[1]]) if bag else (win["cells"].get(ref), cell(ref)["k"])
@@ -1163,12 +1171,13 @@ def _module_actionbar():
                 for s in win.pop("stale", []): Kit.dispose(s)
             raise
     def _draw_bar(x, y, store, built):
-        held_lock = HOST.layout_locked(KEY)
-        if st["minimized"]:
+        held_lock = HOST.layout_locked(KEY); em = st["em"] = bool(st["minimized"]) and not Kit.zone_up(KEY)
+        if em:
             w, h = MINI_W, MINI_H
             if x is None: x, y = Kit.load_pos(POS_KEY, (200, 600), (w, h))
             g = built["g"] = G.CreateGump(True, not held_lock)
-            Kit.mini_bar(g, store, w, h, TITLE, KEY, queue(("toggle_min",)), TITLE)
+            Kit.mini_bar(g, store, w, h, TITLE, KEY, queue(("toggle_min",)),
+                         "%s: page %d" % (TITLE, settings["page"] + 1))
         else:
             refit_if_stale(); L = geom()
             w, h = bar_size(); fitst["off"] = (0, 0); slot = told_slot()
@@ -1183,23 +1192,28 @@ def _module_actionbar():
             Kit.add_window_frame(g, w, h, corners=False); r = 0
             for kind, base in ([("x", k * TOP_SLOTS) for k in range(settings["extra"] - 1, -1, -1)]
                                + ([("a", 0)] if settings["top"] else [])):
-                y0 = BAR_M + rowy[r]; Kit.add_resizepic(g, SLOT_FRAME, *R(x0, y0, L["top_w"], rowh[r]))
+                y0 = BAR_M + rowy[r]; Kit.gold_box(g, *R(x0, y0, L["top_w"], rowh[r]))
                 cy, ch = y0 + celly[r], cellh[r]
                 for i in range(TOP_SLOTS): draw_cell(g, (kind, base + i), *R(x0 + colx[i], cy, colw[i], ch))
+                trims(g, [x0 + c for c in colx], colw, cy, ch)
                 r += 1
             y0, ph = BAR_M + rowy[r], rowh[r]; cy, ch = y0 + celly[r], cellh[r]
             draw_page_column(g, store, BAR_M, y0, ph, PAGE_W)
-            Kit.add_resizepic(g, SLOT_FRAME, *R(x0, y0, L["left_w"], ph))
+            Kit.gold_box(g, *R(x0, y0, L["left_w"], ph))
             for i in range(BOTTOM_SLOTS): draw_cell(g, ("a", TOP_SLOTS + i), *R(x0 + colx[i], cy, colw[i], ch))
-            ux = x0 + L["left_w"] + SGX; Kit.add_resizepic(g, SLOT_FRAME, *R(ux, y0, L["ui_w"], ph))
+            trims(g, [x0 + c for c in colx[:BOTTOM_SLOTS]], colw, cy, ch)
+            ux = x0 + L["left_w"] + SGX; Kit.gold_box(g, *R(ux, y0, L["ui_w"], ph))
             Kit.add_tiled(g, Kit.STONE_TILE, *R(ux + p4, y0 + p4, L["ui_w"] - 2 * p4, ph - 2 * p4), alpha=0.55)
             total = UI_SLOTS * L["bw"] + (UI_SLOTS - 1) * UI_GAP; bx = ux + (L["ui_w"] - total) // 2
             for i in range(UI_SLOTS):
                 draw_cell(g, ("u", i), *R(bx + i * (L["bw"] + UI_GAP), y0 + (ph - L["bh"]) // 2, L["bw"], L["bh"]))
-            gx = ux + L["ui_w"] + SGX; Kit.add_resizepic(g, SLOT_FRAME, *R(gx, y0, L["bag_w"], ph))
+            trims(g, [bx + i * (L["bw"] + UI_GAP) for i in range(UI_SLOTS)], (L["bw"],) * UI_SLOTS,
+                  y0 + (ph - L["bh"]) // 2, L["bh"])
+            gx = ux + L["ui_w"] + SGX; Kit.gold_box(g, *R(gx, y0, L["bag_w"], ph))
             total = BAG_SLOTS * L["bgw"] + (BAG_SLOTS - 1) * BAG_GAP; bx = gx + (L["bag_w"] - total) // 2
             for i in range(BAG_SLOTS): draw_bag(g, i, *R(bx + i * (L["bgw"] + BAG_GAP), cy, L["bgw"], L["bgh"]))
-            tx = gx + L["bag_w"] + SGX; Kit.add_resizepic(g, SLOT_FRAME, *R(tx, y0, L["tray_w"], ph))
+            trims(g, [bx + i * (L["bgw"] + BAG_GAP) for i in range(BAG_SLOTS)], (L["bgw"],) * BAG_SLOTS, cy, L["bgh"])
+            tx = gx + L["bag_w"] + SGX; Kit.gold_box(g, *R(tx, y0, L["tray_w"], ph))
             draw_tray_button(g, *R(tx + p4, cy, TRAY_BTN, L["bgh"])); draw_ctrl_column(g, store, L)
         if settings["anchor"] and not Kit.zone_up(KEY):
             ax, ay = Kit.anchor_pos(settings["anchor"], w, h)
@@ -1208,7 +1222,7 @@ def _module_actionbar():
                                          {"g": g, "store": store})
         st["moved_at"] = None
         for s in win.pop("stale", []): Kit.dispose(s)
-        if not st["minimized"] and time.time() - st.get("counted_at", 0.0) > COUNT_EVERY:
+        if not em and time.time() - st.get("counted_at", 0.0) > COUNT_EVERY:
             k = _cell_kinds()
             if "item" in k["types"] or k["extra"]: count_now()
         update_labels(); build_tray()
@@ -1241,6 +1255,17 @@ def _module_actionbar():
                     if W and x + w > W: x = bx - TRAY_GAP - w
         return x, y
     def bar_gump(): return win["g"]
+    wnd = None
+    def refresh():
+        refs, st["redraw"] = st["redraw"], set(); g = win["g"]
+        if not refs or st["em"] or not Kit.is_open(g): return
+        for ref in sorted(refs):
+            bag = ref[0] == "b"; info = win["bags"].get(ref[1]) if bag else win["cells"].get(ref)
+            if info is None: continue
+            for p in info.get("parts") or (): Kit.dispose(p)
+            if bag: bag_content(g, ref[1], info["x"], info["y"], info["w"], info["h"])
+            else: cell_content(g, ref, info["x"], info["y"], info["w"], info["h"])
+        update_labels()
     def place_on_anchor():
         g = win["g"]
         if not settings["anchor"] or not Kit.is_open(g) or Kit.zone_up(KEY): return
@@ -1250,8 +1275,8 @@ def _module_actionbar():
             g.SetPos(x, y); Kit.note_rect(g, x, y); Kit.moved_by_code(g)
             st["last_pos"] = (x, y); follow_tray()
     def settle(x, y):
-        if st["minimized"]: return
-        if Kit.zone_up(KEY): save_pos(); return
+        if st["em"]: return
+        if Kit.zone_up(KEY): return
         w, h = bar_size(); name = Kit.anchor_at(x, y, w, h, SNAP_ANCHOR)
         turn = True if name in ("L", "R") else False if name in ("T", "B") else None
         turning = turn is not None and turn != settings["vertical"]
@@ -1279,7 +1304,7 @@ def _module_actionbar():
                 if not Kit.zone_up(KEY): place_on_anchor()
     def build_tray():
         old, tray["g"] = tray["g"], None; docks = tray_docks()
-        if st["minimized"] or not settings["tray_open"] or not docks: Kit.dispose(old); return
+        if st["em"] or not settings["tray_open"] or not docks: Kit.dispose(old); return
         L = geom(); tb, bg, m = L["tb"], L["bg"], max(4, L["tm"] // 2); aw, ah = Kit.pic_size(Kit.ART_MIN[0])
         aw, ah = aw or 16, ah or 16; bh = L["bgh"]; w = m + len(docks) * (tb + bg) + aw + m; h = m + bh + m
         g = G.CreateGump(True, False); Kit.add_window_frame(g, w, h, corners=False)
@@ -1326,7 +1351,7 @@ def _module_actionbar():
         if owner: say("%s belongs to %s; pick another." % (k, owner), Kit.HUE_BAD); return
         changed = [ref]
         for r, c in all_cells():
-            if r != ref and norm_key(c["k"]) == k:
+            if r != ref and _norm_key(c["k"]) == k:
                 c["k"] = ""; changed.append(r); say("%s taken off %s." % (k, ref_name(r)))
         for i, bk in enumerate(bag_keys()):
             if ("b", i) != ref and bk == k:
@@ -1471,28 +1496,15 @@ def _module_actionbar():
         if t == "spell":
             n = v.lower(); return bool(n) and (n in HARMFUL_SPELLS or any(s.startswith(n) for s in HARMFUL_SPELLS))
         return t == "item" and int(c.get("g") or 0) == 0x0F0D
-    def must_confirm(tok, c, t, v, now):
+    def must_confirm(tok, c, t, v):
         if c["tg"] != "last" or not harmful_cell(c, t, v): return False
-        conf, st["confirm"] = st["confirm"], None
-        if conf and conf[0] == tok and now <= conf[1]:
-            if 0 <= now - conf[2] < 0.3: st["confirm"] = conf; return True
-            return False
-        gz = HOST.guarded()
-        if gz is False: return False
-        last = int(API.LastTargetSerial or 0); m = API.FindMobile(last) if last else None
-        noto = int(safe(lambda: int(m.Notoriety), 0) or 0) if m is not None else 0
-        if noto not in (1, 2) and not (m is None and last and t == "skill"): return False
-        st["confirm"] = (tok, now + 3.0, now)
-        say("your last target is %s and you %s a guard zone; "
-                   "press again to confirm, or target by hand." % ("blue" if noto == 1 else "green" if noto == 2 else
-                                                                   "not a mobile",
-                    "are in" if gz is True else "may be in"), Kit.HUE_BAD)
-        return True
+        return not HOST.harm_ok(int(API.LastTargetSerial or 0), ("actionbar",) + tok, TITLE, True,
+                                "press again to confirm", t == "skill")
     def run_cell(ref):
         c = cell(ref); t, v = c["t"], c["v"].strip()
         if not t: say("%s is empty." % ref_name(ref)); return
         now = time.time(); tok = (ref, settings["page"])
-        if must_confirm(tok, c, t, v, now): return
+        if must_confirm(tok, c, t, v): return
         arms = c["tg"] in ("self", "last") and t not in ("travel", "say", "ui", "dress", "undress", "ability")
         w = st["want_target"]
         if w and now > w[1]: w = None
@@ -1510,11 +1522,11 @@ def _module_actionbar():
             elif t == "script":
                 def job():
                     try: run_script(v)
-                    except Exception as ex: say("%s failed (%s)." % (cell_text(c), ex), Kit.HUE_BAD)
+                    except Exception as ex: say("couldn't use %s (%s)." % (cell_text(c), ex), Kit.HUE_BAD)
                 later(job)
             elif t == "ui": ok = run_ui(v)
             elif t == "travel": ok = fire_travel(c)
-        except Exception as ex: say("%s failed (%s)." % (cell_text(c), ex), Kit.HUE_BAD); ok = False
+        except Exception as ex: say("couldn't use %s (%s)." % (cell_text(c), ex), Kit.HUE_BAD); ok = False
         if ok and t in ("skill", "spell"): start_cool(t, v)
         if ok and arms and not pending_same:
             if clash: say("a target was still pending; target by hand.")
@@ -1544,7 +1556,7 @@ def _module_actionbar():
     def drop_want(): st["want_target"] = None; HOST.release_cursor(KEY)
     def pick(action):
         drop_want()
-        def done(serial): st["queue"].append(tuple(action) + (int(serial or 0),))
+        def done(serial): queue.add(tuple(action) + (int(serial or 0),), dup=True)
         HOST.pick_target(15, done)
     def pick_item(ref):
         say("target an item for %s (Esc to cancel)." % ref_name(ref)); pick(("picked_item", ref, settings["page"]))
@@ -1725,7 +1737,7 @@ def _module_actionbar():
         IW = w - 2 * M; h = M + 30 + GAP + body_h + M; g = G.CreateGump(True, True)
         Kit.add_window_frame(g, w, h, corners=False); Kit.add_section(g, M, M, IW, 30)
         Kit.add_label(g, title, M + 10, M + 7, Kit.HUE_TITLE)
-        Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 34, M + 4, None, "Close",
+        Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 34, M + 4, None, "Close the menu",
                        on_click=queue(("mpick", "close", None)))
         if lvl not in ("cats", "bag"):
             Kit.art_button(g, store, "back", Kit.ART_RESTORE, w - M - 54, M + 7, None, "Back to the previous menu",
@@ -1802,7 +1814,7 @@ def _module_actionbar():
         elif what == "text":
             v = str(menu["c"]["text"].Text or "").strip()
             if menu["cat"] == "hotkey":
-                k = norm_key(v); owner = key_owner(k)
+                k = _norm_key(v); owner = key_owner(k)
                 if owner: Kit.set_text(menu["c"]["status"], "%s belongs to %s" % (k, owner), Kit.HUE_BAD); return
                 if k: assign_key(ref, k)
                 else: cell(ref)["k"] = ""; cells_changed(refs=[ref])
@@ -1834,10 +1846,10 @@ def _module_actionbar():
         else: run_cell(ref)
     def use_now(ref):
         try: use(ref)
-        except Exception as ex: say("%s failed (%s)." % (ref_name(ref), ex), Kit.HUE_BAD)
+        except Exception as ex: say("couldn't use %s (%s)." % (ref_name(ref), ex), Kit.HUE_BAD)
     _hk = {"ok": None, "held": {}, "map": {}, "hooks": None}
     def sdl_combo(k):
-        parts, key = norm_key(k).split("+"), None
+        parts, key = _norm_key(k).split("+"), None
         for p in parts:
             if p and p not in ("CTRL", "SHIFT", "ALT"): key = p if p.startswith("SDLK_") else "SDLK_" + p
         mods = [m for m in ("CTRL", "SHIFT", "ALT") if m in parts]; return "+".join(mods + ([key] if key else []))
@@ -1862,12 +1874,12 @@ def _module_actionbar():
                 for k in [k for k, t in held.items() if now - t >= HELD_KEY_STALE]: del held[k]
             if st["shutting"] or win["g"] is None: return
             if st["bind"] is not None:
-                if not HOST.typing(): st["queue"].append(("bindkey", legion_combo(combo))); HOST.poke()
+                if not HOST.typing(): queue.add(("bindkey", legion_combo(combo)), dup=True); HOST.poke()
                 return
             ref = _hk["map"].get(combo)
             if ref is None or HOST.typing(): return
             if direct_ok(ref): use_now(ref)
-            else: st["queue"].append(("use", ref)); HOST.poke()
+            else: queue.add(("use", ref), dup=True); HOST.poke()
         except Exception: pass
     def _hk_up(combo):
         try: _hk["held"].pop(str(combo).rsplit("+", 1)[-1], None)
@@ -1898,7 +1910,7 @@ def _module_actionbar():
     def register_hotkeys():
         seen = {}
         for r, c in all_cells():
-            k = norm_key(c["k"])
+            k = _norm_key(c["k"])
             if not k or not c["t"] or not shown(r): continue
             owner = key_owner(k)
             if owner: tell_once((k, owner), "%s belongs to %s; %s has no hotkey." % (k, owner, ref_name(r))); continue
@@ -1907,6 +1919,12 @@ def _module_actionbar():
         for i, k in enumerate(bag_keys()):
             if k and not key_owner(k): seen[k] = ("b", i)
         _hk["map"] = dict((sdl_combo(k), ref) for k, ref in seen.items()) if _hk["ok"] else {}
+    ACTIONS = {"click": on_cell_click, "use": use, "bag": on_bag_click, "ui": run_ui,
+               "pick": pick_item, "menu": open_menu, "mpick": menu_pick,
+               "picked_item": picked_item, "picked_bag": picked_bag,
+               "bindkey": on_bind_key, "lockbar": toggle_lock, "grid": toggle_grid,
+               "bagmenu": lambda i: open_menu(None, i), "page": lambda step: set_page(settings["page"] + step),
+               "bind": lambda: start_bind() if st["bind"] is None else end_bind()}
     def page_table(w):
         col = (w - 24) // 3
         hint = Kit.wrap("Value: a spell, skill, macro or outfit name, primary or secondary, a script file, text to "
@@ -1928,7 +1946,7 @@ def _module_actionbar():
                      {"sw": 100, "vfmt": "%d", "stay": True}), ("custom", 26, draw_anchor)),
                  {"ldy": 2, "sdy": 6, "lgap": 8, "ugap": 10, "fh": 26, "pad": 6}),
                 ("EDIT A CELL", [("custom", 128, draw_edit)] + [("note", line) for line in hint]),
-                ("HOW TO USE IT", [("note", line) for para in HELP for line in Kit.wrap(para, w - 24)]))
+                ("HOW TO USE", [("note", line) for para in HELP for line in Kit.wrap(para, w - 24)]))
     def dd_index(dd, default):
         try: return int(dd.GetSelectedIndex())
         except Exception: return default
@@ -2005,7 +2023,7 @@ def _module_actionbar():
         c = cfg.f.c; ref = sel_ref(page["sel"]); cur = cell(ref)
         def chosen(lst, dd): return lst[max(0, min(len(lst) - 1, dd_index(dd, 0)))][0]
         t = chosen(TYPES, c["does"]); v = str(c["value"].Text or "").strip()
-        tg = chosen(TARGETS, c["target"]); k = norm_key(c["key"].Text); owner = key_owner(k)
+        tg = chosen(TARGETS, c["target"]); k = _norm_key(c["key"].Text); owner = key_owner(k)
         if owner: set_status("%s belongs to %s" % (k, owner), Kit.HUE_BAD); return
         try: lo = int(str(c["lo"].Text or "0"))
         except Exception: lo = LOW_DEFAULT
@@ -2026,7 +2044,7 @@ def _module_actionbar():
             if not v: set_status("Type a value first", Kit.HUE_BAD); return
             new["v"] = v
         cells[ref[0]][ref[1]] = new
-        if new["k"] and new["k"] != norm_key(cur["k"]): assign_key(ref, new["k"])
+        if new["k"] and new["k"] != _norm_key(cur["k"]): assign_key(ref, new["k"])
         cells_changed(recount=True, refresh=False, refs=[ref]); set_status("Saved %s" % ref_name(ref), Kit.HUE_GOOD)
     def page_clicks(f):
         for key, action in (("pgprev", ("page", -1)), ("pgnext", ("page", 1)), ("bind", ("bind",))):
@@ -2045,33 +2063,28 @@ def _module_actionbar():
         register_hotkeys(); want_rebuild(0.4)
     cfg = Kit.Page(settings, page_table, save_settings, settings_changed, adjust=read_dropdowns, clicks=page_clicks,
                    every=0.2)
-    cleanup = Kit.Cleanup()
+    load_settings()
     def _start():
-        st.update(fresh(), minimized=Kit.load_min(MIN_KEY), ub_last=None, ub_pending=True, counted_at=0.0)
+        st.update(fresh(), minimized=Kit.load_min(MIN_KEY), em=False, ub_last=None, ub_pending=True, counted_at=0.0)
         _told.clear(); _hk["held"] = {}; fitst.update(scale=None, vertical=None, slot=None, sig=None)
         load_settings(); load_cells(); scan_bags()
         st["ub_state"], st["grim_state"], st["va_state"] = ub_state(), grim_state(), va_state(); heartbeat()
         HOST.layout_add(KEY, bar_gump, TITLE, LAYOUT_HOOKS); cleanup.add(HOST.layout_remove, KEY)
         st.update(dock_sig=dock_sig(), tray_sig=tray_sig(), watch_next=0.0, owned_sig=frozenset(HOST.hotkeys_owned))
         build_window(); st.update(rebuild_at=0.0, redraw=set()); _hk_install(); register_hotkeys()
-        cleanup.service("actionbar.hotkeys", hotkeys_service)
-    ON_ACTION = {"click": on_cell_click, "use": use, "bag": on_bag_click, "ui": run_ui,
-                 "pick": pick_item, "menu": open_menu, "mpick": menu_pick,
-                 "picked_item": picked_item, "picked_bag": picked_bag,
-                 "bindkey": on_bind_key, "lockbar": toggle_lock, "grid": toggle_grid,
-                 "bagmenu": lambda i: open_menu(None, i), "page": lambda step: set_page(settings["page"] + step),
-                 "bind": lambda: start_bind() if st["bind"] is None else end_bind()}
+        cleanup.service("actionbar.hotkeys", hotkeys_service); cleanup.service("look.actionbar", want_rebuild)
     def _tick():
         if st["shutting"] or win["g"] is None: return
         if Kit.closed(win): return
         now = time.time(); handle_target(now); check_script(now); watch_ub()
+        if st["minimized"] and st["em"] == Kit.zone_up(KEY) and not st["rebuild_at"]: want_rebuild()
         arr = HOST.layout_arranging()
         if arr != win.get("arranging", False):
             win["arranging"] = arr
             if win.get("lockbtn"): recolor(win["lockbtn"], *lock_look())
         while st["queue"]:
             action = st["queue"].pop(0); kind = action[0]
-            if kind in ON_ACTION: ON_ACTION[kind](*action[1:])
+            if kind in ACTIONS: ACTIONS[kind](*action[1:])
             elif kind == "dock":
                 d = dict(all_docks()).get(action[1])
                 if d is not None:
@@ -2093,8 +2106,10 @@ def _module_actionbar():
             st["next_scan"] = now + 2.0; scan_bags(); scan_abilities(); heartbeat()
             if st.get("last_pos") != st.get("pos_saved"): save_pos()
         if st["rebuild_at"] and now >= st["rebuild_at"]: st["rebuild_at"] = 0.0; st["redraw"] = set(); build_window()
-        elif st["redraw"]: redraw_now()
-        if now >= st["next_count"]: st["next_count"] = now + COUNT_EVERY; refresh_counts()
+        elif st["redraw"]: refresh()
+        if now >= st["next_count"] or (st.get("pack_v") is not None and now - st.get("counted_at", 0.0) >= COUNT_SOON
+                                       and HOST.pack_ver() != st["pack_v"]):
+            st["next_count"] = now + COUNT_EVERY; refresh_counts()
         cool_tick(now)
         if now >= st.get("tray_next", 0.0): st["tray_next"] = now + 0.1; watch_position(now)
     def _thread_tick():
@@ -2106,10 +2121,9 @@ def _module_actionbar():
         Kit.save_min(MIN_KEY, st["minimized"]); save_settings(); save_cells(); g, win["g"] = win["g"], None
         Kit.dispose(g)
         for s in win.pop("stale", []): Kit.dispose(s)
-    load_settings()
-    return {"start": _start, "tick": _tick, "stop": _stop, "thread_wanted": lambda: bool(st["jobs"]),
-              "client_tick": True, "thread_tick": _thread_tick, "config_height": cfg.height,
-              "build_config": build_config, "poll_config": cfg.poll, "config_closed": cfg.closed}
+    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+            "build_config": build_config, "poll_config": cfg.poll, "config_closed": cfg.closed,
+            "thread_tick": _thread_tick, "thread_wanted": lambda: bool(st["jobs"])}
 
 
 if "HOST" not in globals():

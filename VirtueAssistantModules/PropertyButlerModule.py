@@ -1,14 +1,16 @@
 def _module_butler():
     KEY = "butler"; TITLE = "Property Butler"; SETTINGS_KEY = "PropertyButler_settings"; POS_KEY = "PropertyButler_pos"
-    VIEW_KEY = "PropertyButler_view"; MIN_KEY = "PropertyButler_min"; LOG_KEY = "PropertyButler_log"
+    MIN_KEY = "PropertyButler_min"; VIEW_KEY = "PropertyButler_view"; LOG_KEY = "PropertyButler_log"
     LOG_POS_KEY = "PropertyButler_log_pos"; W = 520; MINI_W, MINI_H = 300, 46; TRAY_ICON = 0x0BD2; MAX_ROWS = 8
     ROW_H = 22; LOG_LINES = 3; LOG_KEEP = 30; LOG_W = 520; LOG_ROW_H = 18; LOG_SAVE_EVERY = 1.0; NAME_CACHE_SECS = 2.5
     NAME_CACHE_MAX = 200; PICK_WAIT = 15.0; VISITS_KEY = "PropertyButler_visits"
-    LOG_VIEW_KEY = "PropertyButler_log_view"; VISIT_KEEP = 30; VISIT_MERGE = 60.0; VISIT_SAVE_EVERY = 5.0
+    LOG_VIEW_KEY = "PropertyButler_log_view"; LOG_DOCK = "butler.log"; LOG_TITLE = "Property Butler Log"
+    LOG_MIN_ROWS = 4; LOG_FIXED = 2 * Kit.MARGIN + 30 + Kit.GAP + 30 + 8
+    VISIT_KEEP = 30; VISIT_MERGE = 60.0; VISIT_SAVE_EVERY = 5.0
     HOUSE_EVERY = 2.0; HOUSE_CHECKS = 6; EJECT_FOE_EVERY = 10.0; FOE_SERVICE = "ultima.is_foe"
     DETECT_SKILL = "Detect Hidden"; DEFAULT_COOLDOWN = 10.0; COOLDOWN_MIN, COOLDOWN_MAX = 3.0, 120.0; DEFAULT_RANGE = 12
     RANGE_MIN, RANGE_MAX = 1, 18; CURSOR_WAIT = 3.0; REPLY_WAIT = 3.0; REVEAL_WINDOW = 1.0; RETRY_SOON = 1.5
-    CONFIRM_SECS = 3.0; STILL_SECS = 1.0; SCAN_EVERY = 0.3; HELD_EVERY = 0.5; REVEAL_SOUND = 0x01F1
+    CONFIRM_SECS = 3.0; STILL_SECS = 1.0; SCAN_EVERY = 0.3; SCAN_POKE = 0.1; HELD_EVERY = 0.5; REVEAL_SOUND = 0x01F1
     ALERT_REVEAL = "butler.revealed"; ALERT_FOE = "butler.foe"; ALERT_FOE_SOUND = 0x338
     HELD_UNKNOWN = HOLD_TEXT["unknown"]
     J_WAIT = ("must wait a few moments to use another skill", "must wait to perform another action")
@@ -38,10 +40,14 @@ def _module_butler():
     DEFAULTS = dict(settings)
     FIELDS = ("still", "sound", "friends", "confirm", "eject_cmd", "ban_cmd", "friend_cmd", "lock_cmd",
               "release_cmd", None, "eject_foes")
-    st = {"minimized": False, "queue": [], "sweep": False, "next_at": 0.0, "deadline": 0.0, "cast_at": 0.0,
-          "seen": set(), "sweeps": 0, "revealed": 0, "eject_at": {}}
-    win = {"g": None, "c": {}, "rows": [], "store": ({}, {}), "log_g": None, "log_rows": [], "log_view": "log"}
-    log = []; visits = []; cleanup = Kit.Cleanup()
+    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "sweep": False, "next_at": 0.0,
+          "deadline": 0.0, "cast_at": 0.0, "seen": set(), "sweeps": 0, "revealed": 0, "eject_at": {}, "first_d": {},
+          "reveal_line": False, "hooked": False, "scan_poke": False}
+    win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "log_view": "log"}
+    logs = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "minimized": False, "shutting": False, "docked": False,
+            "w": LOG_W, "queue": []}
+    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+    log = []; visits = []
     NOTO_HUE = {"innocent": 90, "ally": 68, "gray": 946, "criminal": 946, "murderer": 33,
                 "enemy": 43, "invulnerable": 53}
     def load_settings():
@@ -51,9 +57,9 @@ def _module_butler():
                                        (1, "range", RANGE_MIN, RANGE_MAX, int)):
                 try: settings[k] = max(lo, min(hi, cast(p[i])))
                 except Exception: pass
-            p = p + [""] * (13 - len(p))
+            n = len(p); p = p + [""] * (13 - len(p))
             for i, k in enumerate(FIELDS, 2):
-                if k: settings[k] = p[i] == "1" if isinstance(DEFAULTS[k], bool) else p[i] or DEFAULTS[k]
+                if k: settings[k] = p[i] == "1" if isinstance(DEFAULTS[k], bool) else (p[i] if i < n else DEFAULTS[k])
         st["sweep"] = Kit.get_var(VIEW_KEY) == "1"; del log[:]
         for line in Kit.get_var(LOG_KEY).split("\n"):
             q = line.split("\t")
@@ -85,18 +91,17 @@ def _module_butler():
             str(e[3]).replace("\t", " ").replace("\n", " ")) for e in visits[-VISIT_KEEP:]]))
     def visits_changed():
         st["visits_dirty"] = True
-        if win["log_view"] == "visits" and win["log_g"] is not None: st["visits_redraw"] = True
+        if win["log_view"] == "visits" and logs["g"] is not None: st["visits_redraw"] = True
     def add_log(text, hue=None):
         hue = Kit.HUE_INFO if hue is None else hue; log.append((time.time(), text, hue)); del log[:-LOG_KEEP]
         st["log_dirty"] = True; say(text + ("" if text.endswith((".", "!", "?")) else "."), hue); refresh_log()
-    say = Kit.sayer(TITLE)
     def note(text, secs=4.0): st["note"], st["note_until"] = text, time.time() + secs
     def has_target(): return bool(API.HasTarget("any"))
     def cursor_free(): return HOST.cursor_busy(KEY) is None and not has_target()
     def short(name, width): return Kit.fit(name or "(unknown)", width)
     def find_t(kind, serial): return (API.FindMobile if CMDS[kind][2] == "mobile" else API.FindItem)(serial)
     def who(h): return VERBS[h["kind"]].lower(), h["name"] or "the target"
-    queue = Kit.queuer(st); SWEEP_H = 82; NAME_W = 150; LOG_PITCH = 20
+    SWEEP_H = 82; NAME_W = 150; LOG_PITCH = 20
     VIS_H = 30 + MAX_ROWS * ROW_H + 8; ACT_H = 30 + 26 + 26 + LOG_LINES * LOG_PITCH + 8
     H = Kit.MARGIN + 30 + Kit.GAP + SWEEP_H + Kit.GAP + VIS_H + Kit.GAP + ACT_H + Kit.MARGIN; MIN_ROWS = 2
     NAME_MIN = 60; RUNNING = "A house command is still running"
@@ -108,7 +113,7 @@ def _module_butler():
         if k != 1.0: ctrl.SetPos(int(round(x * k)), int(round(y * k)))
         else: Kit.ui_pos(ctrl, x, y)
     def cap_w(text): return 35 + Kit.text_w(text)
-    ACTIONS = ((("pick_ej", Kit.ART_PLAY, "Eject...", "Pick a player to eject", "pick_eject"),
+    BUTTONS = ((("pick_ej", Kit.ART_PLAY, "Eject...", "Pick a player to eject", "pick_eject"),
                 ("pick_ban", Kit.ART_CLOSE, "Ban...", "Pick a player to ban", "pick_ban"),
                 ("pick_fr", Kit.ART_OK, "Friend...", "Pick a player to befriend", "pick_friend")),
                (("pick_lock", Kit.ART_OK, "Lock down...", "Pick a house item to lock down", "pick_lock"),
@@ -138,7 +143,7 @@ def _module_butler():
             x_fr = M + 12; x_ej = x_fr + cap_w("Friend") + 12; x_ban = x_ej + cap_w("Eject") + 12
             x_dist = M + IW - 10 - dist_w
         groups, rows_used = [], 0
-        for grp in ACTIONS:
+        for grp in BUTTONS:
             fl = flow([b[2] for b in grp], M + 10, M + IW - 4); groups.append([(x, rows_used + r) for x, r in fl])
             rows_used += fl[-1][1] + 1
         fixed = (M + 30 + Kit.GAP + sweep_h + Kit.GAP + 30 + 8 + Kit.GAP + 30 + 26 * rows_used + 8 + M)
@@ -196,10 +201,10 @@ def _module_butler():
                             section_title("VISITORS", "players near you", IW - 12 - near_w - 16))
             c["near"] = Kit.add_label(g, "", M + IW - 10, yv + 6, Kit.HUE_INFO); c["near_y"] = yv + 6
             x_fr, x_ej, x_ban, x_dist = P["x"]; c["name_w"], c["hidden_w"] = P["name_w"], Kit.text_w(" (hidden)")
-            say = "Say the %s command at them"
-            btns = (("fr", Kit.ART_OK, x_fr, "Friend", say % "friend" + ALT, "friend"),
-                    ("ej", Kit.ART_PLAY, x_ej, "Eject", say % "eject" + ALT, "eject"),
-                    ("ban", Kit.ART_CLOSE, x_ban, "Ban", say % "ban" + ("; click again within %d s to confirm"
+            say_tip = "Say the %s command at them"
+            btns = (("fr", Kit.ART_OK, x_fr, "Friend", say_tip % "friend" + ALT, "friend"),
+                    ("ej", Kit.ART_PLAY, x_ej, "Eject", say_tip % "eject" + ALT, "eject"),
+                    ("ban", Kit.ART_CLOSE, x_ban, "Ban", say_tip % "ban" + ("; click again within %d s to confirm"
                      % int(CONFIRM_SECS) if settings["confirm"] else "") + ALT, "ban"))
             row_h, bdy = P["row_h"], P["btn_dy"]
             for i in range(P["rows_n"]):
@@ -217,7 +222,7 @@ def _module_butler():
                           for i, line in enumerate(P["empty"][:max(1, (P["vis_h"] - 33) // 20)])]
             ya = P["ya"]
             Kit.add_section(g, M, ya, IW, P["act_h"], section_title("ACTIONS", "pick with a cursor", IW - 12))
-            for grp, places in zip(ACTIONS, P["groups"]):
+            for grp, places in zip(BUTTONS, P["groups"]):
                 for (key, art, cap, tip, act_), (bx, brow) in zip(grp, places):
                     Kit.art_button(g, store, key, art, bx, ya + 26 + 26 * brow, cap, tip, on_click=queue(act_))
             ly = ya + 30 + 26 * P["act_rows"]
@@ -228,10 +233,10 @@ def _module_butler():
                 Kit.scale_window(g, k)
             elif body is not None: w, h = lw, body
             else: w, h = lw, lh
-        wnd.end(g, {"rows": rows}, w, h, slot[1] if (slot is not None and not st["minimized"]) else None)
-        refresh_log(); refresh_rows(); refresh_status()
+        wnd.end(g, {"rows": rows}, w, h, slot[1] if (slot is not None and not st["minimized"]) else None); refresh()
     wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, icon=TRAY_ICON, cleanup=cleanup,
                      clear={"rows": []})
+    def refresh(): refresh_log(); refresh_rows(); refresh_status()
     ROW_CTRLS = ("name_lbl", "dist_lbl", "catch", "fr", "fr_btn", "ej", "ej_btn", "ban", "ban_btn")
     def set_vis(ctrl, on, row, key):
         if row.get(key + "_vis") != on:
@@ -277,15 +282,22 @@ def _module_butler():
                     text, hue = log_line(tail[len(tail) - 1 - i], c["log_w"]); Kit.set_text(lbl, text, hue)
                 else: Kit.set_text(lbl, Kit.fit(EMPTY_LOG, c["log_full"]) if i == 0 else "", Kit.HUE_INFO)
         refresh_logwin()
+    def log_min(): return LOG_W, LOG_FIXED + LOG_MIN_ROWS * LOG_ROW_H
+    def log_close():
+        if Kit.zone_up(LOG_DOCK): build_logwin()
+        else: logw.close()
     def build_logwin():
-        M = Kit.MARGIN; visits_view = win["log_view"] == "visits"
-        lines, keep = (visits, VISIT_KEEP) if visits_view else (log, LOG_KEEP)
-        n = min(keep, max(10, (len(lines) + 9) // 10 * 10)); sh = 30 + n * LOG_ROW_H + 8
-        w, h = LOG_W, M + 30 + Kit.GAP + sh + M; g, store, _c = logw.begin(w, h); Kit.add_window_frame(g, w, h)
-        Kit.add_section(g, M, M, w - 2 * M, 30)
-        Kit.add_label(g, "%s LOG" % TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
-        Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close", on_click=queue("show_log"))
-        x_clr = w - M - 54 - 12 - 35 - Kit.text_w("Clear")
+        M = Kit.MARGIN; visits_view = win["log_view"] == "visits"; held = Kit.zone_up(LOG_DOCK)
+        lines, keep = (visits, VISIT_KEEP) if visits_view else (log, LOG_KEEP); mw, mh = log_min()
+        z = logw.slot if held and logw.slot is not None and logw.slot[0] >= mw and logw.slot[1] >= mh else None
+        n = logw.rows(LOG_ROW_H, LOG_FIXED, 0) if z else min(keep, max(10, (len(lines) + 9) // 10 * 10))
+        w, h = z if z else (LOG_W, LOG_FIXED + n * LOG_ROW_H); sh = h - M - 30 - Kit.GAP - M
+        g, store, _c = logw.begin(w, h); Kit.add_window_frame(g, w, h); Kit.add_section(g, M, M, w - 2 * M, 30)
+        Kit.add_label(g, LOG_TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
+        if not held:
+            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close the log",
+                           on_click=queue("show_log"))
+        x_clr = w - M - (10 if held else 66) - 35 - Kit.text_w("Clear")
         Kit.art_button(g, store, "clear", Kit.ART_CLOSE, x_clr, M + 4, "Clear",
                        "Forget these visits" if visits_view else "Forget these actions", on_click=queue("log_clear"))
         cap = "Actions" if visits_view else "Visitors"
@@ -304,9 +316,9 @@ def _module_butler():
                 row["catch"] = Kit.catcher(g, M + 10, ry - 1, w - 2 * M - 20, LOG_ROW_H,
                                            Kit.row_clicker(row, queue, "last"), LAST_TIP)
             rows.append(row)
-        logw.end(g, {"log_rows": rows}); refresh_logwin()
-    logw = Kit.Window(KEY, TITLE, None, win, build_logwin, LOG_POS_KEY, default=(240, 240), cleanup=cleanup,
-                      gkey="log_g", names=None, lock=False, owner=False, clear={"log_rows": []})
+        logw.end(g, {"rows": rows, "w": w}); refresh_logwin()
+    logw = Kit.Window(LOG_DOCK, LOG_TITLE, logs, logs, build_logwin, LOG_POS_KEY, default=(240, 240), cleanup=cleanup,
+                      lock=True, owner=False, clear={"rows": []})
     def visit_line(e, width, now):
         t_in, t_out, serial, name, noto, times, flag = e; lt = time.localtime(t_in)
         when = time.strftime("%H:%M" if lt[:3] == time.localtime(now)[:3] else "%b %d %H:%M", lt)
@@ -319,10 +331,10 @@ def _module_butler():
         name_w = max(60, width - Kit.text_px(when + "  " + tail))
         return "%s  %s%s" % (when, short(name, name_w), tail), NOTO_HUE.get(noto, Kit.HUE_TEXT)
     def refresh_logwin():
-        g = win["log_g"]
+        g = logs["g"]
         if not Kit.is_open(g): return
-        rows = win["log_rows"]; visits_view = win["log_view"] == "visits"; lines = visits if visits_view else log
-        if len(lines) > len(rows): build_logwin(); return
+        rows = logs["rows"]; visits_view = win["log_view"] == "visits"; lines = visits if visits_view else log
+        if len(lines) > len(rows) and not Kit.zone_up(LOG_DOCK): build_logwin(); return
         n = len(lines); now = time.time()
         for i, row in enumerate(rows):
             if i < n:
@@ -330,10 +342,10 @@ def _module_butler():
                 if visits_view:
                     key = (e[0], e[2], e[1], e[5], e[6], st["open_visits"].get(e[2]) is e)
                     if row.get("key") != key:
-                        row["key"] = key; text, hue = visit_line(e, LOG_W - 2 * Kit.MARGIN - 28, now)
+                        row["key"] = key; text, hue = visit_line(e, logs["w"] - 2 * Kit.MARGIN - 28, now)
                         Kit.set_text(row["lbl"], text, hue)
                     Kit.row_set(row, (e[2], e[3]), now)
-                else: text, hue = log_line(e, LOG_W - 2 * Kit.MARGIN - 70); Kit.set_text(row["lbl"], text, hue)
+                else: text, hue = log_line(e, logs["w"] - 2 * Kit.MARGIN - 70); Kit.set_text(row["lbl"], text, hue)
             else:
                 Kit.set_text(row["lbl"], (EMPTY_VISITS if visits_view else EMPTY_LOG) if i == 0 else "", Kit.HUE_INFO)
                 row["key"] = None; Kit.row_set(row, None, now)
@@ -346,7 +358,7 @@ def _module_butler():
         if st["note"] and now < st["note_until"]: return st["note"], Kit.HUE_INFO
         if st["phase"] == "cursor": return "Detect Hidden: waiting for cursor", Kit.HUE_TITLE
         if st["phase"] == "cast": return "Detect Hidden: sweeping", Kit.HUE_GOOD
-        rem = st["next_at"] - now
+        rem = wait_left(now)
         if not st["sweep"]:
             return ("Sweep off; ready in %d s" % int(rem + 0.99) if rem > 0 else "Sweep off; ready"), Kit.HUE_INFO
         if st["held"] == HELD_UNKNOWN: return HELD_UNKNOWN, Kit.HUE_INFO
@@ -391,8 +403,8 @@ def _module_butler():
                     c["count_w"] = tw; IW = P.get("IW", W - 2 * Kit.MARGIN)
                     at_k(cnt, Kit.MARGIN + IW - 10 - tw, c["count_y"])
     def scan_visitors(now, me):
-        if 0 <= now - st["scan_at"] < SCAN_EVERY: return False
-        st["scan_at"] = now; mx, my = int(me.X), int(me.Y); my_serial = me.Serial
+        if 0 <= now - st["scan_at"] < (SCAN_POKE if st["scan_poke"] else SCAN_EVERY): return False
+        st["scan_at"] = now; st["scan_poke"] = False; mx, my = int(me.X), int(me.Y); my_serial = me.Serial
         if st["pos"] != (mx, my): st["pos"], st["moved_at"] = (mx, my), now
         rng = settings["range"]; mobs = API.GetAllMobiles(distance=rng, isHuman=True) or []; cache = st["ncache"]
         if len(cache) > NAME_CACHE_MAX:
@@ -484,6 +496,8 @@ def _module_butler():
         if g is not None: return HELD_UNKNOWN
         if fight: return HOLD_TEXT.get(fight, fight)
         return HOLD_TEXT["alarm"] if HOST.alarm_up() else None
+    def wait_left(now):
+        rem = st["next_at"] - now; return rem if 0 < rem <= COOLDOWN_MAX else 0.0
     def start_sweep(now, forced=False):
         if st["house"] is not None:
             if forced: note(RUNNING)
@@ -493,8 +507,9 @@ def _module_butler():
         if held:
             if forced: note(held if held == HELD_UNKNOWN else "The sweep waits: %s" % held)
             return False
-        if now < st["next_at"]:
-            if forced: note("Ready in %d s" % int(st["next_at"] - now + 0.99))
+        rem = wait_left(now)
+        if rem > 0:
+            if forced: note("Ready in %d s" % int(rem + 0.99))
             return False
         if not forced and settings["still"] and now - st["moved_at"] < STILL_SECS: return False
         if not cursor_free():
@@ -502,7 +517,8 @@ def _module_butler():
             return False
         me = HOST.me()
         if me is not None: st["scan_at"] = 0.0; scan_visitors(now, me)
-        st["seen"] = {v["serial"] for v in st["visitors"] if not v["hidden"]}
+        st["seen"] = {v["serial"] for v in st["visitors"] if not v["hidden"]}; st["first_d"] = {}
+        st["reveal_line"] = False
         API.UseSkill(DETECT_SKILL); HOST.claim_cursor(KEY, CURSOR_WAIT)
         st["phase"], st["deadline"] = "cursor", now + CURSOR_WAIT; return True
     def sweep_tick(now):
@@ -520,8 +536,10 @@ def _module_butler():
             return
         if st["phase"] == "cast":
             if now - st["cast_at"] <= REVEAL_WINDOW:
+                fd = st["first_d"]; edge = max(1, settings["range"] - 2)
                 for v in st["visitors"]:
                     if v["serial"] not in st["seen"] and not v["hidden"]:
+                        if fd.setdefault(v["serial"], v["dist"]) > edge and not st["reveal_line"]: continue
                         st["seen"].add(v["serial"]); st["revealed"] += 1
                         API.HeadMsg("* revealed *", v["serial"], Kit.HUE_BAD)
                         add_log("revealed %s" % (v["name"] or "someone"), Kit.HUE_BAD)
@@ -543,7 +561,7 @@ def _module_butler():
                 if t in low: return
             for t in J_REVEAL:
                 if t in low:
-                    note("Someone was revealed", 6.0)
+                    st["reveal_line"] = True; note("Someone was revealed", 6.0)
                     if settings["sound"]: HOST.alert(ALERT_REVEAL, "Someone was revealed", "warn")
                     return
         h = st["house"]
@@ -561,6 +579,7 @@ def _module_butler():
         if st["phase"] == "cursor":
             st["house_wait"] = {"kind": kind, "serial": serial, "name": name, "until": now + CURSOR_WAIT}
             st["confirm"] = None; return
+        if not settings[CMDS[kind][0]]: note("Type the words for %s on the settings page" % VERBS[kind]); return
         if not cursor_free(): note(NO_CURSOR); return
         if not name: name = str(safe(lambda: find_t(kind, serial).Name, "") or "")
         API.Msg(settings[CMDS[kind][0]]); HOST.claim_cursor(KEY, CURSOR_WAIT)
@@ -604,6 +623,44 @@ def _module_butler():
                 note("Ban %s? Click Ban again to confirm" % (name or "them"), CONFIRM_SECS); return
             if len(c) > 2 and now - c[2] < 0.3: return
         start_house("ban", serial, name, now)
+    def act_sweep(action, now, me):
+        st["sweep"] = not st["sweep"]; Kit.put_var(VIEW_KEY, "1" if st["sweep"] else "0")
+        say("sweep %s." % ("on" if st["sweep"] else "off"), Kit.HUE_GOOD if st["sweep"] else Kit.HUE_INFO)
+    def act_now(action, now, me):
+        if me is not None and st["phase"] == "idle": st["held"] = sweep_held(now)
+        if me is not None and not start_sweep(now, forced=True) and st["phase"] != "idle":
+            note("A sweep is already running")
+    def act_show_log(action, now, me):
+        if Kit.is_open(logs["g"]): log_close()
+        else: build_logwin()
+    def act_log_view(action, now, me):
+        win["log_view"] = "log" if win["log_view"] == "visits" else "visits"; Kit.put_var(LOG_VIEW_KEY, win["log_view"])
+        if Kit.is_open(logs["g"]): build_logwin()
+    def act_clear(action, now, me):
+        if action == "log_clear" and win["log_view"] == "visits":
+            del visits[:]; st["open_visits"], st["inside"] = {}, {}; visits_changed()
+        else: del log[:]; st["log_dirty"] = True; refresh_log()
+    def picked(which):
+        def done(serial):
+            serial = int(serial or 0)
+            if not serial: note("Nothing picked"); return
+            queue.add((which, serial, None), dup=True)
+        return done
+    def act_pick(action, now, me):
+        which = action[5:]
+        if st["house"] is not None or st["house_wait"] is not None: note(RUNNING)
+        else:
+            note("Target the %s to %s (Esc cancels)" % (
+                "player" if CMDS[which][2] == "mobile" else "item", VERBS[which].lower()), PICK_WAIT)
+            HOST.pick_target(PICK_WAIT, picked(which))
+    def act_last(action, now, me): API.SetLastTarget(serial=action[1]); API.HeadMsg("* last target *", action[1], 0x35)
+    def act_house(action, now, me): start_house(action[0], action[1], action[2], now)
+    ACTIONS = {"sweep": act_sweep, "now": act_now, "show_log": act_show_log, "log_view": act_log_view,
+               "log_clear": act_clear, "clear_log": act_clear, "pick_eject": act_pick, "pick_ban": act_pick,
+               "pick_friend": act_pick, "pick_lock": act_pick, "pick_release": act_pick,
+               "follow": lambda action, now, me: Follow.toggle(action[1], TITLE), "last": act_last,
+               "ban": lambda action, now, me: want_ban(action[1], action[2], now), "eject": act_house,
+               "friend": act_house, "lock": act_house, "release": act_house}
     EJECT_TIP = ("Foe: on Ultima Tracker's Foe list; once per player every %d s; Eject on their row ejects them"
                  % int(EJECT_FOE_EVERY))
     PAGE_OPTS = {"ldy": 4, "fh": 30, "ugap": 6}
@@ -634,7 +691,9 @@ def _module_butler():
     def on_change(old, new):
         if new["eject_foes"] != old["eject_foes"]: st["eject_at"].clear()
         if new["confirm"] != old["confirm"] and not st["minimized"]: queue("redraw")()
-    cfg = Kit.Page(settings, page_table, save_settings, on_change, PAGE_OPTS, strict=True, empty=DEFAULTS)
+    cfg = Kit.Page(settings, page_table, save_settings, on_change, PAGE_OPTS, strict=True); load_settings()
+    def on_mobile(*args):
+        if not st["shutting"] and st["phase"] != "idle": st["scan_poke"] = True
     def _start():
         st.update({"shutting": False, "docked": False, "queue": [], "phase": "idle",
                    "house": None, "house_wait": None, "confirm": None, "visitors": [], "near": 0,
@@ -646,7 +705,9 @@ def _module_butler():
         wnd.slot = None; fit.update({"k": 1.0, "full": None}); load_settings(); st["rd"] = Journal.reader()
         HOST.alert_kind(ALERT_REVEAL, "Someone revealed", REVEAL_SOUND)
         HOST.alert_kind(ALERT_FOE, "Red or Foe in your house", ALERT_FOE_SOUND); build_window()
-        wnd.dock(fit=True, exact=True, verify=True, drawn_at=drawn_at)
+        Kit.hook_once(st, "hooked", ("ApiMobileCreated", on_mobile))
+        wnd.dock(fit=True, exact=True, verify=True, drawn_at=drawn_at); logs.update({"shutting": False, "queue": []})
+        logw.dock(fit=True, min=log_min)
         say("on; sweep %s, visitors within %d tiles%s."
             % ("on" if st["sweep"] else "off", settings["range"], ", red or Foe alarm on" if settings["eject_foes"]
                else ""), Kit.HUE_GOOD)
@@ -656,46 +717,20 @@ def _module_butler():
         now = time.time(); me = HOST.me()
         while st["queue"]:
             action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-            if wnd.action(action): continue
-            if action == "sweep":
-                st["sweep"] = not st["sweep"]; Kit.put_var(VIEW_KEY, "1" if st["sweep"] else "0")
-                say("sweep %s." % ("on" if st["sweep"] else "off"), Kit.HUE_GOOD if st["sweep"] else Kit.HUE_INFO)
-            elif action == "now":
-                if me is not None and st["phase"] == "idle": st["held"] = sweep_held(now)
-                if me is not None and not start_sweep(now, forced=True) and st["phase"] != "idle":
-                    note("A sweep is already running")
-            elif action == "show_log":
-                if Kit.is_open(win["log_g"]): logw.close()
-                else: build_logwin()
-            elif action == "log_view":
-                win["log_view"] = "log" if win["log_view"] == "visits" else "visits"
-                Kit.put_var(LOG_VIEW_KEY, win["log_view"])
-                if Kit.is_open(win["log_g"]): build_logwin()
-            elif action == "log_clear" and win["log_view"] == "visits":
-                del visits[:]; st["open_visits"], st["inside"] = {}, {}; visits_changed()
-            elif action in ("clear_log", "log_clear"): del log[:]; st["log_dirty"] = True; refresh_log()
-            elif kind[:5] == "pick_":
-                which = kind[5:]
-                if st["house"] is not None or st["house_wait"] is not None: note(RUNNING)
-                else:
-                    note("Target the %s to %s (Esc cancels)" % (
-                        "player" if CMDS[which][2] == "mobile" else "item", VERBS[which].lower()), PICK_WAIT)
-                    HOST.pick_target(PICK_WAIT, picked(which))
-            elif kind == "follow": Follow.toggle(action[1], TITLE)
-            elif kind == "last":
-                API.SetLastTarget(serial=action[1]); API.HeadMsg("* last target *", action[1], 0x35)
-            elif kind == "ban": want_ban(action[1], action[2], now)
-            elif kind in CMDS: start_house(kind, action[1], action[2], now)
+            if not wnd.action(action) and kind in ACTIONS: ACTIONS[kind](action, now, me)
         if st["log_dirty"] and now >= st["log_save_at"]: st["log_save_at"] = now + LOG_SAVE_EVERY; save_log()
         if st["visits_dirty"] and now >= st["visits_save_at"]:
             st["visits_save_at"] = now + VISIT_SAVE_EVERY; save_visits()
         if st["visits_redraw"]: st["visits_redraw"] = False; refresh_logwin()
+        if logs["queue"]:
+            del logs["queue"][:]
+            if Kit.zone_up(LOG_DOCK) or logs["g"] is not None: build_logwin()
         if me is None: return
         for ln in st["rd"].new(): on_journal(ln)
         if scan_visitors(now, me): eject_on_sight(now)
         house_tick(now)
         if st["house"] is None:
-            if st["sweep"] and st["phase"] == "idle" and (now >= st["next_at"] - HELD_EVERY or now >= st["held_at"]):
+            if st["sweep"] and st["phase"] == "idle" and (wait_left(now) <= HELD_EVERY or now >= st["held_at"]):
                 st["held_at"] = now + HELD_EVERY; held = sweep_held(now)
                 if held != st["held"]:
                     was, st["held"] = st["held"], held
@@ -704,19 +739,12 @@ def _module_butler():
             sweep_tick(now); house_wait_tick(now)
         if st["confirm"] and now >= st["confirm"][1]: st["confirm"] = None
         refresh_status()
-    def picked(which):
-        def done(serial):
-            serial = int(serial or 0)
-            if not serial: note("Nothing picked"); return
-            st["queue"].append((which, serial, None))
-        return done
     def _stop():
-        st["shutting"] = True; st["house_wait"] = None; HOST.release_cursor(KEY); save_settings()
+        st["shutting"] = logs["shutting"] = True; st["house_wait"] = None; HOST.release_cursor(KEY); save_settings()
         if st["log_dirty"]: save_log()
         if st["open_visits"]: close_visits(time.time())
         if st["visits_dirty"]: save_visits()
         cleanup.close()
-    load_settings()
     return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
             "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
 

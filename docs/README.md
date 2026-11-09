@@ -37,7 +37,7 @@ Saved files (lists, layouts, exports, profiles) go in the VirtueAssistantSetting
 
 ## Install and use
 
-1. Put the main script and the VirtueAssistantModules folder in TazUO/LegionScripts and run the main script from the Legion Script Manager. Run only that file, and no other copy of Virtue Assistant at the same time.
+1. Put the main script and the VirtueAssistantModules folder in TazUO/LegionScripts and run the main script from the Legion Script Manager. Run only that file, and no other copy of Virtue Assistant at the same time. Its window shows first; the modules you had on then start one at a time.
 2. In the Virtue Assistant window, tick a module to turn it on, untick it to turn it off.
 3. The down arrow in its title folds the window into a gear (click the gear to reopen it); the gold arrow folds it into the Action Bar instead.
 4. Drag a corner to resize: its sections flow into columns to fill the size, then the window shrinks to fit them. The scale buttons (- and +) scale it; click the percentage for 100%.
@@ -52,17 +52,26 @@ Any module also runs alone: pick its file (in the VirtueAssistantModules group) 
 
 - **Minimize** (boxed down arrow, or double-click the title): the window shrinks to a small form on screen.
 - **Fold into the Action Bar** (gold arrow): the window hides; its tray button on the Action Bar brings it back. With no Action Bar up, it stays minimised until the bar opens.
-- **Snapping:** windows snap to each other and to the screen grid when dragged, and move with the window they snapped to (switch on the Modules tab).
+- **Snapping:** windows snap to each other and to the screen grid when dragged, and move with the window they snapped to (switch in Settings > Interface).
 - Every window uses the client's gump art.
+- **Dark mode** (Settings > Interface, LOOK): tints every window's stone frame and corner knots charcoal and makes the black sections a little darker; open windows redraw at once and keep their place. Saved per character; off by default.
 - Window places, minimised or folded state, which modules are on and each module's view are remembered per character as soon as you change them.
 
 ## Zones
 
-Settings > Layout splits the screen into zones. A window in a zone fills it and stays there; Arrange mode (or Lock on the Action Bar) unlocks windows to move them between zones, and Esc or Done locks them again. The page also edits zones, saves layouts and has Reclaim space, which gives empty room to the game area.
+Settings > Interface (the Interface module) splits the screen into zones. A window in a zone fills it and stays there; Arrange mode (or Lock on the Action Bar) unlocks windows to move them between zones, and Esc or Done locks them again. The page also edits zones, saves layouts and has Reclaim space, which gives empty room to the game area.
+
+- **Set up:** a three-step window (it opens by itself the first time, when no layout is chosen yet): pick one of five ready-made screens (Sides, Mirrored, Bottom bar, Right column, Compact; the screen shows each as you click it), check which zone each window goes in, then pick the look. Nothing changes until Done.
+- **One panel:** with "Join windows in zones into one panel" on, one stone frame covers every window zone and reserved zone (the journal and bag grid too), with no corners or lines between windows and a gold border round the game view. Windows lose their own frames and title rows; hover a window's top edge to show its title row. A zone set to "Apart" in the zone editor keeps its own edge.
+- **Zone editor:** Split cuts a zone in two, Join merges it with a matching neighbour; gold lines mark zones that join.
+- **Interface off:** every window is free again and your own game view comes back.
 
 ## Hotkeys
 
 Set on each module's settings page and on the Action Bar; Settings > Hotkeys lists them all and binds a key to any button. They never fire while you type in the chat line or any text box; click the game world to leave a field.
+
+- **One owner per key:** a second module or button that claims a held key gets a red journal line naming the holder, and takes the key when the holder lets it go.
+- **Harmful cursor in town:** aiming a harmful target cursor at a blue or green in a guard zone (or a zone not yet known) only arms on the first click; a second click within 3 s aims. A double-click doesn't count.
 
 ## Profiles
 

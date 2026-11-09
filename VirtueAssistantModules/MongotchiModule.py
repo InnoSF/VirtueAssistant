@@ -1,6 +1,6 @@
 def _module_mongotchi():
-    import random; KEY = "mongotchi"; TITLE = "Mongotchi"; GFX_PUP = 0x20F9; GFX_ADULT = 0x25A6; GREM_PX = 2
-    GREMLIN_COLOR = "#FFFFFF"; GFX_MESS = 0x0F3B; GFX_CURE = 0x0F07; GFX_BRUSH = 0x1373
+    KEY = "mongotchi"; TITLE = "Mongotchi"; SETTINGS_KEY = "Mongotchi_settings"; import random; GFX_PUP = 0x20F9
+    GFX_ADULT = 0x25A6; GREM_PX = 2; GREMLIN_COLOR = "#FFFFFF"; GFX_MESS = 0x0F3B; GFX_CURE = 0x0F07; GFX_BRUSH = 0x1373
     FOODS = [(0x09D0, "an apple", 20), (0x09C9, "a ham", 35), (0x097B, "a fish steak", 30),
              (0x09D1, "some grapes", 20), (0x103B, "a loaf of bread", 25), (0x171F, "a banana", 20)]
     HUE_GREATER = 1161; HUE_SICK = 2213; HUE_SLEEP = 1102; HUE_WHITE = 1153; HUE_ZZZ = 1152; HUE_STINK = 2006
@@ -25,13 +25,14 @@ def _module_mongotchi():
     LUCK_BONUS = 1.25; PEN_MAX = 6; CODE_TAG = "Mongotchi code:"
     CHANNELS = [("Say", "Msg"), ("Party", "PartyMsg"), ("Guild", "GuildMsg"),
                 ("Alliance", "AllyMsg"), ("Whisper", "WhisperMsg")]
-    LISTEN_EVERY = 2.0; SETTINGS_KEY = "Mongotchi_settings"; STATE_KEY = "Mongotchi_state"; SHOP_KEY = "Mongotchi_shop"
+    LISTEN_EVERY = 2.0; STATE_KEY = "Mongotchi_state"; SHOP_KEY = "Mongotchi_shop"
     GUESTS_KEY = "Mongotchi_guests"; QUEST_KEY = "Mongotchi_quests"; SEASON_KEY = "Mongotchi_seasonal"
     ACH_KEY = "Mongotchi_achievements"
     POS_KEYS = {"main": "Mongotchi_pos", "shop": "Mongotchi_shop_pos",
                 "pen": "Mongotchi_pen_pos", "quest": "Mongotchi_quest_pos", "ach": "Mongotchi_ach_pos"}
     POS_DEFAULTS = {"main": (200, 200), "shop": (510, 200), "pen": (200, 640), "quest": (510, 200), "ach": (540, 240)}
     WINDOWS = ("shop", "pen", "quest", "ach", "main")
+    SUBS = {"shop": "Shop", "pen": "Playpen", "quest": "Journeys", "ach": "Achievements"}
     MIN_KEYS = {"main": "Mongotchi_min", "shop": "Mongotchi_shop_min",
                 "pen": "Mongotchi_pen_min", "quest": "Mongotchi_quest_min", "ach": "Mongotchi_ach_min"}
     W, H = 300, 448; TRAY_ICON = GFX_PUP; MINI_W, MINI_H = 240, 46; SW = 380; SHOP_ROWS = 6; PPW = 420; JW = 480
@@ -313,11 +314,11 @@ def _module_mongotchi():
         ("charm", "Best friends", "Buy the Companion Charm", 50, 0x0E5C, 1161, "charm", 1),
         ("festive", "Festive", "Give a treat in its season", 20, 0x0C6A, 0, None, 1),]
     ACH_BY_ID = dict((a[0], a) for a in ACHIEVEMENTS); ACH_ROWS = 8; ACH_KEEP_MAX = 200
-    DEFAULTS = {"name": "Flapjack", "pace": 100, "grem_min": 20, "share_min": 10,
-                "gremlins": True, "sounds": True, "remind": True, "offline": False,
-                "listen": True, "share_ch": 0, "comp": False, "comp_talk": True, "comp_help": True, "share_open": True}
+    settings = {"name": "Flapjack", "pace": 100, "grem_min": 20, "share_min": 10,
+               "gremlins": True, "sounds": True, "remind": True, "offline": False,
+               "listen": True, "share_ch": 0, "comp": False, "comp_talk": True, "comp_help": True, "share_open": True}
+    DEFAULTS = dict(settings)
     LIMITS = {"pace": (25, 400), "grem_min": (5, 240), "share_min": (0, 60), "share_ch": (0, len(CHANNELS) - 1)}
-    settings = dict(DEFAULTS)
     PET_NEW = {"food": 80.0, "joy": 80.0, "energy": 90.0, "clean": 100.0, "sick": False, "sick_t": 0.0, "asleep": False,
                "age": 0.0, "care_sum": 0.0, "care_t": 0.0, "stage": 0, "pantry": PANTRY_START, "messes": 0,
                "neglect": 0.0, "warned": False, "feral": False, "mess_in": 40 * 60.0, "supply_in": SUPPLY_MIN * 60.0,
@@ -328,17 +329,18 @@ def _module_mongotchi():
     shop = {"sq": 0.0, "own": set(), "cnt": {}, "eq": {}, "last": 0.0}
     quest = {"xp": dict((k, 0.0) for k in VIRTUE_KEYS), "relics": {}, "visits": {}, "hunts": 0, "med": 0, "tab": 0}
     ach = {"got": set(), "earned": 0.0, "swats": 0, "new": False}
-    st = {"minimized": False, "queue": [], "last_t": 0.0, "sim_acc": 0.0, "saved_at": 0.0, "say": "", "say_until": 0.0,
-          "pet_cd": 0.0, "brush_cd": 0.0, "remind": {}, "confirm": 0.0, "px": float(PX0 + PW // 2 - PB_W // 2),
-          "py": float(YMIN + 10), "tx": 0.0, "ty": 0.0, "hover_until": 0.0, "eat_food": None, "eat_x": 0,
-          "play_toy": None, "toy": [0.0, 0.0, 0.0, 0.0], "music_at": 0.0, "away_until": 0.0, "dizzy_until": 0.0,
-          "shop_min": Kit.load_min(MIN_KEYS["shop"]), "shop_cat": 0, "shop_page": 0, "pen_open": False,
-          "pen_min": Kit.load_min(MIN_KEYS["pen"]), "guests": [], "pals": {},
+    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "last_t": 0.0, "sim_acc": 0.0,
+          "saved_at": 0.0, "say": "", "say_until": 0.0, "pet_cd": 0.0, "brush_cd": 0.0, "remind": {}, "confirm": 0.0,
+          "px": float(PX0 + PW // 2 - PB_W // 2), "py": float(YMIN + 10), "tx": 0.0, "ty": 0.0, "hover_until": 0.0,
+          "eat_food": None, "eat_x": 0, "play_toy": None, "toy": [0.0, 0.0, 0.0, 0.0], "music_at": 0.0,
+          "away_until": 0.0, "dizzy_until": 0.0, "shop_min": Kit.load_min(MIN_KEYS["shop"]), "shop_cat": 0,
+          "shop_page": 0, "pen_open": False, "pen_min": Kit.load_min(MIN_KEYS["pen"]), "guests": [], "pals": {},
           "quest_min": Kit.load_min(MIN_KEYS["quest"]), "ach_min": Kit.load_min(MIN_KEYS["ach"]), "ach_saved": None,
           "hallow_night": False, "season_saved": None, "season_told": set(), "hallow_told": None, "snow": [],
           "shared_at": 0.0, "social_at": 0.0, "anims": {}, "snd_later": [], "parts": {"main": [], "pen": []},
           "sprites": {"main": [], "pen": []}, "bar_w": {}, "carry": None, "shop_dirty": False, "quest_dirty": False}
-    wins = dict((k, {"g": None, "c": {}, "store": ({}, {}), "v": None}) for k in WINDOWS)
+    win = {"g": None, "c": {}, "store": ({}, {}), "v": None}
+    cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
     class View(object):
         __slots__ = ("cache", "pen", "xf", "made")
         def __init__(self): self.cache = {}; self.pen = set(); self.xf = None; self.made = None
@@ -526,7 +528,6 @@ def _module_mongotchi():
     def player(): return HOST.me()
     def find_mob(ser): return HOST.mobile(ser)
     def name(): return settings["name"]
-    msg = Kit.sayer(TITLE)
     def sound(idx):
         if settings["sounds"] and idx: API.PlaySound(idx)
     def sounds_due(t):
@@ -539,7 +540,7 @@ def _module_mongotchi():
             for due, idx in q:
                 if due <= t: sound(idx)
     def squeak(): sound(BY_ID[shop["eq"]["voice"]].get("snd", 0x1A6))
-    def say(text, secs=3.0): st["say"], st["say_until"] = text, time.time() + secs
+    def speak(text, secs=3.0): st["say"], st["say_until"] = text, time.time() + secs
     def clamp(v, lo=0.0, hi=100.0): return max(lo, min(hi, v))
     def step_to(x, y, tx, ty, step):
         dx, dy = tx - x, ty - y; dist = math.hypot(dx, dy)
@@ -611,7 +612,7 @@ def _module_mongotchi():
                    "remind": {}, "px": float(PX0 + PW // 2 - PB_W // 2), "py": float(YMIN + 10),
                    "hover_until": 0.0, "dizzy_until": 0.0})
         save_pet(); anim("arrive", 1.2); sprite(SPR_SPARKLE, PX0 + PW / 2.0, YMIN + 30, 1.2, 0, 64)
-        msg("a pup has adopted you: meet %s (rename it on the settings page)." % name(), Kit.HUE_GOOD)
+        say("a pup has adopted you: meet %s (rename it on the settings page)." % name(), Kit.HUE_GOOD)
     B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     B64_REV = dict((ch, i) for i, ch in enumerate(B64))
     CODE_RE = re.compile(r"(?<![A-Za-z0-9_\-])([A-Za-z0-9_\-]{64})(?![A-Za-z0-9_\-])")
@@ -708,7 +709,7 @@ def _module_mongotchi():
             pet["feral"], pet["away"], pet["asleep"] = True, False, False
             events.append(("feral", "%s decided it is better off without a master and flew away." % name())); return
         if pet["neglect"] >= WARN_HOURS * 3600 and not pet["warned"]:
-            pet["warned"] = True; events.append(("warn", "%s looks around for someone else to care for it!" % name()))
+            pet["warned"] = True; events.append(("warn", "%s looks around for someone else to care for it." % name()))
         if pet["stage"] == 0 and pet["age"] >= PUP_HOURS * 3600:
             pet["stage"] = 1; events.append(("grow", "%s has grown into a mongotchi." % name()))
         elif pet["stage"] == 1 and pet["age"] >= GREATER_HOURS * 3600 and pet["care_t"] > 0 \
@@ -718,11 +719,11 @@ def _module_mongotchi():
                  "feeder": Kit.HUE_INFO, "sleep": Kit.HUE_INFO, "wake": Kit.HUE_INFO}
     def handle_events(events, live=True):
         for kind, text in events:
-            if kind in EVENT_HUE and (live or kind not in ("sleep", "wake")): msg(text, EVENT_HUE[kind])
+            if kind in EVENT_HUE and (live or kind not in ("sleep", "wake")): say(text, EVENT_HUE[kind])
             if kind == "grow": earn("grow")
             if not live: continue
-            if kind == "grow": sound(SND_GROW); say("*grows!*", 4); anim("grow", 2.5); pet_sprite(SPR_STARS, 2.0, 72)
-            elif kind == "sick": sound(SND_HURT); say("*cough cough*"); anim("cough", 0.4)
+            if kind == "grow": sound(SND_GROW); speak("*grows!*", 4); anim("grow", 2.5); pet_sprite(SPR_STARS, 2.0, 72)
+            elif kind == "sick": sound(SND_HURT); speak("*cough cough*"); anim("cough", 0.4)
             elif kind == "feral": squeak(); anim("farewell", 2.5); st["redraw_at"] = time.time() + 2.6
             elif kind in ("supply", "feeder"):
                 sound(SND_FOOD)
@@ -736,7 +737,7 @@ def _module_mongotchi():
         if shop["last"]:
             gap = min(max(0.0, now - shop["last"]), OFFLINE_MAX_H * 3600)
             got = earn("passive", PASSIVE_PER_H * gap / 3600.0)
-            if got >= 1: msg("%d squeaks earned while you were away." % int(got), Kit.HUE_GOOD)
+            if got >= 1: say("%d squeaks earned while you were away." % int(got), Kit.HUE_GOOD)
         shop["last"] = now; gap = max(0.0, now - pet["last"]) if pet["last"] else 0.0
         if pet["away"]:
             left = pet["away_left"]
@@ -746,23 +747,23 @@ def _module_mongotchi():
         if not settings["offline"] or gap < 60 or pet["feral"]: return
         gap = min(gap, OFFLINE_MAX_H * 3600); events = []; left = gap
         while left > 0 and not pet["feral"]: step = min(60.0, left); sim(step, events); left -= step
-        msg("while away (%s): fullness %d, happiness %d, %s, pantry %d." % (
+        say("while away (%s): fullness %d, happiness %d, %s, pantry %d." % (
             hm(gap), pet["food"], pet["joy"], Kit.count(pet["messes"], "heap"), pet["pantry"]), Kit.HUE_INFO)
         handle_events([e for e in events if e[0] in ("sick", "grow", "warn", "feral")], live=False)
     def can_act(what):
-        if pet["feral"]: msg("%s has gone wild: adopt a new pup in the pen." % name(), Kit.HUE_INFO); return False
-        if pet["away"]: msg("%s is out %s." % (name(), away_doing()), Kit.HUE_INFO); return False
+        if pet["feral"]: say("%s has gone wild: adopt a new pup in the pen." % name(), Kit.HUE_INFO); return False
+        if pet["away"]: say("%s is out %s." % (name(), away_doing()), Kit.HUE_INFO); return False
         if pet["asleep"] and what not in ("lights", "clean"):
-            say("z Z z"); msg("%s is asleep (Lights wakes it)." % name(), Kit.HUE_INFO); return False
+            speak("z Z z"); say("%s is asleep (Lights wakes it)." % name(), Kit.HUE_INFO); return False
         return True
     def awake_home(): return not pet["asleep"] and not pet["away"]
     def busy(): t = time.time(); return t < st["eat_until"] or t < st["play_until"] or t < st["leave_until"]
-    def do_feed(t):
+    def do_feed(action, t):
         if not can_act("feed") or busy(): return
         if pet["pantry"] <= 0:
-            say("*eyes the empty pantry*")
-            msg("the pantry is empty: Forage, or wait for the farmer.", Kit.HUE_BAD); return
-        if pet["food"] >= 95: say("*turns its nose up*"); return
+            speak("*eyes the empty pantry*")
+            say("the pantry is empty: Forage, or wait for the farmer.", Kit.HUE_BAD); return
+        if pet["food"] >= 95: speak("*turns its nose up*"); return
         pet["pantry"] -= 1; start_eating(random.choice(FOODS), t)
     def start_eating(food, t):
         st.pop("eat_t0", None); st["eat_bites"] = 1.0; st["eat_food"] = food
@@ -770,7 +771,7 @@ def _module_mongotchi():
     def finish_eat():
         _, fname, val = st["eat_food"]; st["eat_food"] = None; bump("food", val); bump("joy", pers("feed_joy", 5))
         pet["fed"] += 1; earn("feed"); sound(SND_EAT)
-        say("*munches %s*" % fname.split(" ", 1)[1] if " " in fname else "*munch*")
+        speak("*munches %s*" % fname.split(" ", 1)[1] if " " in fname else "*munch*")
     def give_treat(it, t):
         if not can_act("treat") or busy() or shop["cnt"].get(it["id"], 0) <= 0: return False
         shop["cnt"][it["id"]] -= 1; st["shop_dirty"] = True
@@ -786,75 +787,75 @@ def _module_mongotchi():
         if it.get("cure"): pet_sprite(SPR_HEAL, 1.2)
         if it.get("sleep"): anim("yawn", 1.4)
         start_eating((it["gfx"], it["name"], 0), t)
-        say("*spooky squeak!* BOO!" if it.get("spooky") else "*gobbles the %s*" % it["name"].lower(), 3.5)
+        speak("*spooky squeak!* BOO!" if it.get("spooky") else "*gobbles the %s*" % it["name"].lower(), 3.5)
         if it.get("sleep"): st["sleep_after"] = t + EAT_SECS + 0.5
-        msg("you give %s a %s." % (name(), it["name"].lower()), Kit.HUE_GOOD)
+        say("you give %s a %s." % (name(), it["name"].lower()), Kit.HUE_GOOD)
         if it.get("season") and in_season(it): ach_award("festive")
         return True
-    def do_play(t):
+    def do_play(action, t):
         if not can_act("play") or busy(): return
-        if pet["sick"]: say("*cough*"); msg("%s is too sick to play." % name(), Kit.HUE_INFO); return
-        if pet["energy"] < 15: say("*yawns*"); msg("%s is too tired to play." % name(), Kit.HUE_INFO); return
+        if pet["sick"]: speak("*cough*"); say("%s is too sick to play." % name(), Kit.HUE_INFO); return
+        if pet["energy"] < 15: speak("*yawns*"); say("%s is too tired to play." % name(), Kit.HUE_INFO); return
         toy = eq("toy"); st["play_toy"] = toy; st["play_until"] = t + PLAY_SECS
         st["toy"] = [float(PX0 + 20), float(FLOOR_Y - 40), random.uniform(70, 110), -60.0]; st["music_at"] = 0.0
         if toy.get("motion") == "music":
-            st["toy"] = [float(PX0 + PW // 2 - 22), float(FLOOR_Y), 0.0, 0.0]; say("*dances*")
-        else: say("*pounces!*")
+            st["toy"] = [float(PX0 + PW // 2 - 22), float(FLOOR_Y), 0.0, 0.0]; speak("*dances*")
+        else: speak("*pounces!*")
     def finish_play():
         toy = st["play_toy"] or eq("toy")
         joy = random.randint(10, 45) if toy.get("motion") == "dice" else 25 + toy.get("joy", 0)
         bump("joy", joy * pers("play", 1.0)); pet["energy"] = clamp(pet["energy"] - 10 + toy.get("energy", 0))
         bump("food", -5); earn("play")
         if toy.get("squeaks"): earn("toy", toy["squeaks"])
-        squeak(); say(random.choice(LINES["happy"]))
-    def do_brush(t):
+        squeak(); speak(random.choice(LINES["happy"]))
+    def do_brush(action, t):
         if not can_act("brush") or busy(): return
-        if t < st["brush_cd"]: say("*already shiny*"); return
+        if t < st["brush_cd"]: speak("*already shiny*"); return
         k = 2 if has("u_groom") else 1; st["brush_cd"] = t + BRUSH_COOLDOWN / k; bump("joy", 10 * k)
         bump("clean", 10 * k); st["brush_until"] = t + 1.8; earn("brush", EARN["brush"] * k); sound(SND_CLEAN)
-        say("*purrs... er, squeaks*")
-    def do_clean(t):
+        speak("*purrs... er, squeaks*")
+    def do_clean(action, t):
         if not can_act("clean"): return
-        if pet["messes"] == 0 and pet["clean"] >= 95: say("*already spotless*"); return
+        if pet["messes"] == 0 and pet["clean"] >= 95: speak("*already spotless*"); return
         if pet["messes"] or pet["clean"] < 80: earn("clean")
         st["mess_was"] = pet["messes"]; anim("clean", 0.7)
         for i in range(pet["messes"]): sprite(SPR_SPARKLE, PX0 + 84 + i * 44 + 22, PY0 + PH - 20, 0.9, 0, 48)
-        if not pet["asleep"]: anim("shake", 0.6); say("*shakes its wings*")
+        if not pet["asleep"]: anim("shake", 0.6); speak("*shakes its wings*")
         pet["messes"], pet["clean"] = 0, 100.0; sound(SND_CLEAN)
-    def do_lights(t):
+    def do_lights(action, t):
         if not can_act("lights"): return
         if pet["asleep"]:
             pet["asleep"] = False; anim("stretch", 0.5)
-            if pet["energy"] < 50: bump("joy", -5); say("*grumpy squeak*")
-            else: say("*stretches*")
+            if pet["energy"] < 50: bump("joy", -5); speak("*grumpy squeak*")
+            else: speak("*stretches*")
         elif busy(): return
-        elif pet["energy"] >= 90: say("*isn't sleepy*")
+        elif pet["energy"] >= 90: speak("*isn't sleepy*")
         else: pet["asleep"] = True; anim("yawn", 1.4); st["say"] = ""
-    def do_cure(t):
+    def do_cure(action, t):
         if not can_act("cure"): return
-        if not pet["sick"]: say("*isn't sick*"); return
+        if not pet["sick"]: speak("*isn't sick*"); return
         pet["sick"], pet["sick_t"] = False, 0.0; bump("joy", -5); st["cure_until"] = t + 1.5; anim("flash", 1.0)
-        anim("shake", 0.8); pet_sprite(SPR_HEAL, 1.4); earn("cure"); sound(SND_CURE); say("*bleh!* ...*feels better*")
-    def do_forage(t):
+        anim("shake", 0.8); pet_sprite(SPR_HEAL, 1.4); earn("cure"); sound(SND_CURE); speak("*bleh!* ...*feels better*")
+    def do_forage(action, t):
         if not can_act("forage") or busy(): return
         if pet["sick"] or pet["energy"] < 20:
-            say("*too weak*" if pet["sick"] else "*too tired*")
-            msg("%s is too %s to forage." % (name(), "sick" if pet["sick"] else "tired"), Kit.HUE_INFO); return
-        if pet["pantry"] >= pantry_max(): msg("the pantry is full.", Kit.HUE_INFO); return
+            speak("*too weak*" if pet["sick"] else "*too tired*")
+            say("%s is too %s to forage." % (name(), "sick" if pet["sick"] else "tired"), Kit.HUE_INFO); return
+        if pet["pantry"] >= pantry_max(): say("the pantry is full.", Kit.HUE_INFO); return
         bump("energy", -max(VIRTUE_FX["sac_forage_min"], FORAGE_ENERGY - VIRTUE_FX["sac_energy"] * vlevel("sac")))
         bump("food", -5); leave(t, 0, random.uniform(FORAGE_SECS[0], FORAGE_SECS[1]), "*flaps off*")
     def leave(t, kind, secs, line):
         pet["away"], pet["away_kind"], pet["away_total"] = True, kind, secs
-        st["away_until"], st["leave_until"] = t + secs, t + 1.5; say(line, 1.5)
+        st["away_until"], st["leave_until"] = t + secs, t + 1.5; speak(line, 1.5)
     def finish_forage(quiet=False, frac=1.0):
         found = (1 + random.randint(0, 1) + (1 if pet["energy"] > 50 and random.random() < 0.5 else 0))
         found += pers("forage", 0) + vlevel("sac") // VIRTUE_FX["sac_per"]
         found = max(0, min(found, pantry_max() - pet["pantry"])); pet["pantry"] += found
         if found and not quiet: st["carry"] = {"who": "pet", "gfx": random.choice(FOODS)[0], "t0": time.time()}
         earn("forage", EARN["forage"] * found)
-        msg("%s foraged %d food." % (name(), found), Kit.HUE_GOOD if found else Kit.HUE_INFO)
+        say("%s foraged %d food." % (name(), found), Kit.HUE_GOOD if found else Kit.HUE_INFO)
         if quiet: return
-        sound(SND_FOOD); say("*brings back %d food!*" % found if found else "*found nothing*")
+        sound(SND_FOOD); speak("*brings back %d food!*" % found if found else "*found nothing*")
     def finish_away(quiet=False, frac=1.0):
         k = pet["away_kind"]; st["ach_due"] = True; pet["away"], pet["away_kind"] = False, 0
         st["px"], st["py"] = float(XMAX), float(YMIN + 10); st["tx"], st["ty"] = float(PX0 + PW // 2), float(YMIN + 20)
@@ -866,15 +867,15 @@ def _module_mongotchi():
         loc = LOCATIONS[n]
         if not can_act("hunt") or busy(): return
         why = meets(loc["req"])
-        if why: msg("%s can't go to %s yet: %s." % (name(), loc["name"], why), Kit.HUE_BAD); return
+        if why: say("%s can't go to %s yet: %s." % (name(), loc["name"], why), Kit.HUE_BAD); return
         if pet["sick"] or pet["energy"] < 25:
-            say("*too weak*" if pet["sick"] else "*too tired*")
-            msg("%s is too %s for a treasure hunt." % (name(), "sick" if pet["sick"] else "tired"), Kit.HUE_INFO)
+            speak("*too weak*" if pet["sick"] else "*too tired*")
+            say("%s is too %s for a treasure hunt." % (name(), "sick" if pet["sick"] else "tired"), Kit.HUE_INFO)
             return
         pet["away_loc"] = n
         bump("energy", -max(VIRTUE_FX["sac_hunt_min"], HUNT_ENERGY - VIRTUE_FX["sac_energy"] * vlevel("sac")))
         bump("food", -10); leave(t, 1, loc["mins"] * 60.0, "*flaps off on an adventure!*"); sound(SND_FOOD)
-        msg("%s flies to %s (about %d min)." % (name(), loc["name"], loc["mins"]), Kit.HUE_GOOD)
+        say("%s flies to %s (about %d min)." % (name(), loc["name"], loc["mins"]), Kit.HUE_GOOD)
         save_pet(); st["quest_redraw"] = True
     def roll_loot(loc, rolls):
         out = {"sq": 0, "food": 0, "trap": 0, "treat": [], "relic": []}
@@ -917,31 +918,31 @@ def _module_mongotchi():
         if parts:
             haul = ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
             end = ", but %s." % loc["bad"] if hurt else "."
-            msg("%s is back from %s with %s%s" % (name(), loc["name"], haul, end),
+            say("%s is back from %s with %s%s" % (name(), loc["name"], haul, end),
                 Kit.HUE_BAD if hurt else Kit.HUE_GOOD)
         else:
-            msg("%s is back from %s empty-handed%s" % (name(), loc["name"], ": %s." % loc["bad"] if hurt else "."),
+            say("%s is back from %s empty-handed%s" % (name(), loc["name"], ": %s." % loc["bad"] if hurt else "."),
                 Kit.HUE_BAD if hurt else Kit.HUE_INFO)
         if new_relic:
-            msg("new relic (Journeys > Relics): relic bonus now +%d%% squeaks." % int(round(relic_bonus() * 100)),
+            say("new relic (Journeys > Relics): relic bonus now +%d%% squeaks." % int(round(relic_bonus() * 100)),
                 Kit.HUE_GOOD)
-            if len(quest["relics"]) == len(RELICS): msg("%s has found every relic in Sosaria." % name(), Kit.HUE_GOOD)
+            if len(quest["relics"]) == len(RELICS): say("%s has found every relic in Sosaria." % name(), Kit.HUE_GOOD)
         save_pet(); st["quest_redraw"] = True
         if quiet: return
         gfx = RELIC_BY_ID[got["relic"][0]][2] if got["relic"] else random.choice(FOODS)[0] if parts else None
         if gfx is not None: st["carry"] = {"who": "pet", "gfx": gfx, "t0": time.time()}
-        if hurt: sound(SND_HURT); say("*ouch...*", 3.0); anim("cough", 0.4)
+        if hurt: sound(SND_HURT); speak("*ouch...*", 3.0); anim("cough", 0.4)
         else:
-            sound(SND_FOOD); say("*brings back treasure!*" if parts else "*found nothing*", 3.0)
+            sound(SND_FOOD); speak("*brings back treasure!*" if parts else "*found nothing*", 3.0)
             if new_relic: pet_sprite(SPR_STARS, 2.0, 72)
     def do_meditate(n, t):
         if n < 0 or n >= len(VIRTUES): return
         v = VIRTUES[n]
         if not can_act("meditate") or busy(): return
-        if pet["sick"]: say("*cough*"); msg("%s is too sick to meditate." % name(), Kit.HUE_INFO); return
-        if vlevel(v[0]) >= VIRTUE_MAX: msg("%s has mastered %s already." % (name(), v[1]), Kit.HUE_INFO); return
+        if pet["sick"]: speak("*cough*"); say("%s is too sick to meditate." % name(), Kit.HUE_INFO); return
+        if vlevel(v[0]) >= VIRTUE_MAX: say("%s has mastered %s already." % (name(), v[1]), Kit.HUE_INFO); return
         pet["away_virt"] = n; bump("food", -5); leave(t, 2, MEDITATE_MIN * 60.0, "*flaps off serenely*")
-        msg("%s flies to meditate at the Shrine of %s (%s, about %d min)." % (name(), v[1], v[2], int(MEDITATE_MIN)),
+        say("%s flies to meditate at the Shrine of %s (%s, about %d min)." % (name(), v[1], v[2], int(MEDITATE_MIN)),
             Kit.HUE_GOOD)
         save_pet(); st["quest_redraw"] = True
     def finish_meditate(quiet=False, frac=1.0):
@@ -952,36 +953,36 @@ def _module_mongotchi():
         st["quest_dirty"] = True; bump("joy", 10 * frac); bump("energy", 10 * frac); earn("meditate", 3)
         after = vlevel(k); done, need = vprogress(k)
         prog = "level %d, %d/%d" % (after, int(done), int(need)) if after < VIRTUE_MAX else "level %d, mastered" % after
-        msg("%s meditated on %s: +%d experience (%s)." % (name(), v[1], int(round(xp)), prog), Kit.HUE_GOOD)
+        say("%s meditated on %s: +%d experience (%s)." % (name(), v[1], int(round(xp)), prog), Kit.HUE_GOOD)
         if after > before:
             eff = veffect(k, after)
-            msg("%s's %s has risen to level %d: %s." % (name(), v[1], after, eff[:1].lower() + eff[1:]), Kit.HUE_GOOD)
+            say("%s's %s has risen to level %d: %s." % (name(), v[1], after, eff[:1].lower() + eff[1:]), Kit.HUE_GOOD)
             if vall_at(5) and not st.get("vall_told_5"):
                 st["vall_told_5"] = True
-                msg("all eight virtues at level 5: the Avatar title is for sale (Shop > Titles).", Kit.HUE_GOOD)
+                say("all eight virtues at level 5: the Avatar title is for sale (Shop > Titles).", Kit.HUE_GOOD)
             if vall_at(VIRTUE_MAX):
-                msg("%s embodies all eight virtues: an Avatar among mongotchis." % name(), Kit.HUE_GOOD)
+                say("%s embodies all eight virtues: an Avatar among mongotchis." % name(), Kit.HUE_GOOD)
         save_pet(); st["quest_redraw"] = True
         if quiet: return
         if after > before: sound(SND_MEDITATE); anim("grow", 2.0); pet_sprite(SPR_STARS, 2.0, 72)
         else: sound(SND_FOOD); pet_sprite(SPR_SPARKLE, 1.4, 64)
-        say("*feels enlightened*" if after > before else "*feels calm*", 3.0)
+        speak("*feels enlightened*" if after > before else "*feels calm*", 3.0)
     def call_home(t):
         if not pet["away"]: return
         frac = trip_frac(t); st["away_until"] = t
         if pet["away_kind"] == 0: return
-        msg("%s called home (%d%% of the trip done)." % (name(), int(frac * 100)), Kit.HUE_INFO)
+        say("%s called home (%d%% of the trip done)." % (name(), int(frac * 100)), Kit.HUE_INFO)
         finish_away(False, frac)
-    def do_pet(t):
+    def do_pet(action, t):
         if pet["feral"] or pet["away"]: return
-        if pet["asleep"]: say("*snore*"); return
-        if t < st["pet_cd"]: say(random.choice(LINES["happy"])); anim("hop", 0.6); return
+        if pet["asleep"]: speak("*snore*"); return
+        if t < st["pet_cd"]: speak(random.choice(LINES["happy"])); anim("hop", 0.6); return
         st["pet_cd"] = t + PET_COOLDOWN; anim("hop", 0.6); pop_text("<3", HUE_HEART, -10, -22.0)
         pop_text("<3", HUE_HEART2, 8, -18.0); bump("joy", pers("pet", 4) + VIRTUE_FX["com_pet"] * vlevel("com"))
         earn("pet"); squeak()
-        if eq("pers")["id"] == "p_grumpy" and random.random() < 0.3: say("*nibbles your finger*")
-        elif random.random() < 0.3 and top_virtue(5) is not None: say(random.choice(VIRTUE_LINES[top_virtue(5)]))
-        else: say(random.choice(LINES["happy"]))
+        if eq("pers")["id"] == "p_grumpy" and random.random() < 0.3: speak("*nibbles your finger*")
+        elif random.random() < 0.3 and top_virtue(5) is not None: speak(random.choice(VIRTUE_LINES[top_virtue(5)]))
+        else: speak(random.choice(LINES["happy"]))
     def grem_gap(): return GREMLIN_GAP / HALLOWEEN_GREMLINS if st["hallow_night"] else GREMLIN_GAP
     def gremlin_tick(t, dt, full):
         gr = st["grem"]
@@ -995,7 +996,7 @@ def _module_mongotchi():
                     lt = time.localtime(t); day = (lt[0], lt[1], lt[2])
                     if st["hallow_told"] != day:
                         st["hallow_told"] = day
-                        msg("it's Halloween night: the gremlins are out in force!", Kit.HUE_BAD)
+                        say("it's Halloween night: the gremlins are out in force.", Kit.HUE_BAD)
                 awake = awake_home() and not pet["sick"] and pet["energy"] > 20
                 guard = awake and (pet["guard"] or random.random() < pers("guard", GUARD_CHANCE)
                                    + VIRTUE_FX["val_guard"] * vlevel("val"))
@@ -1003,7 +1004,7 @@ def _module_mongotchi():
                 st["grem"] = {"phase": "walk", "x": float(GX_START), "t0": t,
                               "walk": GREMLIN_WALK * (1.0 if full else 1.5), "guard_at": t + 1.5 if guard else 0.0}
                 if awake_home(): pop_text("!", Kit.HUE_BAD, 0, -30.0, 1.2)
-                if not full: msg("a gremlin is sneaking into the pen!", Kit.HUE_BAD)
+                if not full: say("a gremlin is sneaking into the pen.", Kit.HUE_BAD)
             return
         if gr["phase"] == "walk":
             f = (t - gr["t0"]) / gr["walk"]; gr["x"] = GX_START + (GX_PANTRY - GX_START) * min(1.0, f)
@@ -1012,7 +1013,7 @@ def _module_mongotchi():
                 elif t >= gr["guard_at"] + 1.2:
                     gr["phase"] = "flee"; anim("gswat", 0.5); bump("joy", 5)
                     earn("guard", EARN["guard"] * (1.0 + VIRTUE_FX["jus_squeaks"] * vlevel("jus"))); sound(SND_OOF)
-                    say("*chases it off!*"); msg("%s chased the gremlin away." % name(), Kit.HUE_GOOD); return
+                    speak("*chases it off!*"); say("%s chased the gremlin away." % name(), Kit.HUE_GOOD); return
             if f >= 1.0:
                 gr["phase"] = "flee"
                 if shop["cnt"].get("u_trap", 0) > 0:
@@ -1020,23 +1021,23 @@ def _module_mongotchi():
                     anim("gtrap", 0.9); sprite(SPR_STARS, gr["x"] + GR_W / 2.0, GR_Y + 30, 0.9, 0, 56)
                     particle("SNAP!", Kit.HUE_BAD, gr["x"] + GR_W / 2.0, GR_Y + 10, 0.0, -20.0, 1.2); got = earn("trap")
                     sound(SND_TRAP)
-                    msg("your Gremlin Trap caught the gremlin (+%d squeaks)." % int(round(got)), Kit.HUE_GOOD)
+                    say("your Gremlin Trap caught the gremlin (+%d squeaks)." % int(round(got)), Kit.HUE_GOOD)
                     ach_award("trap"); return
                 before = pet["pantry"]; pet["pantry"] //= 2; lost = before - pet["pantry"]; pet["stolen"] += lost
                 sound(SND_GREMLIN)
-                if awake_home(): say("*SQUEAK!*")
-                msg("a gremlin stole %d of %d food!" % (lost, before), Kit.HUE_BAD)
+                if awake_home(): speak("*SQUEAK!*")
+                say("a gremlin stole %d of %d food." % (lost, before), Kit.HUE_BAD)
                 if lost:
                     st["carry"] = {"who": "grem", "gfx": random.choice(FOODS)[0]}
                     particle("-%d" % lost, Kit.HUE_BAD, PX0 + 30, PY0 + PH - 40, 0.0, -18.0, 1.6)
                 if lost and awake_home() and random.random() < pers("stealback", 0.0):
                     back = (lost + 1) // 2; pet["pantry"] = min(pantry_max(), pet["pantry"] + back)
-                    say("*steals %d back!*" % back); msg("but %s stole %d back." % (name(), back), Kit.HUE_GOOD)
+                    speak("*steals %d back!*" % back); say("but %s stole %d back." % (name(), back), Kit.HUE_GOOD)
                 elif lost and awake_home() and vlevel("jus"):
                     back = int(lost * VIRTUE_FX["jus_back"] * vlevel("jus") + random.random())
                     if back:
-                        pet["pantry"] = min(pantry_max(), pet["pantry"] + back); say("*demands %d back!*" % back)
-                        msg("but %s won %d back (Justice)." % (name(), back), Kit.HUE_GOOD)
+                        pet["pantry"] = min(pantry_max(), pet["pantry"] + back); speak("*demands %d back!*" % back)
+                        say("but %s won %d back (Justice)." % (name(), back), Kit.HUE_GOOD)
         elif gr["phase"] == "trapped":
             if t - gr["trap_t"] >= 0.9: st["grem"] = None; st["next_grem_ok"] = t + grem_gap()
         else:
@@ -1044,15 +1045,15 @@ def _module_mongotchi():
             if gr["x"] >= GX_START + 4 or not full:
                 st["grem"] = None; st["next_grem_ok"] = t + grem_gap(); cr = st.get("carry")
                 if cr is not None and cr["who"] == "grem": st["carry"] = None
-    def do_swat(t):
+    def do_swat(action, t):
         gr = st["grem"]
         if gr is None or gr["phase"] != "walk": return
         gr["phase"] = "flee"; anim("gswat", 0.5)
         particle("*SWAT*", Kit.HUE_GOOD, gr["x"] + GR_W / 2.0, GR_Y + 4, 0.0, -20.0, 1.0); pet["swats"] += 1
         ach["swats"] += 1; bump("joy", 5); earn("swat", EARN["swat"] * (1.0 + VIRTUE_FX["jus_squeaks"] * vlevel("jus")))
         sound(SND_SWAT); st["snd_later"].append((time.time() + OOF_DELAY, SND_OOF))
-        if awake_home(): say("*cheers*")
-        msg("gremlin swatted: the food is safe.", Kit.HUE_GOOD)
+        if awake_home(): speak("*cheers*")
+        say("gremlin swatted: the food is safe.", Kit.HUE_GOOD)
     ALERT_TEXT = {"sick": "%s is sick.", "hungry": "%s is hungry.", "dirty": "%s's pen needs cleaning.",
                   "bored": "%s is unhappy: play with it."}
     MINI_ALERT = {"grem": "a gremlin in the pen", "sick": "sick", "hungry": "hungry",
@@ -1070,7 +1071,7 @@ def _module_mongotchi():
         for k in alert_keys():
             if k == "grem": continue
             if t - st["remind"].get(k, -1e9) >= REMIND_EVERY:
-                st["remind"][k] = t; msg(ALERT_TEXT[k] % name(), Kit.HUE_BAD)
+                st["remind"][k] = t; say(ALERT_TEXT[k] % name(), Kit.HUE_BAD)
     def top_virtue(least):
         best, best_lv = None, least - 1
         for k in VIRTUE_KEYS:
@@ -1088,7 +1089,7 @@ def _module_mongotchi():
         else:
             lines = LINES["idle"] + pers("lines", []) * 2; tv = top_virtue(5)
             if tv is not None: lines = lines + VIRTUE_LINES[tv] * 2
-        say(random.choice(lines))
+        speak(random.choice(lines))
         if random.random() < 0.3:
             if pet["sick"]: sound(SND_HURT)
             else: squeak()
@@ -1111,7 +1112,7 @@ def _module_mongotchi():
             if key in on and key not in st["season_told"]:
                 st["season_told"].add(key)
                 until = ("the end of February" if b == (2, 29) else "%s %d" % (MONTHS[b[0] - 1], b[1]))
-                msg("%s: %s in the Shop (Seasonal tab) until %s." % (
+                say("%s: %s in the Shop (Seasonal tab) until %s." % (
                     "it's " + nm if key != "winter" else "winter is here",
                     SEASON_SHOP.get(key, "its treats and clothes are"), until), Kit.HUE_GOOD)
         if st["shop_cat"] >= len(shop_cats()): st["shop_cat"], st["shop_page"] = 0, 0
@@ -1133,11 +1134,11 @@ def _module_mongotchi():
         for a in lst:
             ach["got"].add(a[0]); total += a[3]
             if not before:
-                msg("achievement earned: %s (%s), +%d squeaks." % (
+                say("achievement earned: %s (%s), +%d squeaks." % (
                     a[1], a[2][0].lower() + a[2][1:], a[3]), Kit.HUE_GOOD)
         shop["sq"] += total; ach["earned"] += total
         if before:
-            msg("%s already earned: %s, +%d squeaks." % (Kit.count(len(lst), "achievement"),
+            say("%s already earned: %s, +%d squeaks." % (Kit.count(len(lst), "achievement"),
                                               ", ".join(a[1] for a in lst), total), Kit.HUE_GOOD)
         else: sound(SND_ACHIEVE); pop_text("+%d" % total, Kit.HUE_TITLE, 12, -26.0, 1.6); pet_sprite(SPR_STARS, 1.6, 64)
         st["texts_at"] = 0.0; save_shop()
@@ -1158,22 +1159,22 @@ def _module_mongotchi():
     def buy(it):
         if not stackable(it) and has(it["id"]): return
         why = requirement(it); what = it["name"] if it["cat"] != "title" else "the title \"%s\"" % it["name"]
-        if why: msg("you can't buy %s yet: %s." % (what, why), Kit.HUE_BAD); return
+        if why: say("you can't buy %s yet: %s." % (what, why), Kit.HUE_BAD); return
         price = price_of(it)
         if shop["sq"] < price:
-            msg("not enough squeaks for %s (%d more needed)." % (what, price - int(shop["sq"])), Kit.HUE_BAD); return
+            say("not enough squeaks for %s (%d more needed)." % (what, price - int(shop["sq"])), Kit.HUE_BAD); return
         shop["sq"] -= price; slot = CAT_SLOT.get(it["cat"])
         if stackable(it): shop["cnt"][it["id"]] = shop["cnt"].get(it["id"], 0) + 1
         else:
             shop["own"].add(it["id"])
             if it.get("toggle"):
                 set_comp(True)
-                msg("%s can now follow you in the world. Say \"%s stay\", \"%s follow\", "
+                say("%s can now follow you in the world. Say \"%s stay\", \"%s follow\", "
                     "\"%s dance\", \"%s fetch\" or \"%s go home\"." % ((name(),) * 6), Kit.HUE_GOOD)
             if slot: shop["eq"][slot] = it["id"]
         sound(SND_BUY)
         if slot or it.get("toggle"): poof()
-        msg("bought %s for %d squeaks." % (it["name"], price), Kit.HUE_GOOD); save_shop()
+        say("bought %s for %d squeaks." % (it["name"], price), Kit.HUE_GOOD); save_shop()
     def wear(it, on):
         slot = CAT_SLOT.get(it["cat"])
         if not slot: return
@@ -1235,13 +1236,13 @@ def _module_mongotchi():
         elif act == "remove": wear(it, False)
         elif act in ("summon", "dismiss"):
             set_comp(act == "summon")
-            msg("%s %s." % (name(), "flutters out to join you" if settings["comp"]
+            say("%s %s." % (name(), "flutters out to join you" if settings["comp"]
                             else "flies home to its pen"), Kit.HUE_INFO)
         st["shop_redraw"] = True
     def share():
         code = my_code(); ch = CHANNELS[settings["share_ch"]]
         getattr(API, ch[1])("%s %s" % (CODE_TAG, code)); st["shared_at"] = time.time()
-        msg("%s's code posted in %s chat." % (name(), ch[0]), Kit.HUE_INFO)
+        say("%s's code posted in %s chat." % (name(), ch[0]), Kit.HUE_INFO)
     def add_guest(g):
         if g is None: return False
         me = my_owner()
@@ -1254,12 +1255,12 @@ def _module_mongotchi():
             key = (g["uid"], g["owner"])
             if key not in st["full_told"]:
                 st["full_told"][key] = True
-                msg("%s (%s's mongotchi) wanted to play, but the playpen is full (%d): send one home with its X."
+                say("%s (%s's mongotchi) wanted to play, but the playpen is full (%d): send one home with its X."
                     % (g["name"], g["owner"], PEN_MAX), Kit.HUE_INFO)
             return False
         st["guests"].append(g); save_guests(); st["pen_redraw"] = st["ach_due"] = True
-        msg("%s, %s's mongotchi, joined your playpen." % (full_name(g["name"], g["title"]), g["owner"]), Kit.HUE_GOOD)
-        if not st["pen_open"]: msg("open the Playpen to watch them play.", Kit.HUE_INFO)
+        say("%s, %s's mongotchi, joined your playpen." % (full_name(g["name"], g["title"]), g["owner"]), Kit.HUE_GOOD)
+        if not st["pen_open"]: say("open the Playpen to watch them play.", Kit.HUE_INFO)
         return True
     def listen():
         if not st["jcodes_due"]: return
@@ -1425,7 +1426,7 @@ def _module_mongotchi():
         if cmd == "home": set_comp(False); comp_say("*waves goodbye and flies home*", True); return
         if not c["on"]:
             if cmd == "follow" and has("u_companion") and not pet["feral"]:
-                set_comp(True); msg("%s flutters out to join you." % name(), Kit.HUE_GOOD)
+                set_comp(True); say("%s flutters out to join you." % name(), Kit.HUE_GOOD)
             return
         c["nap"] = False
         if cmd == "follow": c["mode"], c["stay"] = "follow", None; comp_say("*flaps after you*", True)
@@ -1584,7 +1585,6 @@ def _module_mongotchi():
             it = BY_ID.get(lk[k] or "")
             if it: ops.append(fx_fixed(it["gfx"], cx, cy, z + dz[lk["stage"]], it["hue"]))
         st["hop"].extend(ops)
-    queue = Kit.queuer(st)
     def want_redraw(): st["redraw"] = True
     def on_disposed(which, g):
         def handler(*args):
@@ -1642,7 +1642,7 @@ def _module_mongotchi():
             Kit.art_button(g, store, key, art, x, M + 4, None if bare else cap,
                            Kit.caption_tip(cap, tip) if bare else tip, on_click=queue((which, key)))
             x -= 6
-        if which == "main" and Kit.zone_up(KEY):
+        if Kit.zone_up(dock_key(which)):
             strip = Kit.catcher(g, M, M, max(20, x - M - 6), 30, lambda *a: None, None, movable=True)
             if shown != title.upper(): Kit.with_tip(strip, title)
             return
@@ -1655,20 +1655,50 @@ def _module_mongotchi():
     def mini_bar(g, store, which, title, close_tip=CLOSE_SUB, w=None):
         return Kit.mini_bar(g, store, w or MINI_W, MINI_H, title, KEY + which, queue((which, "toggle_min")),
                             close_tip=close_tip)
+    def dock_key(which): return KEY if which == "main" else KEY + "." + which
+    def sub_min(which):
+        if which == "shop": return SW, M + 30 + GAP + 30 + GAP + shop_layout(shop_cats())[1] + GAP + 8 + 3 * 38 + 30 + M
+        return {"pen": (PPW, PPH), "quest": (JW, JH), "ach": (ACH_W, ACH_H)}[which]
+    def sub_size(which, nw, nh):
+        z = subfit.get(which); mw, mh = sub_min(which)
+        if z is None or not Kit.zone_up(dock_key(which)) or st[which + "_min"] or z[0] < mw or z[1] < mh: return nw, nh
+        return z
+    def sub_hooks(which):
+        holder = wins[which]
+        def state():
+            if holder["g"] is None or st["shutting"]: return None
+            return "minimized" if st[which + "_min"] else "open"
+        def show():
+            if which == "pen" and not st["pen_open"]: st["shared_at"] = time.time()
+            st[which + "_min"] = False; st[which + "_open"] = st[which + "_redraw"] = True
+        def minimize(): st[which + "_min"] = st[which + "_redraw"] = True
+        def redraw(): st[which + "_redraw"] = True
+        def fit_to(w, h, mode):
+            new = (int(w), int(h)) if (w is not None and h is not None) else None
+            if new != subfit.get(which) or (mode == "again" and new is not None): subfit[which] = new; redraw()
+        return {"title": TITLE + " " + SUBS[which], "icon": TRAY_ICON, "state": state, "show": show,
+                "minimize": minimize, "gump": lambda: holder["g"], "redraw": redraw, "fit": fit_to,
+                "min": lambda: sub_min(which), "exact": True}
     def open_window(which, build, w, h, max_h=None, hidden=False):
-        win = wins[which]; x, y = Kit.load_pos(POS_KEYS[which], POS_DEFAULTS[which], (w, h))
-        if Kit.is_open(win["g"]): x, y = win["g"].GetX(), win["g"].GetY()
-        old, win["g"] = win["g"], None; store, c, v = ({}, {}), {}, View(); g = G.CreateGump(True, True)
+        holder = wins[which]; key = dock_key(which); x, y = Kit.load_pos(POS_KEYS[which], POS_DEFAULTS[which], (w, h))
+        if Kit.is_open(holder["g"]): x, y = holder["g"].GetX(), holder["g"].GetY()
+        at = LAYOUT.placed.get(key) if HOST.layout_holds(key) else None
+        if at is not None: x, y = int(at[0]), int(at[1])
+        old, holder["g"] = holder["g"], None; store, c, v = ({}, {}), {}, View(); g = G.CreateGump(True, True)
         build(g, store, c, v)
-        Kit.show_window(g, x, y, w, h, KEY if which == "main" else None, hidden, on_disposed(which, g),
-                        lambda: save_pos(which), win, {"g": g, "c": c, "store": store, "v": v}, max_h)
+        xy = Kit.show_window(g, x, y, w, h, key, hidden, on_disposed(which, g), lambda: save_pos(which), holder,
+                             {"g": g, "c": c, "store": store, "v": v}, max_h)
+        if at is not None and xy is not None and tuple(xy) != (x, y):
+            g.SetPos(x, y); Kit.note_rect(g, x, y); Kit.moved_by_code(g)
+        if at is not None: LAYOUT.fit_now(key, g)
         Kit.dispose(old)
     def open_sub(which, title, build, w, h):
         if not st[which + "_min"]: return open_window(which, build, w, h)
         def build_mini(g, store, c, v): c["mini"] = mini_bar(g, store, which, title)
         open_window(which, build_mini, MINI_W, MINI_H)
     def close_window(which):
-        win = wins[which]; save_pos(which); g, win["g"] = win["g"], None; Kit.dispose(g); st[which + "_open"] = False
+        holder = wins[which]; save_pos(which); g, holder["g"] = holder["g"], None; Kit.dispose(g)
+        st[which + "_open"] = False
     ART_DIMS = {0x021B: (7, 7), 0x0970: (17, 11), 0x097B: (12, 8), 0x097E: (16, 17), 0x09C0: (14, 15), 0x09C8: (12, 14),
         0x09C9: (18, 14), 0x09D0: (7, 9), 0x09D1: (9, 10), 0x09E9: (23, 25), 0x09EA: (9, 9), 0x09EC: (13, 17),
         0x09F0: (13, 17), 0x09F2: (18, 16), 0x0A15: (13, 26), 0x0A1A: (13, 26), 0x0B1D: (21, 39), 0x0C5C: (17, 15),
@@ -1909,7 +1939,7 @@ def _module_mongotchi():
         new = (int(w), int(h)) if (w is not None and h is not None) else None
         if new != st.get("fit") or (mode == "again" and new is not None): st["fit"] = new; st["redraw"] = True
     def zone_drawn_at(): return st.get("zone_k") or (1.0, None)
-    def build_main():
+    def build_window():
         def build(g, store, c, v):
             if st["minimized"]: c["mini"] = mini_bar(g, store, "main", TITLE, Kit.CLOSE_TIP % TITLE); return
             Kit.add_window_frame(g, W, H)
@@ -1940,13 +1970,16 @@ def _module_mongotchi():
         else:
             w, h = (MINI_W, MINI_H) if st["minimized"] else (W, H)
             open_window("main", build, w, h, None, st["minimized"] and st["docked"])
-        refresh_main(time.time(), True); run_hop()
+        refresh(time.time(), True); run_hop()
+    wnd = None
+    wins = dict((k, win if k == "main" else {"g": None, "c": {}, "store": ({}, {}), "v": None}) for k in WINDOWS)
+    subfit = {}
     def pen_title():
         nm = full_name(name().upper(), shop["eq"].get("title", "")).upper()
         stage = ["pup", "mongotchi", "greater"][pet["stage"]]
         if vall_at(VIRTUE_MAX): stage = "avatar"
         return "%s  (%s)" % (nm, "gone wild" if pet["feral"] else stage)
-    def refresh_main(t, texts):
+    def refresh(t, texts):
         c, v = wins["main"]["c"], wins["main"]["v"]
         if v is None: return
         if c.get("mini") is not None:
@@ -2228,19 +2261,21 @@ def _module_mongotchi():
             if sy < PY0 + 24: sy = cy + max(0.0, oy) + PB_H / 2.0 + 6
             v.move(c["say"], sx, clamp(sy, PY0 + 24, PY0 + PH - 18))
         ambient(t, hidden)
-    def shop_layout(cats):
+    def shop_layout(cats, sw=SW):
         x0, x, y = M + 10, M + 10, 0; out = []
         for n, (_, lbl, _s) in enumerate(cats):
             tw = Kit.text_w(lbl)
-            if x + tw > SW - M - 10 and x > x0: x, y = x0, y + 20
+            if x + tw > sw - M - 10 and x > x0: x, y = x0, y + 20
             out.append((n, x, y)); x += tw + 14
         return out, y + 20 + 14
     def build_shop():
-        tabs = shop_cats(); st["shop_cat"] = min(st["shop_cat"], len(tabs) - 1); cats, cat_h = shop_layout(tabs)
-        BY0 = M + 30 + GAP; CY0 = BY0 + 30 + GAP; LY0 = CY0 + cat_h + GAP; LH = 8 + SHOP_ROWS * 38 + 30
-        SHH = LY0 + LH + M
+        tabs = shop_cats(); st["shop_cat"] = min(st["shop_cat"], len(tabs) - 1); BY0 = M + 30 + GAP
+        CY0 = BY0 + 30 + GAP
+        sw, SHH = sub_size("shop", SW, CY0 + shop_layout(tabs)[1] + GAP + 8 + SHOP_ROWS * 38 + 30 + M)
+        cats, cat_h = shop_layout(tabs, sw); LY0 = CY0 + cat_h + GAP; LH = SHH - LY0 - M
+        rows = st["shop_n"] = max(1, (LH - 38) // 38)
         def build(g, store, c, v):
-            IWS = SW - 2 * M; Kit.add_window_frame(g, SW, SHH); title_bar(g, store, "shop", SW, TITLE + " Shop")
+            IWS = sw - 2 * M; Kit.add_window_frame(g, sw, SHH); title_bar(g, store, "shop", sw, TITLE + " Shop")
             Kit.add_section(g, M, BY0, IWS, 30); c["sq"] = label(g, v, "", M + 10, BY0 + 7, Kit.HUE_TITLE)
             hint = "+%d an hour, even when away" % int(PASSIVE_PER_H)
             Kit.add_label(g, fit(hint, IWS - 130), M + IWS - 10 - min(Kit.text_w(hint), IWS - 130),
@@ -2252,9 +2287,9 @@ def _module_mongotchi():
                 Kit.catcher(g, x - 3, CY0 + 5 + y, Kit.text_w(lbl) + 6, 18,
                             queue(("shop", "cat", n)), "Show the %s tab" % lbl.lower())
             Kit.add_section(g, M, LY0, IWS, LH); items = shop_items()
-            pages = max(1, (len(items) + SHOP_ROWS - 1) // SHOP_ROWS); st["shop_page"] = min(st["shop_page"], pages - 1)
-            first = st["shop_page"] * SHOP_ROWS
-            for i, it in enumerate(items[first:first + SHOP_ROWS]):
+            pages = max(1, (len(items) + rows - 1) // rows); st["shop_page"] = min(st["shop_page"], pages - 1)
+            first = st["shop_page"] * rows
+            for i, it in enumerate(items[first:first + rows]):
                 ry = LY0 + 8 + i * 38
                 if it["cat"] == "ncol": Kit.add_label(g, "Abc", M + 14, ry + 9, it["hue"])
                 elif it["gfx"]: item_pic(g, v, it["gfx"], M + 6, ry, 44, 34, it["hue"])
@@ -2287,19 +2322,19 @@ def _module_mongotchi():
                            on_click=queue(("shop", "next")))
             ptxt = "%s: page %d of %d" % (tabs[st["shop_cat"]][1], st["shop_page"] + 1, pages)
             Kit.add_label(g, ptxt, M + (IWS - Kit.text_w(ptxt)) // 2, py + 3, Kit.HUE_INFO)
-        open_sub("shop", "Shop", build, SW, SHH); refresh_shop(0.0, True); run_hop()
+        open_sub("shop", "Shop", build, sw, SHH); refresh_shop(0.0, True); run_hop()
     def refresh_shop(t, texts):
         c, v = wins["shop"]["c"], wins["shop"]["v"]
         if v is None or not texts: return
         if c.get("mini") is not None: v.text(c["mini"], "Shop: %d squeaks" % int(shop["sq"]))
         elif c.get("sq") is not None: v.text(c["sq"], "Squeaks %d" % int(shop["sq"]))
     def build_pen():
-        members = pen_members()
+        members = pen_members(); pw, ph = sub_size("pen", PPW, PPH); dh = ph - PPH
         def build(g, store, c, v):
-            IWP = PPW - 2 * M; Kit.add_window_frame(g, PPW, PPH)
-            title_bar(g, store, "pen", PPW, TITLE + " Playpen",
+            IWP = pw - 2 * M; Kit.add_window_frame(g, pw, ph)
+            title_bar(g, store, "pen", pw, TITLE + " Playpen",
                       [("share", Kit.ART_PLAY, "Share", "Post %s's code in chat for friends' playpens" % name())])
-            Kit.add_section(g, QX0, QY0, QW, QH); c["head"] = label(g, v, "", QX0 + 8, QY0 + 6, Kit.HUE_TITLE)
+            Kit.add_section(g, QX0, QY0, IWP, QH + dh); c["head"] = label(g, v, "", QX0 + 8, QY0 + 6, Kit.HUE_TITLE)
             c["toy"] = item_pic(g, v, 0x0E1D, QX0 + 20, QY0 + QH - 40, 44, 34, shown=False); c["dolls"] = []
             for n in range(PEN_MAX):
                 x = QXMIN + n * (QXMAX - QXMIN) // max(1, PEN_MAX - 1); d = make_doll(g, v, x, QYMIN + 20)
@@ -2311,9 +2346,9 @@ def _module_mongotchi():
                 for i, line in enumerate(Kit.wrap(tip, QW - 60)[:2]):
                     Kit.add_label(g, line, QX0 + (QW - Kit.text_w(line)) // 2,
                                   QY0 + QH // 2 - 40 + i * 18, Kit.HUE_INFO)
-            Kit.add_section(g, M, QGY, IWP, QGH); colw = IWP // 2
+            Kit.add_section(g, M, QGY + dh, IWP, QGH); colw = IWP // 2
             for n in range(PEN_MAX):
-                x = M + 10 + (n % 2) * colw; y = QGY + 8 + (n // 2) * 25
+                x = M + 10 + (n % 2) * colw; y = QGY + dh + 8 + (n // 2) * 25
                 if n >= len(members): Kit.add_label(g, "Free slot", x + 34, y + 3, Kit.HUE_INFO); continue
                 mb = members[n]
                 if not mb["mine"]:
@@ -2321,13 +2356,13 @@ def _module_mongotchi():
                                    "Send %s home" % mb["name"], on_click=queue(("pen", "rm", n)))
                 txt = "%s (yours)" % mb["name"] if mb["mine"] else "%s (%s)" % (mb["name"], mb["owner"])
                 Kit.add_label(g, fit(txt, colw - 50), x + 34, y + 3, Kit.HUE_GOOD if mb["mine"] else Kit.HUE_TEXT)
-            Kit.add_section(g, M, QAY, IWP, QAH); Kit.add_label(g, "Code:", M + 10, QAY + 12); cap = "Add"
+            ya = QAY + dh; Kit.add_section(g, M, ya, IWP, QAH); Kit.add_label(g, "Code:", M + 10, ya + 12); cap = "Add"
             bx = M + IWP - 10 - 35 - Kit.text_w(cap); lx = M + 10 + Kit.text_w("Code:") + 10
-            c["code"] = Kit.with_tip(Kit.add_textbox(g, "", lx, QAY + 9, bx - lx - 12, numbers=False),
+            c["code"] = Kit.with_tip(Kit.add_textbox(g, "", lx, ya + 9, bx - lx - 12, numbers=False),
                                      "A friend's Mongotchi code (64 characters)")
-            Kit.art_button(g, store, "add", Kit.ART_OK, bx, QAY + 8, cap,
+            Kit.art_button(g, store, "add", Kit.ART_OK, bx, ya + 8, cap,
                            "Add that mongotchi to your playpen", on_click=queue(("pen", "add")))
-        open_sub("pen", "Playpen", build, PPW, PPH); pals = {}
+        open_sub("pen", "Playpen", build, pw, ph); pals = {}
         for mb in members:
             key = (mb["uid"], mb["owner"]); old = st["pals"].get(key)
             if old is None:
@@ -2412,8 +2447,10 @@ def _module_mongotchi():
     JBY0 = M + 30 + GAP; JBH = 48; JTY0 = JBY0 + JBH + GAP; JLY0 = JTY0 + 30 + GAP; JLH = 8 + JROWS * 38 + 8
     JH = JLY0 + JLH + M; JBAR_W = 100
     def build_quest():
+        jw, jh = sub_size("quest", JW, JH)
         def build(g, store, c, v):
-            IWJ = JW - 2 * M; Kit.add_window_frame(g, JW, JH); title_bar(g, store, "quest", JW, TITLE + " Journeys")
+            IWJ = c["iw"] = jw - 2 * M; Kit.add_window_frame(g, jw, jh)
+            title_bar(g, store, "quest", jw, TITLE + " Journeys")
             Kit.add_section(g, M, JBY0, IWJ, JBH); c["status"] = label(g, v, "", M + 10, JBY0 + 7, Kit.HUE_TITLE)
             c["status2"] = label(g, v, "", M + 10, JBY0 + 26, Kit.HUE_INFO); cap = "Call home"
             cx = M + IWJ - 10 - 35 - Kit.text_w(cap); c["home_x"] = cx
@@ -2430,11 +2467,11 @@ def _module_mongotchi():
             counts = "%s, %s" % (Kit.count(quest["hunts"], "hunt"), Kit.count(quest["med"], "meditation"))
             Kit.add_label(g, fit(counts, IWJ - (x - M) - 10), M + IWJ - 10 - min(
                 Kit.text_w(counts), IWJ - (x - M) - 10), JTY0 + 7, Kit.HUE_INFO)
-            Kit.add_section(g, M, JLY0, IWJ, JLH); c["rows"] = []; tab = quest["tab"]
+            Kit.add_section(g, M, JLY0, IWJ, jh - JLY0 - M); c["rows"] = []; tab = quest["tab"]
             if tab == 0: build_hunt_rows(g, store, v, IWJ)
             elif tab == 1: build_virtue_rows(g, store, IWJ)
             else: build_relic_rows(g, v, IWJ)
-        open_sub("quest", "Journeys", build, JW, JH); refresh_quest(time.time(), True); run_hop()
+        open_sub("quest", "Journeys", build, jw, jh); refresh_quest(time.time(), True); run_hop()
     def build_hunt_rows(g, store, v, IWJ):
         away = pet["away"]
         for i, loc in enumerate(LOCATIONS[:JROWS]):
@@ -2507,7 +2544,7 @@ def _module_mongotchi():
             v.text(c["mini"], fit("Journeys: %s" % ("gone wild" if pet["feral"] else
                                                     away_short() if pet["away"] else "at home"), MINI_W - 90))
             return
-        room = c.get("home_x", M + 300) - (M + 10) - 8 if pet["away"] else JW - 2 * M - 20
+        room = c.get("home_x", M + 300) - (M + 10) - 8 if pet["away"] else c["iw"] - 20
         v.text(c["status"], fit(s1, room)); v.text(c["status2"], fit(s2, room))
         home = bool(pet["away"]) and pet["away_kind"] != 0; v.show(c.get("home_btn"), home)
         v.show(c.get("home_lbl"), home)
@@ -2518,10 +2555,12 @@ def _module_mongotchi():
         cur = "{:,}".format(int(min(ACH_VALUES[a[6]](), a[7])))
         return "%s (%s)" % (a[2], cur) if a[7] >= 1000 else "%s (%s/%d)" % (a[2], cur, a[7])
     def build_ach():
+        aw, ah = sub_size("ach", ACH_W, ACH_H)
         def build(g, store, c, v):
-            IWA = ACH_W - 2 * M; Kit.add_window_frame(g, ACH_W, ACH_H)
-            title_bar(g, store, "ach", ACH_W, TITLE + " Achievements"); Kit.add_section(g, M, ABY0, IWA, 30)
-            c["status"] = label(g, v, "", M + 10, ABY0 + 7, Kit.HUE_TITLE); Kit.add_section(g, M, ALY0, IWA, ALH)
+            IWA = c["iw"] = aw - 2 * M; Kit.add_window_frame(g, aw, ah)
+            title_bar(g, store, "ach", aw, TITLE + " Achievements"); Kit.add_section(g, M, ABY0, IWA, 30)
+            c["status"] = label(g, v, "", M + 10, ABY0 + 7, Kit.HUE_TITLE)
+            Kit.add_section(g, M, ALY0, IWA, ah - ALY0 - M)
             colw = IWA // 2; rows = []
             for i, a in enumerate(ACHIEVEMENTS[:2 * ACH_ROWS]):
                 rx = M + (i // ACH_ROWS) * colw; ry = ALY0 + 8 + (i % ACH_ROWS) * 38; done = a[0] in ach["got"]
@@ -2532,7 +2571,7 @@ def _module_mongotchi():
                              "rew": label(g, v, rtxt, rx + colw - 10 - rw, ry + 1, Kit.HUE_TITLE),
                              "how": label(g, v, "", rx + 56, ry + 18, Kit.HUE_INFO)})
             c["rows"] = rows
-        open_sub("ach", "Achievements", build, ACH_W, ACH_H); refresh_ach(0.0, True); run_hop()
+        open_sub("ach", "Achievements", build, aw, ah); refresh_ach(0.0, True); run_hop()
     def refresh_ach(t, texts):
         c, v = wins["ach"]["c"], wins["ach"]["v"]
         if v is None or not texts: return
@@ -2540,7 +2579,7 @@ def _module_mongotchi():
         paid = sum(a[3] for a in ACHIEVEMENTS if a[0] in got)
         if c.get("mini") is not None:
             v.text(c["mini"], fit("Achievements: %d of %d" % (n, len(ACHIEVEMENTS)), MINI_W - 90)); return
-        v.text(c["status"], fit("%d of %d earned: +%d squeaks" % (n, len(ACHIEVEMENTS), paid), ACH_W - 2 * M - 20))
+        v.text(c["status"], fit("%d of %d earned: +%d squeaks" % (n, len(ACHIEVEMENTS), paid), c["iw"] - 20))
         for r in c.get("rows", ()):
             a = r["a"]; done = a[0] in got; line = ach_line(a, done)
             if r["raw"] == (done, line): continue
@@ -2548,6 +2587,61 @@ def _module_mongotchi():
             v.text(r["nm"], fit(a[1], r["nw"]), Kit.HUE_GOOD if done else Kit.HUE_TEXT)
             v.text(r["rew"], "+%d" % a[3], Kit.HUE_INFO if done else Kit.HUE_TITLE)
             v.text(r["how"], fit(line, r["hw"]), Kit.HUE_INFO)
+    def window_click(action, t):
+        which, what = action[0], action[1]
+        if which == "main": Kit.win_action(what, st, KEY, TITLE, want_redraw, MIN_KEYS["main"])
+        elif what == "toggle_min":
+            k = which + "_min"; st[k] = not st[k]; Kit.save_min(MIN_KEYS[which], st[k])
+            st[which + "_redraw"] = True
+        elif which == "shop":
+            if what == "cat": st["shop_cat"], st["shop_page"] = action[2], 0
+            elif what == "prev": st["shop_page"] = max(0, st["shop_page"] - 1)
+            elif what == "next":
+                n = len(shop_items()); st["shop_page"] = min(max(0, (n - 1) // st["shop_n"]), st["shop_page"] + 1)
+            elif what == "act": shop_act(action[2], action[3])
+            st["shop_redraw"] = True
+        elif which == "quest":
+            if what == "tab": quest["tab"] = action[2]; st["quest_dirty"] = True
+            elif what == "hunt": do_hunt(action[2], t)
+            elif what == "med": do_meditate(action[2], t)
+            elif what == "home": call_home(t)
+            st["quest_redraw"] = True
+        elif which == "pen":
+            if what == "share": share()
+            elif what == "rm":
+                members = pen_members(); n = action[2]
+                if n < len(members) and not members[n]["mine"]:
+                    mb = members[n]
+                    st["guests"] = [gst for gst in st["guests"] if not (gst["uid"] == mb["uid"]
+                                            and gst["owner"] == mb["owner"])]
+                    save_guests(); say("%s went home." % mb["name"], Kit.HUE_INFO); st["pen_redraw"] = True
+            elif what == "add":
+                m = CODE_RE.search(str(safe(lambda: wins["pen"]["c"]["code"].Text, "") or ""))
+                gst = decode(m.group(1)) if m else None
+                if gst is None: say("that isn't a Mongotchi code (64 characters).", Kit.HUE_BAD)
+                elif not add_guest(gst) and gst["uid"] == pet["uid"] and gst["owner"] == my_owner():
+                    say("that's your own mongotchi's code.", Kit.HUE_INFO)
+    def toggle_sub(action, t):
+        w = ACT_WIN[action]
+        if st[w + "_open"]:
+            if not Kit.zone_up(dock_key(w)): close_window(w)
+        else:
+            st[w + "_open"], st[w + "_redraw"] = True, True
+            if w == "pen" and not pet["feral"] and settings["share_open"] and settings["share_min"] > 0: share()
+            elif w == "pen": st["shared_at"] = t
+    def adopt(action, t):
+        if pet["feral"]: new_pet(); st["redraw"] = True
+    def release(action, t):
+        if t - st["confirm"] < 6.0:
+            st["confirm"] = 0.0; say("%s released; a new pup arrives." % name(), Kit.HUE_INFO)
+            new_pet(); st["redraw"] = True
+        else: st["confirm"] = t
+        HOST.refresh_settings(KEY)
+    ACT_WIN = {"shop": "shop", "playpen": "pen", "journey": "quest", "ach": "ach"}
+    ACTIONS = {"feed": do_feed, "play": do_play, "brush": do_brush, "cure": do_cure, "forage": do_forage, "pet": do_pet,
+               "clean": do_clean, "lights": do_lights, "swat": do_swat, "window": window_click, "shop": toggle_sub,
+               "playpen": toggle_sub, "journey": toggle_sub, "ach": toggle_sub, "adopt": adopt,
+               "refresh_page": lambda action, t: HOST.refresh_settings(KEY), "release": release}
     PAGE_OPTS = {"fw": 60, "ugap": 14}
     CHECK_TEXTS = {"gremlins": ("Gremlins raid the pantry", "A gremlin that reaches the pantry takes half the food"),
         "sounds": ("Play sounds", "Squeaks, munching, gremlins and music"),
@@ -2587,61 +2681,7 @@ def _module_mongotchi():
         st["texts_at"] = 0.0
     cfg = Kit.Page(settings, page_table, save_settings, page_changed, PAGE_OPTS, empty=settings, adjust=page_read,
                    clicks=page_clicks)
-    ACT_DO = {"feed": do_feed, "play": do_play, "brush": do_brush, "cure": do_cure, "forage": do_forage, "pet": do_pet,
-              "clean": do_clean, "lights": do_lights, "swat": do_swat}
-    ACT_WIN = {"shop": "shop", "playpen": "pen", "journey": "quest", "ach": "ach"}
-    def handle(action, t):
-        if isinstance(action, tuple):
-            which, what = action[0], action[1]
-            if which == "main": Kit.win_action(what, st, KEY, TITLE, want_redraw, MIN_KEYS["main"])
-            elif what == "toggle_min":
-                k = which + "_min"; st[k] = not st[k]; Kit.save_min(MIN_KEYS[which], st[k])
-                st[which + "_redraw"] = True
-            elif which == "shop":
-                if what == "cat": st["shop_cat"], st["shop_page"] = action[2], 0
-                elif what == "prev": st["shop_page"] = max(0, st["shop_page"] - 1)
-                elif what == "next":
-                    n = len(shop_items()); st["shop_page"] = min(max(0, (n - 1) // SHOP_ROWS), st["shop_page"] + 1)
-                elif what == "act": shop_act(action[2], action[3])
-                st["shop_redraw"] = True
-            elif which == "quest":
-                if what == "tab": quest["tab"] = action[2]; st["quest_dirty"] = True
-                elif what == "hunt": do_hunt(action[2], t)
-                elif what == "med": do_meditate(action[2], t)
-                elif what == "home": call_home(t)
-                st["quest_redraw"] = True
-            elif which == "pen":
-                if what == "share": share()
-                elif what == "rm":
-                    members = pen_members(); n = action[2]
-                    if n < len(members) and not members[n]["mine"]:
-                        mb = members[n]
-                        st["guests"] = [gst for gst in st["guests"] if not (gst["uid"] == mb["uid"]
-                                                and gst["owner"] == mb["owner"])]
-                        save_guests(); msg("%s went home." % mb["name"], Kit.HUE_INFO); st["pen_redraw"] = True
-                elif what == "add":
-                    m = CODE_RE.search(str(safe(lambda: wins["pen"]["c"]["code"].Text, "") or ""))
-                    gst = decode(m.group(1)) if m else None
-                    if gst is None: msg("that isn't a Mongotchi code (64 characters).", Kit.HUE_BAD)
-                    elif not add_guest(gst) and gst["uid"] == pet["uid"] and gst["owner"] == my_owner():
-                        msg("that's your own mongotchi's code.", Kit.HUE_INFO)
-            return
-        if action in ACT_DO: ACT_DO[action](t)
-        elif action in ACT_WIN:
-            w = ACT_WIN[action]
-            if st[w + "_open"]: close_window(w)
-            else:
-                st[w + "_open"], st[w + "_redraw"] = True, True
-                if w == "pen" and not pet["feral"] and settings["share_open"] and settings["share_min"] > 0: share()
-                elif w == "pen": st["shared_at"] = t
-        elif action == "adopt" and pet["feral"]: new_pet(); st["redraw"] = True
-        elif action == "refresh_page": HOST.refresh_settings(KEY)
-        elif action == "release":
-            if t - st["confirm"] < 6.0:
-                st["confirm"] = 0.0; msg("%s released; a new pup arrives." % name(), Kit.HUE_INFO)
-                new_pet(); st["redraw"] = True
-            else: st["confirm"] = t
-            HOST.refresh_settings(KEY)
+    load_settings()
     def _start():
         t = time.time()
         st.update({"shutting": False, "docked": False, "queue": [], "grem": None,
@@ -2653,15 +2693,16 @@ def _module_mongotchi():
                    "pen_game": None, "comp": comp_new(), "hop": [], "read_at": 0.0, "jcodes": [], "jcmds": [],
                    "jcodes_due": False, "player": None, "close_at": 0.0, "full_told": {}, "shop_dirty": False,
                    "quest_dirty": False, "ach_open": False, "ach_redraw": False, "ach_due": False, "ach_at": 0.0,
-                   "seasons": None, "season_at": 0.0, "fw_at": 0.0, "sim_acc": 0.0})
+                   "seasons": None, "season_at": 0.0, "fw_at": 0.0, "sim_acc": 0.0, "shop_n": SHOP_ROWS})
         load_settings(); load_shop(); load_guests(); load_quest(); load_ach(); season_tick(t, force=True)
         if load_pet(): catch_up()
         else: shop["last"] = t; st["shop_dirty"] = True; new_pet()
-        ach_check(t); st["last_t"] = t; build_main()
+        ach_check(t); st["last_t"] = t; build_window()
         hooks = Kit.dock_hooks(TITLE, TRAY_ICON, st, wins["main"], want_redraw, fit=zone_fit)
         hooks.update({"exact": True, "verify": True, "drawn_at": zone_drawn_at}); HOST.dock_add(KEY, hooks)
+        subfit.clear()
+        for which in SUBS: HOST.dock_add(dock_key(which), sub_hooks(which))
     def _tick():
-        win = wins["main"]
         if win["g"] is None: return
         t = time.time()
         if t - st["close_at"] >= 0.25:
@@ -2672,7 +2713,9 @@ def _module_mongotchi():
                 if which != "main" and w["g"] is not None and Kit.was_clicked(w["store"], "close"): close_window(which)
         read_client(t)
         if st["queue"]: flush_sim(); st["texts_at"] = 0.0; st["ach_due"] = True
-        while st["queue"]: handle(st["queue"].pop(0), t)
+        while st["queue"]:
+            action = st["queue"].pop(0); kind = "window" if isinstance(action, tuple) else action
+            if kind in ACTIONS: ACTIONS[kind](action, t)
         if st["confirm"] and not 0.0 <= t - st["confirm"] < 6.0: st["confirm"] = 0.0; HOST.refresh_settings(KEY)
         dt = max(0.0, min(5.0, t - st["last_t"])); st["last_t"] = t; season_tick(t); acc = st["sim_acc"] + dt
         simmed = acc >= SIM_EVERY
@@ -2694,23 +2737,23 @@ def _module_mongotchi():
         if st["pen_open"]:
             if settings["share_open"] and settings["share_min"] \
                     and t - st["shared_at"] >= settings["share_min"] * 60 and not pet["feral"]:
-                st["shared_at"] = t; msg("time to Share %s's code again." % name(), Kit.HUE_INFO)
+                st["shared_at"] = t; say("time to Share %s's code again." % name(), Kit.HUE_INFO)
             if len(st["guests"]) and t - st["social_at"] >= 60.0:
                 st["social_at"] = t; earn("social", min(3, len(st["guests"])))
                 if not pet["asleep"] and not pet["feral"]: bump("joy", 2)
         if st.get("redraw_at") and t >= st["redraw_at"]: st["redraw_at"] = 0.0; st["redraw"] = st["quest_redraw"] = True
         if st.get("redraw"):
-            st["redraw"] = False; build_main()
+            st["redraw"] = False; build_window()
             if st["pen_open"]: st["pen_redraw"] = True
-        for which, build, refresh, redraw, is_open in REDRAWS:
+        for which, build, redo, redraw, is_open in REDRAWS:
             if st.get(redraw):
                 st[redraw] = False
                 if st[is_open]: build()
         texts = t - st.get("texts_at", 0.0) >= 1.0
         if texts: st["texts_at"] = t
-        refresh_main(t, texts)
-        for which, build, refresh, redraw, is_open in REDRAWS:
-            if st[is_open]: refresh(t, texts)
+        refresh(t, texts)
+        for which, build, redo, redraw, is_open in REDRAWS:
+            if st[is_open]: redo(t, texts)
         run_hop()
         if t - st["saved_at"] >= SAVE_EVERY: flush_sim(); save_pet()
     SIM_EVERY = 1.0
@@ -2724,15 +2767,14 @@ def _module_mongotchi():
     def _interval(): return 0.1 if not st["minimized"] or (st["pen_open"] and not st["pen_min"]) else 0.5
     def _stop():
         st["shutting"] = True; HOST.dock_remove(KEY)
+        for which in SUBS: HOST.dock_remove(dock_key(which))
         for which in WINDOWS: save_pos(which)
         for k, var in MIN_KEYS.items(): Kit.save_min(var, st["minimized" if k == "main" else k + "_min"])
         save_settings(); flush_sim(); save_pet(final=True)
         for which in WINDOWS: g, wins[which]["g"] = wins[which]["g"], None; Kit.dispose(g)
         st["shop_open"] = st["pen_open"] = st["quest_open"] = st["ach_open"] = False
-    load_settings()
-    return {"start": _start, "tick": _tick, "stop": _stop, "interval": _interval, "client_tick": True,
-              "config_height": cfg.height, "build_config": cfg.build, "poll_config": cfg.poll,
-              "config_closed": cfg.closed}
+    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed, "interval": _interval}
 
 
 if "HOST" not in globals():

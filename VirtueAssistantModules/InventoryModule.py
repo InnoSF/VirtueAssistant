@@ -29,6 +29,10 @@ def _module_inventory():
         if hue: p.Hue = hue
         p.DrawBorder = False; p.SetAcceptMouseInput(False); g.Add(p)
     def commas(n): return "{:,}".format(int(n))
+    def to_slot(key, g, xy):
+        slot = HOST.layout_rect(key)
+        if slot is None or xy is None or (xy[0], xy[1]) == (slot[0], slot[1]): return
+        g.SetPos(int(slot[0]), int(slot[1])); Kit.note_rect(g, slot[0], slot[1]); Kit.moved_by_code(g)
     def _part_bags():
         KEY = "bag"; TITLE = "Bags"
         try:
@@ -65,70 +69,71 @@ def _module_inventory():
         class Bag(object):
             def __init__(self, **kw): self.update(**kw)
             def update(self, **kw): self.__dict__.update(kw)
-        st = Bag(slots=DEFAULT_SLOTS, cols=0, rows=0, assign={}, frame_x=200, frame_y=120, saved_fx=200, saved_fy=120,
-                 cell_w=BACKPACK_INTERIOR[0], cell_h=BACKPACK_INTERIOR[1], fit_pending=True, fit_seen=None, trim=True,
-                 opacity=0.9, scale_pct=100, scale_items=False, driving=False, drive_fixed=False, drive_told=False,
-                 hb_frame=-1, hb_time=0.0, opacity_pending=None, icons_used=None, status_text="", own_cell=None,
-                 mgr_x=120, mgr_y=140, trp_x=200, trp_y=180, mgr_min=False, trp_min=False, collapsed=False,
-                 docked=False, bare=False, side_hidden=False, link_state=None, attach=None, attach_g=None, canvas=None,
-                 side_pw=0, detached_at=0.0, grid_wh=None, names={}, wait_player=False, wait_load=False,
-                 load_wanted=False, load_text=None, trap_sel=set(), trap_extra=[], job=None, actions=[], reported=False,
-                 dirty_frame=True, dirty_mgr=False, dirty_trp=False, open_mgr=False, open_trp=False, want_mgr=False,
-                 want_trp=False, save_in=-1, to_write=None, stopping=False, flt_pick=None, quick_at=0.0, filters=[],
-                 open_flt=False, dirty_flt=False, flt_min=False, flt_x=260, flt_y=120, rules={}, sort=None, srt_x=240,
-                 srt_y=160, srt_min=False, open_srt=False, want_srt=False, dirty_srt=False, layout=(),
-                 geom=(1, BACKPACK_INTERIOR[0], BACKPACK_INTERIOR[1], 0), bar_raw=None, grid_raw=None,
-                 grid_info=(None, False), slot_raws=())
-        ui = {"side_status": None, "bar": None, "grid": None, "mgr": None, "trp": None,
-              "trap_checks": [], "store": ({}, {}), "srt": None, "rule_checks": [], "search_box": None, 
-              "counts": [], "count_state": {}}
-        def act(fn, *args):
-            def _run(*_ignored):
-                if (fn, args) not in st.actions: st.actions.append((fn, args))
-            return _run
-        def run_actions():
-            while st.actions:
-                fn, args = st.actions.pop(0)
-                try: fn(*args)
-                except Exception as e: API.SysMsg(TITLE + ": couldn't do that (%s)." % e, HUE_ERR)
-        def dispose(key): Kit.dispose(ui.get(key)); ui[key] = None
+        settings = {}; DEFAULTS = dict(settings)
+        st = {"cfg_bad": False, "slots": DEFAULT_SLOTS, "cols": 0, "rows": 0, "assign": {}, "frame_x": 200,
+              "frame_y": 120, "saved_fx": 200, "saved_fy": 120, "cell_w": BACKPACK_INTERIOR[0],
+              "cell_h": BACKPACK_INTERIOR[1], "fit_pending": True, "fit_seen": None, "trim": True, "opacity": 0.9,
+              "scale_pct": 100, "scale_items": False, "driving": False, "drive_fixed": False, "drive_told": False,
+              "hb_frame": -1, "hb_time": 0.0, "opacity_pending": None, "icons_used": None, "status_text": "",
+              "own_cell": None, "mgr_x": 120, "mgr_y": 140, "trp_x": 200, "trp_y": 180, "mgr_min": False,
+              "trp_min": False, "minimized": False, "docked": False, "bare": False, "side_hidden": False,
+              "link_state": None, "attach": None, "attach_g": None, "canvas": None, "side_pw": 0, "detached_at": 0.0,
+              "grid_wh": None, "names": {}, "wait_player": False, "wait_load": False, "load_wanted": False,
+              "load_text": None, "trap_sel": set(), "trap_extra": [], "job": None, "queue": [], "reported": False,
+              "dirty_frame": True, "dirty_mgr": False, "dirty_trp": False, "open_mgr": False, "open_trp": False,
+              "want_mgr": False, "want_trp": False, "save_in": -1, "to_write": None, "shutting": False,
+              "flt_pick": None, "quick_at": 0.0, "filters": [], "open_flt": False, "dirty_flt": False, "flt_min": False,
+              "flt_x": 260, "flt_y": 120, "rules": {}, "sort": None, "srt_x": 240, "srt_y": 160, "srt_min": False,
+              "open_srt": False, "want_srt": False, "dirty_srt": False, "layout": (),
+              "geom": (1, BACKPACK_INTERIOR[0], BACKPACK_INTERIOR[1], 0), "bar_raw": None, "grid_raw": None,
+              "grid_info": (None, False), "slot_raws": ()}
+        win = {"g": None, "c": {}, "store": ({}, {}), "side_status": None, "bar": None, "grid": None, "mgr": None,
+               "trp": None, "trap_checks": [], "srt": None, "rule_checks": [], "search_box": None, "counts": [],
+               "count_state": {}}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        def act(kind, *args):
+            def handler(*_ignored): queue.add((kind,) + args)
+            return handler
+        def dispose(key): Kit.dispose(win.get(key)); win[key] = None
         def no_mouse(ctrl): ctrl.SetAcceptMouseInput(False); return ctrl
         def box(x, y, w, h, color, alpha): b = G.CreateGumpColorBox(alpha, color); b.SetRect(x, y, w, h); return b
         def label(g, text, x, y, hue=None): return no_mouse(Kit.add_label(g, text, x, y, hue))
         def framed_window(k, w, h, title, on_min, on_close):
-            M = Kit.MARGIN; minimized = getattr(st, k + "_min"); g = G.CreateGump(True, True)
-            Kit.place(g, getattr(st, k + "_x"), getattr(st, k + "_y"), w, h)
+            M = Kit.MARGIN; minimized = st[k + "_min"]; g = G.CreateGump(True, True)
+            Kit.place(g, st[k + "_x"], st[k + "_y"], w, h)
             Kit.add_window_frame(g, w, h, corners=not minimized); Kit.add_section(g, M, M, w - 2 * M, 30)
             Kit.add_label(g, title, M + 30, M + 7, Kit.HUE_TITLE)
             Kit.title_catcher(g, M, M, w - 2 * M - 84, 30, on_min, key="bag_" + k); store = ({}, {})
             Kit.art_button(g, store, "min", Kit.ART_RESTORE if minimized else Kit.ART_MIN, w - M - 74, M + 7, None,
                            Kit.RESTORE_TIP if minimized else Kit.MIN_TIP, on_click=on_min)
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close", on_click=on_close)
+            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close this window",
+                           on_click=on_close)
             return g, store, M + 30 + Kit.GAP
-        def sub_shown(k, g, moved, **more): G.AddGump(g); Kit.on_moved(g, moved); ui[k] = g; ui.update(more)
-        def schedule_save(): st.save_in = SAVE_DELAY_TICKS
-        def frame_changed(): st.dirty_frame = True; schedule_save()
+        def sub_shown(k, g, moved, **more): G.AddGump(g); Kit.on_moved(g, moved); win[k] = g; win.update(more)
+        def schedule_save(): st["save_in"] = SAVE_DELAY_TICKS
+        def frame_changed(): st["dirty_frame"] = True; schedule_save()
         def short(text, n): text = text or ""; return text if len(text) <= n else text[: n - 1] + "~"
         def bag_name(serial, with_serial=True):
-            name = st.names.get(serial)
+            name = st["names"].get(serial)
             if name is None:
                 it = Kit.find_item(serial)
                 if not it: return "0x%08X (not loaded)" % serial
                 name = it.Name or "Container"
-                if len(st.names) >= NAME_CACHE_CAP: st.names = {}
-                st.names[serial] = name
+                if len(st["names"]) >= NAME_CACHE_CAP: st["names"] = {}
+                st["names"][serial] = name
             return ("%s  0x%08X" % (name, serial)) if with_serial else name
-        def forget_names(): st.names = {}
+        def forget_names(): st["names"] = {}
         R = Bag(tried=False, ok=False, can_ok=False, error="", f_tiles=None)
         H = Bag(frame=0, gumps={}, managed=set(), trimmed=set(), bounds={}, scale=1.0, max_w=0, max_h=0, disabled=False,
                 error="", fail_streak=0, open_count=0, catchers={}, icons=None, hook_calls=0, pre_calls=0, glist=None,
                 head=None, count=-1, lay=None, want=frozenset(), placed={}, bar_at=None, full_frame=-1000, full_at=0.0,
                 fulls=0, labels_for=(None, None), meas={}, opened=frozenset(), hold=None, ginfo={}, catch_ok={}, gtr={})
         CANVAS = {"ver": 0, "regions": {}, "order": [], "orient": "rows", "breaks": None,
-                  "sig": None, "items": None, "kinds": {}, "size": None, "slow": False, "job": None, "done": None}
+                  "sig": None, "items": None, "kinds": {}, "size": None, "slow": False, "job": None}
+        PLAN = {"done": None}
         JR = {"rd": None}; PIN = {}; PIN_ORDER = []
         CV = {"ctrl": None, "rect": None, "texts": True, "said": None, "sum_i": 0, "art": {}, "world": None,
-              "tiles": None, "prof_at": 0.0, "sum_at": 0.0}
+              "tiles": None, "prof_at": 0.0, "sum_at": 0.0, "hooked": False, "poked": set(), "poke_at": 0.0}
         def init_interop():
             if not HAVE_CLR: R.error = "clr module unavailable"; return
             try:
@@ -198,10 +203,10 @@ def _module_inventory():
         def new_ctl(cls):
             try: return cls()
             except Exception: return cls(None)
-        def add_hook(grid, say):
-            if not R.ok or H.disabled or st.drive_fixed: return
+        def add_hook(grid, tell):
+            if not R.ok or H.disabled or st["drive_fixed"]: return
             try:
-                hook = new_ctl(R.Hook); hook.AcceptMouseInput = False; raw = st.grid_info[0]
+                hook = new_ctl(R.Hook); hook.AcceptMouseInput = False; raw = st["grid_info"][0]
                 if raw is not None and Client.on_client_thread():
                     try:
                         hook.Parent = raw
@@ -209,11 +214,11 @@ def _module_inventory():
                     except Exception: pass
                 grid.Add(hook)
             except Exception as e:
-                st.driving = st.drive_fixed = True; H.error = "draw hook: %s" % e
-                if say:
+                st["driving"] = st["drive_fixed"] = True; H.error = "draw hook: %s" % e
+                if tell:
                     API.SysMsg(TITLE + ": couldn't install the draw hook (%s); the script keeps the bags in place."
                                % e, HUE_INFO)
-        def lay_under(grid): safe(lambda: setattr(grid, "LayerOrder", getattr(type(grid.LayerOrder), "Under")))
+        def lay_under(grid): safe(lambda: setattr(grid, "LayerOrder", type(grid.LayerOrder).Under))
         _raw_way = {}
         def _raw_gump(w): return w.Gump
         RAW_WAYS = (_raw_gump, Kit.client_control)
@@ -267,8 +272,8 @@ def _module_inventory():
             b = bounds_of(g); s = H.scale; left, top = int(b[0] * s), int(b[1] * s)
             return left, top, int(b[2] * s) - left, int(b[3] * s) - top
         def cell_xy(idx):
-            cols, cw, ch, gap = st.geom; r, c = divmod(idx, cols)
-            return st.frame_x + c * (cw + gap), st.frame_y + top_off() + r * (ch + gap)
+            cols, cw, ch, gap = st["geom"]; r, c = divmod(idx, cols)
+            return st["frame_x"] + c * (cw + gap), st["frame_y"] + top_off() + r * (ch + gap)
         def get_pos(c): loc = c.Location; return int(loc.X), int(loc.Y)
         def move(c, x, y):
             loc = c.Location
@@ -328,7 +333,7 @@ def _module_inventory():
                     if not g.IsMinimized: g.RequestUpdateContents()
                 if not g.AcceptMouseInput and g.IsVisible: g.AcceptMouseInput = True
                 pic = R.f_pic.GetValue(g)
-                if pic is not None and abs(pic.Alpha - st.opacity) > 0.01: pic.Alpha = st.opacity
+                if pic is not None and abs(pic.Alpha - st["opacity"]) > 0.01: pic.Alpha = st["opacity"]
                 move(g, cx, cy)
                 if g.IsMinimized: return 0, 0, pic, False
                 w, h = get_size(g); return w, h, pic, False
@@ -340,13 +345,14 @@ def _module_inventory():
             ensure_catcher(g, left, top, iw, ih); move(g, cx - left, cy - top); H.trimmed.add(g)
             ov = int(round(PANE_OVERHANG * H.scale)); return iw + ov, ih + ov, pic, True
         def frame_tick():
-            if H.disabled or st.stopping: return
-            bar = st.bar_raw; grid, gbare = st.grid_info; moved = False; att = st.attach; hidden = st.collapsed
+            if H.disabled or st["shutting"]: return
+            bar = st["bar_raw"]; grid, gbare = st["grid_info"]; moved = False; att = st["attach"]
+            hidden = st["minimized"]
             if att is not None:
                 hidden = hidden or not att.get("shown", True); lead = attach_raw()
                 if lead is not None and not lead.IsDisposed:
                     bx, by = get_pos(lead); bx, by = bx + int(att.get("dx", 0)), by + int(att.get("dy", 0))
-                    moved = (bx, by) != H.bar_at; H.bar_at = (bx, by); st.frame_x, st.frame_y = bx, by
+                    moved = (bx, by) != H.bar_at; H.bar_at = (bx, by); st["frame_x"], st["frame_y"] = bx, by
                     if grid is not None and not grid.IsDisposed:
                         move(grid, bx, by)
                         if grid.IsVisible == hidden: grid.IsVisible = not hidden
@@ -355,20 +361,21 @@ def _module_inventory():
                 else: lead, other, dy = bar, grid, BAR_H
                 if lead is not None and not lead.IsDisposed:
                     bx, by = get_pos(lead); moved = (bx, by) != H.bar_at; H.bar_at = (bx, by)
-                    st.frame_x, st.frame_y = bx, by
+                    st["frame_x"], st["frame_y"] = bx, by
                     if other is not None and not other.IsDisposed: move(other, bx, by + dy)
-            lay = st.layout
+            lay = st["layout"]
             if lay is not H.lay: H.lay = lay; H.want = frozenset([s for _, s in lay])
             H.frame += 1; now = time.time()
             full = H.frame - H.full_frame >= SCAN_EVERY_FRAMES and now - H.full_at >= FULL_GAP
             if full: H.full_frame, H.full_at = H.frame, now; H.fulls += 1; scan_gumps()
             else: front_check()
-            rescanned = full; icons_due = full and H.fulls % 10 == 1; full = full or moved; trim = st.trim
-            look = (trim, st.opacity, st.geom, top_off(), CANVAS["ver"]); active = set(); opened = set(); mw = mh = 0
-            first = None; f_pic = R.f_pic; canv = st.canvas is not None and not hidden
+            rescanned = full; icons_due = full and H.fulls % 10 == 1; full = full or moved; trim = st["trim"]
+            look = (trim, st["opacity"], st["geom"], top_off(), CANVAS["ver"]); active = set(); opened = set()
+            mw = mh = 0
+            first = None; f_pic = R.f_pic; canv = st["canvas"] is not None and not hidden
             if canv:
-                cr = CV["rect"] or (0, 0, 0, 0); px, py = st.frame_x + cr[0], st.frame_y + cr[1]
-                park = full or st.driving; seen = (CV["seen_n"], CV["seen_last"], CV["seen_min"])
+                cr = CV["rect"] or (0, 0, 0, 0); px, py = st["frame_x"] + cr[0], st["frame_y"] + cr[1]
+                park = full or st["driving"]; seen = (CV["seen_n"], CV["seen_last"], CV["seen_min"])
             for idx, serial in lay:
                 g = H.gumps.get(serial)
                 if g is None: continue
@@ -412,7 +419,7 @@ def _module_inventory():
                 except Exception: pass
             if len(H.managed) > len(active):
                 for g in [g for g in H.managed if g not in active]: release(g)
-            H.max_w, H.max_h = mw, mh; raws = st.slot_raws
+            H.max_w, H.max_h = mw, mh; raws = st["slot_raws"]
             if opened != H.labels_for[0] or raws is not H.labels_for[1]:
                 for idx, labs in enumerate(raws):
                     show = idx not in opened
@@ -445,7 +452,7 @@ def _module_inventory():
                 try: release(g)
                 except Exception: pass
         def set_minimized_all(minimize):
-            serials = set(st.assign.values())
+            serials = set(st["assign"].values())
             def run():
                 scan_gumps(); n = 0
                 for s in serials:
@@ -479,76 +486,79 @@ def _module_inventory():
             it = Kit.find_item(serial); return bool(it) and Kit.is_open(safe(lambda: it.GetContainerGump()))
         def cfg_file():
             serial = safe(lambda: int(API.Player.Serial), 0); return Kit.data_path("_unified_bag_%d.cfg" % serial)
-        def save():
-            st.save_in = -1
-            if not attached() and st.canvas != "alone": st.saved_fx, st.saved_fy = st.frame_x, st.frame_y
-            lines = ["slots=%d" % st.slots, "cols=%d" % st.cols, "rows=%d" % st.rows,
-                "frame_x=%d" % st.saved_fx, "frame_y=%d" % st.saved_fy,
-                "cell_w=%d" % st.cell_w, "cell_h=%d" % st.cell_h,
-                "trim=%d" % int(st.trim), "collapsed=%d" % int(st.collapsed), "bare=%d" % int(st.bare),
-                "side=%d" % int(st.side_hidden), "opacity=%d" % int(round(st.opacity * 100)),
-                "mgr_x=%d" % st.mgr_x, "mgr_y=%d" % st.mgr_y, "trp_x=%d" % st.trp_x, "trp_y=%d" % st.trp_y,
-                "mgr_open=%d" % int(st.open_mgr), "mgr_min=%d" % int(st.mgr_min),
-                "trp_open=%d" % int(st.open_trp), "trp_min=%d" % int(st.trp_min),
-                "trapsel=" + ",".join(str(s) for s in sorted(st.trap_sel)),
-                "trapextra=" + ",".join(str(s) for s in st.trap_extra),]
-            for idx in sorted(st.assign): lines.append("slot.%d=%d" % (idx, st.assign[idx]))
-            lines += ["srt_x=%d" % st.srt_x, "srt_y=%d" % st.srt_y,
-                      "srt_open=%d" % int(st.open_srt), "srt_min=%d" % int(st.srt_min)]
-            for idx in sorted(st.rules):
-                kinds, graphics = st.rules[idx]
+        def load_settings(): parse_cfg(read_cfg())
+        def save_settings():
+            st["save_in"] = -1
+            if not attached() and st["canvas"] != "alone": st["saved_fx"], st["saved_fy"] = st["frame_x"], st["frame_y"]
+            lines = ["slots=%d" % st["slots"], "cols=%d" % st["cols"], "rows=%d" % st["rows"],
+                "frame_x=%d" % st["saved_fx"], "frame_y=%d" % st["saved_fy"],
+                "cell_w=%d" % st["cell_w"], "cell_h=%d" % st["cell_h"],
+                "trim=%d" % int(st["trim"]), "collapsed=%d" % int(st["minimized"]), "bare=%d" % int(st["bare"]),
+                "side=%d" % int(st["side_hidden"]), "opacity=%d" % int(round(st["opacity"] * 100)),
+                "mgr_x=%d" % st["mgr_x"], "mgr_y=%d" % st["mgr_y"], "trp_x=%d" % st["trp_x"], "trp_y=%d" % st["trp_y"],
+                "mgr_open=%d" % int(st["open_mgr"]), "mgr_min=%d" % int(st["mgr_min"]),
+                "trp_open=%d" % int(st["open_trp"]), "trp_min=%d" % int(st["trp_min"]),
+                "trapsel=" + ",".join(str(s) for s in sorted(st["trap_sel"])),
+                "trapextra=" + ",".join(str(s) for s in st["trap_extra"]),]
+            for idx in sorted(st["assign"]): lines.append("slot.%d=%d" % (idx, st["assign"][idx]))
+            lines += ["srt_x=%d" % st["srt_x"], "srt_y=%d" % st["srt_y"],
+                      "srt_open=%d" % int(st["open_srt"]), "srt_min=%d" % int(st["srt_min"])]
+            for idx in sorted(st["rules"]):
+                kinds, graphics = st["rules"][idx]
                 if kinds or graphics:
                     lines.append("sort.%d=%s;%s" % (idx, ",".join(sorted(kinds)), ",".join(str(g) for g in graphics)))
-            st.to_write = (cfg_file(), "\n".join(lines))
+            st["to_write"] = (cfg_file(), "\n".join(lines))
             if not safe(lambda: HOST.by_key[KEY].running, False): write_saved()
         def others_cursor(): return bool(HOST.cursor_busy(KEY))
         def write_saved():
-            job = st.to_write
+            job = st["to_write"]
             if job is None: return
-            st.to_write = None; path, text = job
-            try:
-                with open(path, "w") as f: f.write(text)
+            st["to_write"] = None; path, text = job
+            if st["cfg_bad"]: return
+            try: Kit.write_safe(path, text)
             except Exception as e: API.SysMsg(TITLE + ": couldn't save its settings (%s)." % e, HUE_ERR)
         def parse_serials(text): return [int(p) for p in (text or "").split(",") if p.strip().isdigit()]
-        def read_cfg():
-            try:
-                with open(cfg_file(), "r") as f: return f.read()
-            except Exception: return None
-        def load(): parse_cfg(read_cfg())
+        def read_cfg(): return Kit.read_safe(cfg_file())
         def parse_cfg(raw):
-            if raw is None: return
+            st["cfg_bad"] = raw is None
+            if raw is None:
+                API.SysMsg(TITLE + ": couldn't read its settings file, so changes aren't saved.", HUE_ERR); return
+            if not raw: return
             vals, ints = {}, {}
             for line in raw.splitlines():
                 if "=" in line:
                     k, v = [p.strip() for p in line.split("=", 1)]; vals[k] = v
                     try: ints[k] = int(v)
                     except ValueError: pass
-            st.slots = max(MIN_SLOTS, min(MAX_SLOTS, ints.get("slots", st.slots)))
-            st.cols = max(0, min(MAX_SLOTS, ints.get("cols", 0))); st.rows = max(0, min(MAX_SLOTS, ints.get("rows", 0)))
-            st.frame_x, st.frame_y = Kit.adapt(ints.get("frame_x", st.frame_x), ints.get("frame_y", st.frame_y))
-            st.saved_fx, st.saved_fy = st.frame_x, st.frame_y
-            st.cell_w = max(20, min(MAX_CELL, ints.get("cell_w", st.cell_w)))
-            st.cell_h = max(20, min(MAX_CELL, ints.get("cell_h", st.cell_h))); st.fit_pending = "cell_w" not in ints
-            st.opacity = max(10, min(100, ints.get("opacity", ints.get("panel_a", 90)))) / 100.0
-            for attr, k, dflt in (("trim", "trim", 1), ("collapsed", "collapsed", 0), ("bare", "bare", 0),
+            st["slots"] = max(MIN_SLOTS, min(MAX_SLOTS, ints.get("slots", st["slots"])))
+            st["cols"] = max(0, min(MAX_SLOTS, ints.get("cols", 0)))
+            st["rows"] = max(0, min(MAX_SLOTS, ints.get("rows", 0)))
+            st["frame_x"], st["frame_y"] = Kit.adapt(ints.get("frame_x", st["frame_x"]), ints.get("frame_y",
+                                                                                                  st["frame_y"]))
+            st["saved_fx"], st["saved_fy"] = st["frame_x"], st["frame_y"]
+            st["cell_w"] = max(20, min(MAX_CELL, ints.get("cell_w", st["cell_w"])))
+            st["cell_h"] = max(20, min(MAX_CELL, ints.get("cell_h", st["cell_h"])))
+            st["fit_pending"] = "cell_w" not in ints
+            st["opacity"] = max(10, min(100, ints.get("opacity", ints.get("panel_a", 90)))) / 100.0
+            for attr, k, dflt in (("trim", "trim", 1), ("minimized", "collapsed", 0), ("bare", "bare", 0),
                                   ("side_hidden", "side", 0), ("mgr_min", "mgr_min", 0), ("trp_min", "trp_min", 0),
                                   ("want_mgr", "mgr_open", 0), ("want_trp", "trp_open", 0), ("srt_min", "srt_min", 0),
                                   ("want_srt", "srt_open", 0)):
-                setattr(st, attr, ints.get(k, dflt) == 1)
+                st[attr] = ints.get(k, dflt) == 1
             for k in ("mgr", "trp", "srt"):
-                x, y = Kit.adapt(ints.get(k + "_x", getattr(st, k + "_x")), ints.get(k + "_y", getattr(st, k + "_y")))
+                x, y = Kit.adapt(ints.get(k + "_x", st[k + "_x"]), ints.get(k + "_y", st[k + "_y"]))
                 st.update(**{k + "_x": x, k + "_y": y})
-            st.trap_sel = set(parse_serials(vals.get("trapsel"))); st.trap_extra = parse_serials(vals.get("trapextra"))
-            st.assign, st.rules = {}, {}
+            st["trap_sel"] = set(parse_serials(vals.get("trapsel")))
+            st["trap_extra"] = parse_serials(vals.get("trapextra")); st["assign"], st["rules"] = {}, {}
             for k, v in vals.items():
                 pre, _, num = k.partition(".")
                 try: idx = int(num)
                 except ValueError: continue
-                if not 0 <= idx < st.slots: continue
-                if pre == "slot" and ints.get(k, 0) > 0: st.assign[idx] = ints[k]
+                if not 0 <= idx < st["slots"]: continue
+                if pre == "slot" and ints.get(k, 0) > 0: st["assign"][idx] = ints[k]
                 elif pre == "sort":
                     rule = parse_rule(v)
-                    if rule is not None: st.rules[idx] = rule
+                    if rule is not None: st["rules"][idx] = rule
         def parse_rule(text):
             kpart, _, gpart = (text or "").partition(";")
             kinds = frozenset(k for k in (p.strip() for p in kpart.split(",")) if k in SORT_KIND_KEYS); graphics = []
@@ -558,27 +568,27 @@ def _module_inventory():
             graphics = tuple(graphics[:SORT_GRAPHICS_CAP]); return (kinds, graphics) if (kinds or graphics) else None
         fitov = {"told": None, "cols": None, "cell": None, "area": None}
         def layout_dims(slots=None, cols=None, rows=None):
-            slots = st.slots if slots is None else slots
+            slots = st["slots"] if slots is None else slots
             if cols is None and rows is None and fitov["cols"]:
                 c = max(1, min(slots, fitov["cols"])); return c, int(math.ceil(slots / float(c)))
-            cols = st.cols if cols is None else cols; rows = st.rows if rows is None else rows
+            cols = st["cols"] if cols is None else cols; rows = st["rows"] if rows is None else rows
             if cols > 0 and rows > 0: return cols, rows
             if cols > 0: return cols, int(math.ceil(slots / float(cols)))
             if rows > 0: c = int(math.ceil(slots / float(rows))); return c, int(math.ceil(slots / float(c)))
             c = max(1, int(math.ceil(math.sqrt(slots)))); return c, int(math.ceil(slots / float(c)))
-        def trimming(): return st.trim and R.ok and not H.disabled
+        def trimming(): return st["trim"] and R.ok and not H.disabled
         LAYOUT_SEEN = [None, None]
         def publish_layout():
-            a = st.assign
-            if a == LAYOUT_SEEN[0] and st.slots == LAYOUT_SEEN[1]: return
-            lay = tuple(sorted((i, s) for i, s in a.items() if i < st.slots))
-            if lay != st.layout: st.layout = lay
-            LAYOUT_SEEN[0], LAYOUT_SEEN[1] = dict(a), st.slots
+            a = st["assign"]
+            if a == LAYOUT_SEEN[0] and st["slots"] == LAYOUT_SEEN[1]: return
+            lay = tuple(sorted((i, s) for i, s in a.items() if i < st["slots"]))
+            if lay != st["layout"]: st["layout"] = lay
+            LAYOUT_SEEN[0], LAYOUT_SEEN[1] = dict(a), st["slots"]
         def default_cell():
             s = H.scale if R.ok else 1.0
             if trimming(): return int(BACKPACK_INTERIOR[0] * s), int(BACKPACK_INTERIOR[1] * s)
             return int(LOOSE_CELL[0] * s), int(LOOSE_CELL[1] * s)
-        def refit_cells(): st.cell_w, st.cell_h = default_cell(); st.fit_pending = True; frame_changed()
+        def refit_cells(): st["cell_w"], st["cell_h"] = default_cell(); st["fit_pending"] = True; frame_changed()
         def side_columns(avail_h):
             inner = max(avail_h - 2 * (SIDE_PAD + SIDE_RIM), 0); cols, used = [[]], 0
             for item in [("bagicons", ICON_BOX[1] + 22), ("break", SIDE_SEP_H), ("spellicons", ICON_BOX[1] + 22),
@@ -604,7 +614,7 @@ def _module_inventory():
             pw = len(cols) * SIDE_COL_W + 2 * SIDE_RIM; ph = max(gh, max(heights) + 2 * (SIDE_PAD + SIDE_RIM) + reserve)
             Kit.add_resizepic(grid, Kit.WINDOW_BG, x0, y0, pw, ph)
             Kit.add_section(grid, x0 + SIDE_RIM, y0 + SIDE_RIM, pw - 2 * SIDE_RIM, ph - 2 * SIDE_RIM)
-            art, iconized = st.icons_used
+            art, iconized = st["icons_used"]
             for ci, col in enumerate(cols):
                 cx = x0 + SIDE_RIM + ci * SIDE_COL_W
                 if ci:
@@ -614,12 +624,12 @@ def _module_inventory():
                 for kind, h in col:
                     if kind in ("bagicons", "spellicons"):
                         if kind == "bagicons":
-                            pair = ((iconized, "Minimize every open slot bag", act(set_min, True), "Minimize"),
-                                    (art, "Restore every minimized slot bag", act(set_min, False), "Restore"))
+                            pair = ((iconized, "Minimize every open slot bag", act("set_min", True), "Minimize"),
+                                    (art, "Restore every minimized slot bag", act("set_min", False), "Restore"))
                         else:
                             pair = ((ICON_MAGIC_TRAP, "Cast Magic Trap on every ticked trap bag",
-                                     act(start_job, "Magic Trap"), "Trap"), (ICON_MAGIC_UNTRAP,
-                                     "Cast Magic Untrap on every ticked trap bag", act(start_job, "Magic Untrap"),
+                                     act("start_job", "Magic Trap"), "Trap"), (ICON_MAGIC_UNTRAP,
+                                     "Cast Magic Untrap on every ticked trap bag", act("start_job", "Magic Untrap"),
                                      "Untrap"))
                         half = SIDE_BTN_W // 2
                         for j, (graphic, tip, handler, cap) in enumerate(pair):
@@ -627,36 +637,38 @@ def _module_inventory():
                             label(grid, cap, bx + j * half + max(0, (half - Kit.text_w(cap)) // 2),
                                   y + ICON_BOX[1] + 3, Kit.HUE_INFO)
                     elif kind == "stop":
-                        cap = Kit.art_button(grid, ui["store"], "stop", Kit.ART_CLOSE, bx, y, "Stop",
-                                             "Stop the trap, untrap or sort run", on_click=act(stop_all))
-                        ui["stop_ctrls"] = [ui["store"][0].get("stop"), cap]
-                        ui["side_status"] = label(grid, st.status_text, bx, y + 26, Kit.HUE_INFO); show_stop()
+                        cap = Kit.art_button(grid, win["store"], "stop", Kit.ART_CLOSE, bx, y, "Stop",
+                                             "Stop the trap, untrap or sort run", on_click=act("stop_all"))
+                        win["stop_ctrls"] = [win["store"][0].get("stop"), cap]
+                        win["side_status"] = label(grid, st["status_text"], bx, y + 26, Kit.HUE_INFO); show_stop()
                     elif kind == "quick": build_quick(grid, bx, y)
                     elif kind == "tools": build_tools(grid, bx, y)
                     elif kind == "break": grid.Add(no_mouse(box(bx, y + h // 2, SIDE_BTN_W, 1, C_SEAM, 0.8)))
                     y += h + SIDE_GAP
             add_bare_button(grid, x0 + pw - SIDE_RIM - BARE_PAD - tw, y0 + ph - SIDE_RIM - BARE_PAD - th, False)
             return pw, ph
-        def attached(): return st.attach is not None
-        def bare_on(): return st.bare and not st.collapsed and not attached()
-        def layout_gump(): return ui.get("grid") if attached() or st.canvas == "alone" or bare_on() else ui.get("bar")
+        def attached(): return st["attach"] is not None
+        def bare_on(): return st["bare"] and not st["minimized"] and not attached()
+        def layout_gump():
+            return win.get("grid") if attached() or st["canvas"] == "alone" or bare_on() else win.get("bar")
         def layout_state():
-            if st.stopping or st.wait_player or not Kit.is_open(ui.get("grid")): return None
-            return "docked" if st.docked else ("minimized" if st.collapsed else "open")
+            if st["shutting"] or st["wait_player"] or not Kit.is_open(win.get("grid")): return None
+            return "docked" if st["docked"] else ("minimized" if st["minimized"] else "open")
         def layout_fit(w, h, mode):
-            new = (None, None); geom = st.geom
+            new = (None, None); geom = st["geom"]
             if not attached():
                 told = (int(w), int(h)) if (w is not None and h is not None) else None
                 if (canvas_ok() and (told != fitov["told"] or (mode == "again" and told is not None))):
-                    st.dirty_frame = True
+                    st["dirty_frame"] = True
                 fitov["told"] = told
                 if canvas_ok() and told is not None: return
             if w is not None and h is not None and geom is not None:
                 cols_now, cw_now, ch_now, gap = geom; gw_now = cols_now * cw_now + (cols_now - 1) * gap
-                gap = 0 if trimming() else LOOSE_GAP; extra = max(0, (st.grid_wh[0] if st.grid_wh else gw_now) - gw_now)
-                if attached(): extra = 0 if side_off() else st.side_pw
-                aw = int(w) - extra; ah = int(h) - top_off(); cw, ch = st.cell_w, st.cell_h; n = max(1, st.slots)
-                best = None
+                gap = 0 if trimming() else LOOSE_GAP
+                extra = max(0, (st["grid_wh"][0] if st["grid_wh"] else gw_now) - gw_now)
+                if attached(): extra = 0 if side_off() else st["side_pw"]
+                aw = int(w) - extra; ah = int(h) - top_off(); cw, ch = st["cell_w"], st["cell_h"]
+                n = max(1, st["slots"]); best = None
                 for c in range(1, n + 1):
                     r = int(math.ceil(n / float(c))); fw = (aw - (c - 1) * gap) // c; fh = (ah - (r - 1) * gap) // r
                     if fw < cw or fh < ch: continue
@@ -666,23 +678,24 @@ def _module_inventory():
                     c = max(1, min(n, (aw + gap) // max(1, cw + gap))); r = int(math.ceil(n / float(c)))
                     best = (0, c, max(cw, (aw - (c - 1) * gap) // c), max(ch, (ah - (r - 1) * gap) // r))
                 new = (best[1], (best[2], best[3]))
-            if new != (fitov["cols"], fitov["cell"]): fitov["cols"], fitov["cell"] = new; st.dirty_frame = True
+            if new != (fitov["cols"], fitov["cell"]): fitov["cols"], fitov["cell"] = new; st["dirty_frame"] = True
         def bag_cell():
-            gap = 0 if trimming() else LOOSE_GAP; side = 0 if side_off() else st.side_pw
+            gap = 0 if trimming() else LOOSE_GAP; side = 0 if side_off() else st["side_pw"]
             area = fitov.get("area")
             if side and area is not None:
                 tw, th = bare_btn_size(); cols, _h = side_columns(area[1] - th - BARE_PAD)
                 side = len(cols) * SIDE_COL_W + 2 * SIDE_RIM
-            cur = int(round(H.scale * 100)) if R.ok else st.scale_pct
-            own = st.scale_pct if shrink["pct"] is not None else cur
+            cur = int(round(H.scale * 100)) if R.ok else st["scale_pct"]
+            own = st["scale_pct"] if shrink["pct"] is not None else cur
             floor = SHRINK_MIN if (R.ok and not H.disabled) else own
             if shrink["pct"] is None or cur == own:
-                st.own_cell = (st.cell_w, st.cell_h, st.slots); cw, ch = float(st.cell_w), float(st.cell_h)
+                st["own_cell"] = (st["cell_w"], st["cell_h"], st["slots"])
+                cw, ch = float(st["cell_w"]), float(st["cell_h"])
             else:
-                oc = st.own_cell
-                if oc is not None and oc[2] == st.slots: cw, ch = float(oc[0]), float(oc[1])
-                else: f = own / float(max(1, cur)); cw, ch = st.cell_w * f, st.cell_h * f
-            return cw, ch, gap, st.slots, side, own, own, min(floor, own)
+                oc = st["own_cell"]
+                if oc is not None and oc[2] == st["slots"]: cw, ch = float(oc[0]), float(oc[1])
+                else: f = own / float(max(1, cur)); cw, ch = st["cell_w"] * f, st["cell_h"] * f
+            return cw, ch, gap, st["slots"], side, own, own, min(floor, own)
         ROOM_MEMO = {}
         def side_width(h):
             k = ("sw", h); v = ROOM_MEMO.get(k)
@@ -694,15 +707,15 @@ def _module_inventory():
             return v
         def canvas_ok(): return R.ok and R.can_ok and not H.disabled
         def canvas_mode():
-            if not canvas_ok() or st.collapsed or st.docked or st.stopping: return None
-            if attached(): return None if fitov["area"] is None or not st.attach.get("shown", True) else "combined"
+            if not canvas_ok() or st["minimized"] or st["docked"] or st["shutting"]: return None
+            if attached(): return None if fitov["area"] is None or not st["attach"].get("shown", True) else "combined"
             return "alone" if fitov["told"] is not None and HOST.layout_holds(KEY) else None
         CANVAS_MIN_W = 120
         def title_buttons(): return [("Settings",), ("Trap bags",), ("Slots",)]
         def title_fits(w):
-            k = ("tf", w, st.slots); v = ROOM_MEMO.get(k)
+            k = ("tf", w, st["slots"]); v = ROOM_MEMO.get(k)
             if v is None:
-                plan = Kit.title_plan(w, TITLE, title_buttons(), str(st.slots))
+                plan = Kit.title_plan(w, TITLE, title_buttons(), str(st["slots"]))
                 v = len(plan[3]) == len(title_buttons()) and \
                     plan[4] >= Kit.MARGIN + 30 + Kit.text_w("..") + Kit.TITLE_GAP
                 if len(ROOM_MEMO) >= 200: ROOM_MEMO.clear()
@@ -713,7 +726,7 @@ def _module_inventory():
                 a = fitov["area"]; side = 0 if side_off() else side_width(a[1])
                 return 0, 0, max(1, a[0] - side), max(1, a[1]), side
             w, h = fitov["told"]; M = Kit.MARGIN
-            if st.bare or not title_fits(w): return M, M, max(1, w - 2 * M), max(1, h - 2 * M), 0
+            if st["bare"] or not title_fits(w): return M, M, max(1, w - 2 * M), max(1, h - 2 * M), 0
             top = M + 30 + Kit.GAP; ch = max(1, h - top - M); side = side_width(ch)
             if w - 2 * M - side < CANVAS_MIN_W: side = 0
             return M, top, max(1, w - 2 * M - side), ch, side
@@ -727,7 +740,7 @@ def _module_inventory():
         def is_board(g, graphic): return gump_info(g)[1] or graphic in BOARDS
         def split_input():
             out = []; seen = set()
-            for idx, serial in st.layout:
+            for idx, serial in st["layout"]:
                 if serial in seen: continue
                 seen.add(serial); g = H.gumps.get(serial); kind, graphic = "closed", 0
                 try:
@@ -851,9 +864,9 @@ def _module_inventory():
             now = time.time()
             if now >= CV["prof_at"]:
                 CV["prof_at"] = now + 1.0
-                try: st.scale_items = bool(R.p_profile.GetValue(None).ScaleItemsInsideContainers)
+                try: st["scale_items"] = bool(R.p_profile.GetValue(None).ScaleItemsInsideContainers)
                 except Exception: pass
-            return st.scale_items
+            return st["scale_items"]
         def canvas_publish(sig, items, ws, W, H_, plan):
             orient, breaks, _cost = plan; new = split_pixels(ws, W, H_, orient, breaks); kinds, slot_of = {}, {}
             for slot, graphic, kind, bag in items: kinds[slot] = (kind, graphic, bag); slot_of[bag] = slot
@@ -866,34 +879,36 @@ def _module_inventory():
             try: return item_hold() is not None
             except Exception: return False
         def canvas_set(mode):
-            if st.canvas is not None: canvas_leave()
-            st.canvas = mode; H.placed.clear(); st.dirty_frame = True
+            if st["canvas"] is not None: canvas_leave()
+            st["canvas"] = mode; H.placed.clear(); st["dirty_frame"] = True
         def canvas_tick():
             mode = canvas_mode()
-            if mode != st.canvas:
+            if mode != st["canvas"]:
                 if dragging(): return
                 canvas_set(mode)
             if mode is None: return
-            done = CANVAS["done"]
-            if done is not None and dragging(): return
-            if done is not None:
-                CANVAS["done"] = None
-                if done[0] == CANVAS["job"]: canvas_publish(*done)
-                CANVAS["job"] = None
             room = canvas_room(mode); items = split_input()
-            sig = (room[2], room[3], items, round(H.scale or 1.0, 4), scale_items_now())
-            if sig == CANVAS["sig"] or sig == CANVAS["job"] or dragging(): return
+            sig = (room[2], room[3], items, round(H.scale or 1.0, 4), scale_items_now()); done = PLAN["done"]
+            if done is not None and len(done) > 1 and done[0] == sig and CANVAS["job"] == sig:
+                if dragging(): return
+                canvas_publish(*done); CANVAS["job"] = None; CANVAS["pending"] = None; return
+            if sig == CANVAS["sig"]: CANVAS["job"] = None; CANVAS["pending"] = None; return
+            if sig == CANVAS["job"] or dragging(): return
             W, H_ = room[2], room[3]; ws = split_weights(items); keep = None
             if CANVAS["items"] == items and CANVAS["breaks"] is not None: keep = (CANVAS["orient"], CANVAS["breaks"])
             if CANVAS["slow"]: CANVAS["job"] = sig; CANVAS["pending"] = (sig, items, ws, W, H_, keep); return
             t0 = time.time(); plan = split_plan(ws, W, H_, keep)
             if time.time() - t0 > SPLIT_SLOW and len(ws) > 8: CANVAS["slow"] = True
             canvas_publish(sig, items, ws, W, H_, plan)
+        def canvas_wanted():
+            job, done = CANVAS.get("pending"), PLAN["done"]
+            return job is not None and (done is None or done[0] != job[0])
         def canvas_thread():
             job = CANVAS.get("pending")
-            if job is None: return
-            CANVAS["pending"] = None; sig, items, ws, W, H_, keep = job; plan = split_plan(ws, W, H_, keep)
-            CANVAS["done"] = (sig, items, ws, W, H_, plan)
+            if job is None or not canvas_wanted(): return
+            sig, items, ws, W, H_, keep = job
+            try: PLAN["done"] = (sig, items, ws, W, H_, split_plan(ws, W, H_, keep))
+            except Exception: PLAN["done"] = (sig,)
         def canvas_detach():
             c = CV["ctrl"]
             if c is None: return
@@ -923,11 +938,10 @@ def _module_inventory():
             if c is not None: safe(c.Dispose)
             canvas_clear(); CV["rect"] = None; pins_drop()
             CANVAS.update({"sig": None, "items": None, "breaks": None, "regions": {},
-                           "kinds": {}, "slot_of": {}, "order": [], "job": None, "done": None,
-                           "pending": None, "size": None})
-            CANVAS["ver"] += 1; ui["counts"] = []; ui["count_state"] = {}
+                           "kinds": {}, "slot_of": {}, "order": [], "job": None, "pending": None, "size": None})
+            CANVAS["ver"] += 1; win["counts"] = []; win["count_state"] = {}
         def canvas_alpha():
-            a = st.opacity; bg = CV["bg"]; want = (a, bg)
+            a = st["opacity"]; bg = CV["bg"]; want = (a, bg)
             if CV["alpha_set"] == want: return
             for ic in ([bg] if bg is not None else []) + CV["icons"]:
                 try:
@@ -939,17 +953,17 @@ def _module_inventory():
             if raw is None: return None
             raw.Parent = CV["ctrl"]; raw.AcceptMouseInput = False; return raw
         def canvas_parts():
-            c = CV["ctrl"]; grid = ui.get("grid")
+            c = CV["ctrl"]; grid = win.get("grid")
             if c is None or grid is None: return
             for p in CV["parts"]:
                 try: detach(c, p); p.Dispose()
                 except Exception: pass
             CV["parts"], CV["icons"], CV["label"], CV["count"] = [], [], {}, {}; CV["tip"] = None
-            CV["alpha_set"] = None; say = CV["say_lbl"]; CV["say_lbl"] = None
-            if say is not None: safe(say.Dispose)
+            CV["alpha_set"] = None; lbl = CV["say_lbl"]; CV["say_lbl"] = None
+            if lbl is not None: safe(lbl.Dispose)
             W, H_ = CANVAS["size"] or (CV["rect"][2], CV["rect"][3])
             regions, kinds = CANVAS["regions"], CANVAS["kinds"]; made = []
-            made.append((Kit.add_tiled(grid, Kit.SECTION_TILE, 0, 0, W, H_, st.opacity), "bg"))
+            made.append((Kit.add_tiled(grid, Kit.SECTION_TILE, 0, 0, W, H_, st["opacity"]), "bg"))
             for slot in CANVAS["order"]:
                 x, y, w, h = regions[slot]
                 if x + w < W: made.append((box(x + w - 1, y, 1, h, C_SEAM, 0.8), "seam"))
@@ -967,7 +981,7 @@ def _module_inventory():
                 for i, line in enumerate(Kit.wrap("No bags yet. Click Slots to add some.", max(60, W - 16))[:3]):
                     made.append((Kit.add_label(grid, line, 8, 8 + 20 * i, Kit.HUE_INFO), "lbl"))
             counts = []
-            for idx in range(st.slots):
+            for idx in range(st["slots"]):
                 cnt = Kit.add_label(grid, "", 0, 0, Kit.HUE_GOOD); Kit.set(cnt, "IsVisible", False)
                 r = regions.get(idx); counts.append((cnt, r[0], r[1], r[2], r[3]) if r else (cnt, 0, 0, 0, 0))
                 made.append((cnt, "count"))
@@ -977,7 +991,7 @@ def _module_inventory():
                 if raw is None: continue
                 parts.append(raw)
                 if kind == "bg": CV["bg"] = raw
-                elif kind == "icon": raw.Alpha = st.opacity; CV["icons"].append(raw)
+                elif kind == "icon": raw.Alpha = st["opacity"]; CV["icons"].append(raw)
             CV["parts"] = parts; old = CV["layers"]; keep = {}
             for slot in CANVAS["order"]:
                 lay = old.pop(slot, None)
@@ -999,7 +1013,7 @@ def _module_inventory():
             in_order = set(order)
             for ctl in list(kids):
                 if ctl not in in_order: kids.Remove(ctl)
-            ui["counts"] = counts; ui["count_state"] = {}; CV["built"] = CANVAS["ver"]; CV["bsize"] = (W, H_)
+            win["counts"] = counts; win["count_state"] = {}; CV["built"] = CANVAS["ver"]; CV["bsize"] = (W, H_)
             CV["seen_n"], CV["seen_last"], CV["seen_min"] = {}, {}, {}
             for slot in CANVAS["order"]:
                 kind, graphic, bag = kinds[slot]; g = H.gumps.get(bag)
@@ -1029,13 +1043,6 @@ def _module_inventory():
                 out.append((Kit.add_label(grid, "Minimized" if kind == "mini" else "Closed",
                                           x + 5, y + 3 + LABEL_PITCH, Kit.HUE_INFO), "lbl"))
             return out
-        def canvas_sync():
-            if st.canvas is None or CV["ctrl"] is None or CANVAS["size"] is None: return
-            if CV["built"] != CANVAS["ver"] or CV["bsize"] != CANVAS["size"]:
-                if CV["rect"] is not None and (CV["rect"][2], CV["rect"][3]) != CANVAS["size"]: return
-                if dragging(): return
-                canvas_parts()
-            canvas_alpha(); canvas_safety()
         def world_of(g):
             w = CV["world"]
             if w is None:
@@ -1055,7 +1062,7 @@ def _module_inventory():
         def art_size(graphic):
             a = CV["art"].get(graphic)
             if a is not None: return a
-            g = st.grid_raw
+            g = st["grid_raw"]
             try: probe = R.CanvasItem(g, UInt32(0), UInt16(int(graphic)), UInt16(0), 0, 0, False)
             except Exception: return 44, 44
             try: return (1, 1) if probe.IsDisposed else art_of(probe, graphic)
@@ -1145,11 +1152,26 @@ def _module_inventory():
                 t = (t * 31 + s * 7 + int(it.X) * 131 + int(it.Y) * 137 + int(it.Hue) * 139
                      + int(it.Amount) * 149) & 0x7FFFFFFF
             return t
-        SAFETY_EVERY = 0.2; SAFETY_CHUNK = 30
+        SAFETY_EVERY = 0.2; SAFETY_CHUNK = 30; POKE_GAP = 0.1; POKE_CAP = 40
+        def on_bag_item(*args):
+            pk = CV["poked"]
+            if st["shutting"] or len(pk) >= POKE_CAP: return
+            slots = CANVAS.get("slot_of", ())
+            for a in args:
+                try: s, c = int(a.Serial), int(a.Container)
+                except Exception: continue
+                for k in (c, s):
+                    if k in slots: pk.add(k)
+                return
         def canvas_safety():
+            now = time.time(); pk = CV["poked"]
+            if pk and now >= CV["poke_at"]:
+                CV["poke_at"] = now + POKE_GAP; todo = list(pk); pk.difference_update(todo)
+                for bag in todo:
+                    g = H.gumps.get(bag)
+                    if g is not None and not g.IsDisposed: canvas_resync(bag, g)
             order = CANVAS["order"]
             if not order: return
-            now = time.time()
             if 0 <= CV["sum_at"] - now <= SAFETY_EVERY: return
             CV["sum_at"] = now + SAFETY_EVERY; part = CV["sum_part"]
             if part is not None:
@@ -1218,12 +1240,12 @@ def _module_inventory():
                     slot = region_at(x, y)
                     if slot is None: return True
                     canvas_drop(slot, x, y, hold); return True
-                if st.flt_pick is not None:
+                if st["flt_pick"] is not None:
                     slot = region_at(x, y)
                     if slot is not None:
-                        kinds = CANVAS["kinds"].get(slot); slots = dict((b, i) for i, b in st.layout)
+                        kinds = CANVAS["kinds"].get(slot); slots = dict((b, i) for i, b in st["layout"])
                         if kinds is not None and kinds[2] in slots:
-                            act(filter_canvas_pick, slots[kinds[2]])(); return True
+                            act("filter_canvas_pick", slots[kinds[2]])(); return True
                 if up_s is not None:
                     if not CV["texts"] and not API.HasTarget(): CV["said"] = (up_s, time.time())
                     return bag_window_up(up_s, button)
@@ -1231,13 +1253,13 @@ def _module_inventory():
                 if slot is None: return False
                 kind, graphic, bag = CANVAS["kinds"][slot]; r = CANVAS["regions"][slot]
                 if kind == "open" and has_line(r) and y < r[1] + LABEL_LINE_H and not API.HasTarget():
-                    act(bag_min, bag, True)(); return True
+                    act("bag_min", bag, True)(); return True
                 return False
             if b == "Right":
                 if up_s is not None: return True
                 slot = region_at(x, y)
                 if slot is not None and CANVAS["kinds"][slot][0] == "open":
-                    act(bag_close, CANVAS["kinds"][slot][2])(); return True
+                    act("bag_close", CANVAS["kinds"][slot][2])(); return True
             return False
         def canvas_drop(slot, x, y, hold):
             kind, graphic, bag = CANVAS["kinds"][slot]
@@ -1265,8 +1287,8 @@ def _module_inventory():
             slot = region_at(x, y)
             if slot is None: return False
             kind, graphic, bag = CANVAS["kinds"][slot]
-            if kind in ("closed", "board"): act(bag_use, bag)(); return True
-            if kind == "mini": act(bag_min, bag, False)(); return True
+            if kind in ("closed", "board"): act("bag_use", bag)(); return True
+            if kind == "mini": act("bag_min", bag, False)(); return True
             return False
         TIPS = {"closed": "Double-click to open; drop an item to put it in",
                 "mini": "Double-click to restore; drop an item to put it in",
@@ -1321,7 +1343,7 @@ def _module_inventory():
             except Exception as e: CV["texts"] = False; H.error = "canvas texts: %s" % e
         SAY_SECS = 4.0; SAY_WAIT = 1.5
         def canvas_say_tick(now):
-            if CV["texts"] or st.canvas is None: return
+            if CV["texts"] or st["canvas"] is None: return
             lbl = CV["say_lbl"]; said = CV["said"]; rd = JR["rd"]
             if said is not None and rd is not None:
                 serial, t0 = said
@@ -1330,7 +1352,7 @@ def _module_inventory():
                     sp = CV["spot"].get(serial); CV["said"] = None
                     if sp is None or CV["ctrl"] is None: break
                     if lbl is None:
-                        grid = ui.get("grid")
+                        grid = win.get("grid")
                         if grid is None: break
                         lbl = Kit.add_label(grid, "", 0, 0, Kit.HUE_TEXT); Kit.flush(); into_canvas(lbl)
                         CV["say_lbl"] = lbl
@@ -1350,19 +1372,19 @@ def _module_inventory():
         shrink = {"pct": None}
         def scale_now():
             p = shrink["pct"]
-            return (p, True) if p is not None and p < st.scale_pct else (st.scale_pct, st.scale_items)
+            return (p, True) if p is not None and p < st["scale_pct"] else (st["scale_pct"], st["scale_items"])
         def note_shrunk():
             if shrink["pct"] is None: Kit.put_var(SHRINK_KEY, "")
-            else: Kit.put_var(SHRINK_KEY, "%d|%d" % (st.scale_pct, 1 if st.scale_items else 0))
+            else: Kit.put_var(SHRINK_KEY, "%d|%d" % (st["scale_pct"], 1 if st["scale_items"] else 0))
         def bag_shrink(pct):
             if pct is not None and not (R.ok and not H.disabled and attached()): pct = None
             if pct is not None and canvas_ok(): pct = None
             if pct is not None and shrink["pct"] is None:
                 got = safe(read_scale)
-                if got: st.scale_pct, st.scale_items = got
+                if got: st["scale_pct"], st["scale_items"] = got
             if pct is not None:
                 pct = max(SHRINK_MIN, int(pct))
-                if pct >= st.scale_pct: pct = None
+                if pct >= st["scale_pct"]: pct = None
             if pct == shrink["pct"]: return
             was = shrink["pct"]; before = H.scale; shrink["pct"] = pct
             try: apply_scale(*scale_now())
@@ -1370,10 +1392,10 @@ def _module_inventory():
                 shrink["pct"] = was; API.SysMsg(TITLE + ": couldn't change the bag scale (%s)." % e, HUE_ERR); return
             note_shrunk()
             if before > 0 and H.scale > 0:
-                f = H.scale / before; st.cell_w = max(1, min(MAX_CELL, int(round(st.cell_w * f))))
-                st.cell_h = max(1, min(MAX_CELL, int(round(st.cell_h * f))))
-            st.fit_pending = True; frame_changed()
-            if not (st.job or st.sort): set_status("Idle")
+                f = H.scale / before; st["cell_w"] = max(1, min(MAX_CELL, int(round(st["cell_w"] * f))))
+                st["cell_h"] = max(1, min(MAX_CELL, int(round(st["cell_h"] * f))))
+            st["fit_pending"] = True; frame_changed()
+            if not (st["job"] or st["sort"]): set_status("Idle")
         def unshrink_left():
             raw = Kit.get_var(SHRINK_KEY)
             if not raw: return
@@ -1381,93 +1403,98 @@ def _module_inventory():
             try: pct, items = int(p[0]), (len(p) > 1 and p[1] == "1")
             except Exception: Kit.put_var(SHRINK_KEY, ""); return
             if R.ok and 50 <= pct <= 200:
-                try: apply_scale(pct, items); st.scale_pct, st.scale_items = pct, items
+                try: apply_scale(pct, items); st["scale_pct"], st["scale_items"] = pct, items
                 except Exception: return
             Kit.put_var(SHRINK_KEY, "")
         def paperdoll_fit(w, h):
             area = (int(w), int(h)) if (w is not None and h is not None and attached()) else None
             if area is None:
-                if fitov["area"] is not None: fitov["area"] = None; layout_fit(None, None, None); st.dirty_frame = True
+                if fitov["area"] is not None:
+                    fitov["area"] = None; layout_fit(None, None, None); st["dirty_frame"] = True
                 return
-            if area != fitov["area"]: fitov["area"] = area; layout_fit(area[0], area[1], "w"); st.dirty_frame = True
+            if area != fitov["area"]: fitov["area"] = area; layout_fit(area[0], area[1], "w"); st["dirty_frame"] = True
         def bag_pack(width, height):
             if not (canvas_ok() and attached()): return None
             side = 0 if side_off() else side_width(max(60, min(int(height), 1000))); aw = int(width) - side
             if aw < 40: return None
             tot = sum(a for _slot, a, _r in split_weights(split_input()))
-            k = (st.scale_pct if shrink["pct"] is not None
-                 else (int(round(H.scale * 100)) if R.ok else st.scale_pct)) / 100.0
+            k = (st["scale_pct"] if shrink["pct"] is not None
+                 else (int(round(H.scale * 100)) if R.ok else st["scale_pct"])) / 100.0
             need = max(80, int(math.ceil(tot * k * k / aw)))
             if int(height) < (1 << 19): need = min(need, max(1, int(height)))
             return None, need
-        def side_off(): return st.side_hidden and not st.collapsed and attached()
+        def side_off(): return st["side_hidden"] and not st["minimized"] and attached()
         def top_off(): return 0 if (bare_on() or attached()) else BAR_H
         def attach_raw():
-            att = st.attach
+            att = st["attach"]
             if att is None: return None
             raw = att.get("raw")
             if raw is None or raw.IsDisposed:
                 raw = raw_of(att.get("g")) if R.ok else None; att["raw"] = raw
-                if raw is not None: Kit.attach(ui["grid"], att.get("g"))
+                if raw is not None: Kit.attach(win["grid"], att.get("g"))
             return raw
         def attach_to(info):
-            if info is None and st.attach is not None:
+            if info is None and st["attach"] is not None:
                 safe(lambda: bag_shrink(None))
                 if fitov["area"] is not None: fitov["area"] = None; layout_fit(None, None, None)
-                st.frame_x, st.frame_y = st.saved_fx, st.saved_fy; st.detached_at = time.time(); H.bar_at = None
-                for raw in (st.bar_raw, st.grid_raw):
+                st["frame_x"], st["frame_y"] = st["saved_fx"], st["saved_fy"]; st["detached_at"] = time.time()
+                H.bar_at = None
+                for raw in (st["bar_raw"], st["grid_raw"]):
                     try:
-                        if raw is not None and not raw.IsDisposed: move(raw, st.frame_x, st.frame_y)
+                        if raw is not None and not raw.IsDisposed: move(raw, st["frame_x"], st["frame_y"])
                     except Exception: pass
                 for key in ("bar", "grid"):
-                    g = ui.get(key)
+                    g = win.get(key)
                     if Kit.is_open(g):
-                        g.SetPos(st.frame_x, st.frame_y); Kit.moved_by_code(g)
+                        g.SetPos(st["frame_x"], st["frame_y"]); Kit.moved_by_code(g)
             elif info is not None:
-                st.collapsed = st.docked = False; set_dock_wish(False)
+                st["minimized"] = st["docked"] = False; set_dock_wish(False)
                 try:
                     lead = info.get("g")
                     if Kit.is_open(lead) and (info.get("dx") or info.get("dy")):
-                        st.frame_x = int(lead.GetX()) + int(info.get("dx", 0))
-                        st.frame_y = int(lead.GetY()) + int(info.get("dy", 0))
+                        st["frame_x"] = int(lead.GetX()) + int(info.get("dx", 0))
+                        st["frame_y"] = int(lead.GetY()) + int(info.get("dy", 0))
                 except Exception: pass
-            st.attach = info; st.dirty_frame = True
+            st["attach"] = info; st["dirty_frame"] = True
         def bare_btn_size(): w, h = Kit.pic_size(ART_BARE[0]); return (w or 15), (h or 15)
         def add_bare_button(grid, x, y, strip=True):
             if strip: add_quick_strip(grid, x - 4, y + max(0, (bare_btn_size()[1] - QUICK_ICON) // 2))
-            if attached(): art, tip = Kit.ART_DOCK, ("Show the side panel" if st.side_hidden else "Hide the side panel")
+            if attached():
+                art, tip = Kit.ART_DOCK, ("Show the side panel" if st["side_hidden"] else "Hide the side panel")
             else:
-                art, tip = ART_BARE, ("Show the title bar and side panel" if st.bare
+                art, tip = ART_BARE, ("Show the title bar and side panel" if st["bare"]
                                       else "Bags only: hide the title bar and side panel")
-            Kit.art_button(grid, ui["store"], "bare", art, x, y, None, tip, on_click=act(toggle_bare))
+            Kit.art_button(grid, win["store"], "bare", art, x, y, None, tip, on_click=act("toggle_bare"))
         def build_slots(grid, slot_raws, cols, cw, ch, gap, gw, gh, trim):
             fit = max(4, (cw - 8) // 7); area = fitov["area"] if attached() else None
             if area is not None:
                 no_mouse(Kit.add_tiled(grid, Kit.SECTION_TILE, 0, 0, area[0], area[1], Kit.SECTION_ALPHA))
-            for idx in range(st.slots):
+            for idx in range(st["slots"]):
                 r, c = divmod(idx, cols); x, y = c * (cw + gap), r * (ch + gap)
                 drop = box(x, y, cw, ch, "#000000", 0.01)
                 if bare_on(): Kit.set(drop, "CanMove", True)
-                grid.Add(drop); Kit.add_tiled(grid, Kit.SECTION_TILE, x, y, cw, ch, st.opacity)
+                grid.Add(drop); Kit.add_tiled(grid, Kit.SECTION_TILE, x, y, cw, ch, st["opacity"])
                 if trim:
                     if c < cols - 1: grid.Add(no_mouse(box(x + cw - 1, y, 1, ch, C_SEAM, 0.8)))
-                    if idx + cols < st.slots: grid.Add(no_mouse(box(x, y + ch - 1, cw, 1, C_SEAM, 0.8)))
+                    if idx + cols < st["slots"]: grid.Add(no_mouse(box(x, y + ch - 1, cw, 1, C_SEAM, 0.8)))
                 else:
                     for bx, by, bw, bh in ((x, y, cw, 1), (x, y + ch - 1, cw, 1),
                                            (x, y, 1, ch), (x + cw - 1, y, 1, ch)):
                         grid.Add(no_mouse(box(bx, by, bw, bh, C_EDGE, 0.9)))
                 labs = [label(grid, "#%d" % (idx + 1), x + 5, y + 3, Kit.HUE_TITLE)]
-                if idx in st.assign:
-                    labs.append(label(grid, short(bag_name(st.assign[idx], False), fit), x + 5, y + 21, Kit.HUE_INFO))
+                if idx in st["assign"]:
+                    labs.append(label(grid, short(bag_name(st["assign"][idx], False), fit), x + 5, y + 21,
+                                      Kit.HUE_INFO))
                     labs.append(label(grid, "Closed", x + 5, y + 39, Kit.HUE_INFO))
                 else: labs.append(label(grid, short("Empty: click Slots", fit), x + 5, y + 21, Kit.HUE_INFO))
                 slot_raws.append(tuple(raw_of(l) for l in labs) if R.ok else ())
                 cnt = label(grid, "", x + 5, y + max(0, ch - 18), Kit.HUE_GOOD); Kit.set(cnt, "IsVisible", False)
-                ui["counts"].append((cnt, x, y, cw, ch))
+                win["counts"].append((cnt, x, y, cw, ch))
             if area is not None:
-                for idx in range(st.slots, cols * int(math.ceil(st.slots / float(cols)))):
+                for idx in range(st["slots"], cols * int(math.ceil(st["slots"] / float(cols)))):
                     r, c = divmod(idx, cols)
-                    no_mouse(Kit.add_tiled(grid, Kit.SECTION_TILE, c * (cw + gap), r * (ch + gap), cw, ch, st.opacity))
+                    no_mouse(Kit.add_tiled(grid, Kit.SECTION_TILE, c * (cw + gap), r * (ch + gap), cw, ch,
+                                           st["opacity"]))
             if trim:
                 for bx, by, bw, bh in ((0, 0, gw, 1), (0, gh - 1, gw, 1), (0, 0, 1, gh), (gw - 1, 0, 1, gh)):
                     grid.Add(no_mouse(box(bx, by, bw, bh, C_EDGE, 0.9)))
@@ -1476,19 +1503,20 @@ def _module_inventory():
                 kx, ky = gw - kw + GRIP_OUT, gh - kh + GRIP_OUT; no_mouse(Kit.add_pic(grid, Kit.CORNER_ART, kx, ky))
                 Kit.catcher(grid, kx, ky, kw, kh, lambda *a: None, "Drag to move the bags", movable=True)
                 add_bare_button(grid, kx - tw - 3, gh + GEM_BELOW); total_w = kx + kw
-                total_h = max(ky + kh, gh + GEM_BELOW + th); grid.SetRect(st.frame_x, st.frame_y, total_w, total_h)
-                st.grid_wh = (total_w, total_h); return total_w
+                total_h = max(ky + kh, gh + GEM_BELOW + th)
+                grid.SetRect(st["frame_x"], st["frame_y"], total_w, total_h)
+                st["grid_wh"] = (total_w, total_h); return total_w
             if side_off():
                 tw, th = bare_btn_size()
                 if area is not None:
                     add_bare_button(grid, area[0] - tw - 2, area[1] - th - 2)
-                    grid.SetRect(st.frame_x, st.frame_y, area[0], area[1]); st.grid_wh = area; return area[0]
+                    grid.SetRect(st["frame_x"], st["frame_y"], area[0], area[1]); st["grid_wh"] = area; return area[0]
                 add_bare_button(grid, gw - tw, gh + GEM_BELOW); total_h = gh + GEM_BELOW + th
-                grid.SetRect(st.frame_x, st.frame_y, gw, total_h); st.grid_wh = (gw, total_h); return gw
-            pw, ph = build_side_panel(grid, gw + gap, gh); st.side_pw = gap + pw; total_w = gw + gap + pw
+                grid.SetRect(st["frame_x"], st["frame_y"], gw, total_h); st["grid_wh"] = (gw, total_h); return gw
+            pw, ph = build_side_panel(grid, gw + gap, gh); st["side_pw"] = gap + pw; total_w = gw + gap + pw
             if area is not None: total_w, ph = max(total_w, area[0]), max(ph, area[1])
-            grid.SetRect(st.frame_x, st.frame_y + top_off(), total_w, max(gh, ph)); st.grid_wh = (total_w, max(gh, ph))
-            return total_w
+            grid.SetRect(st["frame_x"], st["frame_y"] + top_off(), total_w, max(gh, ph))
+            st["grid_wh"] = (total_w, max(gh, ph)); return total_w
         anch = {"outline": None, "told": False}
         def gump_rect(g):
             try:
@@ -1497,18 +1525,18 @@ def _module_inventory():
             except Exception: return None
             return None if w <= 1 or h <= 1 else (x, y, w, h)
         def frame_outline():
-            if st.collapsed or st.docked: return None
+            if st["minimized"] or st["docked"]: return None
             rects = []
-            if not bare_on() and not attached() and st.canvas != "alone":
-                r = gump_rect(ui["bar"])
+            if not bare_on() and not attached() and st["canvas"] != "alone":
+                r = gump_rect(win["bar"])
                 if r is not None: rects.append(r)
-            r = gump_rect(ui["grid"])
+            r = gump_rect(win["grid"])
             if r is not None: rects.append(r)
             if not rects: return None
             x0 = min(r[0] for r in rects); y0 = min(r[1] for r in rects); x1 = max(r[0] + r[2] for r in rects)
             y1 = max(r[1] + r[3] for r in rects); return x0, y0, x1 - x0, y1 - y0
         def anchors_capture():
-            out = []; bar, grid = ui["bar"], ui["grid"]
+            out = []; bar, grid = win["bar"], win["grid"]
             for g, leader in list(SNAP.links.items()):
                 if (leader is bar or leader is grid) and leader is not None and Kit.is_open(g):
                     r = gump_rect(g)
@@ -1517,11 +1545,11 @@ def _module_inventory():
         def edge_pos(f0, f1, o0, o1, n0, n1):
             return n1 + (f0 - o1) if f0 >= o1 - 2 or (f1 > o0 + 2 and abs(f1 - o1) < abs(f0 - o0)) else n0 + (f0 - o0)
         def anchors_apply(followers):
-            snap = SNAP; leader = ui["grid"] if (bare_on() or attached() or st.canvas == "alone") else ui["bar"]
-            if leader is None: leader = ui["grid"]
+            snap = SNAP; leader = win["grid"] if (bare_on() or attached() or st["canvas"] == "alone") else win["bar"]
+            if leader is None: leader = win["grid"]
             Kit.flush(); new = frame_outline(); old = anch["outline"]
-            if old is not None: old = (st.frame_x + old[0], st.frame_y + old[1], old[2], old[3])
-            if new is not None: anch["outline"] = (new[0] - st.frame_x, new[1] - st.frame_y, new[2], new[3])
+            if old is not None: old = (st["frame_x"] + old[0], st["frame_y"] + old[1], old[2], old[3])
+            if new is not None: anch["outline"] = (new[0] - st["frame_x"], new[1] - st["frame_y"], new[2], new[3])
             moved_n = 0
             for g, (fx, fy, fw, fh) in followers:
                 if leader is None or not Kit.is_open(g): continue
@@ -1544,104 +1572,115 @@ def _module_inventory():
                 API.SysMsg(TITLE + ": %s moved with the bags' edge." % Kit.count(moved_n, "snapped window"), HUE_INFO)
         def screen_dims(cols, rows, ch, gap):
             sh = Kit.screen()[1]
-            if sh <= 0 or st.slots <= 1: return cols, rows
+            if sh <= 0 or st["slots"] <= 1: return cols, rows
             fit_rows = max(1, (sh - top_off() - SCREEN_SLACK + gap) // (ch + gap))
             if rows <= fit_rows: return cols, rows
-            c = int(math.ceil(st.slots / float(fit_rows))); return c, int(math.ceil(st.slots / float(c)))
-        def build_frame():
+            c = int(math.ceil(st["slots"] / float(fit_rows))); return c, int(math.ceil(st["slots"] / float(c)))
+        def build_window():
             followers = anchors_capture(); canvas_detach(); dispose("grid"); dispose("bar")
-            if st.canvas is not None and canvas_mode() == st.canvas: build_canvas_frame(followers); return
-            if fitov["area"] is not None and attached() and st.geom is not None:
-                layout_fit(fitov["area"][0], fitov["area"][1], "w"); st.dirty_frame = False
-            elif fitov["told"] is not None and not attached() and st.geom is not None:
-                layout_fit(fitov["told"][0], fitov["told"][1], "w"); st.dirty_frame = False
+            if st["canvas"] is not None and canvas_mode() == st["canvas"]: build_canvas_frame(followers); return
+            if fitov["area"] is not None and attached() and st["geom"] is not None:
+                layout_fit(fitov["area"][0], fitov["area"][1], "w"); st["dirty_frame"] = False
+            elif fitov["told"] is not None and not attached() and st["geom"] is not None:
+                layout_fit(fitov["told"][0], fitov["told"][1], "w"); st["dirty_frame"] = False
             cols, rows = layout_dims(); trim = trimming(); gap = 0 if trim else LOOSE_GAP
-            cw, ch = fitov["cell"] or (st.cell_w, st.cell_h)
-            free = not attached() and st.canvas is None and fitov["told"] is None and not HOST.layout_locked(KEY)
-            if free and not st.collapsed: cols, rows = screen_dims(cols, rows, ch, gap)
-            gw = cols * cw + (cols - 1) * gap; gh = rows * ch + (rows - 1) * gap; st.geom = (cols, cw, ch, gap)
-            st.icons_used = H.icons or DEFAULT_ICONS
-            ui.update({"store": ({}, {}), "side_status": None, "search_box": None, "counts": [], "count_state": {}})
-            bare = bare_on(); grid = G.CreateGump(bare, bare); ui["grid_bare"] = bare
-            st.grid_info = (raw_of(grid) if R.ok else None, bare); slot_raws = []
-            if st.collapsed: total_w = BAR_MIN_W; grid.SetRect(st.frame_x, st.frame_y + BAR_H, 1, 1)
+            cw, ch = fitov["cell"] or (st["cell_w"], st["cell_h"])
+            free = not attached() and st["canvas"] is None and fitov["told"] is None and not HOST.layout_locked(KEY)
+            if free and not st["minimized"]: cols, rows = screen_dims(cols, rows, ch, gap)
+            gw = cols * cw + (cols - 1) * gap; gh = rows * ch + (rows - 1) * gap; st["geom"] = (cols, cw, ch, gap)
+            st["icons_used"] = H.icons or DEFAULT_ICONS
+            win.update({"store": ({}, {}), "side_status": None, "search_box": None, "counts": [], "count_state": {}})
+            bare = bare_on(); grid = G.CreateGump(bare, bare); win["grid_bare"] = bare
+            st["grid_info"] = (raw_of(grid) if R.ok else None, bare); slot_raws = []
+            if st["minimized"]: total_w = BAR_MIN_W; grid.SetRect(st["frame_x"], st["frame_y"] + BAR_H, 1, 1)
             else: total_w = build_slots(grid, slot_raws, cols, cw, ch, gap, gw, gh, trim)
             if free:
                 pair_w = total_w if bare else max(total_w, BAR_MIN_W)
-                pair_h = BAR_H if st.collapsed else top_off() + (st.grid_wh[1] if st.grid_wh else gh)
-                nx, ny = Kit.clamp(st.frame_x, st.frame_y, pair_w, pair_h)
-                if (nx, ny) != (st.frame_x, st.frame_y):
-                    st.frame_x, st.frame_y = nx, ny; grid.SetPos(nx, ny + (BAR_H if st.collapsed else top_off()))
-            add_hook(grid, True); lay_under(grid); G.AddGump(grid); ui["grid"] = grid
-            bar = make_bar(total_w, st.docked or bare or attached(), free)
-            if attached(): st.attach_g = st.attach.get("g"); Kit.attach(grid, st.attach_g)
+                pair_h = BAR_H if st["minimized"] else top_off() + (st["grid_wh"][1] if st["grid_wh"] else gh)
+                nx, ny = Kit.clamp(st["frame_x"], st["frame_y"], pair_w, pair_h)
+                if (nx, ny) != (st["frame_x"], st["frame_y"]):
+                    st["frame_x"], st["frame_y"] = nx, ny
+                    grid.SetPos(nx, ny + (BAR_H if st["minimized"] else top_off()))
+            add_hook(grid, True); lay_under(grid); G.AddGump(grid); win["grid"] = grid
+            bar = make_bar(total_w, st["docked"] or bare or attached(), free)
+            if attached(): st["attach_g"] = st["attach"].get("g"); Kit.attach(grid, st["attach_g"])
             elif bare: Kit.attach(bar, grid)
             else: Kit.attach(grid, bar)
-            anchors_apply(followers); st.slot_raws = tuple(slot_raws)
+            anchors_apply(followers); st["slot_raws"] = tuple(slot_raws)
             if SR["counts"]: show_counts()
-            st.grid_raw = raw_of(grid) if R.ok else None; st.bar_raw = raw_of(bar) if R.ok else None
-            if R.ok and not H.disabled and (st.grid_raw is None or st.bar_raw is None):
+            st["grid_raw"] = raw_of(grid) if R.ok else None; st["bar_raw"] = raw_of(bar) if R.ok else None
+            if R.ok and not H.disabled and (st["grid_raw"] is None or st["bar_raw"] is None):
                 H.error = "can't reach the client's own window controls"; H.disabled = True
         CLOSE_TIP = "Close " + TITLE + " (turns it off; gives every bag back)"
         SLOTS_TIP = "Open the bag manager: a bag per slot"; TRAPS_TIP = "Pick the bags Trap and Untrap cast on"
         def make_bar(total_w, hide, free=False):
             bar_w = max(total_w, BAR_MIN_W); bar = G.CreateGump(True, True)
-            if free: Kit.place(bar, st.frame_x, st.frame_y, bar_w, BAR_H)
-            else: bar.SetRect(st.frame_x, st.frame_y, bar_w, BAR_H)
+            if free: Kit.place(bar, st["frame_x"], st["frame_y"], bar_w, BAR_H)
+            else: bar.SetRect(st["frame_x"], st["frame_y"], bar_w, BAR_H)
             Kit.add_window_frame(bar, bar_w, BAR_H, corners=False); Kit.add_section(bar, 8, 8, bar_w - 16, BAR_H - 16)
             Kit.add_label(bar, TITLE.upper(), 18, 14, Kit.HUE_TITLE)
-            Kit.add_label(bar, str(st.slots), 18 + Kit.text_w(TITLE.upper()) + 8, 14, Kit.HUE_INFO); store = ui["store"]
-            x = bar_w - 12 - 30
+            Kit.add_label(bar, str(st["slots"]), 18 + Kit.text_w(TITLE.upper()) + 8, 14, Kit.HUE_INFO)
+            store = win["store"]; x = bar_w - 12 - 30
             if Kit.zone_up(KEY): x += 20
             else:
-                Kit.art_button(bar, store, "close", Kit.ART_CLOSE, x, 11, None, CLOSE_TIP,
-                               on_click=act(HOST.disable, KEY))
+                Kit.art_button(bar, store, "close", Kit.ART_CLOSE, x, 11, None, CLOSE_TIP, on_click=act("disable", KEY))
                 x -= 20
-                Kit.art_button(bar, store, "min", Kit.ART_RESTORE if st.collapsed else Kit.ART_MIN, x, 14,
-                               None, Kit.RESTORE_TIP if st.collapsed else Kit.MIN_TIP, on_click=act(user_collapse))
-                Kit.dock_button(bar, store, x, 14, on_click=act(fold_to_bar)); x -= Kit.DOCK_DX
+                Kit.art_button(bar, store, "min", Kit.ART_RESTORE if st["minimized"] else Kit.ART_MIN, x, 14,
+                               None, Kit.RESTORE_TIP if st["minimized"] else Kit.MIN_TIP, on_click=act("user_collapse"))
+                Kit.dock_button(bar, store, x, 14, on_click=act("fold_to_bar")); x -= Kit.DOCK_DX
             for key, text, tip, fn in (("settings", "Settings", Kit.SETTINGS_TIP % TITLE,
-                     act(HOST.show_settings, KEY)), ("traps", "Trap bags", TRAPS_TIP, act(open_win, "trp")),
-                    ("bags", "Slots", SLOTS_TIP, act(open_win, "mgr"))):
+                     act("show_settings", KEY)), ("traps", "Trap bags", TRAPS_TIP, act("open_win", "trp")),
+                    ("bags", "Slots", SLOTS_TIP, act("open_win", "mgr"))):
                 x -= 10 + 35 + Kit.text_w(text)
                 Kit.art_button(bar, store, key, Kit.ART_PAGE, x, 11, text, tip, on_click=fn)
-            Kit.title_catcher(bar, 8, 8, max(20, x - 14), BAR_H - 16, act(user_collapse), key=KEY)
+            Kit.title_catcher(bar, 8, 8, max(20, x - 14), BAR_H - 16, act("user_collapse"), key=KEY)
             if hide: bar.IsVisible = False
-            G.AddGump(bar); ui["bar"] = bar; return bar
+            G.AddGump(bar); win["bar"] = bar; return bar
+        wnd = None
+        def refresh():
+            if st["canvas"] is None or CV["ctrl"] is None or CANVAS["size"] is None: return
+            if CV["built"] != CANVAS["ver"] or CV["bsize"] != CANVAS["size"]:
+                if CV["rect"] is not None and (CV["rect"][2], CV["rect"][3]) != CANVAS["size"]: return
+                if dragging(): return
+                canvas_parts()
+            canvas_alpha(); canvas_safety()
         def build_canvas_frame(followers):
-            mode = st.canvas; alone = mode == "alone"; st.icons_used = H.icons or DEFAULT_ICONS
-            ui.update({"store": ({}, {}), "side_status": None, "search_box": None})
+            mode = st["canvas"]; alone = mode == "alone"; st["icons_used"] = H.icons or DEFAULT_ICONS
+            win.update({"store": ({}, {}), "side_status": None, "search_box": None})
             x0, y0, cw, ch, side = canvas_room(mode); W, H_ = fitov["told"] if alone else fitov["area"]
-            grid = G.CreateGump(alone, alone); ui["grid_bare"] = alone; raw = raw_of(grid); st.grid_info = (raw, alone)
-            store = ui["store"]; titled = alone and not st.bare and title_fits(W)
+            grid = G.CreateGump(alone, alone); win["grid_bare"] = alone; raw = raw_of(grid)
+            st["grid_info"] = (raw, alone)
+            store = win["store"]; titled = alone and not st["bare"] and title_fits(W)
             if alone:
                 Kit.add_window_frame(grid, W, H_)
                 if titled:
-                    Kit.title_bar(grid, store, W, TITLE, KEY, act(user_collapse), act(fold_to_bar),
-                                  act(HOST.show_settings, KEY), close_tip=CLOSE_TIP,
-                                  extra=[("traps", Kit.ART_PAGE, "Trap bags", TRAPS_TIP, act(open_win, "trp")),
-                                         ("bags", Kit.ART_PAGE, "Slots", SLOTS_TIP, act(open_win, "mgr"))],
-                                  after=str(st.slots))
+                    Kit.title_bar(grid, store, W, TITLE, KEY, act("user_collapse"), act("fold_to_bar"),
+                                  act("show_settings", KEY), close_tip=CLOSE_TIP,
+                                  extra=[("traps", Kit.ART_PAGE, "Trap bags", TRAPS_TIP, act("open_win", "trp")),
+                                         ("bags", Kit.ART_PAGE, "Slots", SLOTS_TIP, act("open_win", "mgr"))],
+                                  after=str(st["slots"]))
                     b = store[0].get("close")
-                    if b is not None: Kit.on_click(b, act(HOST.disable, KEY))
+                    if b is not None: Kit.on_click(b, act("disable", KEY))
             Kit.flush(); canvas_place(raw, raw.Children.Count, x0, y0, cw, ch); tw, th = bare_btn_size()
             if alone:
-                st.side_pw = 0
-                if st.bare and title_fits(W): add_bare_button(grid, x0 + cw - tw - 2, y0 + ch - th - 2)
-                elif titled and side: st.side_pw = build_side_panel(grid, x0 + cw, ch, y0)[0]
+                st["side_pw"] = 0
+                if st["bare"] and title_fits(W): add_bare_button(grid, x0 + cw - tw - 2, y0 + ch - th - 2)
+                elif titled and side: st["side_pw"] = build_side_panel(grid, x0 + cw, ch, y0)[0]
                 else: add_quick_strip(grid, x0 + cw - 2, y0 + ch - QUICK_ICON - 2)
-            elif side_off(): add_bare_button(grid, W - tw - 2, H_ - th - 2); st.side_pw = 0
-            else: st.side_pw = build_side_panel(grid, cw, H_)[0]
-            grid.SetRect(st.frame_x, st.frame_y, W, H_); st.grid_wh = (W, H_); add_hook(grid, False)
+            elif side_off(): add_bare_button(grid, W - tw - 2, H_ - th - 2); st["side_pw"] = 0
+            else: st["side_pw"] = build_side_panel(grid, cw, H_)[0]
+            grid.SetRect(st["frame_x"], st["frame_y"], W, H_); st["grid_wh"] = (W, H_); add_hook(grid, False)
             if not alone: lay_under(grid)
-            elif HOST.layout_locked(KEY): grid.CanMove = False
-            G.AddGump(grid); ui["grid"] = grid
+            if HOST.layout_locked(KEY): grid.CanMove = False
+            G.AddGump(grid); win["grid"] = grid
             bar = make_bar(W, True)
-            if attached(): st.attach_g = st.attach.get("g"); Kit.attach(grid, st.attach_g)
-            anchors_apply(followers); st.slot_raws = (); st.grid_raw = raw; st.bar_raw = raw_of(bar) if R.ok else None
-            if st.grid_raw is None: H.error = "can't reach the client's own window controls"; H.disabled = True; return
-            canvas_sync()
-        def toggle_collapsed(): st.collapsed = not st.collapsed; st.docked = False; frame_changed()
+            if attached(): st["attach_g"] = st["attach"].get("g"); Kit.attach(grid, st["attach_g"])
+            anchors_apply(followers); st["slot_raws"] = (); st["grid_raw"] = raw
+            st["bar_raw"] = raw_of(bar) if R.ok else None
+            if st["grid_raw"] is None:
+                H.error = "can't reach the client's own window controls"; H.disabled = True; return
+            refresh()
+        def toggle_collapsed(): st["minimized"] = not st["minimized"]; st["docked"] = False; frame_changed()
         def dock_wish(): return HOST.dock_wanted(DOCK_KEY)
         def set_dock_wish(on): HOST.dock_want_set(DOCK_KEY, on)
         def user_collapse():
@@ -1650,11 +1689,12 @@ def _module_inventory():
         def fold_to_bar():
             if Kit.zone_up(KEY): return
             set_dock_wish(True); alive = HOST.bar_alive()
-            if not st.collapsed or st.docked != alive: st.collapsed, st.docked = True, alive; frame_changed()
+            if not st["minimized"] or st["docked"] != alive:
+                st["minimized"], st["docked"] = True, alive; frame_changed()
             if not alive: HOST.dock_note(TITLE)
         def toggle_bare():
-            if attached(): st.side_hidden = not st.side_hidden
-            else: st.bare = not st.bare
+            if attached(): st["side_hidden"] = not st["side_hidden"]
+            else: st["bare"] = not st["bare"]
             frame_changed()
         _link = {"next": 0.0}
         def link_tick():
@@ -1664,31 +1704,31 @@ def _module_inventory():
             if cmd:
                 API.RemoveSharedVar(LINK_CMD); cmd = str(cmd)
                 if attached():
-                    fn = st.attach.get("cmd")
+                    fn = st["attach"].get("cmd")
                     if fn is not None: safe(lambda: fn(cmd))
-                elif cmd == "show" and (st.collapsed or st.docked):
-                    set_dock_wish(False); st.collapsed = st.docked = False; frame_changed()
-                elif cmd == "dock" and not st.docked: fold_to_bar()
-            if attached(): state = str(st.attach.get("state") or "open")
+                elif cmd == "show" and (st["minimized"] or st["docked"]):
+                    set_dock_wish(False); st["minimized"] = st["docked"] = False; frame_changed()
+                elif cmd == "dock" and not st["docked"]: fold_to_bar()
+            if attached(): state = str(st["attach"].get("state") or "open")
             else:
-                if st.docked:
-                    if not HOST.bar_alive(): st.docked = False; st.dirty_frame = True
-                elif st.collapsed and now >= _link.get("wish", 0.0):
+                if st["docked"]:
+                    if not HOST.bar_alive(): st["docked"] = False; st["dirty_frame"] = True
+                elif st["minimized"] and now >= _link.get("wish", 0.0):
                     _link["wish"] = now + 0.25
-                    if dock_wish() and HOST.bar_alive(): st.docked = True; st.dirty_frame = True
-                elif not st.collapsed and now >= _link.get("wish", 0.0):
+                    if dock_wish() and HOST.bar_alive(): st["docked"] = True; st["dirty_frame"] = True
+                elif not st["minimized"] and now >= _link.get("wish", 0.0):
                     _link["wish"] = now + 1.0
                     if dock_wish(): set_dock_wish(False)
-                state = "docked" if st.docked else ("collapsed" if st.collapsed else "open")
-            if state != st.link_state: st.link_state = state; API.SetSharedVar(LINK_STATE, state)
+                state = "docked" if st["docked"] else ("collapsed" if st["minimized"] else "open")
+            if state != st["link_state"]: st["link_state"] = state; API.SetSharedVar(LINK_STATE, state)
         def set_min(value):
             if not R.ok: API.SysMsg(TITLE + ": minimizing bags needs client access (%s)." % R.error, HUE_ERR); return
             n = set_minimized_all(value) or 0
             API.SysMsg(TITLE + ": %s %s." % ("minimized" if value else "restored", Kit.count(n, "bag")), HUE_INFO)
         def fallback_tick():
             track_wrapper_frame(); grew = False
-            hidden = st.collapsed or (attached() and not st.attach.get("shown", True))
-            for idx, serial in st.layout:
+            hidden = st["minimized"] or (attached() and not st["attach"].get("shown", True))
+            for idx, serial in st["layout"]:
                 try:
                     it = API.FindItem(serial); g = it.GetContainerGump() if it else None
                     if not Kit.is_open(g): continue
@@ -1699,88 +1739,90 @@ def _module_inventory():
                     if g.GetX() != cx or g.GetY() != cy: g.SetPos(cx, cy)
                     w = g.GetWidth() or 0; h = g.GetHeight() or 0
                 except Exception: continue
-                if st.cell_w < w <= MAX_CELL: st.cell_w, grew = w, True
-                if st.cell_h < h <= MAX_CELL: st.cell_h, grew = h, True
+                if st["cell_w"] < w <= MAX_CELL: st["cell_w"], grew = w, True
+                if st["cell_h"] < h <= MAX_CELL: st["cell_h"], grew = h, True
             if grew: frame_changed()
         def follow_lead():
-            lead = st.attach.get("g") if attached() else None
-            if lead is not None and lead is not st.attach_g and Kit.is_open(lead) and Kit.is_open(ui.get("grid")):
-                st.attach_g = lead; Kit.attach(ui["grid"], lead)
+            lead = st["attach"].get("g") if attached() else None
+            if lead is not None and lead is not st["attach_g"] and Kit.is_open(lead) and Kit.is_open(win.get("grid")):
+                st["attach_g"] = lead; Kit.attach(win["grid"], lead)
         def track_wrapper_frame():
             if attached():
-                lead, att = st.attach.get("g"), st.attach
+                lead, att = st["attach"].get("g"), st["attach"]
                 if not Kit.is_open(lead): return
                 follow_lead(); x = lead.GetX() + att.get("dx", 0); y = lead.GetY() + att.get("dy", 0)
-                grid = ui.get("grid")
-                if (x, y) != (st.frame_x, st.frame_y):
-                    st.frame_x, st.frame_y = x, y
+                grid = win.get("grid")
+                if (x, y) != (st["frame_x"], st["frame_y"]):
+                    st["frame_x"], st["frame_y"] = x, y
                     if Kit.is_open(grid): grid.SetPos(x, y); Kit.moved_by_code(grid)
                 elif Kit.is_open(grid) and (int(grid.GetX()), int(grid.GetY())) != (x, y):
                     grid.SetPos(x, y); Kit.moved_by_code(grid)
                 return
-            lead, other, dy = (ui["grid"], ui["bar"], 0) if ui.get("grid_bare") else (ui["bar"], ui["grid"], BAR_H)
+            lead, other, dy = (win["grid"], win["bar"], 0) if win.get("grid_bare") else (win["bar"], win["grid"], BAR_H)
             if not Kit.is_open(lead): return
             x = lead.GetX(); y = lead.GetY()
-            if x != st.frame_x or y != st.frame_y:
-                st.frame_x, st.frame_y = x, y
+            if x != st["frame_x"] or y != st["frame_y"]:
+                st["frame_x"], st["frame_y"] = x, y
                 if Kit.is_open(other): other.SetPos(x, y + dy); Kit.moved_by_code(other)
-        def open_win(k): setattr(st, "open_" + k, True); setattr(st, "dirty_" + k, True); schedule_save()
-        CHECKS_OF = {"trp": "trap_checks", "srt": "rule_checks"}; cleanup = Kit.Cleanup()
+        def open_win(k): st["open_" + k] = True; st["dirty_" + k] = True; schedule_save()
+        CHECKS_OF = {"trp": "trap_checks", "srt": "rule_checks"}
         def sub_sync(k):
             if k == "trp": sync_trap_sel()
             elif k == "srt": sync_rules()
         def close_win(k):
             sub_sync(k); close_sub(k)
-            if k in CHECKS_OF: ui[CHECKS_OF[k]] = []
-            setattr(st, "open_" + k, False); schedule_save()
+            if k in CHECKS_OF: win[CHECKS_OF[k]] = []
+            st["open_" + k] = False; schedule_save()
         def toggle_win_min(k):
-            sub_sync(k); setattr(st, k + "_min", not getattr(st, k + "_min")); setattr(st, "dirty_" + k, True)
+            sub_sync(k); st[k + "_min"] = not st[k + "_min"]; st["dirty_" + k] = True
             schedule_save()
         def sub_window_moved(): remember_window_pos(); schedule_save()
         def build_manager():
             close_sub("mgr"); M, GAP = Kit.MARGIN, Kit.GAP; w, row_h, h_act = 480, 28, 40
-            list_h = min(st.slots * row_h + 8, 430)
-            h = M + 30 + M if st.mgr_min else M + 30 + GAP + h_act + GAP + list_h + M
-            g, store, y = framed_window("mgr", w, h, "BAG MANAGER", act(toggle_win_min, "mgr"), act(close_win, "mgr"))
-            if not st.mgr_min:
+            list_h = min(st["slots"] * row_h + 8, 430)
+            h = M + 30 + M if st["mgr_min"] else M + 30 + GAP + h_act + GAP + list_h + M
+            g, store, y = framed_window("mgr", w, h, "BAG MANAGER", act("toggle_win_min", "mgr"),
+                                        act("close_win", "mgr"))
+            if not st["mgr_min"]:
                 IW = w - 2 * M; Kit.add_section(g, M, y, IW, h_act)
                 Kit.art_button(g, store, "fill", Kit.ART_OK, M + 12, y + 9, "Auto-fill",
-                               "Put each open bag without a slot in an empty slot", on_click=act(auto_fill))
+                               "Put each open bag without a slot in an empty slot", on_click=act("auto_fill"))
                 Kit.art_button(g, store, "clear", Kit.ART_CLOSE, M + 200, y + 9, "Clear all",
-                               "Empty every slot", on_click=act(clear_all))
+                               "Empty every slot", on_click=act("clear_all"))
                 y += h_act + GAP; Kit.add_section(g, M, y, IW, list_h)
                 sa = G.CreateGumpScrollArea(M + 4, y + 4, IW - 8, list_h - 8); inner_w = IW - 8 - 20
-                for idx in range(st.slots):
+                for idx in range(st["slots"]):
                     ry = idx * row_h; Kit.add_label(sa, "#%d" % (idx + 1), 6, ry + 5, Kit.HUE_TITLE)
-                    if idx in st.assign: Kit.add_label(sa, short(bag_name(st.assign[idx]), 28), 44, ry + 5)
+                    if idx in st["assign"]: Kit.add_label(sa, short(bag_name(st["assign"][idx]), 28), 44, ry + 5)
                     else: Kit.add_label(sa, "No bag yet: click Set...", 44, ry + 5, Kit.HUE_INFO)
                     Kit.art_button(sa, store, "set%d" % idx, Kit.ART_PLAY, inner_w - 165, ry + 3,
-                                   "Set...", "Target a bag for slot #%d" % (idx + 1), on_click=act(assign_slot, idx))
+                                   "Set...", "Target a bag for slot #%d" % (idx + 1), on_click=act("assign_slot", idx))
                     Kit.art_button(sa, store, "clr%d" % idx, Kit.ART_CLOSE, inner_w - 80, ry + 3, "Clear",
-                                   "Empty slot #%d" % (idx + 1), on_click=act(clear_slot, idx))
+                                   "Empty slot #%d" % (idx + 1), on_click=act("clear_slot", idx))
                 g.Add(sa)
             sub_shown("mgr", g, sub_window_moved)
         def changed_bags():
-            forget_names(); st.dirty_frame = True; st.dirty_mgr = True; st.dirty_trp = True; st.dirty_srt = True
-            publish_layout(); save()
-        def pick_then(fn, *args):
-            def done(serial): st.actions.append((fn, args + (int(serial or 0),)))
+            forget_names(); st["dirty_frame"] = True; st["dirty_mgr"] = True; st["dirty_trp"] = True
+            st["dirty_srt"] = True
+            publish_layout(); save_settings()
+        def pick_then(kind, *args):
+            def done(serial): queue.add((kind,) + args + (int(serial or 0),), dup=True)
             HOST.pick_target(15, done)
         def assign_slot(idx):
-            API.SysMsg(TITLE + ": target a bag for slot #%d." % (idx + 1), HUE_INFO); pick_then(assign_slot_to, idx)
+            API.SysMsg(TITLE + ": target a bag for slot #%d." % (idx + 1), HUE_INFO); pick_then("assign_slot_to", idx)
         def assign_slot_to(idx, target):
             if not target: API.SysMsg(TITLE + ": cancelled.", HUE_INFO); return
             it = Kit.find_item(target)
             if not it or not it.IsContainer:
                 API.SysMsg(TITLE + ": that isn't a container.", HUE_ERR); return
             serial = int(target)
-            for k in [k for k, v in st.assign.items() if v == serial]: del st.assign[k]
-            st.assign[idx] = serial; changed_bags()
+            for k in [k for k, v in st["assign"].items() if v == serial]: del st["assign"][k]
+            st["assign"][idx] = serial; changed_bags()
             if bag_is_open(serial): API.SysMsg(TITLE + ": slot #%d set." % (idx + 1), HUE_OK)
             else: API.SysMsg(TITLE + ": slot #%d set; open the bag to snap it in." % (idx + 1), HUE_OK)
         def clear_slot(idx):
-            if idx in st.assign: del st.assign[idx]; changed_bags()
-        def clear_all(): st.assign = {}; changed_bags(); API.SysMsg(TITLE + ": all slots cleared.", HUE_INFO)
+            if idx in st["assign"]: del st["assign"][idx]; changed_bags()
+        def clear_all(): st["assign"] = {}; changed_bags(); API.SysMsg(TITLE + ": all slots cleared.", HUE_INFO)
         def auto_fill():
             candidates = []
             for top in (safe(lambda: int(API.Backpack), 0), safe(lambda: int(API.Bank), 0)):
@@ -1788,49 +1830,30 @@ def _module_inventory():
                 candidates.append(top)
                 for it in API.ItemsInContainer(top, True) or []:
                     if it.IsContainer: candidates.append(int(it.Serial))
-            used = set(st.assign.values()); free = [i for i in range(st.slots) if i not in st.assign]; added = 0
+            used = set(st["assign"].values()); free = [i for i in range(st["slots"]) if i not in st["assign"]]
+            added = 0
             for serial in candidates:
                 if not free: break
                 if serial in used or not bag_is_open(serial): continue
-                st.assign[free.pop(0)] = serial; used.add(serial); added += 1
+                st["assign"][free.pop(0)] = serial; used.add(serial); added += 1
             changed_bags()
             if added: API.SysMsg(TITLE + ": added %s." % Kit.count(added, "open bag"), HUE_OK)
             elif not free: API.SysMsg(TITLE + ": no empty slots left.", HUE_ERR)
             else: API.SysMsg(TITLE + ": no open bag without a slot found.", HUE_INFO)
         page = {"c": None, "store": ({}, {}), "next_status": 0.0}
         def size_line():
-            if st.canvas is not None: return "In a zone the bags share it. Items always draw solid."
-            return "Slots fit the open bags (%d x %d px). Items always draw solid." % (st.cell_w, st.cell_h)
-        def page_table(w):
-            return (("LAYOUT  (Apply to use)", (
-                        ("num", "slots", "Slots:", "Bag slots (%d-%d)" % (MIN_SLOTS, MAX_SLOTS), "", MIN_SLOTS,
-                         MAX_SLOTS), ("num", "cols", "Columns:", "Slots per row outside a zone (0-%d, 0 = near-square)"
-                         % MAX_SLOTS, "", 0, MAX_SLOTS),
-                        ("num", "rows", "Rows:", "Rows of slots outside a zone (0-%d, 0 = near-square)"
-                         % MAX_SLOTS, "", 0, MAX_SLOTS),
-                        ("num", "scale", "Bag scale:", "The client's Container Scale, for every container (50-200)",
-                         "%", 50, 200),
-                        ("buttons", (("apply", Kit.ART_OK, "Apply", "Use the slots, columns, rows and scale above"),),
-                         {"bdy": 4})), {"top": 32, "sh": 182, "ldy": 2, "fw": 60, "ugap": 6, "lw": w - 122}),
-                    ("LOOK", (("slider", "opacity", "Bag opacity:", "How solid bag panels and art are (10-100%); "
-                               "items stay solid", 10, 100,
-                               {"lw": 158, "sdy": 6, "sw": 200, "ugap": 20, "vfmt": "%d%%", "h": 30}),
-                              ("check", "trim", "Trim bags to their item area", "Hide bag art and butt the item areas "
-                               "together (needs client access; zones always fill)"),
-                              ("check", "items", "Scale items with the bags", "The client's option to draw items at "
-                               "bag scale")), {"top": 32, "sh": 116, "ldy": 2}),
-                    ("STATUS", (("note", short(status_line(), 64), {"key": "status", "h": 24}),
-                                ("note", size_line(), {"key": "size"})), {"top": 32, "sh": 86}))
+            if st["canvas"] is not None: return "In a zone the bags share it. Items always draw solid."
+            return "Slots fit the open bags (%d x %d px). Items always draw solid." % (st["cell_w"], st["cell_h"])
         def config_height(w): return Kit.Form.height(page_table(w), w)
         def build_config(g, x, y, w):
             if R.ok and shrink["pct"] is None:
                 got = safe(read_scale)
-                if got: st.scale_pct, st.scale_items = got
-            f = Kit.Form(g, x, y, w, {"slots": st.slots, "cols": st.cols, "rows": st.rows, "scale": st.scale_pct,
-                                      "opacity": int(round(st.opacity * 100)), "trim": st.trim,
-                                      "items": st.scale_items}, page_table(w))
+                if got: st["scale_pct"], st["scale_items"] = got
+            f = Kit.Form(g, x, y, w, {"slots": st["slots"], "cols": st["cols"], "rows": st["rows"],
+                                      "scale": st["scale_pct"], "opacity": int(round(st["opacity"] * 100)),
+                                      "trim": st["trim"], "items": st["scale_items"]}, page_table(w))
             page.update({"c": f.c, "store": f.store, "next_status": 0.0,
-                         "seen": {"trim": st.trim, "items": st.scale_items}})
+                         "seen": {"trim": st["trim"], "items": st["scale_items"]}})
         def config_closed(): page["c"] = None
         def poll_config():
             c = page["c"]
@@ -1846,13 +1869,13 @@ def _module_inventory():
                 if page.get("pct_v") != (v, c["opacity_lbl"]):
                     page["pct_v"] = (v, c["opacity_lbl"]); Kit.set_text(c["opacity_lbl"], "%d%%" % v)
                 value = v / 100.0
-                if abs(value - st.opacity) > 0.001:
-                    pend = st.opacity_pending
-                    st.opacity_pending = (value, pend[1] + 1) if pend and pend[0] == value else (value, 0)
-                    if st.opacity_pending[1] >= OPACITY_SETTLE_POLLS:
-                        st.opacity = value; st.opacity_pending = None; st.dirty_frame = True; canvas_alpha()
+                if abs(value - st["opacity"]) > 0.001:
+                    pend = st["opacity_pending"]
+                    st["opacity_pending"] = (value, pend[1] + 1) if pend and pend[0] == value else (value, 0)
+                    if st["opacity_pending"][1] >= OPACITY_SETTLE_POLLS:
+                        st["opacity"] = value; st["opacity_pending"] = None; st["dirty_frame"] = True; canvas_alpha()
                         schedule_save()
-                else: st.opacity_pending = None
+                else: st["opacity_pending"] = None
             now = time.time()
             if now >= page["next_status"]:
                 page["next_status"] = now + 1.0; Kit.set_text(c["status"], short(status_line(), 64))
@@ -1861,9 +1884,9 @@ def _module_inventory():
             if not R.tried: return "Off: tick " + TITLE + " on the Modules tab"
             if not R.ok: return "No client access: " + R.error
             if H.disabled: return "Trimming stopped after errors: " + H.error
-            if st.canvas is not None: tail = "%d open, filling the zone" % H.open_count
+            if st["canvas"] is not None: tail = "%d open, filling the zone" % H.open_count
             else: tail = "%d open, %d trimmed" % (H.open_count, len(H.trimmed))
-            if st.driving: return "Running (script-driven): " + tail
+            if st["driving"]: return "Running (script-driven): " + tail
             return "Starting" if H.hook_calls == 0 else "Running: " + tail
         def set_trim(value):
             f = page["c"]
@@ -1871,16 +1894,16 @@ def _module_inventory():
                 API.SysMsg(TITLE + ": trimming isn't available (%s)." % status_line(), HUE_ERR)
                 if f: safe(lambda: f["trim"].SetIsChecked(False)); page["seen"]["trim"] = False
                 value = False
-            if value == st.trim: return
-            st.trim = value; refit_cells(); save()
+            if value == st["trim"]: return
+            st["trim"] = value; refit_cells(); save_settings()
             API.SysMsg(TITLE + ": trim " + ("on." if value else "off."), HUE_INFO)
         def set_scale_items(value):
-            if value == st.scale_items: return
+            if value == st["scale_items"]: return
             if not R.ok: API.SysMsg(TITLE + ": scaling items needs client access (%s)." % R.error, HUE_ERR); return
             try:
-                old = st.scale_items; st.scale_items = value
+                old = st["scale_items"]; st["scale_items"] = value
                 try: apply_scale(*scale_now())
-                except Exception: st.scale_items = old; raise
+                except Exception: st["scale_items"] = old; raise
                 if shrink["pct"] is not None: note_shrunk()
                 refit_cells()
                 API.SysMsg(TITLE + ": items %s with the bags." % ("scale" if value else "don't scale"), HUE_INFO)
@@ -1902,16 +1925,16 @@ def _module_inventory():
                 API.SysMsg(TITLE + ": %d columns x %d rows only fits %d slots, not %d."
                            % (cols, rows, cols * rows, slots), HUE_ERR)
                 return
-            dropped = [k for k in st.assign if k >= slots]
-            for k in dropped: del st.assign[k]
+            dropped = [k for k in st["assign"] if k >= slots]
+            for k in dropped: del st["assign"][k]
             sync_rules()
-            for k in [k for k in st.rules if k >= slots]: del st.rules[k]
-            st.slots, st.cols, st.rows = slots, cols, rows
-            if R.ok and scale != st.scale_pct:
+            for k in [k for k in st["rules"] if k >= slots]: del st["rules"][k]
+            st["slots"], st["cols"], st["rows"] = slots, cols, rows
+            if R.ok and scale != st["scale_pct"]:
                 try:
-                    old = st.scale_pct; st.scale_pct = scale
+                    old = st["scale_pct"]; st["scale_pct"] = scale
                     try: apply_scale(*scale_now())
-                    except Exception: st.scale_pct = old; raise
+                    except Exception: st["scale_pct"] = old; raise
                     if shrink["pct"] is not None:
                         if shrink["pct"] >= scale: shrink["pct"] = None
                         note_shrunk()
@@ -1923,92 +1946,93 @@ def _module_inventory():
             API.SysMsg(msg, HUE_OK); config_closed(); HOST.refresh_settings(KEY)
         def trap_candidates():
             out = []
-            for s in [st.assign[i] for i in sorted(st.assign)] + st.trap_extra:
+            for s in [st["assign"][i] for i in sorted(st["assign"])] + st["trap_extra"]:
                 if s not in out: out.append(s)
             return out
         def sync_trap_sel():
-            checks = ui["trap_checks"]
-            if not checks or not Kit.is_open(ui["trp"]): return
+            checks = win["trap_checks"]
+            if not checks or not Kit.is_open(win["trp"]): return
             for serial, chk in checks:
-                if safe(lambda: chk.IsChecked, False): st.trap_sel.add(serial)
-                else: st.trap_sel.discard(serial)
+                if safe(lambda: chk.IsChecked, False): st["trap_sel"].add(serial)
+                else: st["trap_sel"].discard(serial)
         def build_traps():
             sync_trap_sel(); close_sub("trp"); bags = trap_candidates(); M, GAP = Kit.MARGIN, Kit.GAP
             w, row_h, h_act, h_foot = 480, 28, 40, 52; list_h = min(max(1, len(bags)) * row_h + 8, 400)
-            h = (M + 30 + M if st.trp_min else M + 30 + GAP + h_act + GAP + list_h + GAP + h_foot + M)
-            g, store, y = framed_window("trp", w, h, "TRAP BAGS", act(toggle_win_min, "trp"), act(close_win, "trp"))
+            h = (M + 30 + M if st["trp_min"] else M + 30 + GAP + h_act + GAP + list_h + GAP + h_foot + M)
+            g, store, y = framed_window("trp", w, h, "TRAP BAGS", act("toggle_win_min", "trp"), act("close_win", "trp"))
             checks = []
-            if not st.trp_min:
+            if not st["trp_min"]:
                 IW = w - 2 * M; Kit.add_section(g, M, y, IW, h_act)
                 Kit.buttons(g, store, M + 12, y + 9, (
-                    ("all", Kit.ART_OK, "Tick all", "Tick every bag", act(select_all_traps, True)),
-                    ("none", Kit.ART_CLOSE, "Untick all", "Untick every bag", act(select_all_traps, False)),
+                    ("all", Kit.ART_OK, "Tick all", "Tick every bag", act("select_all_traps", True)),
+                    ("none", Kit.ART_CLOSE, "Untick all", "Untick every bag", act("select_all_traps", False)),
                     ("add", Kit.ART_PLAY, "Add bag...", "Target a bag without a slot to add it",
-                     act(add_trap_bag))), 16)
+                     act("add_trap_bag"))), 16)
                 y += h_act + GAP; Kit.add_section(g, M, y, IW, list_h)
                 sa = G.CreateGumpScrollArea(M + 4, y + 4, IW - 8, list_h - 8); inner_w = IW - 8 - 20
                 if not bags: Kit.add_label(sa, "No bags yet. Fill the slots, or click Add bag...", 6, 6, Kit.HUE_INFO)
                 for i, serial in enumerate(bags):
                     ry = i * row_h
-                    chk = Kit.add_check(sa, short(bag_name(serial), 32), 6, ry + 4, serial in st.trap_sel,
+                    chk = Kit.add_check(sa, short(bag_name(serial), 32), 6, ry + 4, serial in st["trap_sel"],
                                         "Ticked: Trap and Untrap cast on this bag")
                     checks.append((serial, chk))
-                    if serial in st.trap_extra and serial not in st.assign.values():
+                    if serial in st["trap_extra"] and serial not in st["assign"].values():
                         Kit.art_button(sa, store, "rm%d" % i, Kit.ART_CLOSE, inner_w - 110, ry + 3,
-                                       "Remove", "Take this bag off", on_click=act(remove_trap_bag, serial))
+                                       "Remove", "Take this bag off", on_click=act("remove_trap_bag", serial))
                 g.Add(sa); y += list_h + GAP; Kit.add_section(g, M, y, IW, h_foot)
                 Kit.add_label(g, "Tick bags, then Trap or Untrap on the side panel.", M + 12, y + 8, Kit.HUE_INFO)
                 Kit.add_label(g, "A trapped bag explodes on whoever opens it, you included.",
                               M + 12, y + 28, Kit.HUE_BAD)
             sub_shown("trp", g, sub_window_moved, trap_checks=checks)
-        def traps_changed(): ui["trap_checks"] = []; st.dirty_trp = True; save()
-        def select_all_traps(value): st.trap_sel = set(trap_candidates()) if value else set(); traps_changed()
+        def traps_changed(): win["trap_checks"] = []; st["dirty_trp"] = True; save_settings()
+        def select_all_traps(value): st["trap_sel"] = set(trap_candidates()) if value else set(); traps_changed()
         def add_trap_bag():
             sync_trap_sel(); API.SysMsg(TITLE + ": target a bag to add to the trap list.", HUE_INFO)
-            pick_then(add_trap_bag_to)
+            pick_then("add_trap_bag_to")
         def add_trap_bag_to(target):
             if not target: return
             sync_trap_sel(); it = Kit.find_item(target)
             if not it or not it.IsContainer:
                 API.SysMsg(TITLE + ": that isn't a container.", HUE_ERR); return
             serial = int(target)
-            if serial not in st.trap_extra: st.trap_extra.append(serial)
-            st.trap_sel.add(serial); traps_changed()
+            if serial not in st["trap_extra"]: st["trap_extra"].append(serial)
+            st["trap_sel"].add(serial); traps_changed()
         def remove_trap_bag(serial):
             sync_trap_sel()
-            if serial in st.trap_extra: st.trap_extra.remove(serial)
-            st.trap_sel.discard(serial); traps_changed()
+            if serial in st["trap_extra"]: st["trap_extra"].remove(serial)
+            st["trap_sel"].discard(serial); traps_changed()
         def start_job(spell):
-            sync_trap_sel(); save()
-            if st.job: API.SysMsg(TITLE + ": already casting %s; press Stop first." % st.job["spell"], HUE_ERR); return
-            if st.sort: API.SysMsg(TITLE + ": busy sorting; press Stop first.", HUE_ERR); return
-            targets = [s for s in trap_candidates() if s in st.trap_sel]
+            sync_trap_sel(); save_settings()
+            if st["job"]:
+                API.SysMsg(TITLE + ": already casting %s; press Stop first." % st["job"]["spell"], HUE_ERR); return
+            if st["sort"]: API.SysMsg(TITLE + ": busy sorting; press Stop first.", HUE_ERR); return
+            targets = [s for s in trap_candidates() if s in st["trap_sel"]]
             if not targets:
                 API.SysMsg(TITLE + ": tick bags in the Trap bags window first.", HUE_ERR)
                 open_win("trp"); return
-            st.job = {"spell": spell, "queue": targets, "i": 0, "phase": "mana", "t": 0.0,
+            st["job"] = {"spell": spell, "queue": targets, "i": 0, "phase": "mana", "t": 0.0,
                       "tries": 0, "done": 0, "failed": 0, "warned": False, "cast": 0.0}
-            st.dirty_trp = True; set_status("Starting")
+            st["dirty_trp"] = True; set_status("Starting")
             API.SysMsg(TITLE + ": casting %s on %s." % (spell, Kit.count(len(targets), "bag")), HUE_INFO)
         def stop_job(user=False):
-            if st.job:
-                j0 = st.job
+            if st["job"]:
+                j0 = st["job"]
                 if j0.get("phase") == "target" and time.time() - j0.get("cast", 0.0) >= TRAP_CAST_MIN \
                         and HOST.cursor_ok(KEY, "neutral"):
                     API.CancelTarget()
                 HOST.release_cursor(KEY)
-                if user: API.SysMsg(TITLE + ": %s stopped." % st.job["spell"], HUE_INFO); set_status("Stopped")
-            st.job = None; st.dirty_trp = True
+                if user: API.SysMsg(TITLE + ": %s stopped." % st["job"]["spell"], HUE_INFO); set_status("Stopped")
+            st["job"] = None; st["dirty_trp"] = True
         def show_stop():
-            on = bool(st.job or st.sort)
-            for ctrl in ui.get("stop_ctrls") or ():
+            on = bool(st["job"] or st["sort"])
+            for ctrl in win.get("stop_ctrls") or ():
                 if ctrl is not None: Kit.set(ctrl, "IsVisible", on)
         def set_status(text):
             if text == "Idle":
-                p = shrink["pct"]; text = ("Shown at %d%% to fit" % p) if p is not None and p < st.scale_pct else ""
+                p = shrink["pct"]; text = ("Shown at %d%% to fit" % p) if p is not None and p < st["scale_pct"] else ""
             show_stop()
-            if text == st.status_text: return
-            st.status_text = text; lab = ui.get("side_status")
+            if text == st["status_text"]: return
+            st["status_text"] = text; lab = win.get("side_status")
             if lab is not None: Kit.set_text(lab, text)
         J_RESULTS = tuple((res, tuple(w.lower() for w in words))
                           for res, words in (("reagents", J_REAGENTS), ("mana", J_MANA),
@@ -2034,7 +2058,7 @@ def _module_inventory():
                 job_next(j, False)
             else: j["phase"] = "pause"; j["t"] = now + TRAP_RETRY_PAUSE
         def job_step():
-            j = st.job
+            j = st["job"]
             if not j: return
             now = time.time()
             if j["i"] >= len(j["queue"]):
@@ -2134,8 +2158,8 @@ def _module_inventory():
                 return t + "\n" + tile_name(it, graphic)
             return str(it.Name or "").lower() + "\n" + tile_name(it, graphic)
         def scan_matches(terms):
-            assigned = set(s for _, s in st.layout); found, counts = {}, {}; objs = {}; seen = 0
-            for idx, bag in st.layout:
+            assigned = set(s for _, s in st["layout"]); found, counts = {}, {}; objs = {}; seen = 0
+            for idx, bag in st["layout"]:
                 if seen >= SEARCH_SCAN_CAP: break
                 items = API.ItemsInContainer(bag, True) or []; parent = {}; sers = []
                 for it in items:
@@ -2220,11 +2244,11 @@ def _module_inventory():
             SR["texts"] = {}; SR["texts_at"] = 0.0; SR["until"] = 0.0
             if SR["counts"]: SR["counts"] = {}; show_counts()
             if SR["status"] is not None:
-                if st.status_text == SR["status"]: set_status("Idle")
+                if st["status_text"] == SR["status"]: set_status("Idle")
                 SR["status"] = None
         def show_counts():
-            counts = SR["counts"]; state = ui["count_state"]
-            for idx, (lab, x, y, cw, ch) in enumerate(ui["counts"]):
+            counts = SR["counts"]; state = win["count_state"]
+            for idx, (lab, x, y, cw, ch) in enumerate(win["counts"]):
                 n = counts.get(idx, 0); text = ("%d found" % n) if n else ""
                 if state.get(idx) == text: continue
                 state[idx] = text
@@ -2234,8 +2258,8 @@ def _module_inventory():
                     lab.IsVisible = bool(n)
                 except Exception: pass
         def search_tick(now):
-            box = ui["search_box"]
-            if box is not None and not (st.collapsed or st.docked):
+            box = win["search_box"]
+            if box is not None and not (st["minimized"] or st["docked"]):
                 try: txt = box.Text
                 except Exception: txt = None
                 if txt is not None:
@@ -2252,11 +2276,11 @@ def _module_inventory():
             box = Kit.add_textbox(grid, SR["text"], bx + 2 + lw, y, SIDE_BTN_W - 4 - lw, numbers=False)
             box.SetTooltip("Item name part or graphic (0x0F7A, 3962); commas for several. Matches light up for %d s"
                            % int(SEARCH_LIT))
-            ui["search_box"] = box
-            Kit.art_button(grid, ui["store"], "rules", Kit.ART_PAGE, bx, y + 28, "Rules",
-                           "Open Sort rules: what each slot's bag holds", on_click=act(open_win, "srt"))
-            Kit.art_button(grid, ui["store"], "filters", Kit.ART_PAGE, bx, y + 52, "Filters",
-                           "Open Sort filters: items or presets and their bags", on_click=act(open_filters))
+            win["search_box"] = box
+            Kit.art_button(grid, win["store"], "rules", Kit.ART_PAGE, bx, y + 28, "Rules",
+                           "Open Sort rules: what each slot's bag holds", on_click=act("open_win", "srt"))
+            Kit.art_button(grid, win["store"], "filters", Kit.ART_PAGE, bx, y + 52, "Filters",
+                           "Open Sort filters: items or presets and their bags", on_click=act("open_filters"))
         SORT_TIP = "Sort items into their bags once; picking up or Stop ends it"
         QUICK = (("q_restock", "Restock", Kit.ART_PLAY, 0x0E76, "restock",
                   "Top up supplies once from the Restock chest or bank", "restock.run"),
@@ -2280,13 +2304,13 @@ def _module_inventory():
                 fn(); return
         def quick_sig(): return tuple(quick_on(q[4]) for q in QUICK)
         def build_quick(grid, bx, y):
-            ui["quick_sig"] = quick_sig()
+            win["quick_sig"] = quick_sig()
             for i, (k, cap, art, _icon, part, tip, _svc) in enumerate(QUICK):
-                Kit.art_button(grid, ui["store"], k, art, bx, y + i * 24, cap, quick_tip(part, tip),
-                               hue=None if quick_on(part) else Kit.HUE_INFO, on_click=act(quick_press, k))
+                Kit.art_button(grid, win["store"], k, art, bx, y + i * 24, cap, quick_tip(part, tip),
+                               hue=None if quick_on(part) else Kit.HUE_INFO, on_click=act("quick_press", k))
         QUICK_ICON = 18; QUICK_STEP = 22
         def add_quick_strip(grid, x_right, y):
-            ui["quick_sig"] = quick_sig(); x = x_right - len(QUICK) * QUICK_STEP
+            win["quick_sig"] = quick_sig(); x = x_right - len(QUICK) * QUICK_STEP
             for i, (k, cap, _art, icon, part, tip, _svc) in enumerate(QUICK):
                 try:
                     pic = G.CreateGumpItemPic(icon, QUICK_ICON, QUICK_ICON)
@@ -2294,11 +2318,11 @@ def _module_inventory():
                     if not quick_on(part): Kit.set(pic, "Hue", Kit.HUE_INFO)
                     Kit.set(pic, "DrawBorder", False); t = quick_tip(part, tip)
                     pic.SetTooltip(t if not quick_on(part) else cap + ": " + t)
-                    G.AddControlOnClick(pic, act(quick_press, k)); grid.Add(pic)
+                    G.AddControlOnClick(pic, act("quick_press", k)); grid.Add(pic)
                 except Exception: pass
         KIND_GRAPHICS = dict((k, frozenset(gs)) for k, _c, gs in SORT_KINDS); NO_RULE = (frozenset(), ())
         def rule_graphics(idx):
-            kinds, extra = st.rules.get(idx, NO_RULE); out = set(extra)
+            kinds, extra = st["rules"].get(idx, NO_RULE); out = set(extra)
             for k in kinds: out |= KIND_GRAPHICS.get(k, frozenset())
             return out
         def in_corpse(serial):
@@ -2312,8 +2336,8 @@ def _module_inventory():
                 s = c
             return False
         def sort_plan():
-            flt = [f for f in st.filters if f["on"] and f["slot"] is not None and f["set"]]; wants = {}
-            for idx, bag in st.layout:
+            flt = [f for f in st["filters"] if f["on"] and f["slot"] is not None and f["set"]]; wants = {}
+            for idx, bag in st["layout"]:
                 gs = rule_graphics(idx)
                 if gs: wants[idx] = gs
             if not wants and not flt: return None
@@ -2321,9 +2345,9 @@ def _module_inventory():
             for idx in sorted(wants):
                 for g in wants[idx]:
                     if g not in by_graphic: by_graphic[g] = idx
-            slot_of = dict((s, i) for i, s in st.layout); sources = []; pack = safe(lambda: int(API.Backpack), 0)
+            slot_of = dict((s, i) for i, s in st["layout"]); sources = []; pack = safe(lambda: int(API.Backpack), 0)
             if pack: sources.append(pack)
-            for _, bag in st.layout:
+            for _, bag in st["layout"]:
                 if bag not in sources and not in_corpse(bag): sources.append(bag)
             plan = []
             for src in sources:
@@ -2342,13 +2366,13 @@ def _module_inventory():
                         idx = by_graphic.get(graphic)
                         if idx is None or graphic in here: continue
                     if it.IsContainer: continue
-                    dest = st.assign.get(idx)
+                    dest = st["assign"].get(idx)
                     if dest and dest != src: plan.append((serial, src, dest, idx))
             return plan
         def start_sort():
             sync_rules()
-            if st.sort: API.SysMsg(TITLE + ": already sorting; press Stop first.", HUE_ERR); return
-            if st.job: API.SysMsg(TITLE + ": busy with %s; press Stop first." % st.job["spell"], HUE_ERR); return
+            if st["sort"]: API.SysMsg(TITLE + ": already sorting; press Stop first.", HUE_ERR); return
+            if st["job"]: API.SysMsg(TITLE + ": busy with %s; press Stop first." % st["job"]["spell"], HUE_ERR); return
             plan = sort_plan()
             if plan is None:
                 API.SysMsg(TITLE + ": no sort rules yet; tick what each bag holds in Sort rules.", HUE_ERR)
@@ -2356,7 +2380,7 @@ def _module_inventory():
             if not plan:
                 API.SysMsg(TITLE + ": nothing to sort; every ruled item is in its bag.", HUE_INFO)
                 set_status("Nothing to sort"); return
-            st.sort = {"plan": plan, "i": 0, "move": None, "check": None, "at": 0.0, "hold": 0.0,
+            st["sort"] = {"plan": plan, "i": 0, "move": None, "check": None, "at": 0.0, "hold": 0.0,
                        "moved": 0, "refused": 0, "streak": 0, "rechecks": 0, "waits": 0,
                        "why": None, "last": 0, "sent_at": 0.0}
             set_status("Sort 0/%d" % len(plan))
@@ -2394,7 +2418,7 @@ def _module_inventory():
         def stacked(s, bag):
             pre = s.get("pre"); return True if not pre or not pre[0] else stack_total(bag, pre[0]) >= pre[2] + pre[1]
         def sort_tick(now):
-            s = st.sort
+            s = st["sort"]
             if s is None: return
             if s["move"] is not None: return
             if s["why"]: stop_sort(s["why"]); return
@@ -2410,7 +2434,7 @@ def _module_inventory():
                 serial, src, dest, idx = plan[s["i"]]; s["i"] += 1
                 it = API.FindItem(serial); where = int(it.Container) if it else 0
                 if where != src: continue
-                if st.assign.get(idx) != dest: continue
+                if st["assign"].get(idx) != dest: continue
                 if not Kit.find_item(dest): stop_sort("slot #%d's bag is out of reach" % (idx + 1)); return
                 deep = API.ItemsInContainer(dest, True) or []; inside = len(deep)
                 if inside >= BAG_MAX_ITEMS: stop_sort("bag #%d (%s) is full" % (idx + 1, bag_name(dest, False))); return
@@ -2419,31 +2443,25 @@ def _module_inventory():
                 set_status("Sort %d/%d" % (s["i"], len(plan))); return
             finish_sort()
         def sort_send():
-            s = st.sort
+            s = st["sort"]
             if s is None or s["move"] is None: return
-            mv = s["move"]
-            def run():
-                if st.sort is not s or s["move"] is not mv or st.stopping: return "gone"
-                if others_cursor(): return "another target cursor is in use"
-                if Kit.held_item(): return "you picked something up"
-                API.MoveItem(mv[0], mv[2]); return "sent"
-            try: res = Kit.on_client(run)
-            except Exception as e: res = "a move failed (%s)" % e
-            if st.sort is not s: return
-            s["move"] = None
-            if res == "sent":
-                HOST.pack_dirty(); s["check"] = mv; s["last"] = mv[0]; s["sent_at"] = time.time()
-                s["at"] = s["sent_at"] + SORT_GAP
-            elif res != "gone": s["why"] = res
+            mv = s["move"]; s["move"] = None
+            if st["shutting"]: return
+            if others_cursor(): s["why"] = "another target cursor is in use"; return
+            if Kit.held_item(): s["why"] = "you picked something up"; return
+            try: API.MoveItem(mv[0], mv[2])
+            except Exception as e: s["why"] = "a move failed (%s)" % e; return
+            HOST.pack_dirty(); s["check"] = mv; s["last"] = mv[0]; s["sent_at"] = time.time()
+            s["at"] = s["sent_at"] + SORT_GAP
         def finish_sort():
-            s, st.sort = st.sort, None
+            s, st["sort"] = st["sort"], None
             if s is None: return
             msg = "%d moved" % s["moved"]
             if s["refused"]: msg += ", %d refused" % s["refused"]
             API.SysMsg(TITLE + ": sort done: %s." % msg, HUE_ERR if s["refused"] else HUE_OK)
             set_status("Sorted %d" % s["moved"])
         def stop_sort(why=None, user=False):
-            s, st.sort = st.sort, None
+            s, st["sort"] = st["sort"], None
             if s is None: return
             if user: API.SysMsg(TITLE + ": sort stopped (%d moved)." % s["moved"], HUE_INFO); set_status("Stopped")
             elif why:
@@ -2492,56 +2510,61 @@ def _module_inventory():
                             for w in words:
                                 if w in padded: out[k].add(gr); break
                     except Exception: continue
-            cats["data"] = dict((k, frozenset(v)) for k, v in out.items()); st.dirty_flt = st.open_flt
+            cats["data"] = dict((k, frozenset(v)) for k, v in out.items()); st["dirty_flt"] = st["open_flt"]
         def category_of(graphic):
             data = cats["data"] or {}
             for k, _c in PRESETS:
                 if graphic in data.get(k, ()): return k
             return None
         def load_filters():
-            st.filters = []
+            st["filters"] = []
             for part in str(Kit.get_var(FILTERS_KEY, "") or "").split(";"):
                 p = part.split("~")
-                if len(p) < 5 or len(st.filters) >= FILTERS_CAP: continue
+                if len(p) < 5 or len(st["filters"]) >= FILTERS_CAP: continue
                 try:
                     slot = int(p[3]) if p[3] != "" else None; hue = int(p[2]) if p[2] != "" else None
                     gs = tuple(int(x, 16) for x in p[1].split(",") if x and not x.startswith("@"))
                 except ValueError: continue
-                cat = p[1][1:] if p[1].startswith("@") else None
-                st.filters.append({"name": p[0], "gr": gs, "cat": cat, "hue": hue, "slot": slot,
-                                   "on": p[4] == "1", "set": frozenset(gs)})
-            cats["wanted"] = cats["wanted"] or any(f["cat"] for f in st.filters)
+                cat = p[1][1:] if p[1].startswith("@") else None; base = None
+                if len(p) >= 7 and ":" in p[5]:
+                    try: base = (int(p[5].split(":", 1)[0], 16), int(p[5].split(":", 1)[1]))
+                    except ValueError: base = None
+                st["filters"].append({"name": p[0], "gr": gs, "cat": cat, "hue": hue, "slot": slot,
+                                   "on": p[4] == "1", "set": frozenset(gs), "base": base,
+                                   "broad": p[6] if len(p) >= 7 and p[6] in BROAD else None})
+            cats["wanted"] = cats["wanted"] or any(f["cat"] for f in st["filters"])
         def save_filters():
             Kit.put_var(FILTERS_KEY, ";".join("~".join((f["name"].replace(";", " ").replace("~", " "),
                 "@" + f["cat"] if f["cat"] else ",".join("%X" % g for g in f["gr"]),
                 "" if f["hue"] is None else str(f["hue"]), "" if f["slot"] is None else str(f["slot"]),
-                "1" if f["on"] else "0")) for f in st.filters))
-            st.dirty_flt = st.open_flt
+                "1" if f["on"] else "0", "%X:%d" % f["base"] if f.get("base") else "", f.get("broad") or ""))
+                for f in st["filters"]))
+            st["dirty_flt"] = st["open_flt"]
         def filter_sets():
             data = cats["data"]
             if data is None: return
-            for f in st.filters:
+            for f in st["filters"]:
                 if f["cat"]: f["set"] = data.get(f["cat"], frozenset())
-        def open_filters(): cats["wanted"] = True; st.open_flt = True; st.dirty_flt = True
-        def close_filters(): remember_filter_pos(); dispose("flt"); st.open_flt = False; ui["flt_checks"] = []
+        def open_filters(): cats["wanted"] = True; st["open_flt"] = True; st["dirty_flt"] = True
+        def close_filters(): remember_filter_pos(); dispose("flt"); st["open_flt"] = False; win["flt_checks"] = []
         def remember_filter_pos():
-            g = ui.get("flt")
-            if Kit.is_open(g): st.flt_x, st.flt_y = int(g.GetX()), int(g.GetY())
-        def toggle_flt_min(): remember_filter_pos(); st.flt_min = not st.flt_min; st.dirty_flt = True
+            g = win.get("flt")
+            if Kit.is_open(g): st["flt_x"], st["flt_y"] = int(g.GetX()), int(g.GetY())
+        def toggle_flt_min(): remember_filter_pos(); st["flt_min"] = not st["flt_min"]; st["dirty_flt"] = True
         def filter_add(name, gr, hue, cat=None, broad=None):
-            if len(st.filters) >= FILTERS_CAP:
+            if len(st["filters"]) >= FILTERS_CAP:
                 API.SysMsg(TITLE + ": %d filters is the most; remove one first." % FILTERS_CAP, HUE_ERR); return None
             f = {"name": name, "gr": tuple(gr), "cat": cat, "hue": hue, "slot": None, "on": True,
                  "set": frozenset(gr), "broad": broad}
-            st.filters.append(f); filter_sets(); save_filters(); return f
+            st["filters"].append(f); filter_sets(); save_filters(); return f
         def filter_preset(key):
             for k, cap in PRESETS:
                 if k == key:
-                    for f in st.filters:
+                    for f in st["filters"]:
                         if f["cat"] == key: API.SysMsg(TITLE + ": %s is already on the list." % cap, HUE_INFO); return
                     filter_add(cap, (), None, key)
         def filter_by_target():
-            API.SysMsg(TITLE + ": target an item for the new filter.", HUE_INFO); pick_then(filter_targeted)
+            API.SysMsg(TITLE + ": target an item for the new filter.", HUE_INFO); pick_then("filter_targeted")
         def target_item(target):
             if not target: API.SysMsg(TITLE + ": cancelled.", HUE_INFO); return None
             it = Kit.find_item(target)
@@ -2569,8 +2592,8 @@ def _module_inventory():
                 import System
                 Tz.call(None, "DropItem", (System.UInt32(hs), 0xFFFF, 0xFFFF, 0, System.UInt32(home), False), R.Actions)
         def filter_broader(i):
-            if not 0 <= i < len(st.filters): return
-            f = st.filters[i]
+            if not 0 <= i < len(st["filters"]): return
+            f = st["filters"][i]
             if f.get("base") is None and f["gr"]: f["base"] = (f["gr"][0], f["hue"] or 0)
             base = f.get("base")
             if base is None: return
@@ -2586,62 +2609,62 @@ def _module_inventory():
             f["broad"] = nxt; filter_sets(); save_filters()
         def filter_move(i, d):
             j = i + d
-            if 0 <= i < len(st.filters) and 0 <= j < len(st.filters):
-                st.filters[i], st.filters[j] = st.filters[j], st.filters[i]; save_filters()
+            if 0 <= i < len(st["filters"]) and 0 <= j < len(st["filters"]):
+                st["filters"][i], st["filters"][j] = st["filters"][j], st["filters"][i]; save_filters()
         def filter_remove(i):
-            if 0 <= i < len(st.filters): del st.filters[i]; save_filters()
+            if 0 <= i < len(st["filters"]): del st["filters"][i]; save_filters()
         def filter_pick_bag(i):
-            if not 0 <= i < len(st.filters): return
-            st.flt_pick = st.filters[i]
+            if not 0 <= i < len(st["filters"]): return
+            st["flt_pick"] = st["filters"][i]
             API.SysMsg(TITLE + ": click a bag on the bags display, or target a bag in a slot.", HUE_INFO)
-            pick_then(filter_bag_targeted, st.flt_pick)
+            pick_then("filter_bag_targeted", st["flt_pick"])
         def filter_bag_targeted(f, target):
-            if st.flt_pick is not f: return
-            st.flt_pick = None
+            if st["flt_pick"] is not f: return
+            st["flt_pick"] = None
             if not target: return
-            slots = dict((b, i) for i, b in st.layout); s = int(target)
+            slots = dict((b, i) for i, b in st["layout"]); s = int(target)
             for _ in range(8):
                 if s in slots: f["slot"] = slots[s]; save_filters(); return
                 it = Kit.find_item(s); s = int(it.Container or 0) if it else 0
                 if not s: break
             API.SysMsg(TITLE + ": that isn't in a bag slot; put the bag in a slot first (Slots).", HUE_ERR)
         def filter_canvas_pick(slot_index):
-            f, st.flt_pick = st.flt_pick, None
+            f, st["flt_pick"] = st["flt_pick"], None
             if f is None: return False
             f["slot"] = slot_index; save_filters(); API.CancelTarget(); return True
         def filter_poll():
-            for i, chk in ui.get("flt_checks") or ():
-                if i < len(st.filters):
-                    on = bool(safe(lambda: chk.IsChecked, st.filters[i]["on"]))
-                    if on != st.filters[i]["on"]: st.filters[i]["on"] = on; save_filters(); return
+            for i, chk in win.get("flt_checks") or ():
+                if i < len(st["filters"]):
+                    on = bool(safe(lambda: chk.IsChecked, st["filters"][i]["on"]))
+                    if on != st["filters"][i]["on"]: st["filters"][i]["on"] = on; save_filters(); return
         def build_filters():
-            remember_filter_pos(); dispose("flt"); filter_sets(); M, GAP = Kit.MARGIN, Kit.GAP; n = len(st.filters)
+            remember_filter_pos(); dispose("flt"); filter_sets(); M, GAP = Kit.MARGIN, Kit.GAP; n = len(st["filters"])
             row_h, h_add, h_prev = 28, 30 + 3 * 26 + 8, 40; list_h = max(row_h * 2, min(n, 12) * row_h + 8); w = 640
-            h = (M + 30 + M if st.flt_min else M + 30 + GAP + h_prev + GAP + h_add + GAP + list_h + M)
-            g, store, y = framed_window("flt", w, h, "SORT FILTERS", act(toggle_flt_min), act(close_filters))
+            h = (M + 30 + M if st["flt_min"] else M + 30 + GAP + h_prev + GAP + h_add + GAP + list_h + M)
+            g, store, y = framed_window("flt", w, h, "SORT FILTERS", act("toggle_flt_min"), act("close_filters"))
             checks = []
-            if not st.flt_min:
+            if not st["flt_min"]:
                 IW = w - 2 * M; Kit.add_section(g, M, y, IW, h_prev)
                 Kit.art_button(g, store, "sort", Kit.ART_PLAY, M + 12, y + 9, "Sort", SORT_TIP,
-                               on_click=act(start_sort))
+                               on_click=act("start_sort"))
                 plan = safe(sort_plan); k = len(plan) if plan else 0
                 Kit.add_label(g, "%s would move" % Kit.count(k, "item"), M + 100, y + 12, Kit.HUE_INFO)
                 y += h_prev + GAP; Kit.add_section(g, M, y, IW, h_add, "ADD A FILTER"); bx = M + 12
                 Kit.art_button(g, store, "add", Kit.ART_PLAY, bx, y + 28, "Add by target...",
-                               "Target an item: the filter fills in from it", on_click=act(filter_by_target))
+                               "Target an item: the filter fills in from it", on_click=act("filter_by_target"))
                 cols = 5; cw = (IW - 24) // cols
                 for pi, (key, cap) in enumerate(PRESETS):
                     col, row = (pi + 1) % cols, (pi + 1) // cols
                     Kit.art_button(g, store, "pre_" + key, Kit.ART_OK, M + 12 + col * cw, y + 28 + row * 26,
                                    Kit.fit(cap, cw - 40), "Add the %s preset" % cap.lower(),
-                                   on_click=act(filter_preset, key))
+                                   on_click=act("filter_preset", key))
                 y += h_add + GAP; Kit.add_section(g, M, y, IW, list_h)
-                Kit.catcher(g, M, y, IW, list_h, act(filter_dropped), "Drop an item here to add a filter")
+                Kit.catcher(g, M, y, IW, list_h, act("filter_dropped"), "Drop an item here to add a filter")
                 if not n:
                     Kit.add_label(g, "No filters yet. Press a preset, or Add by target.", M + 12, y + 8, Kit.HUE_INFO)
                 else:
                     sa = G.CreateGumpScrollArea(M + 4, y + 4, IW - 8, list_h - 8)
-                    for i, f in enumerate(st.filters):
+                    for i, f in enumerate(st["filters"]):
                         ry = i * row_h
                         chk = Kit.add_check(sa, "", 4, ry + 3, f["on"],
                                             "Use this filter (unticked: kept, moves nothing)")
@@ -2652,71 +2675,72 @@ def _module_inventory():
                         else:
                             Kit.art_button(sa, store, "m%d" % i, Kit.ART_PAGE, 186, ry + 2, "Match: " + broad,
                                            "Matches %s; click for the next" % BROAD_CAP[broad],
-                                           on_click=act(filter_broader, i))
-                        if f["slot"] is None or f["slot"] not in st.assign: cap, hue = "No bag", Kit.HUE_BAD
-                        else: cap, hue = (short(bag_name(st.assign[f["slot"]], False), 14), Kit.HUE_TEXT)
+                                           on_click=act("filter_broader", i))
+                        if f["slot"] is None or f["slot"] not in st["assign"]: cap, hue = "No bag", Kit.HUE_BAD
+                        else: cap, hue = (short(bag_name(st["assign"][f["slot"]], False), 14), Kit.HUE_TEXT)
                         Kit.add_label(sa, cap, 330, ry + 5, hue)
                         Kit.art_button(sa, store, "b%d" % i, Kit.ART_PLAY, 424, ry + 2, "Bag...",
                                        "Click a bag on the bags display, or target a bag in a slot",
-                                       on_click=act(filter_pick_bag, i))
+                                       on_click=act("filter_pick_bag", i))
                         Kit.art_button(sa, store, "u%d" % i, Kit.ART_PAGE, 508, ry + 2, None,
-                                       "Move up (the first match wins)", on_click=act(filter_move, i, -1))
+                                       "Move up (the first match wins)", on_click=act("filter_move", i, -1))
                         Kit.art_button(sa, store, "d%d" % i, Kit.ART_PAGE, 536, ry + 2, None,
-                                       "Move down (the first match wins)", on_click=act(filter_move, i, 1))
+                                       "Move down (the first match wins)", on_click=act("filter_move", i, 1))
                         Kit.art_button(sa, store, "x%d" % i, Kit.ART_CLOSE, 564, ry + 2, None,
-                                       "Remove this filter", on_click=act(filter_remove, i))
+                                       "Remove this filter", on_click=act("filter_remove", i))
                     g.Add(sa)
-            sub_shown("flt", g, remember_filter_pos); ui["flt_checks"] = checks
+            sub_shown("flt", g, remember_filter_pos); win["flt_checks"] = checks
         _srt = {"sync_at": 0.0}
         def sync_rules():
-            checks = ui["rule_checks"]
-            if not checks or not Kit.is_open(ui["srt"]): return False
+            checks = win["rule_checks"]
+            if not checks or not Kit.is_open(win["srt"]): return False
             ticked, rows = {}, set()
             for idx, kind, chk in checks:
-                if idx >= st.slots: continue
+                if idx >= st["slots"]: continue
                 rows.add(idx)
                 try: on = bool(chk.IsChecked)
-                except Exception: on = kind in st.rules.get(idx, NO_RULE)[0]
+                except Exception: on = kind in st["rules"].get(idx, NO_RULE)[0]
                 if on: ticked.setdefault(idx, set()).add(kind)
             changed = False
             for idx in rows:
-                old = st.rules.get(idx); graphics = old[1] if old is not None else ()
+                old = st["rules"].get(idx); graphics = old[1] if old is not None else ()
                 kinds = frozenset(ticked.get(idx, ())); new = (kinds, graphics) if (kinds or graphics) else None
                 if new != old:
                     changed = True
-                    if new is None: del st.rules[idx]
-                    else: st.rules[idx] = new
+                    if new is None: del st["rules"][idx]
+                    else: st["rules"][idx] = new
             return changed
         def build_rules():
             sync_rules(); close_sub("srt"); M, GAP = Kit.MARGIN, Kit.GAP; w, row_h, h_act, h_foot = 580, 52, 40, 52
-            list_h = min(st.slots * row_h + 8, 430)
-            h = (M + 30 + M if st.srt_min else M + 30 + GAP + h_act + GAP + list_h + GAP + h_foot + M)
-            g, store, y = framed_window("srt", w, h, "SORT RULES", act(toggle_win_min, "srt"), act(close_win, "srt"))
+            list_h = min(st["slots"] * row_h + 8, 430)
+            h = (M + 30 + M if st["srt_min"] else M + 30 + GAP + h_act + GAP + list_h + GAP + h_foot + M)
+            g, store, y = framed_window("srt", w, h, "SORT RULES", act("toggle_win_min", "srt"),
+                                        act("close_win", "srt"))
             checks = []
-            if not st.srt_min:
+            if not st["srt_min"]:
                 IW = w - 2 * M; Kit.add_section(g, M, y, IW, h_act)
                 Kit.art_button(g, store, "sort", Kit.ART_PLAY, M + 12, y + 9, "Sort",
                                "Move matching items from your backpack and other slot bags into their bag, one at a "
-                               "time", on_click=act(start_sort))
+                               "time", on_click=act("start_sort"))
                 Kit.art_button(g, store, "stop", Kit.ART_CLOSE, M + 150, y + 9, "Stop", "Stop sorting",
-                               on_click=act(stop_sort, None, True))
+                               on_click=act("stop_sort", None, True))
                 Kit.add_label(g, "Tick what each slot's bag holds.", M + 250, y + 12, Kit.HUE_INFO); y += h_act + GAP
                 Kit.add_section(g, M, y, IW, list_h); sa = G.CreateGumpScrollArea(M + 4, y + 4, IW - 8, list_h - 8)
                 inner_w = IW - 8 - 20; gx = inner_w - 171 - Kit.text_w("+%d graphics" % SORT_GRAPHICS_CAP)
-                for idx in range(st.slots):
-                    ry = idx * row_h; kinds, graphics = st.rules.get(idx, NO_RULE)
+                for idx in range(st["slots"]):
+                    ry = idx * row_h; kinds, graphics = st["rules"].get(idx, NO_RULE)
                     Kit.add_label(sa, "#%d" % (idx + 1), 6, ry + 5, Kit.HUE_TITLE)
-                    if idx in st.assign: Kit.add_label(sa, short(bag_name(st.assign[idx], False), 24), 44, ry + 5)
+                    if idx in st["assign"]: Kit.add_label(sa, short(bag_name(st["assign"][idx], False), 24), 44, ry + 5)
                     else: Kit.add_label(sa, "No bag in this slot", 44, ry + 5, Kit.HUE_INFO)
                     gl = Kit.add_label(sa, ("+%s" % Kit.count(len(graphics), "graphic"))
                                        if graphics else "", gx, ry + 5, Kit.HUE_INFO)
                     if graphics: gl.SetTooltip(", ".join("0x%04X" % v for v in graphics))
                     Kit.art_button(sa, store, "add%d" % idx, Kit.ART_PLAY, inner_w - 165, ry + 3,
                                    "Add...", "Target an item; slot #%d's bag holds its graphic too"
-                                   % (idx + 1), on_click=act(add_rule_graphic, idx))
+                                   % (idx + 1), on_click=act("add_rule_graphic", idx))
                     Kit.art_button(sa, store, "clr%d" % idx, Kit.ART_CLOSE, inner_w - 80, ry + 3,
                                    "Clear", "Forget the graphics added to slot #%d" % (idx + 1),
-                                   on_click=act(clear_rule_graphics, idx))
+                                   on_click=act("clear_rule_graphics", idx))
                     x = 24
                     for key, cap, _gs in SORT_KINDS:
                         chk = Kit.add_check(sa, cap, x, ry + 27, key in kinds,
@@ -2729,95 +2753,132 @@ def _module_inventory():
             sub_shown("srt", g, sub_window_moved, rule_checks=checks); _srt["sync_at"] = time.time() + 1.0
         def add_rule_graphic(idx):
             API.SysMsg(TITLE + ": target an item; slot #%d's bag will hold its graphic." % (idx + 1), HUE_INFO)
-            pick_then(add_rule_graphic_to, idx)
+            pick_then("add_rule_graphic_to", idx)
         def add_rule_graphic_to(idx, target):
             if target:
                 sync_rules()
-                if idx >= st.slots: return
+                if idx >= st["slots"]: return
             it = target_item(target)
             if not it: return
-            graphic = int(it.Graphic); kinds, graphics = st.rules.get(idx, NO_RULE)
+            graphic = int(it.Graphic); kinds, graphics = st["rules"].get(idx, NO_RULE)
             if not graphic or graphic in graphics:
                 API.SysMsg(TITLE + ": slot #%d's bag already holds that." % (idx + 1), HUE_INFO); return
             if len(graphics) >= SORT_GRAPHICS_CAP:
                 API.SysMsg(TITLE + ": slot #%d already holds %d graphics; click Clear first."
                            % (idx + 1, SORT_GRAPHICS_CAP), HUE_ERR)
                 return
-            st.rules[idx] = (kinds, graphics + (graphic,)); st.dirty_srt = True; save()
+            st["rules"][idx] = (kinds, graphics + (graphic,)); st["dirty_srt"] = True; save_settings()
             API.SysMsg(TITLE + ": slot #%d's bag holds graphic 0x%04X too." % (idx + 1, graphic), HUE_OK)
         def clear_rule_graphics(idx):
-            sync_rules(); kinds, graphics = st.rules.get(idx, NO_RULE)
+            sync_rules(); kinds, graphics = st["rules"].get(idx, NO_RULE)
             if not graphics: return
-            if kinds: st.rules[idx] = (kinds, ())
-            else: st.rules.pop(idx, None)
-            st.dirty_srt = True; save()
+            if kinds: st["rules"][idx] = (kinds, ())
+            else: st["rules"].pop(idx, None)
+            st["dirty_srt"] = True; save_settings()
         def close_sub(k): remember_window_pos(); dispose(k)
         def remember_window_pos():
             for key, ax, ay in (("mgr", "mgr_x", "mgr_y"), ("trp", "trp_x", "trp_y"), ("srt", "srt_x", "srt_y")):
-                g = ui[key]
+                g = win[key]
                 if Kit.is_open(g):
-                    setattr(st, ax, g.GetX()); setattr(st, ay, g.GetY())
+                    st[ax] = g.GetX(); st[ay] = g.GetY()
         def upkeep_windows():
-            if st.open_flt:
-                if st.dirty_flt: st.dirty_flt = False; build_filters()
-                elif not Kit.is_open(ui.get("flt")): st.open_flt = False; ui["flt_checks"] = []
+            if st["open_flt"]:
+                if st["dirty_flt"]: st["dirty_flt"] = False; build_filters()
+                elif not Kit.is_open(win.get("flt")): st["open_flt"] = False; win["flt_checks"] = []
                 else: filter_poll()
             for k, build in (("mgr", build_manager), ("trp", build_traps), ("srt", build_rules)):
-                if not getattr(st, "open_" + k): setattr(st, "dirty_" + k, False)
-                elif getattr(st, "dirty_" + k): setattr(st, "dirty_" + k, False); build()
-                elif not Kit.is_open(ui[k]):
-                    setattr(st, "open_" + k, False)
-                    if k in CHECKS_OF: ui[CHECKS_OF[k]] = []
-                elif k == "srt" and ui["rule_checks"]:
+                if not st["open_" + k]: st["dirty_" + k] = False
+                elif st["dirty_" + k]: st["dirty_" + k] = False; build()
+                elif not Kit.is_open(win[k]):
+                    st["open_" + k] = False
+                    if k in CHECKS_OF: win[CHECKS_OF[k]] = []
+                elif k == "srt" and win["rule_checks"]:
                     now = time.time()
                     if now >= _srt["sync_at"]:
                         _srt["sync_at"] = now + 1.0
                         if sync_rules(): schedule_save()
         def grow_cells():
             mw, mh = H.max_w, H.max_h
-            if mw <= 0 or mh <= 0: st.fit_seen = None; return
+            if mw <= 0 or mh <= 0: st["fit_seen"] = None; return
             want = (min(mw, MAX_CELL), min(mh, MAX_CELL))
-            if want == (st.cell_w, st.cell_h): st.fit_seen = None; return
-            seen = st.fit_seen; st.fit_seen = (want, seen[1] + 1 if seen and seen[0] == want else 1)
-            if st.fit_seen[1] >= FIT_STABLE_TICKS or st.fit_pending:
-                st.fit_pending = False; st.fit_seen = None; st.cell_w, st.cell_h = want; frame_changed()
+            if want == (st["cell_w"], st["cell_h"]): st["fit_seen"] = None; return
+            seen = st["fit_seen"]; st["fit_seen"] = (want, seen[1] + 1 if seen and seen[0] == want else 1)
+            if st["fit_seen"][1] >= FIT_STABLE_TICKS or st["fit_pending"]:
+                st["fit_pending"] = False; st["fit_seen"] = None; st["cell_w"], st["cell_h"] = want; frame_changed()
         def check_hook():
-            if st.drive_fixed or not Kit.is_open(ui["grid"]): return
+            if st["drive_fixed"] or not Kit.is_open(win["grid"]): return
             now = time.time()
-            if H.hook_calls != st.hb_frame:
-                st.hb_frame = H.hook_calls; st.hb_time = now
-                if st.driving: st.driving = False
+            if H.hook_calls != st["hb_frame"]:
+                st["hb_frame"] = H.hook_calls; st["hb_time"] = now
+                if st["driving"]: st["driving"] = False
                 return
-            if not st.driving and now - st.hb_time > HOOK_STALL:
-                st.driving = True
-                if H.hook_calls == 0 and not st.drive_told:
-                    st.drive_told = True
+            if not st["driving"] and now - st["hb_time"] > HOOK_STALL:
+                st["driving"] = True
+                if H.hook_calls == 0 and not st["drive_told"]:
+                    st["drive_told"] = True
                     API.SysMsg(TITLE + ": draw hook isn't called; the script keeps the bags in place (they may "
                                "flicker when items move).", HUE_INFO)
+        ACTIONS = {"add_rule_graphic": add_rule_graphic, "add_rule_graphic_to": add_rule_graphic_to,
+                   "add_trap_bag": add_trap_bag, "add_trap_bag_to": add_trap_bag_to, "assign_slot": assign_slot,
+                   "assign_slot_to": assign_slot_to, "auto_fill": auto_fill, "bag_close": bag_close,
+                   "bag_min": bag_min, "bag_use": bag_use, "clear_all": clear_all,
+                   "clear_rule_graphics": clear_rule_graphics, "clear_slot": clear_slot,
+                   "close_filters": close_filters, "close_win": close_win, "disable": HOST.disable,
+                   "filter_bag_targeted": filter_bag_targeted, "filter_broader": filter_broader,
+                   "filter_by_target": filter_by_target, "filter_canvas_pick": filter_canvas_pick,
+                   "filter_dropped": filter_dropped, "filter_move": filter_move, "filter_pick_bag": filter_pick_bag,
+                   "filter_preset": filter_preset, "filter_remove": filter_remove, "filter_targeted": filter_targeted,
+                   "fold_to_bar": fold_to_bar, "open_filters": open_filters, "open_win": open_win,
+                   "quick_press": quick_press, "remove_trap_bag": remove_trap_bag,
+                   "select_all_traps": select_all_traps, "set_min": set_min, "show_settings": HOST.show_settings,
+                   "start_job": start_job, "start_sort": start_sort, "stop_all": stop_all, "stop_sort": stop_sort,
+                   "toggle_bare": toggle_bare, "toggle_flt_min": toggle_flt_min, "toggle_win_min": toggle_win_min,
+                   "user_collapse": user_collapse}
+        def page_table(w):
+            return (("LAYOUT  (Apply to use)", (
+                        ("num", "slots", "Slots:", "Bag slots (%d-%d)" % (MIN_SLOTS, MAX_SLOTS), "", MIN_SLOTS,
+                         MAX_SLOTS), ("num", "cols", "Columns:", "Slots per row outside a zone (0-%d, 0 = near-square)"
+                         % MAX_SLOTS, "", 0, MAX_SLOTS),
+                        ("num", "rows", "Rows:", "Rows of slots outside a zone (0-%d, 0 = near-square)"
+                         % MAX_SLOTS, "", 0, MAX_SLOTS),
+                        ("num", "scale", "Bag scale:", "The client's Container Scale, for every container (50-200)",
+                         "%", 50, 200),
+                        ("buttons", (("apply", Kit.ART_OK, "Apply", "Use the slots, columns, rows and scale above"),),
+                         {"bdy": 4})), {"top": 32, "sh": 182, "ldy": 2, "fw": 60, "ugap": 6, "lw": w - 122}),
+                    ("LOOK", (("slider", "opacity", "Bag opacity:", "How solid bag panels and art are (10-100%); "
+                               "items stay solid", 10, 100,
+                               {"lw": 158, "sdy": 6, "sw": 200, "ugap": 20, "vfmt": "%d%%", "h": 30}),
+                              ("check", "trim", "Trim bags to their item area", "Hide bag art and butt the item areas "
+                               "together (needs client access; zones always fill)"),
+                              ("check", "items", "Scale items with the bags", "The client's option to draw items at "
+                               "bag scale")), {"top": 32, "sh": 116, "ldy": 2}),
+                    ("STATUS", (("note", short(status_line(), 64), {"key": "status", "h": 24}),
+                                ("note", size_line(), {"key": "size"})), {"top": 32, "sh": 86}))
+        cfg = Kit.Page(settings, page_table, save_settings)
         def _start():
-            st.stopping = False
-            if not API.Player: st.wait_player = True; return
-            st.wait_player = False; pre = st.load_text; st.load_text = None
+            st["shutting"] = False
+            if not API.Player: st["wait_player"] = True; return
+            st["wait_player"] = False; pre = st["load_text"]; st["load_text"] = None
             if pre is None and Client.on_client_thread():
-                st.wait_load = st.load_wanted = True; st.to_write = None; return
+                st["wait_load"] = st["load_wanted"] = True; st["to_write"] = None; return
             st.update(wait_load=False, load_wanted=False, driving=False, drive_fixed=False, drive_told=False, job=None,
-                      to_write=None, actions=[], reported=False, detached_at=0.0)
-            anch["told"] = False; forget_names(); st.docked, st.link_state = False, None
+                      to_write=None, queue=[], reported=False, detached_at=0.0)
+            anch["told"] = False; forget_names(); st["docked"], st["link_state"] = False, None
             API.RemoveSharedVar(LINK_CMD); _link["wish"] = 0.0
             fitov["cols"], fitov["cell"], fitov["area"], fitov["told"] = None, None, None, None; shrink["pct"] = None
-            canvas_leave(); load_filters(); st.canvas = None; JR["rd"] = Journal.reader(); H.meas.clear()
+            canvas_leave(); load_filters(); st["canvas"] = None; JR["rd"] = Journal.reader(); H.meas.clear()
             H.opened = frozenset()
             if not R.tried: R.tried = True; init_interop()
             hooks = {"fit": layout_fit, "riding": attached}
             if canvas_ok(): hooks.update({"exact": True, "verify": True, "state": layout_state})
             HOST.layout_add(KEY, layout_gump, TITLE, hooks)
             if R.ok: unshrink_left()
-            st.sort = None; SR.update({"armed": False, "lit": {}, "until": 0.0, "counts": {}, "status": None})
+            st["sort"] = None; SR.update({"armed": False, "lit": {}, "until": 0.0, "counts": {}, "status": None})
             if pre is not None: parse_cfg(pre[0])
-            else: load()
-            st.open_mgr = st.dirty_mgr = st.want_mgr; st.open_trp = st.dirty_trp = st.want_trp
-            st.open_srt = st.dirty_srt = st.want_srt
-            if dock_wish() and not Kit.zone_up(KEY): st.collapsed = True
+            else: load_settings()
+            st["open_mgr"] = st["dirty_mgr"] = st["want_mgr"]; st["open_trp"] = st["dirty_trp"] = st["want_trp"]
+            st["open_srt"] = st["dirty_srt"] = st["want_srt"]
+            if dock_wish() and not Kit.zone_up(KEY): st["minimized"] = True
             link_tick(); H.disabled, H.fail_streak, H.error = False, 0, ""
             if R.ok:
                 try: on_main(scan_gumps)
@@ -2825,94 +2886,97 @@ def _module_inventory():
             else:
                 HOST.refresh_settings(KEY)
                 API.SysMsg(TITLE + ": no client access (%s); using basic pinning." % R.error, HUE_ERR)
-            publish_layout(); st.dirty_frame = True; st.hb_frame, st.hb_time = -1, time.time()
-            for name, fn in (("bag.attach", attach_to), ("bag.grid_size", lambda: st.grid_wh),
+            publish_layout(); st["dirty_frame"] = True; st["hb_frame"], st["hb_time"] = -1, time.time()
+            for name, fn in (("bag.attach", attach_to), ("bag.grid_size", lambda: st["grid_wh"]),
                              ("bag.fit", paperdoll_fit), ("bag.cell", bag_cell), ("bag.shrink", bag_shrink),
-                             ("bag.pack", bag_pack), ("bag.open_manager", act(open_win, "mgr")),
-                             ("bag.open_traps", act(open_win, "trp"))):
+                             ("bag.pack", bag_pack), ("bag.open_manager", act("open_win", "mgr")),
+                             ("bag.open_traps", act("open_win", "trp"))):
                 cleanup.service(name, fn)
-            API.SysMsg(TITLE + ": on, %s." % Kit.count(st.slots, "slot"), HUE_OK)
+            Kit.hook_once(CV, "hooked", ("OnItemUpdated", on_bag_item))
+            API.SysMsg(TITLE + ": on, %s." % Kit.count(st["slots"], "slot"), HUE_OK)
         def _tick():
-            if st.wait_player:
+            if st["wait_player"]:
                 if API.Player: _start()
                 return
-            if st.wait_load:
-                if st.load_text is not None: _start()
+            if st["wait_load"]:
+                if st["load_text"] is not None: _start()
                 return
-            run_actions()
-            if st.stopping: return
+            while st["queue"]:
+                action = st["queue"].pop(0); fn = ACTIONS[action[0]]
+                try: fn(*action[1:])
+                except Exception as e: API.SysMsg(TITLE + ": couldn't do that (%s)." % e, HUE_ERR)
+            if st["shutting"]: return
             link_tick(); publish_layout()
-            if R.ok and H.disabled and not st.reported:
-                st.reported = True
+            if R.ok and H.disabled and not st["reported"]:
+                st["reported"] = True
                 API.SysMsg(TITLE + ": draw hook stopped (%s); using basic pinning." % H.error, HUE_ERR)
-                safe(lambda: on_main(restore_all)); st.dirty_frame = True
-            if not Kit.is_open(ui["bar"]) or not Kit.is_open(ui["grid"]): st.dirty_frame = True
-            if (H.icons or DEFAULT_ICONS) != st.icons_used: st.dirty_frame = True
+                safe(lambda: on_main(restore_all)); st["dirty_frame"] = True
+            if not Kit.is_open(win["bar"]) or not Kit.is_open(win["grid"]): st["dirty_frame"] = True
+            if (H.icons or DEFAULT_ICONS) != st["icons_used"]: st["dirty_frame"] = True
             if R.ok and not H.disabled:
                 check_hook()
-                if st.driving:
+                if st["driving"]:
                     try: on_main(guarded_tick)
                     except Exception as e: H.error = "client thread: %s" % e
                 grow_cells(); canvas_tick()
             else:
-                if st.canvas is not None: canvas_set(None)
+                if st["canvas"] is not None: canvas_set(None)
                 fallback_tick()
-            if st.dirty_frame and not dragging(): st.dirty_frame = False; build_frame()
+            if st["dirty_frame"] and not dragging(): st["dirty_frame"] = False; build_window()
             else:
                 if attached(): follow_lead()
-                canvas_sync()
+                refresh()
             upkeep_windows(); job_step(); now = time.time()
-            if not 0 <= st.quick_at - now <= 1.0:
-                st.quick_at = now + 1.0
-                if ui.get("quick_sig") is not None and ui["quick_sig"] != quick_sig(): st.dirty_frame = True
-            search_tick(now); sort_tick(now); canvas_say_tick(now)
-            if (st.frame_x, st.frame_y) != (st.saved_fx, st.saved_fy) and st.save_in < 0 \
-                    and not attached() and st.canvas != "alone" and now - st.detached_at >= DETACH_SETTLE:
+            if not 0 <= st["quick_at"] - now <= 1.0:
+                st["quick_at"] = now + 1.0
+                if win.get("quick_sig") is not None and win["quick_sig"] != quick_sig(): st["dirty_frame"] = True
+            search_tick(now); sort_tick(now); sort_send(); canvas_say_tick(now)
+            if (st["frame_x"], st["frame_y"]) != (st["saved_fx"], st["saved_fy"]) and st["save_in"] < 0 \
+                    and not attached() and st["canvas"] != "alone" and now - st["detached_at"] >= DETACH_SETTLE:
                 schedule_save()
-            if st.save_in > 0: st.save_in -= 1
-            elif st.save_in == 0: remember_window_pos(); save()
-        def _stop():
-            st.stopping = True
-            if st.wait_player or st.wait_load:
-                st.wait_player = st.wait_load = st.load_wanted = False; st.load_text = None; return
-            safe(stop_job); st.update(job=None, actions=[], sort=None); safe(lambda: clear_search(time.time()))
-            sync_rules(); sync_trap_sel(); cleanup.close()
-            HOST.layout_remove(KEY)
-            if shrink["pct"] is not None: safe(lambda: bag_shrink(None))
-            if st.attach is not None: st.attach = None; st.frame_x, st.frame_y = st.saved_fx, st.saved_fy
-            st.grid_wh = None; st.docked, st.link_state = False, None; API.SetSharedVar(LINK_STATE, "off")
-            safe(canvas_leave); st.canvas = None
-            if R.ok: safe(lambda: on_main(restore_all))
-            remember_window_pos(); save(); write_saved()
-            for key in ("grid", "bar", "mgr", "trp", "srt"): dispose(key)
-            st.open_mgr = st.open_trp = st.open_srt = False
-            ui.update({"side_status": None, "trap_checks": [], "rule_checks": [], "search_box": None, "counts": []})
-            st.update(bar_raw=None, grid_raw=None, grid_info=(None, False), slot_raws=())
-        def _interval(): return DRIVE_TICK if st.driving else TICK
+            if st["save_in"] > 0: st["save_in"] -= 1
+            elif st["save_in"] == 0: remember_window_pos(); save_settings()
         def _thread_tick():
-            if st.load_wanted:
-                st.load_wanted = False; text = read_cfg()
-                if st.wait_load and not st.stopping: st.load_text = (text,)
-            if st.sort is not None: sort_send()
+            if st["load_wanted"]:
+                st["load_wanted"] = False; text = read_cfg()
+                if st["wait_load"] and not st["shutting"]: st["load_text"] = (text,)
             canvas_thread()
             if cats["wanted"] and cats["data"] is None:
                 cats["wanted"] = False
                 try: build_cats()
                 except Exception: cats["data"] = {}
             write_saved()
+        def _interval(): return DRIVE_TICK if st["driving"] else TICK
         def _thread_wanted():
-            return bool(st.load_wanted or st.to_write is not None
-                        or (st.sort is not None and st.sort["move"] is not None) or CANVAS.get("pending") is not None
+            return bool(st["load_wanted"] or st["to_write"] is not None or canvas_wanted()
                         or (cats["wanted"] and cats["data"] is None))
-        load()
-        return {"start": _start, "tick": _tick, "stop": _stop, "interval": _interval,
-                  "client_tick": True, "thread_tick": _thread_tick, "thread_wanted": _thread_wanted,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
+        load_settings()
+        def _stop():
+            st["shutting"] = True
+            if st["wait_player"] or st["wait_load"]:
+                st["wait_player"] = st["wait_load"] = st["load_wanted"] = False; st["load_text"] = None; return
+            safe(stop_job); st.update(job=None, queue=[], sort=None); safe(lambda: clear_search(time.time()))
+            sync_rules(); sync_trap_sel(); cleanup.close()
+            HOST.layout_remove(KEY)
+            if shrink["pct"] is not None: safe(lambda: bag_shrink(None))
+            if st["attach"] is not None:
+                st["attach"] = None; st["frame_x"], st["frame_y"] = st["saved_fx"], st["saved_fy"]
+            st["grid_wh"] = None; st["docked"], st["link_state"] = False, None; API.SetSharedVar(LINK_STATE, "off")
+            safe(canvas_leave); st["canvas"] = None
+            if R.ok: safe(lambda: on_main(restore_all))
+            remember_window_pos(); save_settings(); write_saved()
+            for key in ("grid", "bar", "mgr", "trp", "srt"): dispose(key)
+            st["open_mgr"] = st["open_trp"] = st["open_srt"] = False
+            win.update({"side_status": None, "trap_checks": [], "rule_checks": [], "search_box": None, "counts": []})
+            st.update(bar_raw=None, grid_raw=None, grid_info=(None, False), slot_raws=())
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
+                "config_height": config_height, "build_config": build_config, "poll_config": poll_config,
+                "config_closed": config_closed, "interval": _interval, "thread_tick": _thread_tick,
+                "thread_wanted": _thread_wanted}
     def _part_paperdoll():
         KEY = "character"; TITLE = "Paperdoll"; SETTINGS_KEY = "Character_settings"; POS_KEY = "Character_pos"
         MIN_KEY = "Character_min"; MINI_W, MINI_H = 240, 46; TRAY_ICON = 0x1F03; SLOT = 48; SLOT_GAP = 6
-        SLOT_ART = 0x0A3C; CAPTION_UP = 16; DOLL_W, DOLL_H = 260, 237; STATS_H = 80; STATS_EVERY = 0.2
+        CAPTION_UP = 16; DOLL_W, DOLL_H = 260, 237; STATS_H = 80; STATS_EVERY = 0.2
         WEIGHT_WARN = 0.85; WEIGHT_RED = 0.95; WEIGHT_BAR_W = 90; WEIGHT_BAR_MIN = 30
         WEIGHT_ALERT_SOUND = 0x04A
         WEIGHT_MAX_BASE, WEIGHT_MAX_PER_STR = 40, 3.5; DOLL_EVERY = 0.1; COMBINE_HOLE_GAP = Kit.GAP; PAIR_EVERY = 0.5
@@ -2961,13 +3025,15 @@ def _module_inventory():
         PANEL_H = PANEL_PAD * 2 + DOLL_AREA_H; SIDE_OWN = 4 * PANEL_PAD + 2 * (2 * SLOT + SLOT_GAP); DOLL_MIN_OWN = 100
         PANEL_W_MIN = SIDE_OWN + DOLL_MIN_OWN; DOLL_FIG = (150, 235); DOLL_INSET = 2; BOUNDS_CAP = 300
         W = PANEL_W + 2 * M; Y_BODY = M + 30 + Kit.GAP
-        settings = {"stats": True, "combine": True, "beside": False, "left": False}
+        settings = {"stats": True, "combine": True, "beside": False, "left": False}; DEFAULTS = dict(settings)
         st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "sig": None, "doll_sig": None,
               "stats_at": 0.0, "doll_at": 0.0, "px": M, "attached": None, "beside_said": False, "layer_name": {},
               "wait_player": False, "saved_min": False, "w_armed": True, "w_at": 0.0, "wbar": None, "fit": None,
               "k": 1.0, "py": None, "strip_w": None, "pw": PANEL_W, "col": None, "ph": PANEL_H, "rp": COL_PITCH,
-              "pair": None, "pair_at": 0.0, "room": None, "room_fs": None, "told_shrink": None, "grew": False}
+              "pair": None, "pair_at": 0.0, "room": None, "room_fs": None, "told_shrink": None, "grew": False,
+              "paired": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "raw": None, "doll": []}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         def load_settings():
             p = Kit.get_var(SETTINGS_KEY).split("|")
             if len(p) >= 2: settings["stats"] = p[0] == "1"; settings["combine"] = p[1] == "1"
@@ -3098,7 +3164,7 @@ def _module_inventory():
                 return 0 if arr is None or graphic < 0 or graphic >= arr.Length else int(arr[graphic].Layer)
             except Exception: return 0
         def set_pos(c, x, y): c.Location = R.Point(x, y)
-        queue = Kit.queuer(st); on_disposed = Kit.disposer(KEY, st, win); BLOCK_W = 2 * SLOT + SLOT_GAP
+        on_disposed = Kit.disposer(KEY, st, win); BLOCK_W = 2 * SLOT + SLOT_GAP
         def slot_xy(i):
             col, row = divmod(i, ROWS)
             if col < 2: x = st["px"] + PANEL_PAD + col * COL_PITCH
@@ -3112,7 +3178,7 @@ def _module_inventory():
         FIT_K_MIN, FIT_K_MAX = 0.4, 2.0; STRIP_MIN_W = 300
         def layout_fit(w, h, mode):
             new = (int(w), int(h)) if (w is not None and h is not None) else None
-            if new != st["fit"]:
+            if new != st["fit"] or (mode == "again" and new is not None and not st["paired"]):
                 st["fit"] = new; st["pair"] = pair_rects() if new is not None else None; st["pair_at"] = time.time()
                 queue("redraw")()
         def pair_rects():
@@ -3181,7 +3247,7 @@ def _module_inventory():
                 if (need + spare <= hh and wneed <= hw) or p <= floor: return (None if p >= own else p), need
                 p = max(floor, p - SHRINK_STEP)
         COL_ROWS = 10; COL_PITCH_MIN, COL_PITCH_MAX = 20, 26; COL_BAR_H = 14
-        COL_NEED_H = 2 * 8 + COL_ROWS * COL_PITCH_MIN + COL_BAR_H; geo = {"col_w": None, "bounds": {}}
+        COL_NEED_H = 2 * 8 + COL_ROWS * COL_PITCH_MIN + COL_BAR_H
         def col_w():
             if geo["col_w"] is None:
                 widest = max(Kit.text_w(t) for t in ("Stamina 999/999", "Followers 99/99", "Gold 9,999,999",
@@ -3206,9 +3272,14 @@ def _module_inventory():
                 k = min(bw / float(PANEL_W_MIN), room / float(PANEL_H), FIT_K_MAX)
                 return "none", bw, room, max(FIT_K_MIN, k)
             return best[1], best[2], best[3], best[4]
+        def doll_room(bw):
+            doll = int(math.ceil(FIT_K_MIN * PANEL_H)) + 1
+            if not settings["stats"]: return doll
+            return doll + STATS_H + Kit.GAP if bw >= STRIP_MIN_W else max(doll, COL_NEED_H)
         def fitted_geom(fw, fh, combined):
             bx, by = M, Y_BODY; bw, bh = max(1, fw - 2 * M), max(1, fh - Y_BODY - M); gap = COMBINE_HOLE_GAP
-            room = (bh - grid_need(bw) - gap) if combined else bh; mode, aw, ah, k = choose_fit(bw, room)
+            room = max(bh - grid_need(bw) - gap, min(bh, max(doll_room(bw), (bh - gap) // 2))) if combined else bh
+            mode, aw, ah, k = choose_fit(bw, room)
             pw = max(PANEL_W_MIN, int(round(aw / k))); ph = max(PANEL_H, int(round(ah / k))); pph = int(round(ph * k))
             sh = (STATS_H + Kit.GAP) if mode == "strip" else 0; top, left = by, bx
             if combined: used = max(room, pph + sh); hole = (bx, by + used + gap, bw, max(1, bh - used - gap))
@@ -3265,6 +3336,8 @@ def _module_inventory():
             fit = st["fit"] if not st["minimized"] else None; spx = M
             if Kit.is_open(old): x, y = old.GetX(), old.GetY()
             else: x, y = Kit.load_pos(POS_KEY, (200, 120), (W, Y_BODY + body_h() + M))
+            spot = HOST.layout_rect(KEY); st["paired"] = False
+            if spot is not None: x, y = spot[0], spot[1]
             if st["minimized"]:
                 w, h = MINI_W, MINI_H; g = G.CreateGump(True, True)
                 c["status"] = Kit.mini_bar(g, store, w, h, TITLE, KEY, queue("toggle_min"))
@@ -3274,7 +3347,7 @@ def _module_inventory():
                 if fit is not None:
                     w, h = fit; hole2 = pair_hole(x, y, w, h, st["pair"]) if (att is not None and st["pair"]) else None
                     if hole2 is not None:
-                        half = COMBINE_HOLE_GAP // 2
+                        half = COMBINE_HOLE_GAP // 2; st["paired"] = True
                         (k, st["px"], st["py"], ys_fit, st["strip_w"], _h, sxy, st["pw"],
                          st["col"], st["ph"]) = fitted_geom(w, h - half + M, False)
                         hole = hole2; h = hole[1] + hole[3] + M
@@ -3311,7 +3384,7 @@ def _module_inventory():
                 body.append(c["doll_drop"])
                 for i, (layer, name, cap, tip) in enumerate(LAYERS):
                     sx, sy = slot_xy(i)
-                    body.extend(Kit.add_resizepic(g, SLOT_ART, sx, sy, SLOT, SLOT, mouse=False) or [])
+                    body.extend(Kit.gold_box(g, sx, sy, SLOT, SLOT))
                     drop = G.CreateGumpColorBox(0.01, "#000000"); drop.SetRect(sx, sy, SLOT, SLOT)
                     Kit.on_click(drop, queue(("drop", layer))); stip = tip + ": drop an item to wear it"
                     drop.SetTooltip(stip); g.Add(drop)
@@ -3330,13 +3403,16 @@ def _module_inventory():
                         c["stats%d" % (i + 1)] = Kit.add_label(g, "", sx0 + 10, ys + 8 + 24 * i, Kit.HUE_TEXT)
                     build_weight_bar(g, c, sx0, ys + 56)
                 elif st["col"] is not None: build_stats_col(g, c, st["col"])
-            Kit.show_window(g, x, y, w, h, KEY, st["minimized"] and st["docked"], on_disposed(g), save_place, win,
-                            {"g": g, "c": c, "store": store, "slots": slots})
+            xy = Kit.show_window(g, x, y, w, h, KEY, st["minimized"] and st["docked"], on_disposed(g), save_place,
+                                 win, {"g": g, "c": c, "store": store, "slots": slots})
+            to_slot(KEY, g, xy); hooks = geo["hooks"]
+            if hooks is not None: hooks["verify"] = not st["paired"]
             win["raw"] = raw_of(g) if R.ok else None
             if att is not None: att["g"], att["raw"] = g, None
             sync_attached()
             st.update({"sig": None, "doll_sig": None, "stats_at": 0.0, "stats_key": None, "doll_at": 0.0, "wbar": None})
             Kit.dispose(old)
+        wnd = None; geo = {"col_w": None, "bounds": {}, "need": [], "redo": False, "order": [], "hooks": None}
         def tell_bags(room):
             if room is None: st["room"] = None; tell_shrink(None)
             if room == st.get("told_bags"): return
@@ -3480,14 +3556,18 @@ def _module_inventory():
             if arms in (0x1410, 0x1417):
                 order = [L_TORSO if l == L_ARMS else (L_ARMS if l == L_TORSO else l) for l in order]
             return order, gfx
+        def keep_bounds(gid, b):
+            cache, order = geo["bounds"], geo["order"]
+            if gid not in cache: order.append(gid)
+            cache[gid] = b
+            while len(order) > BOUNDS_CAP: cache.pop(order.pop(0), None)
+            return b
         def art_bounds(gid):
-            cache = geo["bounds"]
-            if gid in cache: return cache[gid]
-            b = None; got = None
-            try:
-                if Tex.find(): got = Tex.gump_pixels(gid)
+            b = "pic"
+            try: got = Kit.on_client(lambda: Tex.gump_pixels(gid) if Tex.find() else None)
             except Exception: got = None
             if got is not None:
+                b = None
                 px, w, h = got; T = 0x01000000
                 def solid(part): return bool(part) and (max(part) >= T or min(part) < 0)
                 top = 0
@@ -3500,11 +3580,15 @@ def _module_inventory():
                     x1 = w - 1
                     while x1 > x0 and not solid(px[lo + x1:hi:w]): x1 -= 1
                     b = (x0, top, x1 + 1, bot + 1)
-            else:
-                pw_, ph_ = Kit.pic_size(gid)
-                if pw_ > 0 and ph_ > 0: b = (0, 0, pw_, ph_)
-            if len(cache) >= BOUNDS_CAP: cache.clear()
-            cache[gid] = b; return b
+            return keep_bounds(gid, b)
+        def cached_bounds(gid):
+            b = geo["bounds"].get(gid, "need")
+            if b == "need":
+                if gid not in geo["need"]: geo["need"].append(gid)
+                b = "pic"
+            if b != "pic": return b
+            pw_, ph_ = Kit.pic_size(gid); return (0, 0, pw_, ph_) if pw_ > 0 and ph_ > 0 else None
+        def _thread_wanted(): return bool(geo["need"])
         def draw_doll(items, who, praw=None):
             g = win["g"]; clear_doll()
             if g is None or who is None: return
@@ -3523,7 +3607,7 @@ def _module_inventory():
                 draw.append((gid, ihue & 0x3FFF, partial, 0 if layer in (L_HAIR, L_BEARD, L_FACE) else serial, layer))
             fx0 = fy0 = 1 << 20; fx1 = fy1 = -(1 << 20)
             for d in draw:
-                b = art_bounds(d[0])
+                b = cached_bounds(d[0])
                 if b is not None: fx0, fy0 = min(fx0, b[0]), min(fy0, b[1]); fx1, fy1 = max(fx1, b[2]), max(fy1, b[3])
             if fx1 <= fx0 or fy1 <= fy0: fx0, fy0, fx1, fy1 = 0, 0, DOLL_W, DOLL_H
             fig = (fx1 - fx0, fy1 - fy0); k = st["k"]; mx, my, mw, mh = mid_rect()
@@ -3581,13 +3665,14 @@ def _module_inventory():
             for gid, phue, partial, serial, _layer in draw: pic(gid, phue, partial, serial)
         def look_worn(force=False):
             if st["minimized"] or win["g"] is None: return
+            if geo["redo"] and not geo["need"]: geo["redo"] = False; st["doll_sig"] = None
             now = time.time()
             if not force and st["sig"] is not None and st["doll_sig"] is not None \
                     and 0 <= now - st["doll_at"] < DOLL_EVERY:
                 return
             st["doll_at"] = now; p = player_raw() if R.ok else None; got = {}; items, who = worn(p, got)
             sig = tuple([items[l][0] if l in items else 0 for l in SLOT_LAYERS])
-            if sig != st["sig"]: refresh_slots(sig, p, got)
+            if sig != st["sig"]: refresh(sig, p, got)
             dsig = (who, tuple(sorted((k, v[0], v[1], v[2]) for k, v in items.items())))
             if dsig != st["doll_sig"]: st["doll_sig"] = dsig; draw_doll(items, who, p)
         def show_item(s, item, api_item):
@@ -3622,7 +3707,7 @@ def _module_inventory():
             pic.SetRect(s["x"] + 3, s["y"] + 3, SLOT - 6, SLOT - 6); scale_ctrl(pic)
             pic.SetEntityTooltip(serial); Kit.on_click(pic, queue(("drop", s["layer"])))
             Kit.hook_double(pic, queue(("use", serial))); g.Add(pic); s["ctrl"] = pic
-        def refresh_slots(sig, p, got=None):
+        def refresh(sig, p, got=None):
             slots = win["slots"]
             if len(slots) != len(sig): return
             old = st["sig"] or (None,) * len(slots)
@@ -3763,18 +3848,21 @@ def _module_inventory():
         def sync_attached():
             att = st["attached"]
             if att is not None: att["shown"] = not st["minimized"]; att["state"] = dock_state()
-        PAGE = (("WINDOW", (("check", "stats", "Show your stats", "Str / Dex / Int, HP, mana, stamina, weight, gold, "
-                             "followers: under the doll, or beside it in a zone"),
-                            ("check", "combine", "Combine with Bags in one window", "The Bags grid inside this window "
-                             "(unticked: two windows)"),
-                            ("check", "beside", "Bags beside the doll (not under)", "Combined: the grid beside the "
-                             "doll; one too tall to stack goes beside anyway"), ("check", "left", "Bags on the left",
-                             "Beside the doll: on its left (unticked: right)"),
-                            ("note", "Drop an item on a slot to wear it; drag it out to take it off.",
-                             {"ndy": 4})), {"top": 32, "sh": 170}),)
+        ACTIONS = {"drop": on_drop, "use": lambda serial: API.UseObject(serial),
+                   "follow": lambda serial: Follow.toggle(serial, TITLE)}
+        def page_table(w):
+            return (("WINDOW", (("check", "stats", "Show your stats", "Str / Dex / Int, HP, mana, stamina, weight, "
+                                 "gold, followers: under the doll, or beside it in a zone"),
+                                ("check", "combine", "Combine with Bags in one window", "The Bags grid inside this "
+                                 "window (unticked: two windows)"),
+                                ("check", "beside", "Bags beside the doll (not under)", "Combined: the grid beside "
+                                 "the doll; one too tall to stack goes beside anyway"),
+                                ("check", "left", "Bags on the left", "Beside the doll: on its left (unticked: right)"),
+                                ("note", "Drop an item on a slot to wear it; drag it out to take it off.",
+                                 {"ndy": 4})), {"top": 32, "sh": 170}),)
         def on_change(old, new):
             if win["g"] is not None: queue("redraw")(); HOST.poke()
-        cfg = Kit.Page(settings, PAGE, save_settings, on_change)
+        cfg = Kit.Page(settings, page_table, save_settings, on_change); load_settings()
         def _start():
             load_settings()
             if not safe(lambda: API.Player): st["wait_player"] = True; return
@@ -3784,12 +3872,13 @@ def _module_inventory():
                        "attached": None, "beside_said": False, "fit": None, "k": 1.0, "py": None,
                        "strip_w": None, "pw": PANEL_W, "col": None, "ph": PANEL_H, "rp": COL_PITCH,
                        "told_bags": None, "pair": None, "pair_at": 0.0,
-                       "room": None, "room_fs": None, "told_shrink": None, "grew": False,
+                       "room": None, "room_fs": None, "told_shrink": None, "grew": False, "paired": False,
                        "w_armed": True, "w_at": 0.0, "wbar": None,
                        "minimized": bool(st["saved_min"] or HOST.dock_wanted(KEY))})
             HOST.alert_kind("character.weight", "Weight near the limit", WEIGHT_ALERT_SOUND)
             build_window(); hooks = Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw"))
-            hooks.update({"fit": layout_fit, "exact": True, "pieces_out": True}); HOST.dock_add(KEY, hooks)
+            hooks.update({"fit": layout_fit, "exact": True, "pieces_out": True, "verify": not st["paired"]})
+            geo["hooks"] = hooks; HOST.dock_add(KEY, hooks)
             if not R.ok:
                 API.SysMsg(TITLE + ": no client access (%s); slots show pictures and equip without swapping."
                            % R.error, Kit.HUE_INFO)
@@ -3807,9 +3896,7 @@ def _module_inventory():
                 elif action in ("bag_mgr", "bag_traps"):
                     fn = bag_service("bag.open_manager" if action == "bag_mgr" else "bag.open_traps")
                     if fn is not None: fn()
-                elif kind == "drop": on_drop(action[1])
-                elif kind == "use": API.UseObject(action[1])
-                elif kind == "follow": Follow.toggle(action[1], TITLE)
+                elif kind in ACTIONS: ACTIONS[kind](action[1])
             sync_attached(); combine_tick()
             if win["g"] is None: return
             drag = held() is not None
@@ -3832,6 +3919,13 @@ def _module_inventory():
                                 build_window(); return
             look_worn()
             if not refresh_stats(): weight_tick()
+        def _thread_tick():
+            need = geo["need"]
+            if not need: return
+            gid = need[0]
+            try: art_bounds(gid)
+            except Exception: keep_bounds(gid, "pic")
+            need.pop(0); geo["redo"] = True
         def _stop():
             st["shutting"] = True; HOST.dock_remove(KEY); Kit.save_pos(POS_KEY, win["g"]); save_state(); save_settings()
             att, st["attached"] = st["attached"], None
@@ -3839,36 +3933,42 @@ def _module_inventory():
                 attach = bag_service("bag.attach")
                 if attach is not None: safe(lambda: attach(None))
             clear_slots(); g, win["g"] = win["g"], None; win["raw"] = None; Kit.dispose(g)
-        load_settings()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
-                  "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
+                  "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
+                  "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
     def _part_storage():
-        KEY = "storage"; TITLE = "Storage"; MAX_CONTAINERS = 300; MAX_ITEMS = 20000; STALE_DAYS = 60
+        KEY = "storage"; TITLE = "Storage"; SETTINGS_KEY = "StorageIndex_settings"; POS_KEY = "StorageIndex_pos"
+        MIN_KEY = "StorageIndex_min"; MAX_CONTAINERS = 300; MAX_ITEMS = 20000; STALE_DAYS = 60
         READ_DELAYS = (0.6, 2.0); REREAD_SECS = 15.0; OPEN_CHECK = 1.0; WATCH_MAX = 600.0; WATCH_CAP = 20
+        CHANGE_DELAY = 0.5; CHANGE_CAP = 40; SEEN_CAP = 6000; ROOTS_CAP = 80
         READ_MAX = 1500; SAVE_DELAY = 5.0; MERGE_CHECK = 10.0; TOMB_DAYS = 30; SEARCH_WAIT = 0.4; LIVE_EVERY = 3.0
         ROWS = 14; MAX_RESULT_ROWS = ROWS * 30; MAX_FAVS = 12; NAME_MAX = 40
         PACK_BODIES = {0x0123: "Pack horse", 0x0124: "Pack llama", 0x0317: "Giant beetle"}
         SKIP_GRAPHICS = (0x2006, 0x1E5E); FILE_FMT = "_storage_index_%s.txt"
-        FILE_HEAD = "# Virtue Assistant Storage Index 1"; SETTINGS_KEY = "StorageIndex_settings"
-        FAVS_KEY = "StorageIndex_favs"; ACCOUNT_KEY = "StorageIndex_account"; POS_KEY = "StorageIndex_pos"
-        MIN_KEY = "StorageIndex_min"; W = 420; MINI_W, MINI_H = 260, 46; ROW_H = 20; TRAY_ICON = 0x0E7C
+        FILE_HEAD = "# Virtue Assistant Storage Index 1"
+        FAVS_KEY = "StorageIndex_favs"; ACCOUNT_KEY = "StorageIndex_account"
+        W = 420; MINI_W, MINI_H = 260, 46; ROW_H = 20; TRAY_ICON = 0x0E7C
         FOLLOW_TIP = "Alt+click: auto-follow (again to stop)"; M = Kit.MARGIN; IW = W - 2 * M; Y_FIND = M + 30 + Kit.GAP
         H_FIND = 64; Y_LIST = Y_FIND + H_FIND + Kit.GAP; H_LIST = 12 + ROWS * ROW_H + 8
         Y_STAT = Y_LIST + H_LIST + Kit.GAP; H_STAT = 30; H = Y_STAT + H_STAT + M
         STORAGE_AGO = ((60, 1, "just now"), (3600, 60, "%dm ago"), (86400, 3600, "%dh ago"),
                        (172800, 86400, "%d day ago"), (0, 86400, "%d days ago"))
         settings = {"bank": True, "ground": True, "pack": True, "days": STALE_DAYS}; favs = []
+        DEFAULTS = dict(settings)
         st = {"shutting": True, "minimized": False, "docked": False, "queue": [], "active": False, "hooked": False}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; page = {"wipe_at": 0.0}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         idx = {"recs": {}, "tombs": {}, "ver": 0, "dirty": False, "dirty_at": 0.0,
-               "loaded": False, "path": None, "mtime": None, "err": ""}
+               "loaded": False, "path": None, "mtime": None, "err": "", "unread": False}
         summ = {"ver": -1, "keys": {}, "places": {}, "items": 0, "chars": 0}
         view = {"query": "", "seen_text": None, "changed_at": 0.0, "page": 0, "rows": [],
                 "sel": None, "naming": None, "forget_arm": (None, 0.0), "status": "",
                 "status_hue": Kit.HUE_INFO, "status_at": 0.0, "dirty": True, "built_for": None,
                 "live": {}, "live_at": 0.0, "live_ver": 0, "live_sig": None, "data": [], "prev": [],
-                "last_read": ("", 0.0)}
-        watching = {}; reads = []; opens = []; tile_names = {}; quick = {}
+                "last_read": ("", 0.0), "iw": IW}
+        watching = {}; feed = {"q": [], "n": 0}; took = {"n": 0}; opens = []; tile_names = {}; quick = {}
+        changed = set(); seen_in = {}
+        seen_roots = []
         fcache = {"key": None, "stats": []}; scache = {"key": None, "by": {}}; NAME_JUNK = re.compile(r"%[^%]*%|%s")
         def clean_text(s): return str(s or "").replace("|", "/").replace("\r", " ").replace("\n", " ").strip()
         def fnv(text):
@@ -3983,25 +4083,10 @@ def _module_inventory():
                     out.append("I|%d|%d|%d|%d|%s" % (s, key[0], key[1], e[1], clean_text(e[0])))
             for s, t in idx["tombs"].items(): out.append("D|%d|%d" % (s, int(t)))
             return "\n".join(out) + "\n"
-        def read_file(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f: return f.read()
-            except Exception:
-                try: import System; return str(System.IO.File.ReadAllText(path))
-                except Exception: return None
+        def read_file(path): return Kit.read_merge(path)
         def write_file(path, text):
-            tmp = path + ".tmp"
-            try:
-                with open(tmp, "w", encoding="utf-8") as f: f.write(text)
-                try: os.replace(tmp, path)
-                except Exception:
-                    if os.path.exists(path): os.remove(path)
-                    os.rename(tmp, path)
-                return True
-            except Exception as ex:
-                idx["err"] = str(ex)[:60]
-                try: import System; System.IO.File.WriteAllText(path, text); return True
-                except Exception: return False
+            try: return Kit.write_safe(path, text)
+            except Exception as ex: idx["err"] = str(ex)[:60]; return False
         def mtime(path): return safe(lambda: os.path.getmtime(path))
         def merge(recs, tombs):
             changed = False; mine = idx["recs"]; cut = time.time() - settings["days"] * 86400.0
@@ -4043,26 +4128,37 @@ def _module_inventory():
         def load_index():
             path = idx["path"]
             if not path: return
-            text = read_file(path) if os.path.exists(path) else ""; idx["mtime"] = mtime(path)
+            text = read_file(path); idx["mtime"] = mtime(path); idx["unread"] = text is None
             if text: merge(*parse_file(text))
             prune(); idx["loaded"] = True; idx["ver"] += 1
         def save_index():
             path = idx["path"]
             if not path: return
             mt = mtime(path)
-            if mt is not None and mt != idx["mtime"]:
+            if idx["unread"] or (mt is not None and mt != idx["mtime"]):
                 text = read_file(path)
+                if text is None: idx["err"] = "couldn't read the index file"; return
+                idx["unread"] = False; idx["mtime"] = mt
                 if text and merge(*parse_file(text)): idx["ver"] += 1
             if prune(): idx["ver"] += 1
             if write_file(path, file_text()): idx["mtime"] = mtime(path); idx["dirty"] = False; idx["err"] = ""
         def check_others():
             path = idx["path"]; mt = mtime(path)
             if mt is None or mt == idx["mtime"]: return
-            text = read_file(path); idx["mtime"] = mt
+            text = read_file(path)
+            if text is None: return
+            idx["mtime"] = mt; idx["unread"] = False
             if text and merge(*parse_file(text)) | prune(): idx["ver"] += 1
         def mark_dirty():
             idx["ver"] += 1
             if not idx["dirty"]: idx["dirty"] = True; idx["dirty_at"] = time.time()
+        def post(res): feed["n"] += 1; res["n"] = feed["n"]; feed["q"] = feed["q"] + [res]
+        def unread():
+            n = took["n"]; return [r for r in feed["q"] if r["n"] > n]
+        def has_unread():
+            q = feed["q"]; return bool(q) and q[-1]["n"] > took["n"]
+        def take_reads():
+            for res in unread(): took["n"] = res["n"]; integrate(res)
         def place_of(it):
             cur, depth = it, 0
             while depth < 12:
@@ -4100,9 +4196,9 @@ def _module_inventory():
                     q = (q * 31 + xs + 7 * int(am or 0) + 13 * xc) & 0xFFFFFFFFFFFF
                 except Exception: first.append(None); continue
                 first.append((xs, am, xc))
-            sig = (q, n)
+            sig = (q, n); keep_seen(serial, first)
             if quick.get(serial) == sig and serial in idx["recs"]:
-                if len(reads) < 40: reads.append({"serial": serial, "same": True, "at": time.time()})
+                if len(feed["q"]) < 40: post({"serial": serial, "same": True, "at": time.time()})
                 return True
             cs, cname = int(me.Serial), str(me.Name or ""); facet = int(API.GetMap() or 0)
             by = {serial: []}; parents, names = {}, {}; n = 0; capped = False
@@ -4134,8 +4230,8 @@ def _module_inventory():
                    "facet": facet, "x": int(top.X), "y": int(top.Y),
                    "mob": int(mob.Serial) if mob is not None else 0, "by": by,
                    "parents": parents, "names": names, "capped": capped, "at": time.time()}
-            if len(reads) < 40:
-                reads.append(res)
+            if len(feed["q"]) < 40:
+                post(res)
                 if len(quick) > 200: quick.clear()
                 quick[serial] = sig
             return True
@@ -4148,7 +4244,16 @@ def _module_inventory():
                 s, depth = r["parent"], depth + 1
             return False
         def integrate(res):
-            recs = idx["recs"]
+            recs = idx["recs"]; op = res.get("op")
+            if op == "forget": forget_place(res["root"]); return
+            if op == "name":
+                r = recs.get(res["root"])
+                if r is not None: r["custom"] = res["text"]; mark_dirty()
+                return
+            if op == "wipe":
+                now = time.time()
+                for s in list(recs): idx["tombs"][s] = now
+                recs.clear(); mark_dirty(); return
             if res.get("same"):
                 serial, now, root = res["serial"], res["at"], None
                 for s, r in recs.items():
@@ -4211,14 +4316,41 @@ def _module_inventory():
                 if s and s >= 0x40000000:
                     if len(opens) < 40: opens.append(s)
                     return
-        def hook_events(): Kit.hook_once(st, "hooked", ("OnOpenContainer", on_open))
+        def keep_seen(root, first):
+            if len(seen_in) > SEEN_CAP or len(seen_roots) > ROOTS_CAP:
+                drop = set(k for k in seen_roots if k not in watching) or set(seen_roots[:max(1, len(seen_roots) // 2)])
+                for k in [k for k, v in seen_in.items() if v in drop]: del seen_in[k]
+                seen_roots[:] = [k for k in seen_roots if k not in drop]
+            if root in seen_roots: seen_roots.remove(root)
+            seen_roots.append(root)
+            for f in first:
+                if f is not None: seen_in[f[0]] = root
+        def on_item_change(*args):
+            if not st["active"] or not watching or len(changed) >= CHANGE_CAP: return
+            for a in args:
+                try: s, c = int(a.Serial), int(a.Container)
+                except Exception: continue
+                for k in (c, s):
+                    root = k if k in watching else seen_in.get(k)
+                    if root is not None: changed.add(root)
+                return
+        def hook_events():
+            Kit.hook_once(st, "hooked", ("OnOpenContainer", on_open), ("OnItemCreated", on_item_change),
+                          ("OnItemUpdated", on_item_change))
         def note_open(serial):
             now = time.time(); w = watching.get(serial)
             if w is None and len(watching) >= WATCH_CAP:
                 oldest = min(watching, key=lambda k: watching[k][0]); watching.pop(oldest, None)
             watching[serial] = [now, now + READ_DELAYS[0], 0]
         def watch_tick(now):
-            if not watching: return
+            if not watching:
+                if changed: changed.clear()
+                return
+            if changed:
+                todo = list(changed); changed.difference_update(todo); soon = now + CHANGE_DELAY
+                for s in todo:
+                    w = watching.get(s)
+                    if w is not None and w[2] >= len(READ_DELAYS) and w[1] > soon: w[1] = soon
             check = now >= st.get("check_at", 0.0) or st.get("check_at", 0.0) - now > OPEN_CHECK
             if check: st["check_at"] = now + OPEN_CHECK
             for serial in list(watching):
@@ -4273,21 +4405,21 @@ def _module_inventory():
                             d[k] = (e[0], a)
                 scache["key"], scache["by"] = key, by
             return scache["by"]
-        queue = Kit.queuer(st); cleanup = Kit.Cleanup()
         def row_click(i):
-            def handler(*args):
-                alt = Follow.alt_held()
-                if len(st["queue"]) < 20: st["queue"].append(("row", i, alt, time.time()))
+            def handler(*args): alt = Follow.alt_held(); queue.add(("row", i, alt, time.time()), dup=True, cap=20)
             return handler
         def build_window():
-            g, store, c = wnd.begin(MINI_W if st["minimized"] else W, MINI_H if st["minimized"] else H); rows = []
+            told = wnd.slot if HOST.layout_holds(KEY) else None; w, h = told or (W, H)
+            n = wnd.rows(ROW_H, H - ROWS * ROW_H, ROWS, 4)
+            iw, h_list = w - 2 * M, h - (H - H_LIST); y_stat = Y_LIST + h_list + Kit.GAP; view["iw"] = iw
+            g, store, c = wnd.begin(MINI_W if st["minimized"] else w, MINI_H if st["minimized"] else h); rows = []
             if not st["minimized"]:
-                wnd.frame(g); Kit.add_section(g, M, Y_FIND, IW, H_FIND); fav_w = 35 + Kit.text_w("Add favourite")
+                wnd.frame(g); Kit.add_section(g, M, Y_FIND, iw, H_FIND); fav_w = 35 + Kit.text_w("Add favourite")
                 Kit.add_label(g, "Find:", M + 10, Y_FIND + 12, Kit.HUE_TEXT); bx = M + 16 + Kit.text_w("Find:")
-                bw = IW - (bx - M) - fav_w - 22
+                bw = iw - (bx - M) - fav_w - 22
                 c["box"] = Kit.with_tip(Kit.add_textbox(g, view["query"], bx, Y_FIND + 9, bw, numbers=False),
                                         "Part of a name, or a graphic (0x0F88); commas for several; empty: favourites")
-                Kit.art_button(g, store, "fav", Kit.ART_OK, M + IW - fav_w - 6, Y_FIND + 8,
+                Kit.art_button(g, store, "fav", Kit.ART_OK, M + iw - fav_w - 6, Y_FIND + 8,
                                "Add favourite", "Add the Find box text to your favourites", on_click=queue("fav"))
                 yb = Y_FIND + 36; xb = M + 10
                 Kit.art_button(g, store, "name", Kit.ART_OK, xb, yb, "Name", "Name the picked place: type it in "
@@ -4296,20 +4428,20 @@ def _module_inventory():
                 Kit.art_button(g, store, "forget", Kit.ART_CLOSE, xb, yb, "Forget",
                                "Drop the picked place and its bags from the index (click twice)",
                                on_click=queue("forget"))
-                nx_w = 35 + Kit.text_w("Next"); xn = M + IW - nx_w - 6
+                nx_w = 35 + Kit.text_w("Next"); xn = M + iw - nx_w - 6
                 Kit.art_button(g, store, "next", Kit.ART_PAGE, xn, yb, "Next", "Next page", on_click=queue("next"))
                 xp = xn - 12 - (35 + Kit.text_w("Prev"))
                 Kit.art_button(g, store, "prev", Kit.ART_PAGE, xp, yb, "Prev", "Previous page", on_click=queue("prev"))
                 c["page"] = Kit.add_label(g, "", xp - 50, yb + 3, Kit.HUE_INFO)
-                Kit.add_section(g, M, Y_LIST, IW, H_LIST)
-                for i in range(ROWS):
+                Kit.add_section(g, M, Y_LIST, iw, h_list)
+                for i in range(n):
                     ry = Y_LIST + 8 + i * ROW_H
                     r = {"l": Kit.add_label(g, "", M + 10, ry, Kit.HUE_TEXT),
-                         "r": Kit.add_label(g, "", M + IW - 60, ry, Kit.HUE_INFO),
-                         "lx": M + 10, "rx": M + IW - 60, "tip": "", "y": ry}
-                    r["c"] = Kit.catcher(g, M + 4, ry - 2, IW - 8, ROW_H, row_click(i)); rows.append(r)
-                Kit.add_section(g, M, Y_STAT, IW, H_STAT)
-                c["status"] = Kit.add_label(g, "", M + 10, Y_STAT + 7, Kit.HUE_INFO)
+                         "r": Kit.add_label(g, "", M + iw - 60, ry, Kit.HUE_INFO),
+                         "lx": M + 10, "rx": M + iw - 60, "tip": "", "y": ry}
+                    r["c"] = Kit.catcher(g, M + 4, ry - 2, iw - 8, ROW_H, row_click(i)); rows.append(r)
+                Kit.add_section(g, M, y_stat, iw, H_STAT)
+                c["status"] = Kit.add_label(g, "", M + 10, y_stat + 7, Kit.HUE_INFO)
             view.update({"data": [None] * len(rows), "prev": [(None, 0.0)] * len(rows), "seen_text": None,
                          "built_for": None, "dirty": True})
             wnd.end(g, {"rows": rows}); refresh(time.time())
@@ -4397,7 +4529,7 @@ def _module_inventory():
                     if p["mob"]: tip += "\n" + FOLLOW_TIP
                     rows.append((nm, commas(a), Kit.HUE_TEXT, 14, tip, data))
             if left:
-                rows.append(("... and %s more line%s: type more of the name" % (
+                rows.append(("%s more line%s: type more of the name" % (
                     commas(left), "" if left == 1 else "s"), "", Kit.HUE_INFO, 0,
                     "A search lists %d lines at most; the total above counts them all" % MAX_RESULT_ROWS, None))
             return rows
@@ -4413,7 +4545,7 @@ def _module_inventory():
             key = (view["query"], summ["ver"], view["live_ver"], view["sel"], view["page"], int(now // 30))
             if view["dirty"] or key != view["built_for"]:
                 view["dirty"] = False; view["built_for"] = key; view["rows"] = results(now)
-                pages = max(1, (len(view["rows"]) + ROWS - 1) // ROWS)
+                pages = page_count()
                 if view["page"] >= pages:
                     view["page"] = pages - 1; view["built_for"] = (key[0], key[1], key[2], key[3], view["page"], key[5])
                 draw_rows(now, pages)
@@ -4425,11 +4557,11 @@ def _module_inventory():
             old = view.get("status_key")
             if old is not None and old[0] is lbl and old[1:] == skey[1:]: return
             view["status_key"] = skey
-            Kit.set_text(lbl, Kit.fit(view["status"] or idle_status(), IW - 20),
+            Kit.set_text(lbl, Kit.fit(view["status"] or idle_status(), view["iw"] - 20),
                          view["status_hue"] if view["status"] else Kit.HUE_INFO)
         def draw_rows(now, pages):
-            rows = win["rows"]; off = view["page"] * ROWS; data, prev = view["data"], view["prev"]
-            right_edge = M + IW - 10
+            rows = win["rows"]; off = view["page"] * len(rows); data, prev = view["data"], view["prev"]
+            right_edge = M + view["iw"] - 10
             for i, r in enumerate(rows):
                 j = off + i
                 if j < len(view["rows"]): lt, rt, hue, indent, tip, d = view["rows"][j]
@@ -4486,67 +4618,66 @@ def _module_inventory():
             return old if changed and (changed >= t or t - changed < 0.15) else view["data"][i]
         def end_naming():
             if view["naming"] is not None: view["naming"] = None; set_box(view["query"])
-        def do_action(action, now):
-            if wnd.action(action): return
-            kind = action[0] if isinstance(action, tuple) else action
-            if action == "show":
-                if st["minimized"] or st["docked"]:
-                    st["minimized"] = st["docked"] = False; HOST.dock_forget(KEY); Kit.save_min(MIN_KEY, False)
-                    build_window()
-                safe(lambda: Kit.client_control(win["g"]).BringOnTop())
-            elif kind == "follow": Follow.toggle(action[1], TITLE)
-            elif kind == "row":
-                _, i, alt, t = action; d = resolve_row(i, t)
-                if d is None: return
-                if alt:
-                    if len(d) > 2 and d[2]: Follow.toggle(d[2], TITLE)
-                    return
-                end_naming()
-                if d[0] == "fav": view["query"] = d[1]; view["page"] = 0; set_box(d[1]); set_status("")
-                elif d[0] == "place":
-                    view["sel"] = None if (d[3] and view["sel"] == d[1]) else d[1]
-                    p = summ["places"].get(view["sel"]) if view["sel"] else None
-                    set_status(("Picked: %s" % p["label"]) if p else "")
-                view["dirty"] = True
-            elif action == "fav":
-                end_naming(); q = view["query"] or (view["seen_text"] or "").strip()
-                if not q: set_status("Type what to look for first (a name, or a graphic like 0x0F88).", Kit.HUE_BAD)
-                elif any(t.lower() == q.lower() for _, t in favs): set_status("\"%s\" is already a favourite." % q)
-                elif len(favs) >= MAX_FAVS:
-                    set_status("%d favourites at most: take one off on the settings page." % MAX_FAVS, Kit.HUE_BAD)
-                else:
-                    favs.append([clean_text(q)[:NAME_MAX], clean_text(q)]); save_favs(); HOST.refresh_settings(KEY)
-                    set_status("Added \"%s\" to the favourites." % q, Kit.HUE_GOOD)
-                view["dirty"] = True
-            elif action == "name":
-                sel = view["sel"]; p = summ["places"].get(sel) if sel else None
-                if view["naming"] is not None:
-                    root = view["naming"]; text = clean_text(view["seen_text"] or "")[:NAME_MAX]
-                    r = idx["recs"].get(root); view["naming"] = None
-                    if r is not None:
-                        r["custom"] = text; mark_dirty()
-                        set_status(("Named it \"%s\"." % text) if text else "Its own name is back.", Kit.HUE_GOOD)
-                    set_box(view["query"])
-                elif p is None or sel not in idx["recs"]:
-                    set_status("Click a place in the list first, then Name.", Kit.HUE_BAD)
-                else:
-                    view["naming"] = sel; set_box(p["label"])
-                    set_status("Type its new name in the Find box, then click Name again "
-                               "(empty: its own name).", Kit.HUE_TITLE)
-            elif action == "forget":
-                end_naming(); sel = view["sel"]; p = summ["places"].get(sel) if sel else None
-                arm, at = view["forget_arm"]
-                if p is None: set_status("Click a place in the list first, then Forget.", Kit.HUE_BAD)
-                elif arm == sel and 0 <= now - at <= 4.0:
-                    view["forget_arm"] = (None, 0.0); forget_place(sel); view["sel"] = None
-                    set_status("Forgot %s." % p["label"], Kit.HUE_GOOD)
-                else:
-                    view["forget_arm"] = (sel, now)
-                    set_status("Click Forget again to forget %s (and the bags in it)." % p["label"], Kit.HUE_TITLE)
-            elif action in ("next", "prev"):
-                pages = max(1, (len(view["rows"]) + ROWS - 1) // ROWS)
-                view["page"] = max(0, min(pages - 1, view["page"] + (1 if action == "next" else -1)))
-                view["dirty"] = True
+        def show_window(action, now):
+            if st["minimized"] or st["docked"]:
+                st["minimized"] = st["docked"] = False; HOST.dock_forget(KEY); Kit.save_min(MIN_KEY, False)
+                build_window()
+            safe(lambda: Kit.client_control(win["g"]).BringOnTop())
+        def follow_action(action, now): Follow.toggle(action[1], TITLE)
+        def row_action(action, now):
+            _, i, alt, t = action; d = resolve_row(i, t)
+            if d is None: return
+            if alt:
+                if len(d) > 2 and d[2]: Follow.toggle(d[2], TITLE)
+                return
+            end_naming()
+            if d[0] == "fav": view["query"] = d[1]; view["page"] = 0; set_box(d[1]); set_status("")
+            elif d[0] == "place":
+                view["sel"] = None if (d[3] and view["sel"] == d[1]) else d[1]
+                p = summ["places"].get(view["sel"]) if view["sel"] else None
+                set_status(("Picked: %s" % p["label"]) if p else "")
+            view["dirty"] = True
+        def add_fav(action, now):
+            end_naming(); q = view["query"] or (view["seen_text"] or "").strip()
+            if not q: set_status("Type what to look for first (a name, or a graphic like 0x0F88).", Kit.HUE_BAD)
+            elif any(t.lower() == q.lower() for _, t in favs): set_status("\"%s\" is already a favourite." % q)
+            elif len(favs) >= MAX_FAVS:
+                set_status("%d favourites at most: take one off on the settings page." % MAX_FAVS, Kit.HUE_BAD)
+            else:
+                favs.append([clean_text(q)[:NAME_MAX], clean_text(q)]); save_favs(); HOST.refresh_settings(KEY)
+                set_status("Added \"%s\" to the favourites." % q, Kit.HUE_GOOD)
+            view["dirty"] = True
+        def name_action(action, now):
+            sel = view["sel"]; p = summ["places"].get(sel) if sel else None
+            if view["naming"] is not None:
+                root = view["naming"]; text = clean_text(view["seen_text"] or "")[:NAME_MAX]
+                r = idx["recs"].get(root); view["naming"] = None
+                if r is not None:
+                    post({"op": "name", "root": root, "text": text})
+                    set_status(("Named it \"%s\"." % text) if text else "Its own name is back.", Kit.HUE_GOOD)
+                set_box(view["query"])
+            elif p is None or sel not in idx["recs"]:
+                set_status("Click a place in the list first, then Name.", Kit.HUE_BAD)
+            else:
+                view["naming"] = sel; set_box(p["label"])
+                set_status("Type its new name in the Find box, then click Name again "
+                           "(empty: its own name).", Kit.HUE_TITLE)
+        def forget_action(action, now):
+            end_naming(); sel = view["sel"]; p = summ["places"].get(sel) if sel else None
+            arm, at = view["forget_arm"]
+            if p is None: set_status("Click a place in the list first, then Forget.", Kit.HUE_BAD)
+            elif arm == sel and 0 <= now - at <= 4.0:
+                view["forget_arm"] = (None, 0.0); post({"op": "forget", "root": sel}); view["sel"] = None
+                set_status("Forgot %s." % p["label"], Kit.HUE_GOOD)
+            else:
+                view["forget_arm"] = (sel, now)
+                set_status("Click Forget again to forget %s (and the bags in it)." % p["label"], Kit.HUE_TITLE)
+        def page_count(): per = max(1, len(win["rows"])); return max(1, (len(view["rows"]) + per - 1) // per)
+        def page_step(action, now):
+            pages = page_count()
+            view["page"] = max(0, min(pages - 1, view["page"] + (1 if action == "next" else -1))); view["dirty"] = True
+        ACTIONS = {"show": show_window, "follow": follow_action, "row": row_action, "fav": add_fav,
+                   "name": name_action, "forget": forget_action, "next": page_step, "prev": page_step}
         def forget_place(root):
             recs = idx["recs"]; now = time.time()
             for s in [s for s, r in recs.items() if r["root"] == root or s == root]: del recs[s]; idx["tombs"][s] = now
@@ -4597,26 +4728,29 @@ def _module_inventory():
                 now = time.time()
                 if 0 <= now - page["wipe_at"] <= 4.0:
                     page["wipe_at"] = 0.0
-                    for s in list(idx["recs"]): idx["tombs"][s] = now
-                    idx["recs"].clear(); quick.clear(); view["sel"] = None; mark_dirty()
+                    post({"op": "wipe"}); quick.clear(); view["sel"] = None
                     API.SysMsg("%s: the index is empty." % TITLE, Kit.HUE_GOOD); HOST.refresh_settings(KEY)
                 else: page["wipe_at"] = now; Kit.set_text(c.get("wipe_lbl"), "Click again to empty it", Kit.HUE_BAD)
         cfg = Kit.Page(settings, page_table, save_settings, adjust=read_days, clicks=page_clicks)
         def _start():
             st.update({"shutting": False, "docked": False, "queue": [], "active": True, "check_at": 0.0,
                        "merge_at": 0.0, "minimized": wnd.start_min()})
-            load_settings(); load_favs(); watching.clear(); del reads[:]; del opens[:]
+            load_settings(); load_favs(); watching.clear(); feed["q"] = unread(); del opens[:]
             view.update({"sel": None, "naming": None, "status": "", "page": 0, "dirty": True})
-            idx["path"] = Kit.data_path(FILE_FMT % account_id()); hook_events(); build_window(); wnd.dock()
-            cleanup.service("storage.show", queue("show"))
+            idx["path"] = Kit.data_path(FILE_FMT % account_id()); hook_events(); build_window()
+            wnd.dock(fit=True, min=(W, H - (ROWS - 4) * ROW_H)); cleanup.service("storage.show", queue("show"))
         def _tick():
             if win["g"] is None: return
             if Kit.closed(win): return
             now = time.time()
+            if feed["q"] and feed["q"][0]["n"] <= took["n"]: feed["q"] = unread()
             while opens: note_open(opens.pop(0))
             watch_tick(now)
             while st["queue"]:
-                do_action(st["queue"].pop(0), now)
+                action = st["queue"].pop(0)
+                if not wnd.action(action):
+                    fn = ACTIONS.get(action[0] if isinstance(action, tuple) else action)
+                    if fn is not None: fn(action, now)
                 if win["g"] is None: return
             if full_shown(): poll_box(now); live_tick(now)
             refresh(now)
@@ -4625,8 +4759,7 @@ def _module_inventory():
             if not idx["loaded"]:
                 try: load_index()
                 except Exception as ex: idx["loaded"], idx["err"] = True, str(ex)[:60]
-            while reads: integrate(reads.pop(0))
-            now = time.time()
+            take_reads(); now = time.time()
             if idx["dirty"] and (now - idx["dirty_at"] >= SAVE_DELAY or now < idx["dirty_at"]):
                 save_index(); st["merge_at"] = now + MERGE_CHECK
             elif now >= st["merge_at"] or st["merge_at"] - now > MERGE_CHECK:
@@ -4636,26 +4769,25 @@ def _module_inventory():
                 if view["query"]: search_stored(view["query"])
         def _thread_wanted():
             if st["shutting"]: return False
-            if not idx["loaded"] or reads or summ["ver"] != idx["ver"]: return True
+            if not idx["loaded"] or has_unread() or summ["ver"] != idx["ver"]: return True
             now = time.time()
             if idx["dirty"] and (now - idx["dirty_at"] >= SAVE_DELAY or now < idx["dirty_at"]): return True
             return now >= st["merge_at"] or st["merge_at"] - now > MERGE_CHECK
+        load_settings()
         def _stop():
             st["shutting"] = True; st["active"] = False
-            if reads or idx["dirty"]:
+            if has_unread() or idx["dirty"]:
                 try:
                     if not idx["loaded"]: load_index()
-                    while reads: integrate(reads.pop(0))
-                    save_index()
+                    take_reads(); save_index()
                 except Exception: pass
-            watching.clear(); del reads[:]; del opens[:]; cleanup.close()
-        load_settings()
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-                  "thread_wanted": _thread_wanted, "config_height": cfg.height, "build_config": cfg.build,
-                  "poll_config": cfg.poll, "config_closed": cfg.closed}
+            watching.clear(); del opens[:]; cleanup.close()
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
+                "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
     def _part_restock():
-        KEY = "restock"; TITLE = "Restock"; SETTINGS_KEY = "Restock_settings"; TARGETS_KEY = "Restock_targets"
-        POS_KEY = "Restock_pos"; MIN_KEY = "Restock_min"; W = 400; MINI_W, MINI_H = 240, 46; TRAY_ICON = 0x0E79
+        KEY = "restock"; TITLE = "Restock"; SETTINGS_KEY = "Restock_settings"; POS_KEY = "Restock_pos"
+        MIN_KEY = "Restock_min"; TARGETS_KEY = "Restock_targets"; W = 400; MINI_W, MINI_H = 240, 46; TRAY_ICON = 0x0E79
         ROW_H = 22; ICON = 20; PAGE_ROWS = 12; ART_BACK = (4014, 4016, 4015); MOVE_GAP = 0.7; NOCHANGE_WAIT = 3.0
         ANSWER_WAIT = 10.0; FAIL_STOP = 3; WAIT_RETRY = 3; LIMBO_WAIT = ANSWER_WAIT; OPEN_WAIT = 3.0; REACH = 2
         WEIGHT_SPARE = 0; TARGET_MAX = 60000; COUNT_EVERY = 1.0; POLL_EVERY = 0.25; PICK_TIMEOUT = 20.0
@@ -4672,11 +4804,13 @@ def _module_inventory():
         DEST_BUTTONS = (("pack", "Backpack", "Restock into your backpack"),
                         ("bag", "Pick bag...", "Target a bag in your backpack to restock into"))
         settings = {"deep": True, "src_deep": True, "src": "last", "src_serial": 0, "dest": 0}; targets = {}
+        DEFAULTS = dict(settings)
         st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "run": None,
               "halt": False, "status": ("Idle", Kit.HUE_INFO), "last_open": 0, "opened": [],
               "page": 0, "count_at": 0.0, "short": {}, "layout": None,
               "hooked": False, "active": False, "redraw": False, "shown_moved": 0, "sent_at": 0.0, "flight": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "tips": {}}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         page = {"c": None, "seen": None, "at": 0.0}
         def noop(): pass
         def load_settings():
@@ -4703,19 +4837,9 @@ def _module_inventory():
             try: v = getattr(obj, attr); return default if v is None else int(v)
             except Exception: return default
         def no_container(c): return not c or c == 0xFFFFFFFF
-        def top_of(serial):
-            s = int(serial or 0)
-            for _ in range(10):
-                it = API.FindItem(s)
-                if it is None: return s, 0
-                c = num(it, "Container")
-                if no_container(c): return s, 0
-                if c < 0x40000000: return s, c
-                s = c
-            return s, 0
+        top_of = Kit.top_of; in_pack = Kit.in_pack
         def backpack(): return int(API.Backpack or 0)
         def bank_box(): return int(API.Bank or 0)
-        def in_pack(serial): pack = backpack(); return bool(pack) and top_of(serial)[0] == pack
         def item_name(it, fallback="container"):
             try: n = str(it.Name or "").strip()
             except Exception: n = ""
@@ -4817,8 +4941,10 @@ def _module_inventory():
         def on_open(*args):
             if not st["active"]: return
             for a in args:
-                s = 0
-                try: s = int(getattr(a, "Serial", a) or 0)
+                try: s = int(a.Serial or 0)
+                except AttributeError:
+                    try: s = int(a or 0)
+                    except Exception: s = 0
                 except Exception: s = 0
                 if s: st["opened"].append(s); del st["opened"][:-8]; return
         def hook_events(): Kit.hook_once(st, "hooked", ("OnOpenContainer", on_open))
@@ -4831,7 +4957,6 @@ def _module_inventory():
             if lbl is not None:
                 if st["minimized"]: text = TITLE + ": " + text[:1].lower() + text[1:]
                 Kit.set_text(lbl, Kit.fit(text, win["c"].get("status_w", 200)), st["status"][1])
-        say = Kit.sayer(TITLE)
         def start_run():
             if st["run"] is not None: say("already restocking; press Stop first.", Kit.HUE_BAD); return
             rows = [k for k in ORDER if targets.get(k, 0) > 0]
@@ -4986,16 +5111,17 @@ def _module_inventory():
                 if not HOST.alert(ALERT_STOP, "Stopped: " + text, "warn"): say("stopped: " + text + ".", Kit.HUE_BAD)
                 set_status("Stopped: " + (why or ""), Kit.HUE_BAD)
             st["count_at"] = 0.0; refresh_buttons()
-        queue = Kit.queuer(st); cleanup = Kit.Cleanup()
         def halt_click(): st["halt"] = True; queue("stop")()
         def list_keys(): return [k for k in ORDER if targets.get(k, 0) > 0]
+        FIXED_H = 2 * Kit.MARGIN + 30 + 3 * Kit.GAP + 136 + 64
         def layout_now():
-            keys = list_keys(); pages = max(1, (len(keys) + PAGE_ROWS - 1) // PAGE_ROWS)
-            pg = min(st["page"], pages - 1)
-            return (st["minimized"], st["docked"], pg, pages, tuple(keys[pg * PAGE_ROWS:(pg + 1) * PAGE_ROWS]))
+            keys = list_keys(); per = wnd.rows(ROW_H, FIXED_H + list_h(0) - 2 * ROW_H, PAGE_ROWS, 2)
+            pages = max(1, (len(keys) + per - 1) // per); pg = min(st["page"], pages - 1)
+            return (st["minimized"], st["docked"], pg, pages, tuple(keys[pg * per:(pg + 1) * per]))
         def build_window():
             lay = layout_now(); st["page"] = lay[2]; st["layout"] = lay; mini = st["minimized"]
-            w, h = (MINI_W, MINI_H) if mini else (W, 2 * Kit.MARGIN + 30 + 3 * Kit.GAP + 136 + 64 + list_h(len(lay[4])))
+            told = wnd.slot if HOST.layout_holds(KEY) else None
+            w, h = (MINI_W, MINI_H) if mini else (told or (W, FIXED_H + list_h(len(lay[4]))))
             g, store, c = wnd.begin(w, h); M = Kit.MARGIN; rows = []
             if mini: c["status_w"] = w - 90
             else:
@@ -5014,7 +5140,7 @@ def _module_inventory():
                         Kit.HUE_TITLE if (mode == "bag") == bool(settings["dest"]) else Kit.HUE_TEXT,
                         on_click=queue(("dest", mode)))
                     bx += 35 + Kit.text_w(cap) + 14
-                yb = ya + 136 + Kit.GAP; hb = list_h(len(lay[4]))
+                yb = ya + 136 + Kit.GAP; hb = h - FIXED_H if told else list_h(len(lay[4]))
                 Kit.add_section(g, M, yb, IW, hb, "LIST  (carried / to carry)")
                 if lay[3] > 1:
                     px = M + IW - 12 - 21
@@ -5098,6 +5224,18 @@ def _module_inventory():
             st["count_at"] = 0.0; refresh_buttons()
         def group_rows(grp): return [r for r in ITEMS if r[1] == grp]
         def group_h(grp): n = len(group_rows(grp)); return 30 + ((n + 1) // 2) * 26 + 6
+        def stop_action(action):
+            if st["run"] is not None: stop_run(user=True)
+        def pick_place(action):
+            kind = action[0]
+            if st["run"] is not None: say("press Stop first.", Kit.HUE_BAD)
+            elif action[1] == ("pick" if kind == "src" else "bag"): ask_pick(kind)
+            else:
+                settings[kind] = action[1] if kind == "src" else 0; save_settings(); st["count_at"] = 0.0
+                refresh_buttons()
+        def turn_page(action): pages = layout_now()[3]; st["page"] = (st["page"] + action[1]) % pages; build_window()
+        ACTIONS = {"go": lambda action: start_run(), "stop": stop_action, "src": pick_place, "dest": pick_place,
+                   "picked": lambda action: picked(action[1], action[2]), "page": turn_page}
         OPT_H = 30 + 2 * 28 + 24 + 8
         def page_table(w):
             half = (w - 24) // 2
@@ -5113,6 +5251,7 @@ def _module_inventory():
                                   "chest or bank box too (only those whose contents you have seen)", {"h": 30}),
                                  ("note", "One move every %.1f s; it stops when you pick something up." % MOVE_GAP)),
                      {"sh": OPT_H})]
+        cfg = Kit.Page(settings, page_table, save_settings)
         def config_height(w): return Kit.Form.height(page_table(w), w)
         def build_config(g, x, y, w):
             vals = dict(settings); vals.update((k, targets.get(k, 0)) for k in ORDER)
@@ -5151,7 +5290,8 @@ def _module_inventory():
                        "count_at": 0.0, "short": {}, "layout": None,
                        "active": True, "redraw": False, "shown_moved": 0, "minimized": wnd.start_min()})
             load_settings(); HOST.alert_kind(ALERT_STOP, "Restock stopped early", ALERT_STOP_SOUND)
-            hook_events(); build_window(); cleanup.service("restock.run", queue("go")); wnd.dock(scale=True)
+            hook_events(); build_window(); cleanup.service("restock.run", queue("go"))
+            wnd.dock(fit=True, min=(W, FIXED_H + list_h(2)))
         def _tick():
             if win["g"] is None: return
             if Kit.closed(win): return
@@ -5159,55 +5299,43 @@ def _module_inventory():
             while st["queue"]:
                 action = st["queue"].pop(0)
                 if wnd.action(action): continue
-                kind = action[0] if isinstance(action, tuple) else action
-                if action == "go": start_run()
-                elif action == "stop":
-                    if st["run"] is not None: stop_run(user=True)
-                elif kind in ("src", "dest"):
-                    if st["run"] is not None: say("press Stop first.", Kit.HUE_BAD)
-                    elif action[1] == ("pick" if kind == "src" else "bag"): ask_pick(kind)
-                    else:
-                        settings[kind] = action[1] if kind == "src" else 0; save_settings(); st["count_at"] = 0.0
-                        refresh_buttons()
-                elif kind == "picked": picked(action[1], action[2])
-                elif kind == "page":
-                    pages = layout_now()[3]; st["page"] = (st["page"] + action[1]) % pages; build_window()
+                fn = ACTIONS.get(action[0] if isinstance(action, tuple) else action)
+                if fn is not None: fn(action)
             if st["redraw"]:
                 st["redraw"] = False
                 if layout_now() != st["layout"]: build_window()
             now = time.time(); r = st["run"]
             if r is not None:
-                run_step(now)
+                run_step(now); send_move()
                 if r["moved"] != st["shown_moved"]: st["shown_moved"] = r["moved"]; st["count_at"] = 0.0
             refresh(now)
-        def _thread_tick():
-            if st["run"] is not None and not st["shutting"]: send_move()
-        def _thread_wanted(): r = st["run"]; return r is not None and r["move"] is not None and not st["shutting"]
+        def _interval(): return 0.05 if st["run"] is not None else 0.1
+        load_settings()
         def _stop():
             st.update({"shutting": True, "halt": True, "active": False}); r, st["run"] = st["run"], None; keep_flight(r)
             save_settings(); cleanup.close()
-        def _interval(): return 0.05 if st["run"] is not None else 0.1
-        load_settings()
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-                  "thread_wanted": _thread_wanted, "interval": _interval,
-                  "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
+                "config_height": config_height, "build_config": build_config, "poll_config": poll_config,
+                "config_closed": config_closed, "interval": _interval}
     def _part_supplies():
         KEY = "supplies"; TITLE = "Supplies"; OLD_SETTINGS_KEY = "UnitFrames_settings"; SET_KEY = "UnitFrames_supset"
         SAVE_EVERY = 10.0; PACK_AGE = 0.5; SUPPLY_EVERY = 1.0; SUPPLY_W = 220; SUPPLY_ROW = 22; SUPPLY_ICON = 20
+        SUPPLY_ROW_MIN = 20
         SUPPOS_KEY = "UnitFrames_suppos"; SUPPLY_SIDES = ("Below the frame", "Left of the frame", "Right of the frame")
-        SUPPLY_LOW_DEFAULT = 10; ROWS_POLL = 0.25; SUPPLY_ITEMS = tuple(r + (None,) for r in ITEMS)
+        SUPPLY_LOW_DEFAULT = 10; SUPPLY_SOON = 0.1; ROWS_POLL = 0.25; SUPPLY_ITEMS = tuple(r + (None,) for r in ITEMS)
         SUPPLY_DEFAULT = ("bp", "bm", "ga", "gi", "mr", "ns", "ss", "sa",
                           "p_heal", "p_cure", "p_refresh", "s_recall", "s_gate", "o_band")
         SUPPLIES_KEY = "UnitFrames_supplies"; SUPWARN_KEY = "UnitFrames_supwarn"; HUE_LOW = Kit.HUE_TITLE
         WARN_READ_EVERY = 0.25; WARN_MAX = 9999
         settings = {"sup_open": False, "sup_deep": True, "sup_hide0": False, "sup_follow": True,
                     "sup_low": SUPPLY_LOW_DEFAULT, "sup_side": 0}
-        NUMBERS = {"sup_low": (0, 9999), "sup_side": (0, 2)}
-        st = {"next_supply": 0.0, "counts": {}, "next_save": 0.0, "queue": []}; supplies = set(SUPPLY_DEFAULT)
-        sup = {"g": None, "c": {}, "rows": (), "at": None}; warn = {}
+        DEFAULTS = dict(settings); NUMBERS = {"sup_low": (0, 9999), "sup_side": (0, 2)}
+        st = {"minimized": False, "shutting": False, "docked": False, "next_supply": 0.0, "counts": {},
+              "next_save": 0.0, "queue": []}
+        win = {"g": None, "c": {}, "store": ({}, {})}; supplies = set(SUPPLY_DEFAULT)
+        sup = {"g": None, "c": {}, "rows": (), "at": None, "slot": None, "drawn": None}; warn = {}
         page = {"next_warn": 0.0}; _get, _put = Kit.get_var, Kit.put_var
-        queue = Kit.queuer(st); cleanup = Kit.Cleanup()
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         def read_pairs(key): Kit.kv_load(key, ",", settings, NUMBERS)
         def load_settings(): read_pairs(SET_KEY if _get(SET_KEY, "") else OLD_SETTINGS_KEY)
         def save_settings(): Kit.kv_save(SET_KEY, ",", settings, sorted(settings), NUMBERS)
@@ -5258,38 +5386,57 @@ def _module_inventory():
             if n <= crit: hue = Kit.HUE_BAD
             else: hue = HUE_LOW if lw is not None and lw[0] is not None and n <= lw[0] else Kit.HUE_TEXT
             return "{:,}".format(int(n)), hue
-        def build_supplies(rows):
-            old = sup["g"]; w = SUPPLY_W
+        def follows(): return bool(settings["sup_follow"]) and not HOST.layout_holds(KEY)
+        def table_slot(): return sup["slot"] if HOST.layout_holds(KEY) else None
+        def table_plan(rows, pitch):
             groups = [(grp, [r for r in rows if r[1] == grp]) for grp in GROUPS if any(r[1] == grp for r in rows)]
-            heights = [26 + len(grows) * SUPPLY_ROW + 4 for _grp, grows in groups] or [26 + 2 * SUPPLY_ROW + 4]
-            h = 16 + sum(heights) + Kit.GAP * (len(heights) - 1); follow = bool(settings["sup_follow"])
-            g = G.CreateGump(True, not follow); Kit.add_window_frame(g, w, h, corners=False); c = {}; y = 8
+            heights = [26 + len(grows) * pitch + 4 for _grp, grows in groups] or [26 + 2 * pitch + 4]
+            return groups, heights, 16 + sum(heights) + Kit.GAP * (len(heights) - 1)
+        def table_fit(w, h, mode):
+            new = (int(w), int(h)) if (w is not None and h is not None) else None
+            if new != sup["slot"] or mode == "again": sup["slot"] = new; sup["drawn"] = False
+        def table_min(): return SUPPLY_W, table_plan(supply_rows(), SUPPLY_ROW_MIN)[2]
+        def build_supplies(rows):
+            old = sup["g"]; slot = table_slot(); held = HOST.layout_holds(KEY); follow = follows(); pitch = SUPPLY_ROW
+            groups, heights, h = table_plan(rows, pitch); w = SUPPLY_W if slot is None else slot[0]
+            if slot is not None:
+                n = sum(len(grows) for _grp, grows in groups) or 2
+                pitch = max(SUPPLY_ROW_MIN, min(2 * SUPPLY_ROW, SUPPLY_ROW + (slot[1] - h) // n))
+                groups, heights, h = table_plan(rows, pitch)
+                if h < slot[1]: heights[-1] += slot[1] - h; h = slot[1]
+            g = G.CreateGump(True, not follow and not HOST.layout_locked(KEY))
+            Kit.add_window_frame(g, w, h, corners=False); c = {}; y = 8
             art = dict((key, (graphic, hue)) for key, _g, _c, graphic, hue in SUPPLY_ITEMS)
             if not groups:
                 Kit.add_section(g, 8, y, w - 16, heights[0], "SUPPLIES")
                 hint = "None of these in your pack." if supplies else "No rows ticked yet."
                 Kit.add_label(g, hint, 18, y + 26, Kit.HUE_INFO)
-                Kit.add_label(g, "Pick rows: its settings page.", 18, y + 26 + SUPPLY_ROW, Kit.HUE_INFO)
+                Kit.add_label(g, "Pick rows: its settings page.", 18, y + 26 + pitch, Kit.HUE_INFO)
             for (grp, grows), sh in zip(groups, heights):
                 Kit.add_section(g, 8, y, w - 16, sh, grp)
                 for i, (key, _grp, cap) in enumerate(grows):
-                    ry = y + 26 + i * SUPPLY_ROW
-                    item_pic(g, art[key][0], art[key][1], 16, ry + (SUPPLY_ROW - SUPPLY_ICON) // 2 - 1, SUPPLY_ICON)
-                    text, hue = supply_text(key)
+                    ry = y + 26 + i * pitch
+                    item_pic(g, art[key][0], art[key][1], 16, ry + (pitch - SUPPLY_ICON) // 2 - 1, SUPPLY_ICON)
+                    text, hue = supply_text(key); ry += (pitch - SUPPLY_ROW) // 2
                     c[key] = Kit.add_label(g, text, w - 18 - Kit.text_w(text), ry + 2, hue)
                     Kit.add_label(g, Kit.fit(cap, w - 18 - SUPPLY_ICON - 4 - 18 - 6 - 44), 18 + SUPPLY_ICON + 4, ry + 2)
                 y += sh + Kit.GAP
             at = None
-            if not follow:
+            if held: spot = HOST.layout_rect(KEY); x, y0 = (spot[0], spot[1]) if spot is not None else sup_pos()
+            elif not follow:
                 Kit.catcher(g, 0, 0, w, h, lambda: None, "Drag to move the supplies table", movable=True)
                 x, y0 = sup_pos()
                 if Kit.is_open(old): x, y0 = old.GetX(), old.GetY()
                 Kit.place(g, x, y0, w, h)
             else: a = frame_anchor(w, h); at = a[1] if a is not None else sup_pos(); Kit.place(g, at[0], at[1], w, h)
-            Kit.art_button(g, ({}, {}), "close", Kit.ART_CLOSE, w - 8 - 30, 10, None, "Close", on_click=queue("close"))
-            sup.update({"g": g, "c": c, "rows": rows, "at": at, "w": w, "h": h, "follow": follow, "leader": None})
-            G.AddGump(g)
-            if not follow: Kit.on_moved(g, save_sup_pos)
+            if not Kit.zone_up(KEY):
+                Kit.art_button(g, ({}, {}), "close", Kit.ART_CLOSE, w - 8 - 30, 10, None, "Close the supplies list",
+                               on_click=queue("close"))
+            sup.update({"g": g, "c": c, "rows": rows, "at": at, "w": w, "h": h, "follow": follow, "leader": None,
+                        "drawn": slot})
+            if held: to_slot(KEY, g, Kit.show_window(g, x, y0, w, h, KEY, False, None, None))
+            else: G.AddGump(g)
+            if not follow and not held: Kit.on_moved(g, save_sup_pos)
             Kit.dispose(old); place_supplies()
         SUP_DEFAULT_POS = (60, 620)
         def sup_pos():
@@ -5300,7 +5447,7 @@ def _module_inventory():
                 return a[1] if a is not None else SUP_DEFAULT_POS
         def save_sup_pos():
             g = sup["g"]
-            if Kit.is_open(g) and not sup.get("follow", True):
+            if Kit.is_open(g) and not sup.get("follow", True) and not HOST.layout_holds(KEY):
                 try: data = "%d,%d" % (int(g.GetX()), int(g.GetY()))
                 except Exception: return
                 if data != sup.get("saved"): sup["saved"] = data; _put(SUPPOS_KEY, data)
@@ -5320,13 +5467,39 @@ def _module_inventory():
                 sup["at"] = at
                 try: Kit.place(g, at[0], at[1], sup["w"], sup["h"]); Kit.moved_by_code(g)
                 except Exception: pass
-        def update_supplies(now):
+        ROWS_W = 620; ROWS_POS_KEY = "UnitFrames_rowspos"; ROWS_KEY = "supplies_rows"
+        def build_window():
+            M, GAP = Kit.MARGIN, Kit.GAP; w = ROWS_W; IW = w - 2 * M
+            longest = max(sum(1 for r in SUPPLY_ITEMS if r[1] == grp) for grp in GROUPS)
+            h_list = 52 + longest * SUP_ROW + 4; h = M + 30 + GAP + h_list + M
+            g, store, c = wnd.begin(w, h); Kit.add_window_frame(g, w, h)
+            Kit.add_section(g, M, M, IW, 30); Kit.add_label(g, "SUPPLIES TABLE ROWS", M + 30, M + 7, Kit.HUE_TITLE)
+            bx = w - M - 54 - 20 - 35 - Kit.text_w("Untick all")
+            Kit.art_button(g, store, "none", Kit.ART_CLOSE, bx, M + 4, "Untick all", "Empty the table")
+            bx -= 14 + 35 + Kit.text_w("Tick all")
+            Kit.art_button(g, store, "all", Kit.ART_OK, bx, M + 4, "Tick all", "Show every row")
+            Kit.catcher(g, M, M, bx - M - 6, 30, lambda: None, "Drag to move", movable=not HOST.layout_locked(ROWS_KEY))
+            if not Kit.zone_up(ROWS_KEY):
+                Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close the table")
+            yl = M + 30 + GAP; Kit.add_section(g, M, yl, IW, h_list, "ROWS  (ticked rows show in the table)")
+            cw = (IW - 16) // len(GROUPS)
+            for col, grp in enumerate(GROUPS):
+                cx = M + 10 + col * cw; Kit.add_label(g, grp, cx, yl + 30, Kit.HUE_TITLE)
+                for i, (key, _grp, cap, _gr, _h) in enumerate(r for r in SUPPLY_ITEMS if r[1] == grp):
+                    c[key] = Kit.add_check(g, Kit.fit(cap, cw - 34), cx, yl + 52 + i * SUP_ROW, key in supplies)
+            wnd.end(g, {"next_poll": 0.0})
+        wnd = Kit.Window(ROWS_KEY, "Supplies Rows", st, win, build_window, ROWS_POS_KEY, default=(260, 160),
+                         cleanup=cleanup, owner=False, clear={"c": {}})
+        def refresh(now):
             if not settings["sup_open"]:
                 if sup["g"] is not None: save_sup_pos(); g, sup["g"] = sup["g"], None; Kit.dispose(g)
                 return
-            recount = now >= st["next_supply"] or not st["counts"]
-            if recount: st["next_supply"] = now + SUPPLY_EVERY; st["counts"] = count_supplies()
-            if not Kit.is_open(sup["g"]) or sup.get("follow") != bool(settings["sup_follow"]):
+            recount = now >= st["next_supply"] or not st["counts"] or (now >= st.get("sup_min", 0.0)
+                                                                         and HOST.pack_ver() != st.get("pack_v"))
+            if recount:
+                st.update({"next_supply": now + SUPPLY_EVERY, "sup_min": now + SUPPLY_SOON, "pack_v": HOST.pack_ver()})
+                st["counts"] = count_supplies()
+            if not Kit.is_open(sup["g"]) or sup.get("follow") != follows() or sup["drawn"] != table_slot():
                 save_sup_pos(); build_supplies(supply_rows())
             elif recount:
                 rows = supply_rows()
@@ -5338,41 +5511,19 @@ def _module_inventory():
                             lbl.SetPos(sup["w"] - 18 - Kit.text_px(text), lbl.GetY())
                     place_supplies()
             else: place_supplies()
-        ROWS_W = 620; ROWS_POS_KEY = "UnitFrames_rowspos"; rows_win = {"g": None, "c": {}, "store": ({}, {})}
-        def build_rows_window():
-            M, GAP = Kit.MARGIN, Kit.GAP; w = ROWS_W; IW = w - 2 * M
-            longest = max(sum(1 for r in SUPPLY_ITEMS if r[1] == grp) for grp in GROUPS)
-            h_list = 52 + longest * SUP_ROW + 4; h = M + 30 + GAP + h_list + M
-            g, store, c = rows_w.begin(w, h); Kit.add_window_frame(g, w, h)
-            Kit.add_section(g, M, M, IW, 30); Kit.add_label(g, "SUPPLIES TABLE ROWS", M + 30, M + 7, Kit.HUE_TITLE)
-            bx = w - M - 54 - 20 - 35 - Kit.text_w("Untick all")
-            Kit.art_button(g, store, "none", Kit.ART_CLOSE, bx, M + 4, "Untick all", "Empty the table")
-            bx -= 14 + 35 + Kit.text_w("Tick all")
-            Kit.art_button(g, store, "all", Kit.ART_OK, bx, M + 4, "Tick all", "Show every row")
-            Kit.catcher(g, M, M, bx - M - 6, 30, lambda: None, "Drag to move", movable=True)
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close"); yl = M + 30 + GAP
-            Kit.add_section(g, M, yl, IW, h_list, "ROWS  (ticked rows show in the table)")
-            cw = (IW - 16) // len(GROUPS)
-            for col, grp in enumerate(GROUPS):
-                cx = M + 10 + col * cw; Kit.add_label(g, grp, cx, yl + 30, Kit.HUE_TITLE)
-                for i, (key, _grp, cap, _gr, _h) in enumerate(r for r in SUPPLY_ITEMS if r[1] == grp):
-                    c[key] = Kit.add_check(g, Kit.fit(cap, cw - 34), cx, yl + 52 + i * SUP_ROW, key in supplies)
-            rows_w.end(g, {"next_poll": 0.0})
-        rows_w = Kit.Window(KEY, TITLE, None, rows_win, build_rows_window, ROWS_POS_KEY, default=(260, 160),
-                            cleanup=cleanup, lock=False, owner=False, clear={"c": {}})
         def poll_rows_window(now):
-            g = rows_win["g"]
+            g = win["g"]
             if g is None: return
-            if not Kit.is_open(g): rows_win.update({"g": None, "c": {}}); return
-            store, c = rows_win["store"], rows_win["c"]
-            if Kit.was_clicked(store, "close"): rows_w.close(); return
+            if not Kit.is_open(g): win.update({"g": None, "c": {}}); return
+            store, c = win["store"], win["c"]
+            if Kit.was_clicked(store, "close"): wnd.close(); return
             poked = False
             for name, on in (("all", True), ("none", False)):
                 if Kit.was_clicked(store, name):
                     poked = True
                     for cb in c.values(): cb.SetIsChecked(on)
-            if not poked and not HOST.pass_poked and now < rows_win.get("next_poll", 0.0): return
-            rows_win["next_poll"] = now + ROWS_POLL; ticked = set()
+            if not poked and not HOST.pass_poked and now < win.get("next_poll", 0.0): return
+            win["next_poll"] = now + ROWS_POLL; ticked = set()
             for key, cb in c.items():
                 try: on = bool(cb.IsChecked)
                 except Exception: on = key in supplies
@@ -5380,6 +5531,12 @@ def _module_inventory():
             if ticked != supplies:
                 supplies.clear(); supplies.update(ticked); save_supplies(); st["next_supply"] = 0.0
                 HOST.refresh_settings(KEY)
+        def open_now(now):
+            if not settings["sup_open"]: settings["sup_open"] = True; save_settings(); st["next_supply"] = 0.0
+            refresh(now); g = sup["g"]
+            if Kit.is_open(g): safe(lambda: Kit.client_control(g).BringOnTop())
+        def close_now(now): settings["sup_open"] = False; save_settings()
+        ACTIONS = {"open": open_now, "close": close_now, "sup_rows": lambda now: build_window()}
         SUP_CHECKS = (("sup_follow", "The table sticks to the player frame", "Untick to drag it anywhere"),
                       ("sup_deep", "Count inside bags in your backpack", "Bags and pouches in your backpack count too"),
                       ("sup_hide0", "Hide rows you have none of", "Leave out rows at 0"))
@@ -5463,23 +5620,24 @@ def _module_inventory():
         def open_table(): queue("open")()
         def _start():
             st.update({"next_supply": 0.0, "counts": {}, "next_save": 0.0, "queue": []}); sup["saved"] = None
-            load_settings(); load_supplies(); load_warn(); cleanup.service("supplies.open", open_table)
+            load_settings(); load_supplies(); load_warn(); cleanup.service("supplies.open", open_table); wnd.dock()
+            HOST.dock_add(KEY, {"title": TITLE, "state": lambda: "open" if Kit.is_open(sup["g"]) else None,
+                                "show": open_table, "gump": lambda: sup["g"], "fit": table_fit, "min": table_min,
+                                "untitled": True})
+            cleanup.add(HOST.dock_remove, KEY)
         def _tick():
             now = time.time()
             while st["queue"]:
                 action = st["queue"].pop(0)
-                if action == "open":
-                    if not settings["sup_open"]: settings["sup_open"] = True; save_settings(); st["next_supply"] = 0.0
-                    update_supplies(now); g = sup["g"]
-                    if Kit.is_open(g): safe(lambda: Kit.client_control(g).BringOnTop())
-                elif action == "close": settings["sup_open"] = False; save_settings()
-                elif action == "sup_rows": build_rows_window()
-            poll_rows_window(now); update_supplies(now)
+                if wnd.action(action): continue
+                fn = ACTIONS.get(action)
+                if fn is not None: fn(now)
+            poll_rows_window(now); refresh(now)
             if now >= st["next_save"]: st["next_save"] = now + SAVE_EVERY; save_sup_pos()
+        load_settings(); load_supplies(); load_warn()
         def _stop():
             save_settings(); save_supplies(); save_sup_pos(); g, sup["g"] = sup["g"], None; Kit.dispose(g)
             cleanup.close()
-        load_settings(); load_supplies(); load_warn()
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                   "build_config": build_config, "poll_config": cfg.poll, "config_closed": config_closed}
     PARTS = (("bags", _part_bags, 0.1, "bag"), ("paperdoll", _part_paperdoll, 0.1, "character"),

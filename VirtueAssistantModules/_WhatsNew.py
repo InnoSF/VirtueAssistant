@@ -1,6 +1,38 @@
-WHATS_NEW = ("2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker windows could still be minimized "
-    "there); Action Bar Stealing on an item and harmful cells now aim at the target you confirmed; and "
-    "more fixes.",
+WHATS_NEW = ("2.7.0.16: with the one-panel look, Social and Pets no longer jump between two looks; thinner gold "
+    "edges round the Action Bar and Paperdoll slots.",
+    "2.7.0.15: Action Bar: gold trim between cells; its gold slot frames stay gold in Dark mode. "
+    "Dark mode moved to Settings > Interface.",
+    "2.7.0.14: Dark mode: a switch on the Settings tab tints every window charcoal; off by default.",
+    "2.7.0.13: with the one-panel look, a window in a zone on the screen's edge no longer flickers "
+    "between two places.",
+    "2.7.0.12: windows fill their zones: the Paperdoll and bags, Pets, Buffs & Timers and the lists; "
+    "closed windows open in their zones; empty bags zones are cleared; Supplies, the killer window, Mongotchi's "
+    "side windows, the Butler log and Skill Bags results can sit in zones.",
+    "2.7.0.11:tidy-up only: every module's code follows one layout; nothing you see changes.",
+    "2.7.0.10: speed: clicks and hotkeys act in the same frame; modules react to game events instead of "
+    "polling; fewer saved-data reads; start-up shows the window first; picture work stays off the game frame.",
+    "2.7.0.09: a harmful cursor on a blue in town asks twice; Corpse takes only your named corpse; "
+    "Skill Bags uses only backpack bags and opens them only on Run; any attack on you pauses loops; saves from "
+    "two clients merge; one key has one owner; zoned windows stay locked; clearer texts.",
+    "2.7.0.08: the Keys page in Settings is now called Hotkeys.",
+    "2.7.0.07: button hotkeys on Virtue Assistant's own windows no longer fire another window's button; "
+    "empty stone panels catch clicks; Snap: off zones keep every pixel; one-panel windows trim faster.",
+    "2.7.0.06: Meters' exact damage numbers work again; Set up keeps its look with Settings > "
+    "Interface open; Snap: off zones keep their place; zones are a little lighter on the client.",
+    "2.7.0.05: one-panel windows catch their own clicks again and keep title rows hidden; zones "
+    "can be set to Snap: off for free, pixel-exact placement.",
+    "2.7.0.04: in the one-panel look every window fills its zone the same way, the Paperdoll and "
+    "Meters included, with no gap where the title row was.",
+    "2.7.0.03: in the one-panel look your bags show in front of the frame again, and windows in "
+    "zones of the same size come out the same size.",
+    "2.7.0.02: the one-panel look is one frame round every zone (journal and bags too), with no "
+    "corners or lines between windows, title rows hidden and a gold border round the game view.",
+    "2.7.0.01: the one-panel look now really joins windows in zones into one frame; a game area set "
+    "to Overlap keeps its full size under the windows over it.",
+    "2.7.0: new Interface module: zones, layout and snapping are in Settings > Interface. Set up "
+    "picks a ready-made screen in three steps, and windows in zones can join into one seamless panel.",
+    "2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker windows could still be minimized "
+    "there); Action Bar Stealing on an item and harmful cells now aim at the target you confirmed; and more fixes.",
     "2.6.102: Action Bar Stealing, Snooping, Discordance and Provocation cells aimed at your last target "
     "now ask for a second press on a blue in town, like harmful spells; and more fixes.",
     "2.6.101: fixes: closing the Skills window no longer turns off Training Alarm and Skill Bags; "
@@ -8,10 +40,8 @@ WHATS_NEW = ("2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker wi
     "and smaller fixes.",
     "2.6.100: quicker: hotkeys and more clicks act at once, and bars, paperdoll stats, timers and "
     "Lookout alarms update sooner.",
-    "2.6.99: the modules are smaller and share more of the main script's helpers. Nothing changes in "
-    "game.",
-    "2.6.98: the main script is smaller and has new shared helpers for the modules. Nothing changes in "
-    "game.",
+    "2.6.99: the modules are smaller and share more of the main script's helpers. Nothing changes in game.",
+    "2.6.98: the main script is smaller and has new shared helpers for the modules. Nothing changes in game.",
     "2.6.97: any module runs on its own: pick its file in the Script Manager. Alone it has its own "
     "window and settings, without profiles, zones, the tray or other modules.",
     "2.6.96: every module is smaller and uses the shared window and settings code. Debug options are "
@@ -44,8 +74,7 @@ WHATS_NEW = ("2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker wi
     "2.6.85: the bandage bar fills however a bandage was started, and a window in a zone is always up, "
     "with no Minimize, Close or fold arrow. Supplies moved to Inventory, with new buttons on the bag "
     "sidebar and easy sort filters. The Swing Bar shows where to turn back when kiting. The game view "
-    "fits its zone, Settings > Layout can reclaim space, and any button can have a hotkey (Settings > "
-    "Keys).",
+    "fits its zone, Settings > Layout can reclaim space, and any button can have a hotkey (Settings > Keys).",
     "2.6.82: a speed pass over everything. Virtue Assistant reads the game far less often for the same "
     "result: one look at you, the mobiles around you and your backpack per pass, shared by every module, "
     "and windows, bars and settings pages that read only when something can have changed. Nothing it "
@@ -53,11 +82,9 @@ WHATS_NEW = ("2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker wi
     "2.6.81: over a hundred fixes. Every loop that acts by itself (Skill Bags, Property Butler's sweep, "
     "Bags' Trap / Untrap run) now waits the same way: in a fight, near a hostile, while you move an "
     "item, and until the guard zone is known. A harmful press on a blue in town asks for a second press, "
-    "a module answers only the target cursor its own press raised, and Ultima Tracker's B is one bandage "
-    "per press.",
+    "a module answers only the target cursor its own press raised, and Ultima Tracker's B is one bandage per press.",
     "2.6.80: on the bag canvas each bag's items keep their places relative to one another, as in the bag "
-    "itself, whatever size its region takes, and every item stays wholly inside its own bag's region, "
-    "below its label.",
+    "itself, whatever size its region takes, and every item stays wholly inside its own bag's region, below its label.",
     "2.6.79: the bag canvas works in game: 2.6.78 stopped Bags with an error as soon as your bags were "
     "shown in a zone.",
     "2.6.78: in a zone your open bags fill the whole bag area as one picture: each bag gets a region "
@@ -173,8 +200,7 @@ WHATS_NEW = ("2.6.103: windows in a zone stay up (Grimoire and Ultima Tracker wi
     "tracker and the meters on the right. Pick the Default window layout to try it; drag any window on "
     "to a zone to slot it there (it stacks under what is there), drag it out to free it. Edit zones "
     "shows every zone on the screen grid to drag, resize, add or remove, and saves your own frame "
-    "layouts; they reflow for any screen. Nothing moves until you pick a layout or drop a window on a "
-    "zone.",
+    "layouts; they reflow for any screen. Nothing moves until you pick a layout or drop a window on a zone.",
     "2.6.53: no window is ever taller than the screen. A window that grows past the screen's height (a "
     "long list, a tall settings page, a small screen) now fits the screen and its body scrolls, with a "
     "scrollbar down its right side; the title row stays put. Every window of every module does this, and "

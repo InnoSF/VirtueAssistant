@@ -5,9 +5,9 @@ def _module_ultima():
     NOTO_HUE = {"murderer": 0x0022, "criminal": 0x03B2, "gray": 0x03B2, "enemy": 0x0090,
                 "innocent": 0x0059, "ally": 0x003F, "invulnerable": 0x0035}
     def _part_tracker():
-        OWN_PREFIX = TITLE + ":"
-        say = Kit.sayer(TITLE); TICK_SECONDS             = 0.25; COMBAT_TICK_SECONDS      = 0.15
-        DOUBLE_CLICK_SECONDS     = 0.45; ATTACK_CONFIRM_SECONDS   = 3.0; ATTACK_CONFIRM_MIN       = 0.6
+        KEY = "ultima"; TITLE = "Ultima Tracker"; OWN_PREFIX = TITLE + ":"
+        TICK_SECONDS             = 0.25; COMBAT_TICK_SECONDS      = 0.15; HP_EVERY = 0.05
+        DOUBLE_CLICK_SECONDS     = 0.45
         NPC_RECHECK_SECONDS      = 3.0; DEFAULT_SCALE   = 100; DEFAULT_OPACITY = 85; DEFAULT_RANGE   = 18
         DEFAULT_SYNC    = False; SCALE_MIN, SCALE_MAX = 50, 200; RANGE_MIN, RANGE_MAX = 1, 24; ROW_H      = 32
         MIN_W      = 210; MIN_H      = 90; POP_W      = 200; POP_BTN_W  = 18; NPC_BTN_W  = 12; SCROLLBAR  = 14
@@ -74,24 +74,29 @@ def _module_ultima():
             "combat":  [300, 200, BASE_WIDTH, 0, False, False, DEFAULT_OPACITY],
             "panel":   [40, 380, 0, 0, False, False, DEFAULT_OPACITY],}
         FOES = {}; IGNORE = {}; LAYOUT = {k: list(v) for k, v in DEFAULT_LAYOUT.items()}
-        UI_DEFAULTS = {"scale": DEFAULT_SCALE, "opacity": DEFAULT_OPACITY, "range": DEFAULT_RANGE,
+        settings = {"scale": DEFAULT_SCALE, "opacity": DEFAULT_OPACITY, "range": DEFAULT_RANGE,
                        "sync": DEFAULT_SYNC, "magery": False, "combat_shown": True,
                        "combat_only": DEFAULT_COMBAT_ONLY, "healing": False, "borders": True,
                        "alert_red": True, "alert_foes": True, "alert_orange": False,
                        "alert_gray": False, "alert_minutes": DEFAULT_ALERT_MINUTES, "sightings": True, "killer": True}
-        UI = dict(UI_DEFAULTS)
+        DEFAULTS = dict(settings)
         STATE_DEFAULTS = {"dirty_save": False, "foe_ver": 0, "combat_loaded": False, "shutting": False,
                           "started": False, "loaded": False}
-        STATE = dict(STATE_DEFAULTS, party=set()); POPS = {}; DOCK_REQ = []; SETTINGS_REQ = []
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "dirty_save": False, "foe_ver": 0,
+              "combat_loaded": False, "started": False, "loaded": False, "party": set()}
+        win = {"g": None, "c": {}, "store": ({}, {})}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
+        POPS = {}; DOCK_REQ = []; SETTINGS_REQ = []
         KIT_HEAD = Kit.MARGIN + 30 + Kit.GAP; KIT_MINI_H = 2 * Kit.MARGIN + 30
         def settings_click(*args): SETTINGS_REQ.append(True)
         LAST_CLICK = {}; NATIVE = {}; SIGHTS = []; LAST_SEEN = {}; ALT_OF = {}
         SIGHT = {"ver": 0, "seen_ver": 0, "dirty": False, "save_at": 0.0}; PRESENT = {}; ALERTED = {}; FOE_SERIALS = {}
         ALERT_PREV = set(); ATTACKERS = {}; LINK_PICK = [None]
-        def sc(v, scale=None): s = UI["scale"] if scale is None else scale; return max(1, int(round(v * s / 100.0)))
+        def sc(v, scale=None):
+            s = settings["scale"] if scale is None else scale; return max(1, int(round(v * s / 100.0)))
         TEXT_FIT_MAX = 13; EMPTY_PITCH = 20
         def text_scale(s): return s if s > 1.0 else 1.0
-        def tsc(v): return sc(v) if UI["scale"] > 100 else int(v)
+        def tsc(v): return sc(v) if settings["scale"] > 100 else int(v)
         def empty_lines(text, width):
             width = max(20, int(width)); return [Kit.fit(ln, width) for ln in Kit.wrap(text, width)]
         def add_empty(parent, lines, x, y):
@@ -101,7 +106,7 @@ def _module_ultima():
         def reset_layout():
             for k, v in DEFAULT_LAYOUT.items(): LAYOUT[k] = list(v)
         def reset_settings():
-            ANCHORS.clear(); UI.update(UI_DEFAULTS); FIT["req"] = False; BANDAGE["serial"] = None; reset_layout()
+            ANCHORS.clear(); settings.update(DEFAULTS); FIT["req"] = False; BANDAGE["serial"] = None; reset_layout()
         def clamp(v, lo, hi): return max(lo, min(hi, v))
         def stopping(): return API.StopRequested
         TITLE_PREFIXES = ("lord ", "lady ")
@@ -123,7 +128,7 @@ def _module_ultima():
             __slots__ = ("row", "make")
             def __init__(self, row, make): self.row, self.make = row, make
             def bind(self):
-                r = self.row; serial, name = r.serial, r.name; prev = getattr(r, "prev", None)
+                r = self.row; serial, name = r.serial, r.name; prev = r.prev
                 if prev is not None and time.time() - prev[2] < CLICK_GRACE: serial, name = prev[0], prev[1]
                 if serial is None: return None
                 return self.make(serial, name)
@@ -154,14 +159,13 @@ def _module_ultima():
                 except Exception as ex:
                     if HOST.stopping(): return True
                     report_error(ex)
-        def request_save():
-            if M["windows"] is not None and not STATE.get("shutting"): SAVE_REQ[0] = True
-            else: save_data(background=True)
         def catcher(x, y, w, h, fn, tip=None):
             c = API.Gumps.CreateGumpColorBox(0.01, "#000000"); c.SetRect(x, y, w, h); on_click(c, fn)
             return Kit.with_tip(c, tip)
-        def pic(graphic, x=0, y=0, hue=0): return inert(API.Gumps.CreateGumpPic(graphic, x, y, hue))
-        def tiled(graphic, w, h, hue=0): return inert(API.Gumps.CreateTiledGumpPic(graphic, max(0, w), max(0, h), hue))
+        def pic(graphic, x=0, y=0, hue=0):
+            return inert(API.Gumps.CreateGumpPic(graphic, x, y, Kit.look_hue(graphic, hue)))
+        def tiled(graphic, w, h, hue=0):
+            return inert(API.Gumps.CreateTiledGumpPic(graphic, max(0, w), max(0, h), Kit.look_hue(graphic, hue)))
         def init_native_art():
             NATIVE.clear(); icons = NATIVE["icons"] = {}
             for kind, graphics in (("lock", (LOCK_GUMP, LOCK_GUMP)), ("min", MIN_GUMPS), ("opacity", OPACITY_GUMPS)):
@@ -245,21 +249,21 @@ def _module_ultima():
             parent.Add(lb); c = catcher(x, y, w, h, fn, tip); parent.Add(c)
             if store is not None: store.extend([f, lb, c])
             return lb
-        def friend_button_count(): return (2 if UI["magery"] else 0) + (1 if UI["healing"] else 0)
+        def friend_button_count(): return (2 if settings["magery"] else 0) + (1 if settings["healing"] else 0)
         ALT_FOLLOW_TIP = "Alt+click: auto-follow (again to stop)"
         TIP_HEAL = ("Cast Heal on %s (Shift+click: Greater Heal). Alt+click: auto-follow (again to stop)")
         TIP_CURE = ("Cast Cure on %s (Shift+click: Arch Cure). Alt+click: auto-follow (again to stop)")
         TIP_BANDAGE = "Bandage %s when adjacent; farther away, follow them (again to stop). " + ALT_FOLLOW_TIP
         def friend_buttons(parent, x, y, w, h, serial, name, store=None, row=None):
-            fs = max(7, int(h * 0.7 / min(1.0, UI["scale"] / 100.0)))
+            fs = max(7, int(h * 0.7 / min(1.0, settings["scale"] / 100.0)))
             tips, specs, parts = [], [], [] if store is None else store
-            if UI["magery"]:
+            if settings["magery"]:
                 for text, spell, stronger, tip, face in (("H", SPELL_HEAL, SPELL_GREATER_HEAL, TIP_HEAL, COL_HEAL),
                         ("C", SPELL_CURE, SPELL_ARCH_CURE, TIP_CURE, COL_CURE)):
                     specs.append((text, make_heal_click(serial, spell, stronger) if row is None else RowClick(row, (
                         lambda sp, st: lambda s, n: make_heal_click(s, sp, st))(spell, stronger)), tip, face,
                         "#FFFFFF"))
-            if UI["healing"]:
+            if settings["healing"]:
                 specs.append(("B", make_bandage_click(serial, name) if row is None else
                               RowClick(row, make_bandage_click), TIP_BANDAGE, COL_BANDAGE, "#202020"))
             for text, fn, tip, face, color in specs:
@@ -308,7 +312,7 @@ def _module_ultima():
                 API.UseObject(band)
                 BANDAGE.update(serial=serial, name=name, state="cursor", until=time.time() + BANDAGE_CURSOR_WAIT)
                 claim_cursor("bandage", BANDAGE_CLAIM)
-            return follow_or(serial, _cb)
+            return Kit.once(follow_or(serial, _cb), ("ultima.bandage", serial), Kit.TWICE)
         CURSOR_KEY = "ultima"; CURSOR_OWN = {"bandage": False, "spell": False}
         def claim_cursor(what, seconds): CURSOR_OWN[what] = True; HOST.claim_cursor(CURSOR_KEY, seconds)
         def release_cursor(what):
@@ -370,7 +374,7 @@ def _module_ultima():
                 for b, r in zip(self.edges, rects): b.SetRect(*r)
                 self.apply_borders()
             def apply_borders(self):
-                on = UI["borders"]
+                on = settings["borders"]
                 for p in self.edges: set_box_alpha(p, 1.0 if on else 0.0)
                 w, h = self.size
                 if on: self.center.SetRect(BORDER, BORDER, max(0, w - 2 * BORDER), max(0, h - 2 * BORDER))
@@ -540,7 +544,7 @@ def _module_ultima():
                     elif text != self.title_text:
                         self.title_text = text; Kit.set_text(self.title_lbl, text)
                         if self.status_text is not None:
-                            st, self.status_text = self.status_text, None; self.set_status(st)
+                            sv, self.status_text = self.status_text, None; self.set_status(sv)
                     return
                 if color is not None and color != self.title_color:
                     self.title_color = color; old = self.title_lbl
@@ -620,7 +624,8 @@ def _module_ultima():
             @staticmethod
             def shift(m, dx, dy, rects, wins):
                 x, y, w, h = rects[m]
-                g = wins[m][0]; g.SetPos(x + dx, y + dy); Kit.moved_by_code(g); rects[m] = (x + dx, y + dy, w, h)
+                g = wins[m][0]; nx, ny = Kit.place(g, x + dx, y + dy, w, h); Kit.moved_by_code(g)
+                rects[m] = (nx, ny, w, h)
             def tick(self, get_wins):
                 if self.moving is None and not self.pending and self.linger <= 0 and not SNAP.drag:
                     for k in list(self.gid):
@@ -684,6 +689,7 @@ def _module_ultima():
         ANCHORS = Anchors()
         def pop_listed(k): return k.startswith("pop:") and int(k[4:]) in POPS
         import threading; FILE_LOCK = threading.Lock(); SAVE_SEQ = [0]; SAVE_ERR = [None]; DATA_READY = [False]
+        FOE_CHG = {}; FILE_MT = [None]; MERGE_WAIT = [0.0]; PEND = [0]; GONE = [0.0]
         def in_background(fn):
             t = threading.Thread(target=fn); t.daemon = True; t.start()
         def read_save_lines():
@@ -691,15 +697,18 @@ def _module_ultima():
             if not os.path.exists(path): return None, []
             with FILE_LOCK:
                 with open(path, "r") as f: lines = f.readlines()
+                if path == DATA_FILE: FILE_MT[0] = file_stamp()
             return path, lines
-        def load_data():
+        def load_settings():
             try: path, lines = read_save_lines()
             except Exception as ex:
                 say("couldn't read the save file (%s); saving is off this session." % ex, Kit.HUE_BAD); return
             parse_save_lines(path, lines)
+        def save_settings():
+            if views["windows"] is not None and not st.get("shutting"): SAVE_REQ[0] = True
+            else: save_data(background=True)
         def parse_save_lines(path, lines):
-            DATA_READY[0] = True
-            if path is None: return
+            if path is None: DATA_READY[0] = True; return
             section = None; links = []
             try:
                 for raw in lines:
@@ -712,8 +721,8 @@ def _module_ultima():
                         elif section == "players": PLAYER_NAMES[line.lower()] = line; PLAYER_VER[0] += 1
                         elif section == "settings" and "=" in line:
                             key, val = [p.strip().lower() for p in line.split("=", 1)]
-                            if key in INT_SETTINGS: UI[key] = clamp(int(val), *INT_SETTINGS[key])
-                            elif key in BOOL_SETTINGS: UI[key] = val == "true"
+                            if key in INT_SETTINGS: settings[key] = clamp(int(val), *INT_SETTINGS[key])
+                            elif key in BOOL_SETTINGS: settings[key] = val == "true"
                         elif section == "anchors" and "=" in line:
                             keys = [k.strip().lower() for k in line.split("=", 1)[1].split(",")]
                             keys = [k for k in keys if k in FIXED_WINDOWS]
@@ -725,8 +734,8 @@ def _module_ultima():
                                 LAYOUT[key] = [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]),
                                                parts[4].lower() == "true",
                                                len(parts) > 5 and parts[5].lower() == "true",
-                                               clamp(int(parts[6]), 0, 100) if len(parts) > 6 else UI["opacity"]]
-                                if key == "combat": STATE["combat_loaded"] = True
+                                               clamp(int(parts[6]), 0, 100) if len(parts) > 6 else settings["opacity"]]
+                                if key == "combat": st["combat_loaded"] = True
                         elif section == "sightings":
                             e = parse_sight(line)
                             if e is not None: SIGHTS.append(e); note_seen(e)
@@ -743,19 +752,21 @@ def _module_ultima():
                     if alt != main and alt in FOES and main in FOES: ALT_OF[alt] = main
                 flatten_links()
                 for key in LAYOUT: L = LAYOUT[key]; L[0], L[1] = Kit.adapt(L[0], L[1], L[2], L[3])
-            except Exception as ex: say("couldn't read the save file (%s)." % ex, Kit.HUE_BAD)
+                DATA_READY[0] = True
+            except Exception as ex:
+                say("couldn't read the save file (%s); saving is off this session." % ex, Kit.HUE_BAD)
             if path == OLD_DATA_FILE:
-                for k in ("friend", "foe", "neutral"): LAYOUT[k][6] = UI["opacity"]
+                for k in ("friend", "foe", "neutral"): LAYOUT[k][6] = settings["opacity"]
         def load_old_combat_settings():
-            if STATE["combat_loaded"]: return
+            if st["combat_loaded"]: return
             def get(key, default):
                 try: return int(API.GetPersistentVar(key, str(default), API.PersistentVar.Char))
                 except Exception: return default
             L = LAYOUT["combat"]; L[0], L[1] = get("CombatBars_X", L[0]), get("CombatBars_Y", L[1])
             L[2] = clamp(get("CombatBars_W", L[2]), CB_MIN_WIDTH, CB_MAX_WIDTH)
             L[6] = clamp(get("CombatBars_Opacity", L[6]), 0, 100); L[4] = get("CombatBars_Locked", 0) == 1
-            L[5] = get("CombatBars_Minimized", 0) == 1; UI["magery"] = get("CombatBars_Magery", 0) == 1
-            STATE["dirty_save"] = True
+            L[5] = get("CombatBars_Minimized", 0) == 1; settings["magery"] = get("CombatBars_Magery", 0) == 1
+            st["dirty_save"] = True
         def stranded_tmp():
             try:
                 d = os.path.dirname(DATA_FILE) or "."; base = os.path.basename(DATA_FILE) + "."
@@ -767,25 +778,44 @@ def _module_ultima():
                 except Exception: continue
                 if best_t is None or m > best_t: best, best_t = t, m
             return best
-        def write_save_file(text):
-            try: tmp = DATA_FILE + ".%d.tmp" % os.getpid()
-            except Exception: tmp = DATA_FILE + ".tmp"
-            with open(tmp, "w") as f: f.write(text)
-            try: os.replace(tmp, DATA_FILE)
-            except Exception:
-                try:
-                    if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
-                    os.rename(tmp, DATA_FILE)
-                except Exception:
-                    if os.path.exists(DATA_FILE):
-                        try: os.remove(tmp)
-                        except Exception: pass
-                    raise
+        def write_save_file(text): Kit.write_safe(DATA_FILE, text, None)
+        def file_stamp(): return safe(lambda: (os.path.getmtime(DATA_FILE), os.path.getsize(DATA_FILE)))
+        def merge_foes():
+            mt = file_stamp(); now = time.time()
+            if mt is None:
+                if FILE_MT[0] is None: return True
+                if not GONE[0]: GONE[0] = now
+                if now - GONE[0] < 5.0: return False
+                FILE_MT[0] = None; GONE[0] = 0.0; return True
+            GONE[0] = 0.0
+            if mt == FILE_MT[0]: return True
+            oc = Client.on_client_thread()
+            if (PEND[0] and not oc) or now < MERGE_WAIT[0]: return False
+            try:
+                with FILE_LOCK:
+                    with open(DATA_FILE, "r") as f: lines = f.readlines()
+            except Exception as ex:
+                MERGE_WAIT[0] = now + 30.0
+                say("couldn't read the save file to merge it (%s); saving waits." % ex, Kit.HUE_BAD); return False
+            sect, got = None, []
+            for raw in lines:
+                line = raw.strip()
+                if line.startswith("[") and line.endswith("]"): sect = line[1:-1].strip().lower()
+                elif sect == "foes" and line and not line.startswith("#"): got.append(line)
+            if oc: apply_foes(got, mt, 0); return True
+            tok = PEND[0] = id(got); TICK_JOBS.append(lambda: apply_foes(got, mt, tok)); return False
+        def apply_foes(got, mt, tok):
+            if tok and tok != PEND[0]: return
+            PEND[0] = 0; out = Kit.merge_text("\n".join(got), dict(FOE_CHG), name_key)[1]
+            new = dict((name_key(n), n) for n in out)
+            for k in [k for k in FOES if k not in new]: del FOES[k]
+            FOES.update(new); FILE_MT[0] = mt; st["foe_ver"] += 1
+            if tok: save_settings()
         def report_save_error():
             err, SAVE_ERR[0] = SAVE_ERR[0], None
             if err: say("couldn't save (%s)." % err, Kit.HUE_BAD)
         def save_text():
-            if not DATA_READY[0]: return None
+            if not DATA_READY[0] or not merge_foes(): return None
             def tf(b): return "true" if b else "false"
             try:
                 out = ["# UltimaTracker save file - one name per line"]
@@ -795,8 +825,8 @@ def _module_ultima():
                 if PLAYER_TEXT[0] != ver or PLAYER_TEXT[1] is None:
                     PLAYER_TEXT[1] = sorted(PLAYER_NAMES.values(), key=lambda s: s.lower()); PLAYER_TEXT[0] = ver
                 out += ["[players]"] + PLAYER_TEXT[1] + [""]
-                out += ["[settings]"] + ["%s=%d" % (k, UI[k]) for k in INT_ORDER]
-                out += ["%s=%s" % (k, tf(UI[k])) for k in BOOL_SETTINGS] + ["", "[anchors]"]
+                out += ["[settings]"] + ["%s=%d" % (k, settings[k]) for k in INT_ORDER]
+                out += ["%s=%s" % (k, tf(settings[k])) for k in BOOL_SETTINGS] + ["", "[anchors]"]
                 out += ["group=%s" % ",".join(keys) for keys in ANCHORS.saved_groups()]
                 out += ["", "[layout]"] + ["%s=%d,%d,%d,%d,%s,%s,%d" % (
                     k, v[0], v[1], v[2], v[3], tf(v[4]), tf(v[5]), v[6]) for k, v in LAYOUT.items()]
@@ -808,15 +838,29 @@ def _module_ultima():
         def write_text(text, seq=None):
             with FILE_LOCK:
                 if seq is not None and seq != SAVE_SEQ[0]: return
-                try: write_save_file(text)
+                try: write_save_file(text); FILE_MT[0] = file_stamp(); return True
                 except Exception as ex: SAVE_ERR[0] = str(ex)
         def save_data(background=False):
             text = save_text()
             if text is None: return
-            STATE["dirty_save"] = False; SIGHT["dirty"] = False; SAVE_SEQ[0] += 1; seq = SAVE_SEQ[0]
-            def write(): write_text(text, seq)
+            st["dirty_save"] = False; SIGHT["dirty"] = False; SAVE_SEQ[0] += 1; seq = SAVE_SEQ[0]
+            chg = dict(FOE_CHG)
+            def write():
+                if write_text(text, seq):
+                    for k, v in chg.items():
+                        if FOE_CHG.get(k, 0) == v: FOE_CHG.pop(k, None)
             if background: in_background(write)
             else: write(); report_save_error()
+        def build_window():
+            windows = {c: CategoryGump(c) for c in CATS}; combat = CombatWindow()
+            views.update({"windows": windows, "combat": combat})
+            if settings["combat_shown"]: combat.show()
+            views["panel"] = ControlPanel(windows, combat); register_docks(windows, combat); st["foe_ver"] += 1
+            n = len(FOES); say("on, %s." % Kit.count(n, "saved foe"), Kit.HUE_GOOD)
+            M.update({"last_layout": layout_signature(), "tick": 0,
+                      "next_scan": 0.0, "next_combat": 0.0, "next_glow": 0.0})
+            if Kit.get_var(SIGHT_OPEN_KEY) == "1": SIGHT_WIN.show()
+        wnd = None; views = {"windows": None, "combat": None, "panel": None}
         S_T, S_SERIAL, S_NOTO, S_FACET, S_X, S_Y, S_GUARD, S_NAME, S_KEY, S_LINE = range(10)
         GUARD_CH = {True: "1", False: "0", None: "-"}; GUARD_OF = {"1": True, "0": False}
         def sight_line(t, serial, noto, facet, x, y, guard, name):
@@ -912,7 +956,8 @@ def _module_ultima():
             n = social_note(name)
             if n: lines.append("Note: " + n)
             return "\n".join(lines)
-        def add_foe(name): FOES[name_key(name)] = name; STATE["foe_ver"] += 1; request_save()
+        def add_foe(name): FOES[name_key(name)] = FOE_CHG[name_key(name)] = name; st["foe_ver"] += 1; save_settings()
+        def drop_foe(key): FOE_CHG[key] = None; st["foe_ver"] += 1; save_settings(); return FOES.pop(key)
         def is_foe(serial=None, name=None):
             if name:
                 k = name_key(str(name))
@@ -939,7 +984,7 @@ def _module_ultima():
             for low in later:
                 if drop <= 0: break
                 del PLAYER_NAMES[low]; drop -= 1
-            PLAYER_VER[0] += 1; NPC_CACHE.clear(); STATE["dirty_save"] = True
+            PLAYER_VER[0] += 1; NPC_CACHE.clear(); st["dirty_save"] = True
         def capped(cache):
             if len(cache) > CACHE_CAP: cache.clear()
         JOURNAL_NEXT = [0.0]; JREAD = {"learn": None, "attack": None, "killer": None}
@@ -956,7 +1001,7 @@ def _module_ultima():
                 if KARMA_TAG_RE.match(text):
                     if low not in PLAYER_NAMES:
                         if len(PLAYER_NAMES) >= PLAYER_NAMES_CAP: trim_players(PLAYER_NAMES_CAP - 1)
-                        PLAYER_NAMES[low] = name; PLAYER_VER[0] += 1; STATE["dirty_save"] = True; NPC_CACHE.clear()
+                        PLAYER_NAMES[low] = name; PLAYER_VER[0] += 1; st["dirty_save"] = True; NPC_CACHE.clear()
                 elif text.lower().startswith(low + " the "): capped(TITLED_NPCS); TITLED_NPCS.add(low)
         FRIEND_Q = {}; FRIEND_Q_SECONDS = 1.0; FRIEND_Q_AT = [0.0]
         def is_friend(serial):
@@ -970,8 +1015,7 @@ def _module_ultima():
             try: return bool(getattr(m, attr))
             except Exception: return False
         def acts_like_player(mob, serial, name, low):
-            if low.startswith(TITLE_PREFIXES) or name_key(name) in FOES or low in PLAYER_NAMES \
-                    or serial in STATE["party"]:
+            if low.startswith(TITLE_PREFIXES) or name_key(name) in FOES or low in PLAYER_NAMES or serial in st["party"]:
                 return True
             if mflag(mob, "IsRunning") or mflag(mob, "IsMounted") or mflag(mob, "InWarMode"): return True
             return is_friend(serial)
@@ -1000,8 +1044,7 @@ def _module_ultima():
                     first = name_props(mob).split("\n")[0].strip().lower()
                     npc = first.startswith(low + " the "); capped(TITLE_CACHE); TITLE_CACHE[serial] = (npc, now)
             if not npc: return False
-            if low in PLAYER_NAMES or name_key(name) in FOES or serial in STATE["party"] or is_friend(serial):
-                return False
+            if low in PLAYER_NAMES or name_key(name) in FOES or serial in st["party"] or is_friend(serial): return False
             return True
         def looks_like_player(mob, serial):
             dead = mflag(mob, "IsDead")
@@ -1032,7 +1075,7 @@ def _module_ultima():
                 if name and name.lower() in IGNORE: return None
                 return classify(serial, name, noto, party) + (noto, dead)
             except Exception: return None
-        def mobiles_near(): return HOST.mobiles(max(UI["range"], MAX_RANGE))
+        def mobiles_near(): return HOST.mobiles(max(settings["range"], MAX_RANGE))
         def mnum(m, attr):
             try: return getattr(m, attr) or 0
             except Exception: return 0
@@ -1048,11 +1091,12 @@ def _module_ultima():
                 FRIEND_Q.clear(); FRIEND_Q_AT[0] = now + FRIEND_Q_SECONDS
             me = HOST.me(); WATCH["me"] = me
             if me is None: return out
-            rng = UI["range"]; mobs = mobiles_near()
-            party = set(API.GetPartyMemberSerials() or []); STATE["party"] = party; learn_from_journal()
+            rng = settings["range"]; mobs = mobiles_near()
+            party = set(API.GetPartyMemberSerials() or []); st["party"] = party; learn_from_journal()
             my_serial = me.Serial; mx, my = int(me.X), int(me.Y)
-            alert_on = (UI["alert_red"] or UI["alert_foes"] or UI["alert_orange"] or UI["alert_gray"])
-            cands = fresh = appeared = foes_here = None; log_on = UI["sightings"]; wins = M["windows"] or {}
+            alert_on = (settings["alert_red"] or settings["alert_foes"] or settings["alert_orange"]
+                        or settings["alert_gray"])
+            cands = fresh = appeared = foes_here = None; log_on = settings["sightings"]; wins = views["windows"] or {}
             need_hp = {}
             for c in CATS: w = wins.get(c); need_hp[c] = w is None or not (w.minimized and LAYOUT[c][5])
             for m in mobs:
@@ -1091,7 +1135,8 @@ def _module_ultima():
                             SCANNED[serial] = (name, noto, cat, dead, psn, par, hits, hmax, dist)
                     else: hits = hmax = 0; psn = par = False
                     out[cat].append({"serial": serial, "name": name or "(unknown)", "tag": tag, "noto": noto,
-                        "hits": hits, "hmax": hmax, "dist": dist, "poisoned": psn, "paralyzed": par, "dead": dead,})
+                        "hits": hits, "hmax": hmax, "dist": dist, "poisoned": psn, "paralyzed": par, "dead": dead,
+                        "mob": m.raw})
                 except Exception: continue
             for c in CATS: out[c].sort(key=_by_name)
             ALERT_PREV.clear()
@@ -1103,13 +1148,13 @@ def _module_ultima():
             except Exception as ex: report_error(ex)
             return out
         def alert_why(tag, noto):
-            if tag == "L" and UI["alert_foes"]: return "foe"
-            if noto == "murderer" and UI["alert_red"]: return "red"
-            if noto == "enemy" and UI["alert_orange"]: return "orange"
-            if (noto == "gray" or noto == "criminal") and UI["alert_gray"]: return "gray"
+            if tag == "L" and settings["alert_foes"]: return "foe"
+            if noto == "murderer" and settings["alert_red"]: return "red"
+            if noto == "enemy" and settings["alert_orange"]: return "orange"
+            if (noto == "gray" or noto == "criminal") and settings["alert_gray"]: return "gray"
             return None
         def foe_alerts(fresh, now):
-            gap = UI["alert_minutes"] * 60.0
+            gap = settings["alert_minutes"] * 60.0
             for serial, name, noto, tag, dist, dx, dy in fresh:
                 t = ALERTED.get(serial)
                 if t is not None and now - t < gap: continue
@@ -1121,23 +1166,7 @@ def _module_ultima():
             return "%s: %s, %s" % (who, what, Kit.where_text(dx, dy, "right here"))
         def map_now(): return int(API.GetMap())
         def guard_now(): return safe(HOST.guarded)
-        ATTACK_CONFIRM = {"serial": None, "t": 0.0}
-        def attack_hold(serial, mob, now):
-            c = ATTACK_CONFIRM; noto = Kit.noto_name(mob) if mob is not None else "unknown"
-            if noto not in FRIENDLY_NOTO or guard_now() is False: c["serial"] = None; return None
-            if c["serial"] == serial:
-                age = now - c["t"]
-                if 0.0 <= age <= ATTACK_CONFIRM_MIN: return "quiet"
-                if age <= ATTACK_CONFIRM_SECONDS: c["serial"] = None; return None
-            c["serial"], c["t"] = serial, now; return "warn"
-        def held_back(key, serial, mob, now, head, again, name=None, verb="attack"):
-            hold = attack_hold(key, mob, now)
-            if hold == "warn":
-                colour = "green" if Kit.noto_name(mob) == "ally" else "blue"
-                where = "are" if guard_now() is True else "may be"
-                name = name or safe(lambda: mob.Name, "") or "they"; API.HeadMsg(head, serial, 0x22)
-                say("%s is %s and you %s in a guard zone: %s to %s." % (name, colour, where, again, verb), Kit.HUE_BAD)
-            return hold is not None
+        def held_back(key, serial, again, now=None): return not HOST.harm_ok(serial, key, TITLE, True, again, now=now)
         def log_appeared(appeared, now):
             facet, guard = map_now(), guard_now()
             for serial, name, noto, x, y in appeared: log_sighting(now, serial, name, noto, facet, x, y, guard)
@@ -1159,11 +1188,11 @@ def _module_ultima():
             if now >= WATCH["prune_at"]: WATCH["prune_at"] = now + 10.0; prune_session(now)
             me = WATCH["me"]; dead = mflag(me, "IsDead") if me is not None else WATCH["dead"]
             was, WATCH["dead"] = WATCH["dead"], dead
-            if UI["killer"] and (now >= WATCH["att_at"] or (dead and was is False)):
+            if settings["killer"] and (now >= WATCH["att_at"] or (dead and was is False)):
                 WATCH["att_at"] = now + 1.0; note_attackers(now)
             if was is None or dead is None or dead == was: return
             if dead: on_death(now)
-            else: KILLER_WIN.close()
+            else: KILLER_WIN.end()
         def note_attackers(now):
             rd = JREAD["killer"]
             if rd is None: JREAD["killer"] = Journal.reader(); return
@@ -1208,7 +1237,7 @@ def _module_ultima():
             return None, None
         def note_attacker(name, t, serial):
             if t <= WATCH["died_at"]: return False
-            if serial is not None and (serial in STATE["party"] or is_friend(serial)): return False
+            if serial is not None and (serial in st["party"] or is_friend(serial)): return False
             low = name.lower(); a = ATTACKERS.get(low)
             if a is None:
                 if len(ATTACKERS) >= ATTACKERS_CAP:
@@ -1223,7 +1252,7 @@ def _module_ultima():
         def _newest_first(a): return -a[1]
         def on_death(now):
             WATCH["died_at"] = now
-            if not UI["killer"]: ATTACKERS.clear(); return
+            if not settings["killer"]: ATTACKERS.clear(); return
             cut = now - KILLER_BACK; got = sorted([a for a in ATTACKERS.values() if a[1] >= cut], key=_newest_first)
             ATTACKERS.clear()
             if got: KILLER_WIN.open(got[:KILLER_ROWS], now, len(got))
@@ -1231,7 +1260,7 @@ def _module_ultima():
             cut = now - SIGHT_GONE
             for s in [s for s, t in PRESENT.items() if t < cut]: del PRESENT[s]
             if ALERTED:
-                cut = now - UI["alert_minutes"] * 60.0
+                cut = now - settings["alert_minutes"] * 60.0
                 for s in [s for s, t in ALERTED.items() if t < cut]: del ALERTED[s]
             if ATTACKERS:
                 cut = now - KILLER_BACK
@@ -1240,14 +1269,16 @@ def _module_ultima():
             def _clicked(*args):
                 now = time.time(); prev = LAST_CLICK.get(serial, 0); capped(LAST_CLICK); LAST_CLICK[serial] = now
                 if alt_held(): LAST_CLICK[serial] = 0; toggle_follow(serial); return
-                if click_can_aim(): API.Target(serial); LAST_CLICK[serial] = 0; return
+                if click_can_aim():
+                    LAST_CLICK[serial] = 0
+                    if HOST.harm_ok(serial, "ultima.aim", TITLE): API.Target(serial)
+                    return
                 if origin is not None and shift_held(): pop_out(serial, name, origin); LAST_CLICK[serial] = 0; return
                 double = now - prev <= DOUBLE_CLICK_SECONDS
                 if double: LAST_CLICK[serial] = 0
                 API.SetLastTarget(serial=serial)
                 if double:
-                    if held_back(serial, serial, API.FindMobile(serial), now, "* double-click again to attack *",
-                                 "double-click again", name): return
+                    if held_back("ultima.attack", serial, "double-click again to attack"): return
                     API.Attack(serial); API.HeadMsg("* attacking *", serial, 0x22)
                 else: API.HeadMsg("* last target *", serial, 0x35)
             return _clicked
@@ -1322,9 +1353,9 @@ def _module_ultima():
             def __init__(self, serial, name, x, y):
                 self.serial, self.name, self.x, self.y = serial, name, x, y; self.gump = None
                 self.locked = self.minimized = self.opacity_open = False
-                self.opacity, self.name_color = UI["opacity"], TEXT_COLOR; self.create()
+                self.opacity, self.name_color = settings["opacity"], TEXT_COLOR; self.create()
             def create(self):
-                s = UI["scale"] / 100.0; w = sc(POP_W); self.row_h = max(10, sc(16)); self.pad = max(2, sc(5))
+                s = settings["scale"] / 100.0; w = sc(POP_W); self.row_h = max(10, sc(16)); self.pad = max(2, sc(5))
                 h = 2 * BORDER + title_h(s)
                 if self.opacity_open: h += orow_h(s)
                 if not self.minimized: h += self.row_h + 2 * self.pad
@@ -1346,8 +1377,8 @@ def _module_ultima():
                 if not mini:
                     b.append(("opacity", oo, self.toggle_opacity, "Hide the opacity slider" if oo
                               else "Show the opacity slider (frame and bars stay solid)"))
-                b.append(("close", False, self.close, "Close"))
-                self.chrome.layout(w, h, UI["scale"] / 100.0, self.opacity, self.name, self.name_color, b,
+                b.append(("close", False, self.close, "Close this bar"))
+                self.chrome.layout(w, h, settings["scale"] / 100.0, self.opacity, self.name, self.name_color, b,
                                    oo and not mini, self.toggle_minimize, lambda: toggle_follow(self.serial),
                                    self.anchor_key)
             def destroy(self): g, self.gump = self.gump, None; Kit.dispose(g)
@@ -1377,7 +1408,8 @@ def _module_ultima():
                 color, _, friend = key
                 if self.bar is not None: self.bar.Dispose()
                 for c in [self.info, self.hit, self.glow] + self.spell_ctrls: drop(c)
-                self.spell_ctrls = []; w = self.size[0]; s = UI["scale"] / 100.0; y = self.chrome.content_top + self.pad
+                self.spell_ctrls = []; w = self.size[0]; s = settings["scale"] / 100.0
+                y = self.chrome.content_top + self.pad
                 bw = w - 2 * BORDER - 2 * self.pad; x = BORDER + self.pad
                 if friend and friend_button_count():
                     sw = self.row_h; bw -= friend_button_count() * (sw + 2)
@@ -1408,12 +1440,13 @@ def _module_ultima():
                     else:
                         try: name = mob.Name or self.name
                         except Exception: name = self.name
-                        noto = Kit.noto_name(mob); cat, _ = classify(self.serial, name, noto, STATE["party"])
+                        noto = Kit.noto_name(mob); cat, _ = classify(self.serial, name, noto, st["party"])
                         dead, poisoned = mflag(mob, "IsDead"), mflag(mob, "IsPoisoned")
                         paralyzed, hits, hmax = mflag(mob, "IsParalyzed"), mnum(mob, "Hits"), mnum(mob, "HitsMax")
                         try: dist = max(abs(int(mob.X) - int(me.X)), abs(int(mob.Y) - int(me.Y)))
                         except Exception: dist = 0
-                    key = (bar_color(cat, poisoned, dead, paralyzed), (UI["magery"], UI["healing"]), cat == "friend")
+                    key = (bar_color(cat, poisoned, dead, paralyzed), (settings["magery"], settings["healing"]),
+                           cat == "friend")
                     self.low = cat == "friend" and needs_heal(dead, hits, hmax); ncol = NOTO_COLOR.get(noto, "#DDDDDD")
                     text, cur, mx = hp_text(dead, hits, hmax, poisoned, paralyzed, dist)
                 if Follow.serial == self.serial: text = "FOL " + text
@@ -1431,7 +1464,7 @@ def _module_ultima():
             def _clicked(*args):
                 if not name or name == "(unknown)":
                     say("no name yet; try again in a moment.", Kit.HUE_BAD); return
-                IGNORE[name.lower()] = name; request_save(); pb = POPS.get(serial)
+                IGNORE[name.lower()] = name; save_settings(); pb = POPS.get(serial)
                 if pb is not None: pb.close()
                 say("%s marked as an NPC and hidden; Unignore the name to undo." % name, Kit.HUE_GOOD)
             return follow_or(serial, _clicked)
@@ -1452,12 +1485,12 @@ def _module_ultima():
             x = gx + origin.size[0] + 6
             y = gy + len(POPS) * (sc(52) + 4); pb = POPS[serial] = PopBar(serial, name, x, y)
             pb.update(); say("popped out a health bar for %s." % name, Kit.HUE_GOOD)
-        TIP_BAR_ROW = ("Click: last target, or aim a target cursor. Double-click: attack (blue or green in guards: "
-                       "twice). Alt+click: auto-follow (again to stop)")
+        TIP_BAR_ROW = ("Click: target; double-click: attack (blue or green in guards: twice). "
+                       "Alt+click: auto-follow (again to stop)")
         TIP_FOE_ROW = "Click: put the name in the box. Alt+click: auto-follow (again to stop)"
         TIP_SIGHT = ("Click: show only this player (again for everyone). Alt+click: auto-follow (again to stop)")
         class PoolRow(object):
-            glow = None
+            glow = None; e = None; prev = None
             def parts(self): return self.ctrls
             def set_shown(self, on):
                 for c in self.parts(): Kit.set(c, "IsVisible", on)
@@ -1468,14 +1501,14 @@ def _module_ultima():
                 if self.glow is not None: pulse_glow(self.glow, False)
                 self.set_shown(False)
         class TrackerRow(PoolRow):
-            def __init__(self, win, i, geo, e):
-                self.win = win; self.serial, self.name = e["serial"], e["name"]; self.y = y = i * geo["row_h"]
+            def __init__(self, view, i, geo, e):
+                self.win = view; self.serial, self.name = e["serial"], e["name"]; self.y = y = i * geo["row_h"]
                 self.shown, self.low, self.ctrls = True, False, []; self.last = self.raw = self.name_raw = None
-                sa, rw = win.sa, geo["rw"]; bg = API.Gumps.CreateGumpColorBox(0.35, "#000000")
+                sa, rw = view.sa, geo["rw"]; bg = API.Gumps.CreateGumpColorBox(0.35, "#000000")
                 bg.SetRect(0, y, rw, geo["row_h"] - 2)
-                on_click(bg, RowClick(self, lambda s, n: make_bar_click(s, n, win)))
+                on_click(bg, RowClick(self, lambda s, n: make_bar_click(s, n, view)))
                 Kit.with_tip(bg, tip_for(TIP_BAR_ROW, self.name)); self.bg = bg; self.glow = None
-                if win.cat == "friend": self.glow = box(0.0, GLOW_COLOR); self.glow.SetRect(0, y, rw, geo["row_h"] - 2)
+                if view.cat == "friend": self.glow = box(0.0, GLOW_COLOR); self.glow.SetRect(0, y, rw, geo["row_h"] - 2)
                 text, color = row_name(e, geo); self.name_lbl = label(text, geo["name_fs"], color)
                 place(self.name_lbl, 4, y + geo["name_dy"]); self.name_key = (text, color)
                 pbw, nbw = geo["pbw"], geo["nbw"]
@@ -1487,14 +1520,14 @@ def _module_ultima():
                             "Mark as an NPC and hide (Unignore the name to undo). " + ALT_FOLLOW_TIP,
                             font=geo["npc_fs"], store=self.ctrls)
                 flat_button(sa, rw - 4 - pbw, y + geo["pop_dy"], pbw, geo["pop_h"], ">",
-                            RowClick(self, lambda s, n: make_pop_click(s, n, win)),
+                            RowClick(self, lambda s, n: make_pop_click(s, n, view)),
                             "Pop out a health bar (or Shift+click the row). " + ALT_FOLLOW_TIP, font=geo["pop_fs"],
                                 store=self.ctrls)
                 self.tips = []
                 if geo["fbtn"]:
                     self.tips = friend_buttons(sa, 4 + geo["bar_w"] + 2, y + geo["fbtn_dy"],
                                                geo["sb"], geo["sb"], self.serial, self.name, store=self.ctrls, row=self)
-                self.bar = HealthBar(sa, 4, y + geo["bar_dy"], geo["bar_w"], geo["bar_h"], row_color(win.cat, e))
+                self.bar = HealthBar(sa, 4, y + geo["bar_dy"], geo["bar_w"], geo["bar_h"], row_color(view.cat, e))
             def assign(self, e, geo):
                 serial, name = e["serial"], e["name"]
                 if serial != self.serial or name != self.name:
@@ -1517,7 +1550,7 @@ def _module_ultima():
                     place(lb, 4, self.y + geo["name_dy"]); self.win.sa.Add(lb); self.ctrls[at] = lb; self.name_lbl = lb
                 self.name_key = (text, color)
             def values(self, e):
-                fol = Follow.serial == e["serial"]
+                self.e = e; fol = Follow.serial == e["serial"]
                 raw = (e["dead"], e["hits"], e["hmax"], e["poisoned"], e["paralyzed"], e["dist"], fol)
                 if self.last is not None and raw == self.raw: return
                 self.raw = raw
@@ -1550,7 +1583,7 @@ def _module_ultima():
                 self.show_empty(n == 0)
                 for r, e in zip(rows, data): r.values(e)
             def destroy(self): g, self.gump = self.gump, None; Kit.dispose(g)
-            def moved(self): ANCHORS.pending = True; self.snapshot(); request_save()
+            def moved(self): ANCHORS.pending = True; self.snapshot(); save_settings()
             @property
             def dock_key(self): return "ultima." + self.cat
             def user_minimize(self, *args): HOST.dock_forget(self.dock_key); self.toggle_minimize()
@@ -1564,18 +1597,16 @@ def _module_ultima():
                 self.locked = self.minimized = self.docked = False; self.create()
             def create(self):
                 x, y, w, h, locked, mini, _ = LAYOUT[self.cat]; self.minimized = mini; lo_w, lo_h = sc(MIN_W), sc(MIN_H)
-                slot = FIT["size"].get(self.cat)
+                slot = FIT["size"].get(self.cat); held = HOST.layout_holds(self.dock_key)
                 if slot is not None:
                     lo_w = min(lo_w, slot[0]); lo_h = min(lo_h, slot[1]); w = slot[0]
                     if not mini: h = slot[1]
-                    at = safe(lambda: HOST.layout_rect(self.dock_key))
-                    if at is not None: x, y = at[0], at[1]
                 w = max(w, lo_w)
                 if mini: gh = KIT_MINI_H; min_h, resizable = gh, False
                 else: gh = max(h, lo_h); min_h, resizable = lo_h, slot is None
                 self.made_min = (lo_w, lo_h); self.resized_flag = self.user_resize_pending = False
-                self.sync_target, self.user_resize_ticks = None, 0; x, y = Kit.clamp(x, y, w, gh)
-                LAYOUT[self.cat][0], LAYOUT[self.cat][1] = x, y
+                self.sync_target, self.user_resize_ticks = None, 0
+                if not held: x, y = Kit.clamp(x, y, w, gh); LAYOUT[self.cat][0], LAYOUT[self.cat][1] = x, y
                 self.gump = API.Gumps.CreateModernGump(x, y, w, gh, resizable, lo_w, min_h, self._on_resized)
                 self.gump.SetAlpha(0.0); self.chrome = Chrome(self.gump, kit=True, key=self.dock_key)
                 self._forget_body(); self.size = (w, gh); self.count_n = 0; self.locked = locked; self.layout_chrome()
@@ -1599,6 +1630,8 @@ def _module_ultima():
                 self.chrome.layout_kit(w, h, LAYOUT[c][6], TITLES[c], TITLE_COLOR[c], self.minimized,
                                        self.user_minimize, lambda *a: DOCK_REQ.append(self.dock_key))
                 self.chrome.set_status(str(max(0, self.count_n)))
+            def zone_chrome(self):
+                if Kit.is_open(self.gump) and self.chrome is not None: self.layout_chrome()
             def _on_resized(self, *args): self.resized_flag = True
             def set_count(self, n):
                 if n == self.count_n: return
@@ -1608,12 +1641,12 @@ def _module_ultima():
                 held = HOST.layout_holds(self.dock_key)
                 if not held: Kit.set(self.gump, "CanMove", not locked)
                 self.gump.SetResizable(not locked and not self.minimized and not zoned)
-                LAYOUT[self.cat][4] = locked; STATE["dirty_save"] = True
+                LAYOUT[self.cat][4] = locked; st["dirty_save"] = True
             def set_locked(self, locked): self.locked = locked; self._apply_lock()
             def toggle_minimize(self, *args):
                 self.snapshot(); LAYOUT[self.cat][5] = not self.minimized
                 if not LAYOUT[self.cat][5]: self.docked = False
-                self.destroy(); self.create(); STATE["dirty_save"] = True
+                self.destroy(); self.create(); st["dirty_save"] = True
             def geometry(self):
                 w, h = self.size; ix = Kit.MARGIN + 4; sa_w = max(40, w - 2 * ix); rw = max(60, sa_w - SCROLLBAR)
                 name_fs = tsc(13)
@@ -1649,7 +1682,7 @@ def _module_ultima():
                     if slot is not None and (w, h) != slot: FIT["req"] = True
                 self.set_count(len(entries))
                 if self.minimized: return
-                key = (self.size, self.chrome.content_top, UI["scale"], UI["magery"], UI["healing"])
+                key = (self.size, self.chrome.content_top, settings["scale"], settings["magery"], settings["healing"])
                 if key != self.body_key: self.build_body(); self.body_key = key
                 self.fill(entries)
             def pulse(self, a=None):
@@ -1666,66 +1699,71 @@ def _module_ultima():
                 if not Kit.is_open(self.gump): return
                 L = LAYOUT[self.cat]; L[0], L[1], L[2] = self.gump.GetX(), self.gump.GetY(), self.size[0]
                 if not self.minimized: L[3] = self.size[1]
-        def rebuild_windows(windows):
+        def refresh(windows):
             for w in windows.values(): w.destroy()
             for w in windows.values(): w.create()
             for p in list(POPS.values()): p.rebuild()
+        def redo_look():
+            if views["windows"] is not None:
+                for w in views["windows"].values(): w.snapshot()
+                refresh(views["windows"])
+            if views["combat"] is not None: views["combat"].relayout = True
         def sync_sizes(windows, source):
             if source.minimized: w, h = LAYOUT[source.cat][2], LAYOUT[source.cat][3]
             else: w, h = source.size
             for t in windows.values():
                 if t is source or t.locked or FIT["size"].get(t.cat) is not None: continue
                 t.resize_to(w, h)
-            STATE["dirty_save"] = True
+            st["dirty_save"] = True
         def process_size_sync(windows):
             for w in windows.values():
-                if not UI["sync"]: w.user_resize_pending = False
+                if not settings["sync"]: w.user_resize_pending = False
                 elif w.user_resize_pending and w.user_resize_ticks >= 2:
                     if drag_on(): return
                     w.user_resize_pending = False; sync_sizes(windows, w); return
         def apply_scale(new_scale, windows):
-            old = UI["scale"]
+            old = settings["scale"]
             if new_scale == old: return
             ratio = float(new_scale) / old
             for w in windows.values():
                 w.snapshot(); L = LAYOUT[w.cat]; L[2] = max(sc(MIN_W, new_scale), int(round(L[2] * ratio)))
                 L[3] = max(sc(MIN_H, new_scale), int(round(L[3] * ratio)))
-            UI["scale"] = new_scale; rebuild_windows(windows); STATE["dirty_save"] = True
+            settings["scale"] = new_scale; refresh(windows); st["dirty_save"] = True
         def fit_tick(windows):
             if not FIT["req"]: return
             FIT["req"] = False; busy = drag_on()
             for cat, want in list(FIT["size"].items()):
-                win = windows.get(cat)
-                if win is None or win.gump is None: continue
+                view = windows.get(cat)
+                if view is None or view.gump is None: continue
                 if want is None:
                     if busy: FIT["req"] = True; continue
                     FIT["size"].pop(cat, None); own = FIT["own_size"].pop(cat, None)
-                    if win.made_min is not None and win.made_min != (sc(MIN_W), sc(MIN_H)):
-                        win.snapshot()
+                    if view.made_min is not None and view.made_min != (sc(MIN_W), sc(MIN_H)):
+                        view.snapshot()
                         if own is not None: LAYOUT[cat][2], LAYOUT[cat][3] = own
-                        win.destroy(); win.create()
-                    elif own is not None and own != (LAYOUT[cat][2], LAYOUT[cat][3]): win.resize_to(own[0], own[1])
+                        view.destroy(); view.create()
+                    elif own is not None and own != (LAYOUT[cat][2], LAYOUT[cat][3]): view.resize_to(own[0], own[1])
                     FIT["made"].pop(cat, None)
-                    if win.gump is not None: win._apply_lock()
+                    if view.gump is not None: view._apply_lock()
                     continue
                 if cat not in FIT["own_size"]: FIT["own_size"][cat] = (LAYOUT[cat][2], LAYOUT[cat][3])
                 w, h = want; force = cat in FIT["force"]
-                if win.minimized:
-                    if LAYOUT[cat][2] != w or (win.size and win.size[0] != w):
+                if view.minimized:
+                    if LAYOUT[cat][2] != w or (view.size and view.size[0] != w):
                         if busy: FIT["req"] = True; continue
-                        win.resize_to(w, LAYOUT[cat][3])
+                        view.resize_to(w, LAYOUT[cat][3])
                     FIT["force"].discard(cat); continue
-                real = (int(win.gump.GetWidth()), int(win.gump.GetHeight()))
+                real = (int(view.gump.GetWidth()), int(view.gump.GetHeight()))
                 if real[0] <= 0 or real[1] <= 0: FIT["force"].discard(cat); continue
                 made = FIT["made"].get(cat); tries = made[1] if made is not None and made[0] == (w, h) else 0
-                if real == (w, h) and win.size == (w, h): tries = 0; FIT["made"].pop(cat, None)
-                if (force or win.size != (w, h) or real != (w, h) or win.made_min[0] > w or win.made_min[1] > h) \
+                if real == (w, h) and view.size == (w, h): tries = 0; FIT["made"].pop(cat, None)
+                if (force or view.size != (w, h) or real != (w, h) or view.made_min[0] > w or view.made_min[1] > h) \
                         and (force or tries < FIT_TRIES):
                     if busy: FIT["req"] = True; continue
-                    FIT["force"].discard(cat); FIT["made"][cat] = ((w, h), tries + 1); win.snapshot()
-                    LAYOUT[cat][2], LAYOUT[cat][3] = w, h; win.destroy(); win.create()
+                    FIT["force"].discard(cat); FIT["made"][cat] = ((w, h), tries + 1); view.snapshot()
+                    LAYOUT[cat][2], LAYOUT[cat][3] = w, h; view.destroy(); view.create()
                 else: FIT["force"].discard(cat)
-        ATTACK_RE = re.compile(r"\*?\s*(.+?)\s+is attacking you", re.IGNORECASE)
+        ATTACK_RE = Journal.ATTACK_RE
         HOSTILE_INTS = [int(n) for n in HOSTILE_NOTO]; cb_engaged = {}; cb_order_counter = [0]; cb_pending_click = []
         cb_snap = {}; cb_pending_spell = []
         cb_casting = {"serial": None, "until": 0.0, "harmful": True, "stale": False}
@@ -1743,7 +1781,7 @@ def _module_ultima():
             if not e:
                 me = HOST.me()
                 if me is None or serial == me.Serial: return
-            if serial in STATE["party"] or is_friend(serial): return
+            if serial in st["party"] or is_friend(serial): return
             t = t or time.time()
             if e: e["last"] = t
             elif len(cb_engaged) < MAX_BARS:
@@ -1774,14 +1812,14 @@ def _module_ultima():
         def cb_scan_last_target():
             s = API.LastTargetSerial; me = HOST.me()
             if not s or me is None or s == me.Serial or s in cb_engaged: return
-            if UI["combat_only"] and not me.InWarMode: return
+            if settings["combat_only"] and not me.InWarMode: return
             now = time.time(); sk = LT_SKIP
             if sk["serial"] == s and 0.0 <= sk["until"] - now <= LT_SKIP_SECONDS: return
             m = API.FindMobile(s)
             if cb_mob_ok(m) and cb_dist(m) <= COMBAT_RANGE and cb_attackable(m): sk["serial"] = None; cb_engage(s)
             else: sk["serial"], sk["until"] = s, now + LT_SKIP_SECONDS
         def cb_scan_warmode_hostiles():
-            rng = MELEE_RANGE if UI["combat_only"] else COMBAT_RANGE
+            rng = MELEE_RANGE if settings["combat_only"] else COMBAT_RANGE
             for m in HOST.mobiles(rng):
                 try:
                     if int(m.Notoriety) in HOSTILE_INTS and m.InWarMode \
@@ -1813,21 +1851,23 @@ def _module_ultima():
                 except Exception: continue
             rows.sort(); return [r[1:] for r in rows]
         def cb_make_click(serial):
-            def _cb(*args): cb_pending_click.append((serial, alt_held()))
+            def _cb(*args): cb_pending_click.append((serial, alt_held(), time.time()))
             return _cb
         def cb_handle_clicks():
             while cb_pending_click:
-                s, alt = cb_pending_click.pop(0); m = API.FindMobile(s)
+                s, alt, at = cb_pending_click.pop(0); m = API.FindMobile(s)
                 if not m: continue
                 if alt: toggle_follow(s); continue
-                if click_can_aim(): API.Target(s)
+                if click_can_aim():
+                    if not HOST.harm_ok(s, "ultima.aim", TITLE, now=at): continue
+                    API.Target(s)
                 else:
-                    if held_back(s, s, m, time.time(), "* click again to attack *", "click the bar again"): continue
+                    if held_back("ultima.attack", s, "click the bar again to attack", at): continue
                     API.Attack(s)
                 cb_engage(s)
         def cb_make_spell_click(spell, serial):
             def _cb(*args):
-                if alt_held(): cb_pending_click.append((serial, True)); return
+                if alt_held(): cb_pending_click.append((serial, True, time.time())); return
                 cb_pending_spell.append((spell, serial, True, time.time()))
             return _cb
         def make_heal_click(serial, spell, stronger):
@@ -1841,8 +1881,7 @@ def _module_ultima():
                         del cb_pending_spell[:]; say("target cursor busy; %s not cast." % spell, Kit.HUE_BAD)
                 else:
                     del cb_pending_spell[:]; m = API.FindMobile(s)
-                    if m and harmful and held_back(("cast", s), s, m, t0, "* click again to cast *",
-                                                   "click the button again", None, "cast"): m = None
+                    if m and harmful and held_back("ultima.cast", s, "click the button again to cast", t0): m = None
                     if m:
                         stale = bool(API.HasTarget("any"))
                         if stale and cb_casting["serial"] is not None and not cb_casting["stale"] \
@@ -1868,13 +1907,13 @@ def _module_ultima():
             if psn: tags += "PSN "
             if par: tags += "PAR "
             return tags + pct
-        TIP_CB = "Click: attack %s (blue or green in guards: twice), or aim a target cursor. " + ALT_FOLLOW_TIP
+        TIP_CB = "Attack or aim at %s (blue or green in guards: twice). " + ALT_FOLLOW_TIP
         CB_SPELLS = ((SPELL_POISON, "P", COL_POISON, "Cast Poison on %s. Alt+click: auto-follow (again to stop)"),
                      (SPELL_PARALYZE, "Z", COL_PARA, "Cast Paralyze on %s. Alt+click: auto-follow (again to stop)"))
         CB_X = Kit.MARGIN + 4
         class CombatSlot(PoolRow):
-            def __init__(self, win, i, geo, d):
-                self.win = win; g = win.gump; serial, name, noto, hits, hmr, psn, par = d
+            def __init__(self, view, i, geo, d):
+                self.win = view; g = view.gump; serial, name, noto, hits, hmr, psn, par = d
                 self.serial, self.name = serial, name; self.y = ry = geo["y"] + i * (geo["rh"] + CB_ROW_GAP)
                 self.shown, self.ctrls, self.tips = True, [], []
                 self.bar = HealthBar(g, CB_X, ry, geo["bar_w"], geo["rh"],
@@ -1884,7 +1923,7 @@ def _module_ultima():
                 c = catcher(CB_X, ry, geo["bar_w"], geo["rh"], RowClick(self, lambda s, n: cb_make_click(s)),
                             tip_for(TIP_CB % name, name))
                 g.Add(c); self.ctrls.append(c); self.tips.append((c, TIP_CB))
-                if UI["magery"]:
+                if settings["magery"]:
                     bx = CB_X + geo["bar_w"] + 1
                     for spell, txt, col, tip in CB_SPELLS:
                         parts = []
@@ -1922,6 +1961,7 @@ def _module_ultima():
                     self.name_raw = nr
                 self._texts(d, geo)
             def values(self, d):
+                self.e = d
                 serial, name, noto, hits, hmr, psn, par = d; hm = hmr if hmr else 1; self.bar.SetProgress(hits, hm)
                 rk = (serial, hits, hm, psn, par, Follow.serial == serial)
                 if rk != self.info_raw:
@@ -1940,6 +1980,7 @@ def _module_ultima():
                 slot = (int(w), int(h)) if w and h else None
                 if slot != self.slot or mode == "again": self.slot = slot; self.relayout = self.zone_redraw = True
             def width(self): return self.slot[0] if self.slot is not None else LAYOUT["combat"][2]
+            def zone_chrome(self): self.relayout = True
             def _forget(self):
                 self.rows, self.grip, self.empty_lines = [], [], []
                 self.empty = self.frame_key = self.geo = self.fit_n = None; self.empty_shown = False
@@ -1949,16 +1990,18 @@ def _module_ultima():
             def show(self):
                 if self.is_open(): return
                 L = LAYOUT["combat"]; L[2] = clamp(L[2], CB_MIN_WIDTH, CB_MAX_WIDTH)
-                L[0], L[1] = Kit.clamp(L[0], L[1], self.width(), self.height(0))
+                held = HOST.layout_holds(self.dock_key)
+                if not held: L[0], L[1] = Kit.clamp(L[0], L[1], self.width(), self.height(0))
                 self.made_min = min(CB_MIN_WIDTH, self.width())
                 g = API.Gumps.CreateModernGump(L[0], L[1], self.width(), self.height(0), True,
                                                self.made_min, 16, self._on_resized)
                 g.SetAlpha(0.0); self.gump = g; self._forget(); G.AddGump(g)
-                Kit.on_moved(g, self.moved); ANCHORS.placed("combat"); UI["combat_shown"] = True
-                STATE["dirty_save"] = True; self.apply_lock(); self.draw(cb_prune_and_refresh())
+                Kit.on_moved(g, self.moved); ANCHORS.placed("combat")
+                if not held: settings["combat_shown"] = True; st["dirty_save"] = True
+                self.apply_lock(); self.draw(cb_prune_and_refresh())
             def hide(self):
                 self.snapshot(); Kit.dispose(self.gump)
-                self.gump = None; self._drop_notes(); UI["combat_shown"] = False; STATE["dirty_save"] = True
+                self.gump = None; self._drop_notes(); settings["combat_shown"] = False; st["dirty_save"] = True
                 if self.docked: self.docked = False; HOST.dock_forget(self.dock_key)
             def _drop_notes(self):
                 for sl in self.rows: LABELS.pop(id(sl.name_lbl), None); LABELS.pop(id(sl.info), None)
@@ -2001,11 +2044,11 @@ def _module_ultima():
                 g.SetResizable(not locked and not held)
             def set_locked(self, locked):
                 if LAYOUT["combat"][4] != locked:
-                    LAYOUT["combat"][4] = locked; self.apply_lock(); self.relayout = True; STATE["dirty_save"] = True
+                    LAYOUT["combat"][4] = locked; self.apply_lock(); self.relayout = True; st["dirty_save"] = True
             def toggle_minimize(self, *args):
                 LAYOUT["combat"][5] = not LAYOUT["combat"][5]
                 if not LAYOUT["combat"][5]: self.docked = False
-                self.relayout = True; STATE["dirty_save"] = True
+                self.relayout = True; st["dirty_save"] = True
             def status_text(self, data):
                 n = len(data)
                 if not LAYOUT["combat"][5] or n == 0: return "%d" % n
@@ -2033,8 +2076,8 @@ def _module_ultima():
                                        lambda *a: DOCK_REQ.append("ultima.combat"))
                 self.chrome.set_status(self.status_text(data))
                 if mini: return
-                inner_w = W - 2 * CB_X; info_w = int(round(80 * s)); spell_w = max(14, rh) if UI["magery"] else 0
-                bar_w = inner_w - (2 * (spell_w + 1) if UI["magery"] else 0)
+                inner_w = W - 2 * CB_X; info_w = int(round(80 * s)); spell_w = max(14, rh) if settings["magery"] else 0
+                bar_w = inner_w - (2 * (spell_w + 1) if settings["magery"] else 0)
                 self.geo = {"y": self.chrome.content_top, "rh": rh, "font": font,
                             "info_w": info_w, "spell_w": spell_w, "bar_w": bar_w, "name_w": bar_w - info_w - 6, "W": W}
                 if L[4]: return
@@ -2056,7 +2099,7 @@ def _module_ultima():
                     if len(data) > cap: data = data[:cap]
                 self.fit(len(data)); PoolWin.fill(self, data)
             def draw(self, data):
-                L = LAYOUT["combat"]; key = (L[2], L[5], L[4], UI["magery"], self.slot)
+                L = LAYOUT["combat"]; key = (L[2], L[5], L[4], settings["magery"], self.slot)
                 if self.zone_redraw and self.frame_key is not None and drag_on():
                     if self.chrome is not None: self.chrome.set_status(self.status_text(data))
                     if key == self.frame_key and not L[5] and self.geo is not None: self.fill(data)
@@ -2071,7 +2114,9 @@ def _module_ultima():
                 if g is None: del cb_pending_click[:]; return
                 if stopping(): return
                 if not Kit.is_open(g):
-                    self.gump = None; self._drop_notes(); UI["combat_shown"] = False; STATE["dirty_save"] = True
+                    self.gump = None; self._drop_notes()
+                    if HOST.layout_holds(self.dock_key): return
+                    settings["combat_shown"] = False; st["dirty_save"] = True
                     say("combat bars hidden; Show combat in the %s window brings them back." % TITLE, Kit.HUE_INFO)
                     return
                 if ((self.made_min > self.slot[0]) if self.slot is not None
@@ -2089,7 +2134,7 @@ def _module_ultima():
                 self.g = self.list_sa = self.input = self.lock_all_lbl = self.combat_lbl = self.foe_title = None
                 self.store, self.x0, self.w = ({}, {}), 0, 0; self.foe_ver = self.seen_ver = -1
                 self.foe_rows, self.seen_at = [], 0.0; self.lock_all_text = self.combat_text = ""
-                self.list_top = self.list_h = 0; hub = HOST.hub
+                self.list_top = self.list_h = 0; self.list_lbls = (); hub = HOST.hub
                 if hub is not None:
                     hub.add("ultima", TITLE, {"height": self.height, "build": self.build_section,
                              "closed": self.section_closed})
@@ -2135,7 +2180,7 @@ def _module_ultima():
                 step = max(16, NATIVE.get("font_h", 0) if uo_font_for(11) else 0)
                 self.list_h = bottom - step - 14 - self.list_top
                 lb = label("Alt+click any bar: auto-follow (again to stop).", 11, DIM_TEXT)
-                place(lb, X + 2, bottom - step - 6); g.Add(lb); self.foe_ver = STATE["foe_ver"]; self.rebuild_foe_list()
+                place(lb, X + 2, bottom - step - 6); g.Add(lb); self.foe_ver = st["foe_ver"]; self.rebuild_foe_list()
             def _button(self, text, x, y, w, fn, art, tip=None):
                 bw = Kit.pic_size(art[0])[0] or 30; key = "ut:" + text.lower().replace(" ", "_").rstrip(".")
                 return Kit.art_button(self.g, self.store, key, art, x, y, Kit.fit(text, max(10, w - bw - 6)), tip,
@@ -2153,8 +2198,7 @@ def _module_ultima():
                 if key in FOES:
                     unlink_foe(key)
                     if LINK_PICK[0] == key: LINK_PICK[0] = None
-                    name = FOES.pop(key); STATE["foe_ver"] += 1; request_save()
-                    say("removed %s from the Foe list." % name, Kit.HUE_GOOD)
+                    name = drop_foe(key); say("removed %s from the Foe list." % name, Kit.HUE_GOOD)
                 else: say("%s isn't on the Foe list." % key, Kit.HUE_BAD)
             def target_foe(self, *args):
                 say("target a player for your Foe list.", Kit.HUE_INFO); HOST.pick_target(10, self._foe_targeted)
@@ -2165,12 +2209,12 @@ def _module_ultima():
             def ignore_name(self, *args):
                 n = self._typed()
                 if n:
-                    IGNORE[n.lower()] = n; request_save(); self._clear_input()
+                    IGNORE[n.lower()] = n; save_settings(); self._clear_input()
                     say("ignoring %s from now on." % n, Kit.HUE_GOOD)
             def unignore_name(self, *args):
                 n = self._typed()
                 if n and n.lower() in IGNORE:
-                    IGNORE.pop(n.lower()); request_save(); self._clear_input()
+                    IGNORE.pop(n.lower()); save_settings(); self._clear_input()
                     say("no longer ignoring %s." % n, Kit.HUE_GOOD)
             def _all_locked(self):
                 locks = [w.locked for w in self.windows.values()]
@@ -2183,7 +2227,9 @@ def _module_ultima():
                 for p in list(POPS.values()): p.set_locked(target)
                 self.refresh_labels()
             def toggle_combat(self, *args):
-                (self.combat.hide if self.combat.is_open() else self.combat.show)(); self.refresh_labels()
+                cw = self.combat
+                if cw.is_open() and HOST.layout_holds(cw.dock_key): return
+                (cw.hide if cw.is_open() else cw.show)(); self.refresh_labels()
             def refresh_labels(self):
                 if self.gump is None or self.lock_all_lbl is None: return
                 text = "Unlock all" if self._all_locked() else "Lock all"
@@ -2197,20 +2243,20 @@ def _module_ultima():
                     if w.docked: w.docked = False; HOST.dock_forget(w.dock_key)
                 cb_was_docked = self.combat.docked
                 if cb_was_docked: self.combat.docked = False; HOST.dock_forget(self.combat.dock_key)
-                rebuild_windows(self.windows); self.combat.reset()
+                refresh(self.windows); self.combat.reset()
                 if cb_was_docked and self.combat.is_open(): Kit.set(self.combat.gump, "IsVisible", True)
                 if HOST.hub is not None: HOST.hub.refresh()
-                apply_borders_all(); request_save()
+                apply_borders_all(); save_settings()
                 say("settings and windows reset to the defaults.", Kit.HUE_GOOD)
             def set_all_opacity(self, v):
-                UI["opacity"] = v
+                settings["opacity"] = v
                 for w in self.windows.values(): w.apply_opacity(v)
                 for pb in POPS.values(): pb.apply_opacity(v)
-                self.combat.apply_opacity(v); LAYOUT["panel"][6] = v; STATE["dirty_save"] = True
+                self.combat.apply_opacity(v); LAYOUT["panel"][6] = v; st["dirty_save"] = True
             def rebuild_foe_list(self):
                 if self.gump is None: return
                 Kit.dispose(self.list_sa)
-                for lb in getattr(self, "list_lbls", ()): LABELS.pop(id(lb), None)
+                for lb in self.list_lbls: LABELS.pop(id(lb), None)
                 self.list_lbls = lbls = []
                 self.list_sa = API.Gumps.CreateGumpScrollArea(self.x0, self.list_top, self.w, self.list_h)
                 self.g.Add(self.list_sa); self.foe_rows = []; names = sorted(FOES.items(), key=lambda kv: kv[1].lower())
@@ -2248,12 +2294,12 @@ def _module_ultima():
                 if pick is None or pick not in FOES:
                     LINK_PICK[0] = key; say("press L on the entry to link with %s." % FOES[key], Kit.HUE_INFO)
                 elif pick == key: LINK_PICK[0] = None; say("linking cancelled.", Kit.HUE_INFO)
-                else: LINK_PICK[0] = None; say(link_foes(pick, key), Kit.HUE_GOOD); request_save()
-                STATE["foe_ver"] += 1
+                else: LINK_PICK[0] = None; say(link_foes(pick, key), Kit.HUE_GOOD); save_settings()
+                st["foe_ver"] += 1
             def unlink_click(self, key):
                 if key in FOES and unlink_foe(key):
-                    say("%s is no longer linked." % FOES[key], Kit.HUE_GOOD); request_save()
-                    STATE["foe_ver"] += 1
+                    say("%s is no longer linked." % FOES[key], Kit.HUE_GOOD); save_settings()
+                    st["foe_ver"] += 1
             def foe_name_click(self, key, name):
                 if alt_held():
                     best, bt = None, -1.0
@@ -2267,7 +2313,7 @@ def _module_ultima():
                 safe(lambda: self.input.SetText(name))
             def update(self):
                 if self.gump is None: return
-                if self.foe_ver != STATE["foe_ver"]: self.foe_ver = STATE["foe_ver"]; self.rebuild_foe_list()
+                if self.foe_ver != st["foe_ver"]: self.foe_ver = st["foe_ver"]; self.rebuild_foe_list()
                 elif self.foe_rows:
                     now = time.time()
                     if self.seen_ver != SIGHT["seen_ver"] or now >= self.seen_at:
@@ -2281,13 +2327,25 @@ def _module_ultima():
                 self.c, self.nm, self.here = {}, "", None
         def make_sight_click(serial, name): return follow_or(serial, lambda: SIGHT_WIN.filter_name(name))
         SIGHT_LIST_H = 26 + SIGHT_ROWS * 22 + 6; SIGHT_H = 2 * Kit.MARGIN + 30 + 36 + SIGHT_LIST_H + 36 + 3 * Kit.GAP
+        SIGHT_MIN_H = SIGHT_H - (SIGHT_ROWS - 1) * 22
+        def zone_fit(obj, w, h, mode):
+            new = (int(w), int(h)) if (w is not None and h is not None) else None
+            if new != obj.slot or (mode == "again" and new is not None): obj.slot = new; obj.redraw = True
+        def zone_told(obj, mw, mh):
+            z = obj.slot
+            if z is None or obj.st["minimized"] or not HOST.layout_holds(obj.KEY) or z[0] < mw or z[1] < mh: return None
+            return z
         class SightingsWindow(object):
             KEY = "ultima.sightings"; TITLE = "Sightings"; W = 480; MINI_W, MINI_H = 300, 46
             COLS = (8, 92, 230, 278, 404)
             def __init__(self):
                 self.st = {"minimized": False, "docked": False, "shutting": True}; self.win = {"g": None}
-                self.hooks = Kit.dock_hooks(self.TITLE, SIGHT_TRAY_ICON, self.st, self.win, self.ask_redraw, scale=True)
+                self.slot, self.want, self.n, self.w = None, False, SIGHT_ROWS, self.W
+                self.hooks = Kit.dock_hooks(self.TITLE, SIGHT_TRAY_ICON, self.st, self.win, self.ask_redraw, self.fit)
+                self.hooks.update(show=self.zone_show, min=(self.W, SIGHT_MIN_H))
                 self.flt = {"text": "", "noto": 0, "time": 0}; self.forget()
+            def fit(self, w, h, mode): zone_fit(self, w, h, mode)
+            def zone_show(self): self.want = True
             def forget(self):
                 self.c, self.store, self.rows = {}, ({}, {}), []; self.page, self.matches, self.counts = 0, [], {}
                 self.ver, self.ver_at, self.dirty, self.redraw = None, 0.0, True, False
@@ -2297,7 +2355,7 @@ def _module_ultima():
             def toggle(self):
                 if not self.is_open(): self.show()
                 elif self.st["minimized"] or self.st["docked"]: self.bring()
-                else: self.close()
+                elif not HOST.layout_holds(self.KEY): self.close()
             def bring(self):
                 if not self.is_open(): self.show()
                 if self.st["minimized"] or self.st["docked"]:
@@ -2305,35 +2363,39 @@ def _module_ultima():
                     Kit.save_min(SIGHT_MIN_KEY, False); self.build()
             def show(self):
                 if self.is_open(): return
-                self.st.update(shutting=False, docked=False, minimized=Kit.load_min(SIGHT_MIN_KEY)
-                               or bool(HOST.dock_wanted(self.KEY)))
-                self.build(); HOST.dock_add(self.KEY, self.hooks); Kit.put_var(SIGHT_OPEN_KEY, "1")
-            def save_pos(self): Kit.save_pos(SIGHT_POS_KEY, self.win["g"])
+                held = HOST.layout_holds(self.KEY)
+                self.st.update(shutting=False, docked=False, minimized=not held and bool(
+                    Kit.load_min(SIGHT_MIN_KEY) or HOST.dock_wanted(self.KEY)))
+                self.build(); Kit.put_var(SIGHT_OPEN_KEY, "1")
+            def save_pos(self):
+                if not HOST.layout_holds(self.KEY): Kit.save_pos(SIGHT_POS_KEY, self.win["g"])
             def close(self, stopping=False):
                 g = self.win["g"]
                 if g is None: return
-                self.st["shutting"] = True; HOST.dock_remove(self.KEY)
+                self.st["shutting"] = True
                 if not stopping: HOST.dock_forget(self.KEY); Kit.put_var(SIGHT_OPEN_KEY, "0")
-                Kit.save_pos(SIGHT_POS_KEY, g); Kit.save_min(SIGHT_MIN_KEY, self.st["minimized"]); self.win["g"] = None
-                self.forget(); Kit.dispose(g)
+                if not HOST.layout_holds(self.KEY):
+                    Kit.save_pos(SIGHT_POS_KEY, g); Kit.save_min(SIGHT_MIN_KEY, self.st["minimized"])
+                self.win["g"] = None; self.forget(); Kit.dispose(g)
             def lost(self):
-                self.win["g"] = None; self.st["shutting"] = True; HOST.dock_remove(self.KEY)
-                Kit.put_var(SIGHT_OPEN_KEY, "0"); self.forget()
+                self.win["g"] = None; self.st["shutting"] = True; Kit.put_var(SIGHT_OPEN_KEY, "0"); self.forget()
             def build(self):
                 self.redraw = False; old = self.win["g"]
                 x, y = Kit.load_pos(SIGHT_POS_KEY, (320, 160), (self.W, SIGHT_H))
                 if Kit.is_open(old): x, y = old.GetX(), old.GetY()
                 self.win["g"] = None; self.forget(); store, c, rows = self.store, self.c, self.rows
-                M, GAP = Kit.MARGIN, Kit.GAP; g = G.CreateGump(True, True)
+                M, GAP = Kit.MARGIN, Kit.GAP; g = G.CreateGump(True, True); self.n, self.w = SIGHT_ROWS, self.W
                 if self.st["minimized"]:
                     w, h = self.MINI_W, self.MINI_H
                     c["status"] = Kit.mini_bar(g, store, w, h, self.TITLE, self.KEY,
-                                               queue_click(self.toggle_min), close_tip="Close")
+                                               queue_click(self.toggle_min), close_tip="Close Sightings")
                 else:
-                    w, h = self.W, SIGHT_H; IW = w - 2 * M; Kit.add_window_frame(g, w, h)
+                    z = zone_told(self, self.W, SIGHT_MIN_H); w, h = z if z else (self.W, SIGHT_H)
+                    list_h = h - SIGHT_H + SIGHT_LIST_H; self.n = max(1, (list_h - 32) // 22); self.w = w
+                    IW = w - 2 * M; Kit.add_window_frame(g, w, h)
                     Kit.title_bar(g, store, w, self.TITLE, self.KEY, queue_click(self.toggle_min),
                                   queue_click(lambda: HOST.dock_to_bar(self.KEY, self.TITLE)),
-                                  queue_click(lambda: HOST.show_settings("ultima")), close_tip="Close")
+                                  queue_click(lambda: HOST.show_settings("ultima")), close_tip="Close Sightings")
                     yf = M + 30 + GAP; Kit.add_section(g, M, yf, IW, 36); Kit.add_label(g, "Find:", M + 10, yf + 9)
                     c["find"] = Kit.with_tip(Kit.add_textbox(g, self.flt["text"], M + 52, yf + 7, 128, numbers=False),
                                              "Part of a name: list only that player")
@@ -2345,10 +2407,10 @@ def _module_ultima():
                                                SIGHT_TIME_FILTERS[self.flt["time"]][0],
                                                "How far back to list (click to cycle)",
                                                on_click=queue_click(lambda: self.cycle("time", SIGHT_TIME_FILTERS)))
-                    yl = yf + 36 + GAP; Kit.add_section(g, M, yl, IW, SIGHT_LIST_H)
+                    yl = yf + 36 + GAP; Kit.add_section(g, M, yl, IW, list_h)
                     for x0, head in zip(self.COLS, ("Time", "Player", "Colour", "Where", "Count")):
                         Kit.add_label(g, head, M + x0, yl + 6, Kit.HUE_TITLE)
-                    for i in range(SIGHT_ROWS):
+                    for i in range(self.n):
                         ry = yl + 26 + i * 22; r = SightRow()
                         for k, x0, hue in (("t", 0, Kit.HUE_INFO), ("n", 1, Kit.HUE_TEXT),
                                            ("o", 2, Kit.HUE_TEXT), ("p", 3, Kit.HUE_INFO), ("k", 4, Kit.HUE_INFO)):
@@ -2356,14 +2418,14 @@ def _module_ultima():
                         r.c["hit"] = Kit.catcher(g, M + 4, ry, IW - 8, 22, queue_click(RowClick(r, make_sight_click)),
                                                  TIP_SIGHT)
                         rows.append(r)
-                    yb = yl + SIGHT_LIST_H + GAP; Kit.add_section(g, M, yb, IW, 36)
+                    yb = yl + list_h + GAP; Kit.add_section(g, M, yb, IW, 36)
                     Kit.art_button(g, store, "newer", Kit.ART_PAGE, M + 10, yb + 7, "Prev",
                                    "Newer sightings", on_click=queue_click(self.newer))
                     Kit.art_button(g, store, "older", Kit.ART_PAGE, M + 120, yb + 7, "Next",
                                    "Older sightings", on_click=queue_click(self.older))
                     c["status"] = Kit.add_label(g, "", M + 230, yb + 10, Kit.HUE_INFO)
-                Kit.show_window(g, x, y, w, h, None, self.st["minimized"] and self.st["docked"], None, self.save_pos,
-                                self.win, {"g": g})
+                Kit.show_window(g, x, y, w, h, self.KEY, self.st["minimized"] and self.st["docked"], None,
+                                self.save_pos, self.win, {"g": g})
                 Kit.dispose(old); self.refresh(time.time(), True)
             def toggle_min(self, *args):
                 Kit.win_action("toggle_min", self.st, self.KEY, self.TITLE, self.build, SIGHT_MIN_KEY)
@@ -2374,12 +2436,18 @@ def _module_ultima():
             def newer(self, *args):
                 if self.page > 0: self.page -= 1; self.dirty = True
             def older(self, *args):
-                if (self.page + 1) * SIGHT_ROWS < len(self.matches): self.page += 1; self.dirty = True
+                if (self.page + 1) * self.n < len(self.matches): self.page += 1; self.dirty = True
             def filter_name(self, name):
                 new = "" if self.flt["text"].lower() == name.lower() else name; tb = self.c.get("find")
                 if tb is not None: safe(lambda: tb.SetText(new))
                 self.flt["text"] = new; self.page, self.dirty = 0, True
             def tick(self, now):
+                if self.want:
+                    self.want = False
+                    if HOST.layout_holds(self.KEY):
+                        if not self.is_open(): self.show()
+                        elif self.st["minimized"] or self.st["docked"]:
+                            self.st["minimized"] = self.st["docked"] = False; self.build()
                 if self.win["g"] is None: return
                 if Kit.was_clicked(self.store, "close"): self.close(); return
                 if self.redraw: self.build(); return
@@ -2417,18 +2485,18 @@ def _module_ultima():
                     if find and find not in e[S_KEY]: continue
                     if nf is not None and (e[S_KEY] not in FOES if nf == "foe" else e[S_NOTO] not in nf): continue
                     out.append(e); counts[e[S_KEY]] = counts.get(e[S_KEY], 0) + 1
-                self.matches, self.counts = out, counts; last = max(0, (len(out) - 1) // SIGHT_ROWS)
+                self.matches, self.counts = out, counts; last = max(0, (len(out) - 1) // self.n)
                 if self.page > last: self.page = last
             def fill(self, now):
-                today0 = today_start(now); start = self.page * SIGHT_ROWS; m = self.matches
+                today0 = today_start(now); start = self.page * self.n; m = self.matches
                 for i, r in enumerate(self.rows): j = start + i; self.assign(r, m[j] if j < len(m) else None, today0)
                 self.mark_here(now); n = len(m)
                 if n:
-                    text = "%d-%d of %d, %s" % (start + 1, min(n, start + SIGHT_ROWS), n,
+                    text = "%d-%d of %d, %s" % (start + 1, min(n, start + self.n), n,
                                                     Kit.count(len(self.counts), "name"))
                 elif SIGHTS: text = "No sightings match the filters"
-                else: text = "No sightings yet" if UI["sightings"] else "Logging is off (settings page)"
-                Kit.set_text(self.c["status"], Kit.fit(text, self.W - 2 * Kit.MARGIN - 236))
+                else: text = "No sightings yet" if settings["sightings"] else "Logging is off (settings page)"
+                Kit.set_text(self.c["status"], Kit.fit(text, self.w - 2 * Kit.MARGIN - 236))
             def assign(self, r, e, today0):
                 c = r.c
                 if e is None:
@@ -2455,41 +2523,59 @@ def _module_ultima():
                     if here != r.here:
                         r.here = here; Kit.set_text(r.c["n"], r.nm, Kit.HUE_GOOD if here else Kit.HUE_TEXT)
         class KillerWindow(object):
-            TITLE = "Add my killer"; W = 340; MINI_W, MINI_H = 260, 46; ROW_H = 26
+            KEY = "ultima.killer"; TITLE = "Add my killer"; W = 340; MINI_W, MINI_H = 260, 46; ROW_H = 26
             def __init__(self):
-                self.g, self.store, self.c, self.cands = None, ({}, {}), {}, []; self.until, self.minimized = 0.0, False
-            def height(self): return 2 * Kit.MARGIN + 30 + Kit.GAP + 8 + len(self.cands) * self.ROW_H + 26
+                self.st = {"minimized": False, "docked": False, "shutting": True}; self.win = {"g": None}
+                self.store, self.c, self.cands = ({}, {}), {}, []; self.until, self.slot = 0.0, None
+                self.redraw = self.want = False
+                self.hooks = Kit.dock_hooks(self.TITLE, 0, self.st, self.win, self.ask_redraw, self.fit)
+                self.hooks.update(show=self.zone_show, min=(self.W, self.height(1)))
+            def ask_redraw(self): self.redraw = True
+            def zone_show(self): self.want = True
+            def fit(self, w, h, mode): zone_fit(self, w, h, mode)
+            def held(self): return HOST.layout_holds(self.KEY)
+            def height(self, n): return 2 * Kit.MARGIN + 30 + Kit.GAP + 8 + n * self.ROW_H + 26
             def open(self, got, now, total=None):
                 self.cands = [{"name": a[0], "serial": a[2]} for a in got]; self.until = now + KILLER_SHOW
-                self.minimized = Kit.load_min(KILLER_MIN_KEY); self.build(); n = len(got) if total is None else total
+                self.st.update(shutting=False, docked=False, minimized=not self.held() and Kit.load_min(KILLER_MIN_KEY))
+                self.build(); n = len(got) if total is None else total
                 say("you died; %s attacked you (see %s)." % (Kit.count(n, "player"), self.TITLE), Kit.HUE_BAD)
-            def save_pos(self): Kit.save_pos(KILLER_POS_KEY, self.g)
+            def save_pos(self):
+                if not self.held(): Kit.save_pos(KILLER_POS_KEY, self.win["g"])
             def close(self):
-                g = self.g
+                g = self.win["g"]
                 if g is None: return
-                Kit.save_pos(KILLER_POS_KEY, g); Kit.save_min(KILLER_MIN_KEY, self.minimized)
-                self.g, self.c, self.cands = None, {}, []; Kit.dispose(g)
+                if not self.held(): Kit.save_pos(KILLER_POS_KEY, g); Kit.save_min(KILLER_MIN_KEY, self.st["minimized"])
+                self.st["shutting"] = True; self.win["g"], self.c, self.cands = None, {}, []; Kit.dispose(g)
+            def end(self):
+                if not self.held(): self.close()
+                elif self.cands: self.cands = []; self.build()
             def build(self):
-                old = self.g; W, H = self.W, self.height(); sw, sh = Kit.screen()
+                old = self.win["g"]; mini = self.st["minimized"]; z = zone_told(self, self.W, self.height(1))
+                W, H = z if z else (self.W, self.height(max(1, len(self.cands)))); sw, sh = Kit.screen()
+                shown = self.cands[:max(1, (H - self.height(0)) // self.ROW_H)] if z else self.cands
                 x, y = Kit.load_pos(KILLER_POS_KEY, (max(0, ((sw or 1024) - W) // 2),
                                                      max(0, ((sh or 768) - H) // 3)), (W, H))
                 if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-                self.g = None; store, c = ({}, {}), {}; M = Kit.MARGIN; g = G.CreateGump(True, True)
-                if self.minimized:
+                self.win["g"] = None; store, c = ({}, {}), {}; M = Kit.MARGIN; g = G.CreateGump(True, True)
+                if mini:
                     W, H = self.MINI_W, self.MINI_H; n = len(self.cands)
-                    c["status"] = Kit.mini_bar(g, store, W, H, self.TITLE, "ultima.killer",
-                                               queue_click(self.toggle_min),
-                                               "%s: %s" % (self.TITLE, Kit.count(n, "attacker")), close_tip="Close")
+                    c["status"] = Kit.mini_bar(g, store, W, H, self.TITLE, self.KEY, queue_click(self.toggle_min),
+                                               "%s: %s" % (self.TITLE, Kit.count(n, "attacker")),
+                                               close_tip="Close the attacker list")
                 else:
                     IW = W - 2 * M; Kit.add_window_frame(g, W, H); Kit.add_section(g, M, M, IW, 30)
                     Kit.add_label(g, self.TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
-                    Kit.title_catcher(g, M, M, W - M - 80 - M, 30, queue_click(self.toggle_min), key="ultima.killer")
-                    Kit.art_button(g, store, "min", Kit.ART_MIN, W - M - 74, M + 7, None,
-                                   Kit.MIN_TIP, on_click=queue_click(self.toggle_min))
-                    Kit.art_button(g, store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None, "Close")
+                    if Kit.zone_up(self.KEY): Kit.catcher(g, M, M, IW, 30, lambda *a: None, None, movable=True)
+                    else:
+                        Kit.title_catcher(g, M, M, W - M - 80 - M, 30, queue_click(self.toggle_min), key=self.KEY)
+                        Kit.art_button(g, store, "min", Kit.ART_MIN, W - M - 74, M + 7, None,
+                                       Kit.MIN_TIP, on_click=queue_click(self.toggle_min))
+                        Kit.art_button(g, store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None,
+                                       "Close the attacker list")
                     yb = M + 30 + Kit.GAP; Kit.add_section(g, M, yb, IW, H - yb - M); cap = "Add to foes"
                     bx = W - M - 10 - (35 + Kit.text_w(cap))
-                    for i, a in enumerate(self.cands):
+                    for i, a in enumerate(shown):
                         ry = yb + 8 + i * self.ROW_H; on = name_key(a["name"]) in FOES
                         Kit.add_label(g, Kit.fit(a["name"], bx - M - 30), M + 10, ry + 3, Kit.HUE_BAD)
                         Kit.catcher(g, M + 6, ry, bx - M - 14, 22, queue_click(self.make_follow(i)),
@@ -2497,10 +2583,11 @@ def _module_ultima():
                         c["add%d" % i] = Kit.art_button(g, store, "add%d" % i, Kit.ART_OK, bx, ry, "On Foe list" if on
                             else cap, "Put %s on your Foe list. Alt+click: auto-follow (again to stop)"
                             % a["name"], on_click=queue_click(self.make_add(i)))
-                    Kit.add_label(g, "Closes on resurrection.", M + 10,
-                                  yb + 8 + len(self.cands) * self.ROW_H + 2, Kit.HUE_INFO)
-                Kit.show_window(g, x, y, W, H, None, False, None, self.save_pos)
-                self.g, self.store, self.c = g, store, c; Kit.dispose(old)
+                    text = "Closes on resurrection." if shown else Kit.fit(
+                        "Lists your attackers when you die." if settings["killer"] else "Off (settings page)", IW - 20)
+                    Kit.add_label(g, text, M + 10, yb + 8 + len(shown) * self.ROW_H + 2, Kit.HUE_INFO)
+                Kit.show_window(g, x, y, W, H, self.KEY, mini and self.st["docked"], None, self.save_pos)
+                self.win["g"], self.store, self.c = g, store, c; self.redraw = False; Kit.dispose(old)
             def make_add(self, i):
                 def _add(*args):
                     if i >= len(self.cands): return
@@ -2520,11 +2607,20 @@ def _module_ultima():
                     else: toggle_follow(s)
                 return _follow
             def toggle_min(self, *args):
-                self.minimized = not self.minimized; Kit.save_min(KILLER_MIN_KEY, self.minimized); self.build()
+                ks = self.st; ks["minimized"] = not ks["minimized"]; Kit.save_min(KILLER_MIN_KEY, ks["minimized"])
+                self.build()
             def tick(self, now):
-                if self.g is None: return
-                if Kit.was_clicked(self.store, "close") or now >= self.until: self.close()
-                elif not Kit.is_open(self.g): self.g, self.c, self.cands = None, {}, []
+                if self.want:
+                    self.want = False; ks = self.st
+                    if self.held() and (self.win["g"] is None or ks["minimized"] or ks["docked"]):
+                        ks.update(shutting=False, minimized=False, docked=False); self.build()
+                g = self.win["g"]
+                if g is None: return
+                if Kit.was_clicked(self.store, "close"): self.close()
+                elif not Kit.is_open(g): self.win["g"], self.c, self.cands = None, {}, []; self.st["shutting"] = True
+                elif not self.cands and not self.held(): self.close()
+                elif self.redraw: self.build()
+                elif self.cands and now >= self.until: self.end()
         SIGHT_WIN = SightingsWindow(); KILLER_WIN = KillerWindow()
         NPC_NAMES_DATA = ("0aaron2sin1ba2bott3y2del3iel2el4la3y2igail3jah3na3ona3ra2ner2ra4h5am4n2sinthe1cacia3nit4tha"
             "2calia2e3lin2hen3illes2kerley1da3ir3lia3m3ra2di4son2eben3laide4e4ia5ne4le3m3na3res3sina2ie3mina3ran3va2la"
@@ -2665,9 +2761,8 @@ def _module_ultima():
             return names
         def layout_signature(): return tuple(tuple(v) for _, v in sorted(LAYOUT.items()))
         page = {"f": None, "seen": None, "stable": 0, "loaded": False, "lines": None, "save_at": 0.0}
-        cleanup = Kit.Cleanup()
         def page_ensure_loaded():
-            if STATE["started"] or page["loaded"]: return
+            if st["started"] or page["loaded"]: return
             reset_globals(); page["loaded"] = True
             def read():
                 try: page["lines"] = read_save_lines()
@@ -2677,16 +2772,16 @@ def _module_ultima():
             got = page["lines"]
             if got is None: return False
             page["lines"] = None
-            if STATE["started"] or not got: return False
+            if st["started"] or not got: return False
             parse_save_lines(got[0], got[1]); return True
         def page_save():
-            if STATE["started"]: STATE["dirty_save"] = True
+            if st["started"]: st["dirty_save"] = True
             else: page["save_at"] = time.time() + PAGE_SAVE_DELAY
         def page_flush_save(background):
             if page["save_at"]: page["save_at"] = 0.0; save_data(background=background)
         def all_locked(): return all(bool(LAYOUT[k][4]) for k in CATS + ["combat"])
-        PAGE_OPTS = {"top": 32, "pad": 6, "ldy": 0, "sdy": 4, "fh": 26, "lw": 110, "ugap": 6}
-        def page_table():
+        ACTIONS = {}; PAGE_OPTS = {"top": 32, "pad": 6, "ldy": 0, "sdy": 4, "fh": 26, "lw": 110, "ugap": 6}
+        def page_table(w):
             right = {"dx": 320, "bdy": 0, "h": 26}
             return (("WINDOWS", (("slider", "scale", "Scale:", "Size of the trackers and pop-out bars (%d-%d)"
                          % (SCALE_MIN, SCALE_MAX), SCALE_MIN, SCALE_MAX, {"unit": "%"}),
@@ -2725,45 +2820,45 @@ def _module_ultima():
                         ("slider", "alert_minutes", "Same player again after:",
                             "Minutes before the same player alerts again (%d-%d)" % (ALERT_MIN, ALERT_MAX), ALERT_MIN,
                                 ALERT_MAX,
-                         {"lw": 178, "sw": 150, "ugap": 12, "unit": "%d min" % UI["alert_minutes"]}))))
-        def config_height(w): return Kit.Form.height(page_table(), w, **PAGE_OPTS)
+                         {"lw": 178, "sw": 150, "ugap": 12, "unit": "%d min" % settings["alert_minutes"]}))))
+        cfg = Kit.Page(settings, page_table, opts=PAGE_OPTS)
         def build_config(g, x, y, w):
             page_ensure_loaded()
-            page.update({"f": Kit.Form(g, x, y, w, dict(UI, lock=all_locked()), page_table(), **PAGE_OPTS),
-                         "stable": 0, "seen": {k: UI[k] for k in INT_ORDER}})
+            page.update({"f": Kit.Form(g, x, y, w, dict(settings, lock=all_locked()), page_table(w), **PAGE_OPTS),
+                         "stable": 0, "seen": {k: settings[k] for k in INT_ORDER}})
         def poll_config():
             f = page["f"]
             if f is None: return
             if page_apply_loaded(): page["f"] = None; HOST.refresh_settings("ultima"); return
             report_save_error(); now = time.time()
             if page["save_at"] and now >= page["save_at"]: page_flush_save(True)
-            store, seen = f.store, page["seen"]; windows = M["windows"]
+            store, seen = f.store, page["seen"]; windows = views["windows"]
             if Kit.was_clicked(store, "unanchor"):
                 ANCHORS.clear(); page_save(); say("every window unanchored.", Kit.HUE_GOOD)
             if Kit.was_clicked(store, "reset"):
-                if M["panel"] is not None: M["panel"].reset_defaults()
+                if views["panel"] is not None: views["panel"].reset_defaults()
                 else:
                     reset_settings(); page_save()
                     say("settings and windows reset to the defaults.", Kit.HUE_GOOD)
                 HOST.refresh_settings("ultima"); return
-            f.vals = dict(UI, **seen); new = f.read(); sv = new["scale"]
+            f.vals = dict(settings, **seen); new = f.read(); sv = new["scale"]
             if sv != seen["scale"]: seen["scale"] = sv; page["stable"] = 0
-            elif sv != UI["scale"]:
+            elif sv != settings["scale"]:
                 page["stable"] += 1
                 if page["stable"] >= 2:
                     if windows is not None: apply_scale(sv, windows)
-                    else: UI["scale"] = sv; page_save()
+                    else: settings["scale"] = sv; page_save()
             ov = new["opacity"]
             if ov != seen["opacity"]:
                 seen["opacity"] = ov
-                if M["panel"] is not None: M["panel"].set_all_opacity(ov)
-                else: UI["opacity"] = ov; page_save()
+                if views["panel"] is not None: views["panel"].set_all_opacity(ov)
+                else: settings["opacity"] = ov; page_save()
             for k in ("range", "alert_minutes"):
                 if new[k] == seen[k]: continue
-                seen[k] = UI[k] = new[k]; page_save()
+                seen[k] = settings[k] = new[k]; page_save()
                 if k == "alert_minutes": Kit.set_text(f.c["alert_minutes_lbl"], "%d min" % new[k])
             if Kit.was_clicked(store, "sightings"):
-                if M["windows"] is not None: M["sight_req"] = True
+                if views["windows"] is not None: M["sight_req"] = True
                 else: say("the trackers aren't up yet; try again in a moment.", Kit.HUE_INFO)
             lv = bool(new.get("lock"))
             if seen.get("lock") is None: seen["lock"] = lv
@@ -2771,62 +2866,68 @@ def _module_ultima():
                 seen["lock"] = lv
                 if windows is not None:
                     for k in CATS: windows[k].set_locked(lv)
-                if M["panel"] is not None: M["panel"].combat.set_locked(lv)
+                if views["panel"] is not None: views["panel"].combat.set_locked(lv)
                 else:
                     for k in CATS + ["combat"]: LAYOUT[k][4] = lv
-                request_save()
+                save_settings()
             for key in ("borders", "healing", "magery", "combat_only", "sync", "alert_red",
                         "alert_foes", "alert_orange", "alert_gray", "sightings", "killer"):
                 v = new[key]
-                if v == UI[key]: continue
-                UI[key] = v; page_save()
+                if v == settings[key]: continue
+                settings[key] = v; page_save()
                 if key == "borders": apply_borders_all()
                 elif key == "healing" and not v: BANDAGE["serial"] = None
                 elif key == "sync" and v and windows is not None:
                     ref = [windows[k] for k in CATS if not windows[k].minimized]
                     sync_sizes(windows, ref[0] if ref else windows[CATS[0]]); say("tracker sizes synced.", Kit.HUE_GOOD)
         def config_closed(): page["f"] = None; page_flush_save(True)
-        M = {"windows": None, "combat": None, "panel": None, "last_layout": None, "tick": 0, "errors": set(),
-             "next_scan": 0.0, "next_combat": 0.0, "next_glow": 0.0, "sight_req": False}
+        M = {"last_layout": None, "tick": 0, "errors": set(),
+             "next_scan": 0.0, "next_combat": 0.0, "next_glow": 0.0, "sight_req": False, "next_hp": 0.0}
         def due(key, step, now):
             t = M[key]
             if now < t <= now + step: return False
             M[key] = t + step if 0 <= now - t < step else now + step; return True
         def open_windows():
-            windows, combat, panel = M["windows"], M["combat"], M["panel"]
+            windows, combat, panel = views["windows"], views["combat"], views["panel"]
             wins = {c: (windows[c].gump, windows[c].size) for c in CATS}
             if combat.is_open(): wins["combat"] = (combat.gump, (LAYOUT["combat"][2], 0))
             if panel.gump is not None: wins["panel"] = (panel.gump, panel.size)
             for s, pb in POPS.items(): wins["pop:%d" % s] = (pb.gump, pb.size)
             return wins
         def snapshot_all():
-            for w in (M["windows"] or {}).values(): w.snapshot()
-            if M["combat"] is not None: M["combat"].snapshot()
-        def dock_hooks(win, title, fit):
+            for w in (views["windows"] or {}).values(): w.snapshot()
+            if views["combat"] is not None: views["combat"].snapshot()
+        def dock_hooks(view, title, fit):
             def state():
-                if win.gump is None or STATE.get("shutting"): return None
-                return "docked" if win.docked else ("minimized" if win.minimized else "open")
-            def visible(on): Kit.set(win.gump, "IsVisible", on)
+                if view.gump is None or st.get("shutting"): return None
+                return "docked" if view.docked else ("minimized" if view.minimized else "open")
+            def visible(on): Kit.set(view.gump, "IsVisible", on)
             def to(docked, mini):
                 def f():
-                    if win.minimized != mini: win.toggle_minimize()
-                    win.docked = docked; visible(not docked)
+                    if view.minimized != mini: view.toggle_minimize()
+                    view.docked = docked; visible(not docked)
                 return f
-            def undock(): win.docked = False; visible(True)
-            return {"title": title, "icon": 0, "state": state, "show": to(False, False), "dock": to(True, True),
-                    "undock": undock, "minimize": to(False, True), "gump": lambda: win.gump, "fit": fit, "exact": True,
-                    "verify": True}
+            def undock(): view.docked = False; visible(True)
+            def show():
+                if view.gump is None and view is views["combat"]: TICK_JOBS.append(view.show)
+                else: to(False, False)()
+            return {"title": title, "icon": 0, "state": state, "show": show, "dock": to(True, True),
+                    "undock": undock, "minimize": to(False, True), "gump": lambda: view.gump, "fit": fit, "exact": True,
+                    "verify": True, "redraw": view.zone_chrome}
         def register_docks(windows, combat):
             for c, w in list(windows.items()) + [("combat", combat)]:
                 HOST.dock_add("ultima." + c, dock_hooks(w, TITLES[c], w.layout_fit))
                 cleanup.add(HOST.dock_remove, "ultima." + c)
+            for key, hooks in (("ultima.sightings", SIGHT_WIN.hooks), (KILLER_WIN.KEY, KILLER_WIN.hooks)):
+                HOST.dock_add(key, hooks); cleanup.add(HOST.dock_remove, key)
         def reset_globals():
             for d in (FOES, IGNORE, PLAYER_NAMES, POPS, LAST_CLICK, cb_engaged, CLICK_MODS, FRIEND_Q, NOTE_CACHE,
-                      LAST_SEEN, ALT_OF, ALERT_PREV, ATTACKERS): d.clear()
+                      LAST_SEEN, ALT_OF, ALERT_PREV, ATTACKERS, FOE_CHG): d.clear()
+            FILE_MT[0] = None; MERGE_WAIT[0] = GONE[0] = 0.0; PEND[0] = 0
             for q in (DOCK_REQ, cb_pending_click, cb_pending_spell, CHROMES, CLICK_Q, THREAD_JOBS, TICK_JOBS, SIGHTS):
                 del q[:]
-            PLAYER_VER[0] += 1; reset_layout(); UI.update(UI_DEFAULTS)
-            FIT.update(req=False, size={}, own_size={}, force=set(), made={}); STATE.update(STATE_DEFAULTS, party=set())
+            PLAYER_VER[0] += 1; reset_layout(); settings.update(DEFAULTS)
+            FIT.update(req=False, size={}, own_size={}, force=set(), made={}); st.update(STATE_DEFAULTS, party=set())
             BANDAGE.update(serial=None, follow=None); ANCHORS.__init__(); cb_casting.update(serial=None, stale=False)
             SAVE_REQ[0] = DATA_READY[0] = False; page.update({"loaded": False, "lines": None, "save_at": 0.0})
             JREAD["learn"] = JREAD["attack"] = JREAD["killer"] = None; LT_SKIP.update(serial=None, until=0.0)
@@ -2837,32 +2938,24 @@ def _module_ultima():
         def _start():
             pending = None
             if page["save_at"]: page["save_at"] = 0.0; pending = save_text()
-            reset_globals(); STATE["started"] = True
+            reset_globals(); st["started"] = True
             for k in JREAD: JREAD[k] = Journal.reader()
             init_native_art(); M["errors"] = set(); HOST.alert_kind(ALERT_KEY, "Foe in range", ALERT_SOUND)
             cleanup.service("ultima.is_foe", is_foe); cleanup.service("ultima.classify", classify_service)
+            cleanup.service("look.ultima", lambda: TICK_JOBS.append(redo_look))
             THREAD_JOBS.append(lambda: load_job(pending))
         def load_job(pending_text=None):
-            if STATE["shutting"]: return
+            if st["shutting"]: return
             if pending_text is not None: SAVE_SEQ[0] += 1; write_text(pending_text, SAVE_SEQ[0]); report_save_error()
-            load_data(); ANCHORS.saved = ANCHORS.saved_groups(); load_old_combat_settings(); STATE["loaded"] = True
-        def build_windows():
-            windows = {c: CategoryGump(c) for c in CATS}; combat = CombatWindow()
-            M.update({"windows": windows, "combat": combat})
-            if UI["combat_shown"]: combat.show()
-            M["panel"] = ControlPanel(windows, combat); register_docks(windows, combat); STATE["foe_ver"] += 1
-            n = len(FOES); say("on, %s." % Kit.count(n, "saved foe"), Kit.HUE_GOOD)
-            M.update({"last_layout": layout_signature(), "tick": 0,
-                      "next_scan": 0.0, "next_combat": 0.0, "next_glow": 0.0})
-            if Kit.get_var(SIGHT_OPEN_KEY) == "1": SIGHT_WIN.show()
+            load_settings(); ANCHORS.saved = ANCHORS.saved_groups(); load_old_combat_settings(); st["loaded"] = True
         def _tick():
-            if M["windows"] is None:
-                if STATE["loaded"] and not STATE["shutting"]: build_windows()
+            if views["windows"] is None:
+                if st["loaded"] and not st["shutting"]: build_window()
                 return
             report_save_error(); run_clicks(); run_jobs(TICK_JOBS)
             while DOCK_REQ: HOST.dock_to_bar(DOCK_REQ.pop(0))
             if SETTINGS_REQ: del SETTINGS_REQ[:]; HOST.show_settings(KEY)
-            windows, combat, panel = M["windows"], M["combat"], M["panel"]
+            windows, combat, panel = views["windows"], views["combat"], views["panel"]
             if windows is None: return
             fit_tick(windows); now = time.time()
             try:
@@ -2873,7 +2966,7 @@ def _module_ultima():
                     if HOST.stopping(): return
                     report_error(ex)
                 handle_spells(); handle_bandage(); ANCHORS.tick(open_windows)
-                if ANCHORS.groups_changed(): STATE["dirty_save"] = True
+                if ANCHORS.groups_changed(): st["dirty_save"] = True
                 if due("next_glow", GLOW_EVERY, now):
                     a = glow_alpha(); windows["friend"].pulse(a)
                     for pb in list(POPS.values()): pb.pulse(a)
@@ -2888,39 +2981,57 @@ def _module_ultima():
                     process_size_sync(windows); panel.update(); check_follow(); M["tick"] += 1
                     if M["tick"] % SAVE_EVERY == 0:
                         snapshot_all(); sig = layout_signature()
-                        if sig != M["last_layout"] or STATE["dirty_save"] or \
-                                (SIGHT["dirty"] and now >= SIGHT["save_at"]):
-                            M["last_layout"] = sig; request_save()
+                        if sig != M["last_layout"] or st["dirty_save"] or (SIGHT["dirty"] and now >= SIGHT["save_at"]):
+                            M["last_layout"] = sig; save_settings()
                 if due("next_combat", TICK_SECONDS if combat.docked else COMBAT_TICK_SECONDS, now) and not stopping():
                     combat.tick()
+                if due("next_hp", HP_EVERY, now) and not stopping(): hp_tick(windows, combat)
             except Exception as ex:
                 if HOST.stopping(): return
                 report_error(ex)
+        def hp_tick(windows, combat):
+            for w in windows.values():
+                if w.minimized or w.docked or not Kit.is_open(w.gump): continue
+                for r in w.rows:
+                    e = r.e
+                    if not r.shown or not e or not e["hmax"] or e.get("mob") is None: continue
+                    try: hits, hmax = e["mob"].Hits or 0, e["mob"].HitsMax or 0
+                    except Exception: continue
+                    if hmax > 0: e["hits"], e["hmax"] = hits, hmax; r.values(e)
+            if combat is None or combat.docked or combat.minimized or not Kit.is_open(combat.gump): return
+            for r in combat.rows:
+                d = r.e
+                if not r.shown or d is None: continue
+                m = cb_snap.get(d[0])
+                if m is None: continue
+                try: hp = (m.Hits or 0, m.HitsMax or 0)
+                except Exception: continue
+                if hp[1] > 0 and hp != d[3:5]: r.values(d[:3] + hp + d[5:])
         def _thread_tick():
             if run_jobs(THREAD_JOBS): return
             if SAVE_REQ[0]: SAVE_REQ[0] = False; save_data(background=True)
         def _thread_wanted(): return bool(THREAD_JOBS) or bool(SAVE_REQ[0])
         def _stop():
-            STATE["shutting"] = True; STATE["started"] = False; cleanup.close()
+            st["shutting"] = True; st["started"] = False; SIGHT_WIN.close(stopping=True); KILLER_WIN.close()
+            cleanup.close()
             for what in list(CURSOR_OWN): release_cursor(what)
-            if M["windows"] is None: return
+            if views["windows"] is None: return
             safe(lambda: Kit.on_client(snapshot_all)); SAVE_REQ[0] = False; save_data(); gumps = []
-            for w in M["windows"].values(): gumps.append(w.gump); w.gump = None
-            if M["combat"] is not None: gumps.append(M["combat"].gump); M["combat"].gump = None
+            for w in views["windows"].values(): gumps.append(w.gump); w.gump = None
+            if views["combat"] is not None: gumps.append(views["combat"].gump); views["combat"].gump = None
             if HOST.hub is not None: HOST.hub.remove("ultima")
             for pb in list(POPS.values()): gumps.append(pb.gump); pb.gump = None
             POPS.clear()
             for g in gumps: Kit.dispose(g)
-            SIGHT_WIN.close(stopping=True); KILLER_WIN.close()
-            end_follow(BANDAGE["follow"]); M.update({"windows": None, "combat": None, "panel": None})
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-                  "thread_wanted": _thread_wanted, "config_height": config_height, "build_config": build_config,
-                  "poll_config": poll_config, "config_closed": config_closed}
+            end_follow(BANDAGE["follow"]); views.update({"windows": None, "combat": None, "panel": None})
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
+                "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
     def _part_lookout():
-        KEY = "lookout"
-        TITLE = "Lookout"; say = Kit.sayer(TITLE); SETTINGS_KEY = "Lookout_settings"; POS_KEY = "Lookout_pos"
+        KEY = "lookout"; TITLE = "Lookout"; SETTINGS_KEY = "Lookout_settings"; POS_KEY = "Lookout_pos"
         MIN_KEY = "Lookout_min"; FEED_NAME = "_lookout_feed.txt"; W = 370; MINI_W, MINI_H = 280, 46; TRAY_ICON = 0x0A25
-        ROWS = 5; ROW_H = 22; DEFAULT_RANGE = 18; RANGE_MIN, RANGE_MAX = 3, 24; SCAN_EVERY = 0.25; GONE_SECONDS = 30.0
+        ROWS = 5; RECENT_CAP = 30; ROW_H = 22; DEFAULT_RANGE = 18; RANGE_MIN, RANGE_MAX = 3, 24; SCAN_EVERY = 0.25
+        GONE_SECONDS = 30.0
         HEARTBEAT = 5.0; LOST_SECONDS = 20.0; LISTEN_EVERY = 0.1; FEED_MAX_AGE = 15.0; FEED_MAX_BYTES = 32768
         FEED_KEEP = 60; READ_MAX = 65536; ANNOUNCE_EVERY = 30.0; LISTENER_TTL = 120.0; LISTENERS_EVERY = 10.0
         OUTBOX_CAP = 200; WRITE_RETRY = 1.0; SEEN_CAP = 400; PRESENT_CAP = 1000; WATCHERS_CAP = 8; PING_GIVE_UP = 10.0
@@ -2929,13 +3040,16 @@ def _module_ultima():
         ROW_TIP = ("Click: tracking arrow to where they were seen (again to clear). "
                    "Alt+click: auto-follow (again to stop)")
         settings = {"watch": False, "listen": True, "range": DEFAULT_RANGE, "ping": True, "lost": True}
+        DEFAULTS = dict(settings)
         def fresh():
             return {"shutting": False, "minimized": False, "docked": False, "queue": [], "me": 0, "path": None,
                     "facet": -1, "next_scan": 0.0, "present": {}, "in_range": 0, "hb_next": 0.0, "outbox": [],
                     "write_next": 0.0, "pings": [], "ping_next": 0.0, "listeners": {}, "listeners_next": 0.0,
                     "offset": 0, "listen_next": 0.0, "announce_next": 0.0, "seen": {}, "inbox": [], "watchers": {},
                     "file": "none", "recent": [], "arrow": None, "own_alarm": None, "dirty": True, "refresh_at": 0.0}
-        st = fresh(); win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}; cleanup = Kit.Cleanup()
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": []}; st.update(fresh())
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
+        cleanup = Kit.Cleanup(); queue = Kit.queuer(st); say = Kit.sayer(TITLE)
         NUMS, ORDER = {"range": (RANGE_MIN, RANGE_MAX)}, ("watch", "listen", "range", "ping", "lost")
         def load_settings(): Kit.kv_load(SETTINGS_KEY, ";", settings, NUMS)
         def save_settings(): Kit.kv_save(SETTINGS_KEY, ";", settings, ORDER, NUMS)
@@ -2987,12 +3101,15 @@ def _module_ultima():
         def trim(path):
             try:
                 with open(path, "rb") as f: data = f.read()
+                cut = data.rfind(b"\n") + 1; data = data[:cut]
                 lines = [ln for ln in data.split(b"\n") if ln.strip()]; keep = lines[-FEED_KEEP:]; heard = set()
                 for ln in reversed(lines[:-FEED_KEEP]):
                     if b"|listen|" in ln and len(heard) < WATCHERS_CAP:
                         ev = parse(ln)
                         if ev is not None and ev["from"] not in heard: heard.add(ev["from"]); keep.insert(0, ln)
-                with open(path, "wb") as f: f.write(b"\n".join(keep) + (b"\n" if keep else b""))
+                def since():
+                    with open(path, "rb") as f: f.seek(cut); return f.read()
+                Kit.write_safe(path, b"\n".join(keep) + (b"\n" if keep else b""), tail=since)
             except Exception: pass
         def read_new(path):
             try: size = os.path.getsize(path)
@@ -3115,7 +3232,7 @@ def _module_ultima():
             st["present"].clear(); st["in_range"] = 0; del st["pings"][:]
             if st["me"]: post(line(0, "", "off", 0, 0, st["facet"], 0, 0, 0))
             st["dirty"] = True
-        def remember(ev): rec = st["recent"]; rec.insert(0, ev); del rec[ROWS:]; st["dirty"] = True
+        def remember(ev): rec = st["recent"]; rec.insert(0, ev); del rec[RECENT_CAP:]; st["dirty"] = True
         def heard(ev, now):
             ws = st["watchers"]; w = ws.get(ev["from"])
             if w is None:
@@ -3150,7 +3267,6 @@ def _module_ultima():
                 if age > LOST_SECONDS:
                     w["told"] = True; st["dirty"] = True
                     HOST.alert(ALERT_LOST, "Lookout quiet for %d s" % int(age), level="warn", who=frm)
-        queue = Kit.queuer(st)
         def row_handler(i):
             def handler():
                 rows = win["rows"]
@@ -3163,19 +3279,22 @@ def _module_ultima():
             return handler
         def body_y(): return Kit.MARGIN + 30 + Kit.GAP
         SEC_A = 58
-        def full_h(): return body_y() + SEC_A + Kit.GAP + 30 + ROWS * ROW_H + 6 + Kit.MARGIN
+        def full_h(n=ROWS): return body_y() + SEC_A + Kit.GAP + 30 + n * ROW_H + 6 + Kit.MARGIN
         def build_window():
-            g, store, c = wnd.begin(W, full_h()); M = Kit.MARGIN; rows = []
+            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
+            if z is not None and (z[0] < W or z[1] < full_h(1)): z = None
+            w, h = z if z else (W, full_h()); n = wnd.rows(ROW_H, full_h(0), ROWS) if z else ROWS
+            g, store, c = wnd.begin(w, h); M = Kit.MARGIN; rows = []
             if not st["minimized"]:
-                w = W; IW = w - 2 * M; wnd.frame(g)
+                IW = w - 2 * M; wnd.frame(g); c["info_w"] = IW - 196
                 ya = body_y(); Kit.add_section(g, M, ya, IW, SEC_A); xc = w - M - 12 - 35 - Kit.text_w("Clear")
                 Kit.art_button(g, store, "clear", Kit.ART_CLOSE, xc, ya + 28, "Clear",
                                "Clear the list, alarm line and tracking arrow", on_click=queue("clear"))
                 c["watch"] = Kit.add_label(g, "", M + 12, ya + 9, Kit.HUE_INFO)
                 c["listen"] = Kit.add_label(g, "", M + 12, ya + 32, Kit.HUE_INFO)
                 c["tw"] = (IW - 24, xc - 8 - (M + 12)); yb = ya + SEC_A + Kit.GAP
-                Kit.add_section(g, M, yb, IW, 30 + ROWS * ROW_H + 6, "SPOTTED  (newest first)")
-                for i in range(ROWS):
+                Kit.add_section(g, M, yb, IW, h - yb - M, "SPOTTED  (newest first)")
+                for i in range(n):
                     yr = yb + 28 + i * ROW_H
                     r = {"name": Kit.add_label(g, "", M + 12, yr + 2, Kit.HUE_TEXT),
                          "info": Kit.add_label(g, "", M + 12 + 180, yr + 2, Kit.HUE_INFO),
@@ -3183,7 +3302,7 @@ def _module_ultima():
                     r["hit"] = Kit.catcher(g, M + 6, yr, IW - 12, ROW_H, row_handler(i), ""); rows.append(r)
             wnd.end(g, {"rows": rows}); st["dirty"] = True; refresh(time.time())
         wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (220, 220), (MINI_W, MINI_H), TRAY_ICON,
-                         cleanup, lock=False, clear={"rows": []})
+                         cleanup, lock=True, clear={"rows": []})
         def watch_text():
             if not settings["watch"]: return "off", Kit.HUE_INFO
             n = st["in_range"]
@@ -3224,7 +3343,7 @@ def _module_ultima():
             src = "lookout" if ev.get("src") == "lookout" else "here"
             where = where_text(ev, True) if src == "lookout" else "%d,%d" % (ev["x"], ev["y"])
             Kit.set_text(r["info"], Kit.fit("%s, %s ago (%s)" % (where, Kit.ago(now - ev["t"], Kit.AGO_SHORT), src),
-                                            W - 2 * Kit.MARGIN - 196))
+                                            win["c"]["info_w"]))
             tip = "%s (%s), seen %s at %d,%d%s. %s" % (
                 ev["name"], NOTO_WORD.get(noto, noto), "by the lookout" if src == "lookout" else "here",
                 ev["x"], ev["y"], "" if ev["facet"] == st["facet"] else " in " + Kit.facet_name(ev["facet"]), ROW_TIP)
@@ -3250,18 +3369,22 @@ def _module_ultima():
             API.TrackingArrow(x, y, ARROW_ID); st["arrow"] = (x, y, m)
         def clear_arrow():
             if st["arrow"] is not None: st["arrow"] = None; API.TrackingArrow(-1, -1, ARROW_ID)
-        PAGE = (("WATCH AND LISTEN  (two clients, one TazUO folder)", (
-                    ("check", "watch", "Watch: this client is the lookout",
-                        "Park it hidden and still; it reports every player in range to the other client "
-                     "(not party, friends or guild)"), ("check", "listen", "Listen: this client gets the alarms",
-                        "Alarm for each player a lookout reports (sound: Settings > Alerts)"),
-                    ("slider", "range", "Watch range:", "Watch range in tiles (%d-%d)"
-                     % (RANGE_MIN, RANGE_MAX), RANGE_MIN, RANGE_MAX,
-                     {"ldy": 6, "sdy": 4, "lw": 98, "sw": 160, "ugap": 10, "vfmt": "%d tiles", "h": 32}),
-                    ("check", "ping", "Danger ping on the map where a player is spotted",
-                        "Needs World Map > Map Pings; guildmates see it too"),
-                    ("check", "lost", "Warn when the lookout is quiet for %d s" % int(LOST_SECONDS),
-                     "Its client closed, crashed or lost the connection")), {"top": 32, "pad": 4}),)
+        def clear_recent(action): st["recent"] = []; st["own_alarm"] = None; clear_arrow(); st["dirty"] = True
+        ACTIONS = {"clear": clear_recent, "follow": lambda action: Follow.toggle(action[1], TITLE),
+                   "arrow": lambda action: toggle_arrow(action[1], action[2], action[3])}
+        def page_table(w):
+            return (("WATCH AND LISTEN  (two clients, one TazUO folder)", (
+                        ("check", "watch", "Watch: this client is the lookout",
+                            "Park it hidden and still; it reports every player in range to the other client "
+                         "(not party, friends or guild)"), ("check", "listen", "Listen: this client gets the alarms",
+                            "Alarm for each player a lookout reports (sound: Settings > Alerts)"),
+                        ("slider", "range", "Watch range:", "Watch range in tiles (%d-%d)"
+                         % (RANGE_MIN, RANGE_MAX), RANGE_MIN, RANGE_MAX,
+                         {"ldy": 6, "sdy": 4, "lw": 98, "sw": 160, "ugap": 10, "vfmt": "%d tiles", "h": 32}),
+                        ("check", "ping", "Danger ping on the map where a player is spotted",
+                            "Needs World Map > Map Pings; guildmates see it too"),
+                        ("check", "lost", "Warn when the lookout is quiet for %d s" % int(LOST_SECONDS),
+                         "Its client closed, crashed or lost the connection")), {"top": 32, "pad": 4}),)
         def on_change(old, new):
             for k in ("watch", "listen", "ping", "lost"):
                 if new[k] != old[k]: apply_toggle(k, new[k])
@@ -3275,22 +3398,21 @@ def _module_ultima():
                 else: st["inbox"] = []
             elif k == "ping" and not on: del st["pings"][:]
             st["refresh_at"] = time.time()
-        cfg = Kit.Page(settings, PAGE, save_settings, on_change)
+        cfg = Kit.Page(settings, page_table, save_settings, on_change); load_settings()
         def _start():
             st.update(fresh(), minimized=wnd.start_min()); load_settings()
             p = API.Player; st["me"] = int(p.Serial) if p is not None else 0; st["facet"] = int(API.GetMap())
             feed_path(); HOST.alert_kind(ALERT_ALARM, "Lookout spotted a player", ALERT_ALARM_SOUND)
-            HOST.alert_kind(ALERT_LOST, "Lookout went quiet", ALERT_LOST_SOUND); build_window(); wnd.dock(scale=True)
+            HOST.alert_kind(ALERT_LOST, "Lookout went quiet", ALERT_LOST_SOUND); build_window()
+            wnd.dock(fit=True, min=(W, full_h(1)))
         def _tick():
             if win["g"] is None: return
             if Kit.closed(win): return
             while st["queue"]:
                 action = st["queue"].pop(0)
                 if wnd.action(action): continue
-                kind = action[0] if isinstance(action, tuple) else action
-                if action == "clear": st["recent"] = []; st["own_alarm"] = None; clear_arrow(); st["dirty"] = True
-                elif kind == "follow": Follow.toggle(action[1], TITLE)
-                elif kind == "arrow": toggle_arrow(action[1], action[2], action[3])
+                fn = ACTIONS.get(action[0] if isinstance(action, tuple) else action)
+                if fn is not None: fn(action)
             now = time.time()
             if settings["watch"]:
                 if due(now, "next_scan", SCAN_EVERY): watch_scan(now)
@@ -3308,14 +3430,19 @@ def _module_ultima():
             if st["outbox"] and (now >= st["write_next"] or st["write_next"] - now > WRITE_RETRY): write_outbox()
             if settings["watch"] and due(now, "listeners_next", LISTENERS_EVERY): read_listeners(now)
             if settings["listen"] and st["me"] and due(now, "listen_next", LISTEN_EVERY): read_feed(now)
+        def _thread_wanted():
+            if st["shutting"]: return False
+            now = time.time()
+            if settings["listen"] and st["me"]: return True
+            if st["outbox"] and not 0 < st["write_next"] - now <= WRITE_RETRY: return True
+            return bool(settings["watch"]) and not 0 < st["listeners_next"] - now <= LISTENERS_EVERY
         def _stop():
             st["shutting"] = True
             if settings["watch"] and st["me"]: post(line(0, "", "off", 0, 0, st["facet"], 0, 0, 0)); write_outbox()
             clear_arrow(); save_settings(); cleanup.close()
-        load_settings()
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "thread_tick": _thread_tick,
-                  "config_height": cfg.height, "build_config": cfg.build, "poll_config": cfg.poll,
-                  "config_closed": cfg.closed}
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
+                "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
     PARTS = (("tracker", _part_tracker, 0.05, "ultima"), ("lookout", _part_lookout, 0.1, "lookout"),)
     return PartSet(KEY, TITLE, PARTS).hooks()
 
