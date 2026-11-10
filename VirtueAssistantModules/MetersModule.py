@@ -1,1367 +1,919 @@
 def _module_meters():
-    KEY = "meters"; TITLE = "Meters"; SETTINGS_KEY = "Meters_settings"; WINS_KEY = "Meters_windows"; W = 360
-    SIZE_MIN_W = 240; SIZE_MAX_W = 1200; RESIZE_SETTLE = 0.35; ZONE_EVERY = 0.5; MINI_W, MINI_H = 320, 46; PICK_W = 360
-    DETAIL_W = 300; ROW_H = 20; VAL_W = 146; MAX_WINDOWS = 6; TRAY_ICON = 0x0EEF; ART_LEFT = (4014, 4016, 4015)
-    BAR_BG = "#17171a"; UI_EVERY = 1.0; UI_SOON = 0.25; FRIENDS_EVERY = 3.0; SCAN_EVERY = 2.0; WATCH_SECS = 30.0
-    KILL_CREDIT_SECS = 30.0; PET_RANGE = 18; JUMP_TILES = 12; DEATH_BIT = 0x80000000; GOLD_GRAPHIC = 0x0EED
-    HEAL_SPELL_SECS = 8.0; BANDAGE_SECS = 2.0; POTION_SECS = 2.5; CURE_SECS = 8.0; ORPHAN_SECS = 1.5; MANA_SECS = 4.0
-    BIG_KEEP = 25; REPORT_ROWS = 5; HOOK_KEY = "VirtueMeters.DamageHook"; DAMAGE_QUEUE_MAX = 4000; PARTY_MSG_MAX = 220
-    DYING_CHECK_SECS = WATCH_SECS / 2; WATCH_MAX = 40; FEED_BURST = 600; MOBS_MAX = 800; SPOTS_KEY = "Meters_spots"
-    SPOTS_MAX = 20; SPOT_NAME_MAX = 24; SPOT_RADIUS = 20; SPOT_RADIUS_LIMITS = (1, 300); PLACE_EVERY = 1.0
-    PLACE_ELSEWHERE = "Elsewhere"; PLACE_MIN_SECS = 60.0; GRAPH_MINUTES = 60; GRAPH_H = 40; GRAPH_COL = 4
-    GRAPH_BLOCK = 18 + GRAPH_H + 4; EXPORT_FILE = "Meters_%08X.txt"; EXPORT_ROWS = 50; RECAP_SECS = 10.0
-    RECAP_ROWS = 12; RECAP_COLS = 40; RECAP_W = 360; RECAP_POS_KEY = "Meters_recap_pos"
-    RECAP_HINT = ("Who: spell words heard before the hit,", "else whom you fought (marked ?).")
-    TAKEN_KEEP = 200; HP_KEEP = 300; CASTS_KEEP = 20; CAST_CREDIT_SECS = 4.0; CAST_EARLY = 0.5
-    HARM_SET = frozenset(("Magic Arrow", "Harm", "Fireball", "Lightning", "Mind Blast",
-                   "Energy Bolt", "Explosion", "Flamestrike", "Chain Lightning",
-                   "Meteor Swarm", "Earthquake", "Poison", "Poison Field", "Fire Field",
-                   "Holy Light", "Pain Spike", "Poison Strike", "Strangle", "Wither"))
-    MSG_BANDAGE_BEGIN = "you begin applying the bandages"
-    MSG_BANDAGE_HEALS = ("you finish applying the bandages", "you heal what little damage",
-                         "you apply the bandages, but they barely help")
-    MSG_BANDAGE_CURE = "you have cured the target of all poisons"; MSG_FIZZLE = "the spell fizzles"
-    MSG_INTERRUPT = "your concentration is disturbed"; MSG_NO_MANA = "insufficient mana"
-    RE_SKILL = re.compile(r"your skill in (.+?) has (increased|decreased) by " r"([0-9]+(?:\.[0-9]+)?)", re.I)
-    RE_STAT = re.compile(r"your (strength|dexterity|intelligence) has (increased|decreased) by " r"([0-9]+)", re.I)
-    RE_FAME = re.compile(r"you have (gained|lost) .*?\b(fame|karma)\b", re.I); SPELLS = Kit.SPELL_WORDS
-    POTIONS = {0x0F0C: ("Heal", "heal"), 0x0F07: ("Cure", "cure"), 0x0F0B: ("Refresh", None),
-               0x0F09: ("Strength", None), 0x0F08: ("Agility", None),
-               0x0F0D: ("Explosion", None), 0x0F06: ("Night Sight", None), 0x0F0A: ("Poison", None)}
-    CONSUMABLES = {0x0F7A: "Black Pearl", 0x0F7B: "Blood Moss", 0x0F84: "Garlic",
-                   0x0F85: "Ginseng", 0x0F86: "Mandrake Root", 0x0F88: "Nightshade",
-                   0x0F8D: "Spiders' Silk", 0x0F8C: "Sulfurous Ash", 0x0F78: "Bat Wing",
-                   0x0F8F: "Grave Dust", 0x0F7D: "Daemon Blood", 0x0F8E: "Nox Crystal",
-                   0x0F8A: "Pig Iron", 0x0F3F: "Arrows", 0x1BFB: "Bolts"}
-    METRIC = {"dmg_done": ("Damage done", "s", "n", "#c4562a", True),
-              "dmg_taken": ("Damage taken", "s", "n", "#b02a2a", True),
-              "dmg_nearby": ("All damage nearby", "s", "n", "#9a5a3a", True),
-              "big": ("Biggest hits", "", "n", "#d07a2a", True), "kills": ("Kills", "h", "n", "#8a6ab0", False),
-              "deaths": ("Deaths", "h", "n", "#6a6a78", True), "heal_done": ("Healing done", "s", "n", "#2f9a3c", True),
-              "heal_taken": ("Healing received", "s", "n", "#3fae5a", True),
-              "heal_by": ("Healing by method", "s", "n", "#4aa070", False),
-              "cures": ("Cures", "m", "n", "#2a9a8a", True), "poisoned": ("Poisonings", "m", "n", "#5a9a2a", True),
-              "spells": ("Spells cast", "m", "n", "#2f62cc", False), "mana": ("Mana spent", "m", "n", "#3a72d8", False),
-              "consum": ("Consumables", "h", "n", "#a08a2a", False),
-              "buffs": ("Buffs & debuffs", "h", "n", "#8a5ab0", False), "gold": ("Gold", "h", "n", "#cfae2a", False),
-              "gold_place": ("Gold by place", "h", "n", "#d8b84a", False),
-              "loot": ("Items gained", "h", "n", "#a8925a", False),
-              "skills": ("Skill gains", "h", "d1", "#5a8acc", False),
-              "stats": ("Stat gains", "h", "n", "#cc7a5a", False), "fame": ("Fame & karma", "h", "n", "#b0a050", False),
-              "travel": ("Travel", "h", "n", "#6a9aaa", False),
-              "session": ("Session summary", "", "", "#4a4a58", False)}
-    GROUPS = (("COMBAT", ("dmg_done", "dmg_taken", "dmg_nearby", "big", "kills", "deaths")),
-              ("HEALING", ("heal_done", "heal_taken", "heal_by", "cures", "poisoned")),
-              ("MAGIC & ITEMS", ("spells", "mana", "consum", "buffs")),
-              ("ECONOMY & PROGRESS", ("gold", "gold_place", "loot", "skills", "stats", "fame", "travel", "session")))
-    ORDER = [m for _, ms in GROUPS for m in ms]; DEFAULT_METRIC = "dmg_done"
-    RATE_WORD = {"s": "per sec", "m": "per min", "h": "per hour"}
-    settings = {"idle": 6, "engage": 12, "history": 10, "min_heal": 3, "rows": 8,
-               "rank": True, "pct": True, "scan": True, "travel": True, "party": True, "recap": True}
-    DEFAULTS = dict(settings)
-    LIMITS = {"idle": (2, 60), "engage": (3, 120), "history": (1, 30), "min_heal": (1, 50), "rows": (3, 20)}
-    MAX_ROWS = 5000; FOLD_TO = 4000; OTHERS = "(others)"; OWN_PREFIX = TITLE.lower() + ":"
-    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "active": False, "hooked": False,
-          "jr": None, "engaged": {}, "watch": {}, "friendly": {}, "mobs": {}, "dead_seen": {}, "pack_sig": None,
-          "pend": [], "orph": [], "last_spell": None, "cast_t": 0.0, "prev_lt": 0, "to_write": [], "changed": False}
-    win = {"g": None, "c": {}, "store": ({}, {})}
-    cleanup, queue, say = Kit.basics(st, TITLE)
-    spots = []; graph = {"min": None, "b": None, "hist": {}, "ver": 0, "vb": {}}
-    recap = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
-    data = {}; wins = []; page = {}
-    feed = {"q": None, "handler": None, "event": None, "kind": "not hooked"}
-    refl = {"tried": False, "tm": None, "la": None}; jobs = []; SEGN = [0]; import heapq
-    RE_COUNT = re.compile(r"^[0-9,]+\s+"); PACK_CHUNK = 60; NAME_EVERY = 1.0; find_mob = HOST.mobile
-    def pets_near():
-        svc = HOST.services.get("pets.list")
-        if svc is not None:
-            try:
-                got = svc(distance=PET_RANGE)
-                if got is not None: return [int(s) for s in got]
-            except Exception: pass
-        pets = []
-        for m in HOST.mobiles(PET_RANGE):
-            try:
-                if m.IsRenamable: pets.append(int(m.Serial))
-            except Exception: pass
-        return pets
-    def fmt_num(v, f="n"):
-        if f == "d1": return "%.1f" % v
-        a = abs(v)
-        if a >= 1e6: return "%.2fM" % (v / 1e6)
-        if a >= 1e4: return "%.1fk" % (v / 1e3)
-        if a >= 1000: return "%.2fk" % (v / 1e3)
-        if abs(v - round(v)) < 0.05: return "%d" % int(round(v))
-        return "%.1f" % v
-    def fmt_rate(v, f="n"):
-        if f == "d1": return "%.1f" % v if abs(v) < 100 else "%d" % int(round(v))
-        if abs(v) < 10: return "%.1f" % v
-        if abs(v) < 1000: return "%d" % int(round(v))
-        return fmt_num(v)
-    def fmt_signed(v, f="n"): s = fmt_num(v, f); return s if v < 0 else "+" + s
-    def fmt_time(sec):
-        sec = int(max(0, sec)); h, m, s = sec // 3600, (sec // 60) % 60, sec % 60
-        return "%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)
-    def is_mobile(ser): return 0 < int(ser or 0) < 0x40000000
-    def pct_row(name): return name.endswith(" (%)")
-    def load_settings(): Kit.kv_load(SETTINGS_KEY, "|", settings, LIMITS)
-    def save_settings(): Kit.kv_save(SETTINGS_KEY, "|", settings, sorted(DEFAULTS), LIMITS)
-    def new_win(wid, metric=DEFAULT_METRIC, x=200, y=200, minimized=False):
-        return {"id": wid, "metric": metric if metric in METRIC else DEFAULT_METRIC,
-                "seg": "current", "x": x, "y": y, "minimized": minimized, "docked": False,
-                "shutting": False, "g": None, "c": {}, "store": ({}, {}), "slots": [],
-                "picker": None, "segpick": None, "detail": None, "dc": {}, "detail_row": None,
-                "detail_metric": None, "graph": False, "gcols": [], "gkey": None, "fit": None, "size": None,
-                "drawn": None, "resize_at": 0.0, "preview": False}
-    def load_windows():
-        out = []
-        for part in Kit.get_var(WINS_KEY).split(";"):
-            p = part.split(",")
-            if len(p) < 6: continue
-            try: wid, x, y = int(p[0]), int(p[3]), int(p[4])
-            except ValueError: continue
-            if any(w["id"] == wid for w in out): continue
-            x, y = Kit.adapt(x, y, W, 0); w = new_win(wid, p[1], x, y, p[5] == "1")
-            w["seg"] = "overall" if p[2] == "overall" else "current"; w["graph"] = len(p) > 6 and p[6] == "1"
-            if len(p) > 8:
-                try:
-                    sw, sh = int(p[7]), int(p[8])
-                    if sw > 0 and sh > 0: w["size"] = own_size(sw, sh)
-                except ValueError: pass
-            out.append(w)
-        out.sort(key=lambda w: w["id"])
-        if not out or out[0]["id"] != 0: out.insert(0, new_win(0))
-        del wins[:]; wins.extend(out[:MAX_WINDOWS])
-    def own_size(sw, sh): return max(SIZE_MIN_W, min(SIZE_MAX_W, sw)), max(60, sh)
-    def forget_sizes_off():
-        if not wins: load_windows()
-        for w in wins: w["size"] = None
-        save_windows()
-    def save_windows():
-        parts = []
-        for w in wins:
-            g = w["g"]
-            if Kit.is_open(g): w["x"], w["y"] = g.GetX(), g.GetY()
-            size = w.get("size") or (0, 0)
-            parts.append("%d,%s,%s,%d,%d,%s,%s,%d,%d" % (w["id"], w["metric"], "overall" if w["seg"] == "overall"
-                                                         else "current", int(w["x"]), int(w["y"]),
-                                                         "1" if w["minimized"] else "0", "1" if w.get("graph") else "0",
-                                                         int(size[0]), int(size[1])))
-        Kit.put_var(WINS_KEY, ";".join(parts))
-    def load_spots():
-        del spots[:]; lo, hi = SPOT_RADIUS_LIMITS
-        for part in Kit.get_var(SPOTS_KEY).split(";"):
-            p = part.split(",")
-            if len(p) < 5 or not p[0].strip(): continue
-            try: sp = [p[0].strip(), int(p[1]), int(p[2]), int(p[3]), max(lo, min(hi, int(p[4])))]
-            except ValueError: continue
-            if all(o[0] != sp[0] for o in spots) and len(spots) < SPOTS_MAX: spots.append(sp)
-    def save_spots(): Kit.put_var(SPOTS_KEY, ";".join("%s,%d,%d,%d,%d" % tuple(sp) for sp in spots))
-    def spot_name(text):
-        for ch in ";,|": text = text.replace(ch, " ")
-        return " ".join(text.split())[:SPOT_NAME_MAX]
-    def new_seg(kind, n=0):
-        now = time.time(); SEGN[0] += 1
-        return {"kind": kind, "n": n, "name": "Fight %d" % n if n else "Overall",
-                "start": now, "end": None, "combat": 0.0, "d": {}, "serial": {}, "big": [],
-                "fights": 0, "uid": SEGN[0], "ver": 0, "tot": {}, "place_t": {}}
-    def reset_data():
-        data.clear()
-        data.update({"overall": new_seg("overall"), "cur": None, "hist": [], "n": 0, "last_combat": 0.0, "c_at": None})
-        st["watch"].clear(); st["engaged"].clear(); st["pend"], st["orph"] = [], []
-        graph.update({"min": None, "b": None, "ver": graph["ver"] + 1}); graph["hist"].clear(); graph["vb"].clear()
-    def segs(): cur = data["cur"]; return (data["overall"], cur) if cur is not None else (data["overall"],)
-    def graph_bucket(now):
-        m = int(now // 60)
-        if m != graph["min"]:
-            hist = graph["hist"]
-            for k in [k for k in hist if k <= m - GRAPH_MINUTES]: del hist[k]
-            graph["min"] = m; graph["b"] = hist.setdefault(m, {})
-        return graph["b"]
-    def record(mid, row, amt, ser=None):
-        now = time.time(); pct = row.endswith(" (%)")
-        if not pct and (mid != "gold" or row == "Gained"):
-            b = graph_bucket(now); b[mid] = b.get(mid, 0.0) + amt; vb = graph["vb"]; vb[mid] = vb.get(mid, 0) + 1
-        for seg in segs():
-            d = seg["d"].get(mid)
-            if d is None: d = seg["d"][mid] = {}
-            r = d.get(row)
-            if r is None:
-                if len(d) >= MAX_ROWS: fold(seg, mid, d)
-                r = d[row] = [0.0, 0, amt, amt, now, now]
-            r[0] += amt; r[1] += 1
-            if amt > r[2]: r[2] = amt
-            if amt < r[3]: r[3] = amt
-            r[5] = now
-            if ser: seg["serial"][(mid, row)] = ser
-            if not pct: tot = seg["tot"]; tot[mid] = tot.get(mid, 0.0) + amt
-            seg["ver"] += 1
-        if amt and any(w["metric"] in (mid, "session") and not w["docked"] for w in wins): st["changed"] = True
-    def fold(seg, mid, d):
-        small = sorted((abs(r[0]), k) for k, r in d.items() if k != OTHERS and not k.endswith(" (%)"))
-        o = d.get(OTHERS); sers = seg["serial"]
-        for _, k in small[:max(0, len(d) - FOLD_TO)]:
-            r = d.pop(k); sers.pop((mid, k), None)
-            if o is None: o = d[OTHERS] = list(r)
-            else:
-                o[0] += r[0]; o[1] += r[1]; o[2], o[3] = max(o[2], r[2]), min(o[3], r[3])
-                o[4], o[5] = min(o[4], r[4]), max(o[5], r[5])
-    def record_big(amt, name, ser):
-        b = graph_bucket(time.time())
-        if amt > b.get("big", 0.0): b["big"] = amt; vb = graph["vb"]; vb["big"] = vb.get("big", 0) + 1
-        for seg in segs():
-            big = seg["big"]
-            if len(big) >= BIG_KEEP and amt <= big[-1][0]: continue
-            i = len(big)
-            while i > 0 and big[i - 1][0] < amt: i -= 1
-            big.insert(i, (amt, name, ser)); del big[BIG_KEEP:]
-    def total(seg, mid): return seg["tot"].get(mid, 0)
-    def enter_combat():
-        now = time.time()
-        if data["cur"] is None:
-            data["n"] += 1; data["cur"] = new_seg("fight", data["n"]); data["overall"]["fights"] += 1
-        data["last_combat"] = now; data["c_at"] = (data["cur"]["combat"], data["overall"]["combat"])
-    def close_fight(now):
-        cur = data["cur"]
-        if cur is None: return
-        ca = data.get("c_at")
-        if ca is not None: cur["combat"], data["overall"]["combat"] = ca
-        else:
-            tail = max(0.0, now - data["last_combat"])
-            for seg in (cur, data["overall"]): seg["combat"] = max(0.0, seg["combat"] - tail)
-        data["c_at"] = None; cur["end"] = data["last_combat"]; d = cur["d"].get("dmg_done", {})
-        if d:
-            top = max(d.items(), key=lambda kv: kv[1][0])[0]
-            cur["name"] = top + (" +%d" % (len(d) - 1) if len(d) > 1 else "")
-        data["hist"].insert(0, cur); del data["hist"][settings["history"]:]; data["cur"] = None
-    def combat_secs(seg): return max(1.0, seg["combat"])
-    def wall_secs(seg): return max(1.0, (seg["end"] or time.time()) - seg["start"])
-    def rate_of(seg, rate, value):
-        if rate == "s": return value / combat_secs(seg)
-        if rate == "m": return value / (wall_secs(seg) / 60.0)
-        return value / (max(60.0, wall_secs(seg)) / 3600.0)
-    def seg_for(w):
-        s = w["seg"]
-        if s == "overall": return data["overall"]
-        if s != "current":
-            for h in data["hist"]:
-                if h["n"] == s: return h
-            w["seg"] = "current"
-        return data["cur"] or (data["hist"][0] if data["hist"] else None)
-    SEG_CAPS = {"overall": "Overall", "current": "Current"}
-    def seg_caption(w): return SEG_CAPS.get(w["seg"]) or "Fight %d" % w["seg"]
-    def seg_duration_text(seg):
-        if seg is None: return ""
-        if seg["kind"] == "overall": return fmt_time(time.time() - seg["start"])
-        return fmt_time(combat_secs(seg))
-    def _row_size(kv): return abs(kv[1][0])
-    def nr(seg, v, r, head=fmt_num): return "%s (%s/%s)" % (head(v), fmt_rate(rate_of(seg, r, v)), r)
-    def view(mid, seg, limit=None):
-        _, rate, f, _, _ = METRIC[mid]
-        if seg is None: return (["No fight yet."], [])
-        dur = seg_duration_text(seg)
-        if mid == "session": return session_view(seg)
-        if mid == "big":
-            big = seg["big"] if limit is None else seg["big"][:limit]
-            rows = [(name, amt, fmt_num(amt), ser, None) for amt, name, ser in big]
-            head = (["Biggest %s on %s" % (fmt_num(seg["big"][0][0]), seg["big"][0][1])]
-                    if seg["big"] else ["No hits yet."])
-            return (head + [dur], rows)
-        d = seg["d"].get(mid, {})
-        if mid == "gold":
-            gain = d.get("Gained", [0.0])[0]; spent = d.get("Spent / banked", [0.0])[0]; net = gain - spent
-            rows = [("Gained", gain, nr(seg, gain, "h"), None, d.get("Gained")),
-                    ("Spent / banked", spent, fmt_num(spent), None, d.get("Spent / banked")),
-                    ("Net", abs(net), nr(seg, net, "h", fmt_signed), None, None)]
-            return (["Net %s" % fmt_signed(net), "%s per hour" % fmt_rate(rate_of(seg, "h", net)), dur], rows)
-        if mid == "gold_place": return place_view(seg, d, limit, dur)
-        tot = total(seg, mid)
-        if limit is None: items = sorted(d.items(), key=_row_size, reverse=True)
-        elif limit <= 0: items = []
-        else: items = heapq.nlargest(limit, d.items(), key=_row_size)
-        rows = []
-        for name, r in items:
-            v = r[0]; bits = []
-            if rate: bits.append(fmt_rate(rate_of(seg, rate, v), f) + ("" if rate == "s" else "/" + rate))
-            if settings["pct"] and tot and not pct_row(name) and v > 0:
-                bits.append("%d%%" % int(round(100.0 * v / tot)))
-            vt = (fmt_signed(v, f) if mid in ("skills", "stats") else fmt_num(v, f))
-            text = vt + (" (%s)" % ", ".join(bits) if bits else "")
-            rows.append((name, abs(v), text, seg["serial"].get((mid, name)), r))
-        if mid in ("skills", "stats"): head = ["Total %s" % fmt_signed(tot, f)]
-        elif mid == "cures":
-            mine = total(seg, "cures_mine"); head = ["Cures %s" % fmt_num(tot), "by you %s" % fmt_num(mine)]
-        else: head = ["Total %s" % fmt_num(tot, f)]
-        if rate: head.append("%s %s" % (fmt_rate(rate_of(seg, rate, tot), f), RATE_WORD[rate]))
-        head.append("in combat " + fmt_time(seg["combat"]) if rate == "s" else dur); return (head, rows)
-    def place_rate(seg, name, gold):
-        secs = seg["place_t"].get(name, 0.0); return gold / (max(PLACE_MIN_SECS, secs) / 3600.0), secs
-    def _rate_size(row): return row[1]
-    def place_view(seg, d, limit, dur):
-        pt = seg["place_t"]; names = list(d)
-        for k, secs in pt.items():
-            if secs >= PLACE_MIN_SECS and k not in d: names.append(k)
-        tot = sum(r[0] for r in d.values()); rows = []
-        for name in names:
-            r = d.get(name); gold = r[0] if r is not None else 0.0; rate, _secs = place_rate(seg, name, gold)
-            bits = [fmt_num(gold)]
-            if settings["pct"] and tot and gold > 0: bits.append("%d%%" % int(round(100.0 * gold / tot)))
-            rows.append((name, rate, "%s/h (%s)" % (fmt_rate(rate), ", ".join(bits)), None, r))
-        rows.sort(key=_rate_size, reverse=True)
-        if limit is not None: del rows[max(0, limit):]
-        n = len(names); return (["Gained %s" % fmt_num(tot), Kit.count(n, "place"), dur], rows)
-    def session_view(seg):
-        wall = wall_secs(seg); cs = seg["combat"]
-        dd, dt, hd = total(seg, "dmg_done"), total(seg, "dmg_taken"), total(seg, "heal_done")
-        kills, deaths = total(seg, "kills"), total(seg, "deaths"); gd = seg["d"].get("gold", {})
-        net = gd.get("Gained", [0.0])[0] - gd.get("Spent / banked", [0.0])[0]; sk = total(seg, "skills")
-        lines = [("Time", fmt_time(wall)), ("In combat", "%s (%d%%)" % (fmt_time(cs), int(100 * cs / wall)))]
-        if seg["kind"] == "overall": lines.append(("Fights", "%d" % seg["fights"]))
-        lines += [("Damage done", nr(seg, dd, "s")), ("Damage taken", nr(seg, dt, "s")),
-                  ("Healing done", nr(seg, hd, "s")), ("Kills", nr(seg, kills, "h")), ("Deaths", fmt_num(deaths)),
-                  ("Gold", nr(seg, net, "h", fmt_signed)),
-                  ("Skill gain", "%s (%s/h)" % (fmt_signed(sk, "d1"), fmt_rate(rate_of(seg, "h", sk), "d1"))),
-                  ("Items gained", fmt_num(total(seg, "loot"))),
-                  ("Spells cast", fmt_num(sum(r[1] for k, r in seg["d"].get("spells", {}).items()
-                                              if k not in ("Fizzled", "Interrupted", "Out of mana"))))]
-        rows = [(name, 0.0, text, None, None) for name, text in lines]
-        return ([seg["name"] if seg["kind"] == "fight" else "Session", fmt_time(wall)], rows)
-    def hook_damage():
-        try:
-            import clr; clr.AddReference("System.Collections.Concurrent"); clr.AddReference("System.Linq.Expressions")
-            from System import Array, Int32, UInt32, Object, EventHandler, Tuple, Type, AppDomain
-            from System.Reflection import BindingFlags; from System.Collections.Concurrent import ConcurrentQueue
-            from System.Linq.Expressions import Expression, ParameterExpression
-            stat = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static; asm = API.GetType().Assembly
-            sink = asm.GetType("ClassicUO.Game.Managers.EventSink")
-            ent = asm.GetType("ClassicUO.Game.GameObjects.Entity"); ev = sink.GetEvent("OnEntityDamage", stat)
-            t_obj, t_int, t_uint = (clr.GetClrType(Object), clr.GetClrType(Int32), clr.GetClrType(UInt32))
-            ftype = Tuple[UInt32, Int32]; q = ConcurrentQueue[ftype](); p_s = Expression.Parameter(t_obj, "sender")
-            p_e = Expression.Parameter(t_int, "amount"); qc = Expression.Constant(q)
-            serial = Expression.Convert(Expression.PropertyOrField(Expression.Convert(p_s, ent), "Serial"), t_uint)
-            ctor = clr.GetClrType(ftype).GetConstructor(Array[Type]([t_uint, t_int]))
-            enqueue = Expression.Call(qc, q.GetType().GetMethod("Enqueue"), Array[Expression]([Expression.New(ctor,
-                                              Array[Expression]([serial, p_e]))]))
-            room = Expression.LessThan(Expression.Property(qc, "Count"), Expression.Constant(DAMAGE_QUEUE_MAX, t_int))
-            body = Expression.IfThen(Expression.AndAlso(Expression.TypeIs(p_s, ent), room), enqueue)
-            handler = Expression.Lambda[EventHandler[Int32]](body, Array[ParameterExpression]([p_s, p_e])).Compile()
-            dom = AppDomain.CurrentDomain; left = dom.GetData(HOOK_KEY)
-            if left is not None: safe(lambda: ev.GetRemoveMethod(True).Invoke(None, Array[Object]([left])))
-            ev.GetAddMethod(True).Invoke(None, Array[Object]([handler])); dom.SetData(HOOK_KEY, handler)
-            feed.update({"q": q, "handler": handler, "event": ev, "kind": "exact (per mobile)"}); return True
-        except Exception as ex:
-            feed.update({"q": None, "handler": None, "event": None})
-            feed["kind"] = "amounts only (%s)" % (str(ex)[:50] or "no hook"); return False
-    def unhook_damage():
-        h, ev = feed.get("handler"), feed.get("event")
-        if h is None or ev is None: return
-        with Kit.quiet:
-            from System import Array, Object, AppDomain; ev.GetRemoveMethod(True).Invoke(None, Array[Object]([h]))
-            AppDomain.CurrentDomain.SetData(HOOK_KEY, None)
-        feed.update({"q": None, "handler": None, "event": None, "kind": "not hooked"})
-    def on_damage_amount(*args):
-        if not st["active"]: return
-        if not st["poked"]: st["poked"] = True; HOST.poke(KEY, False)
-        if feed.get("q") is not None: return
-        for a in args:
-            try: st["amtq"].append(int(a))
-            except Exception: continue
-            del st["amtq"][:-200]; return
-    def last_attack():
-        if not refl["tried"]:
-            refl["tried"] = True
-            try:
-                from System.Reflection import BindingFlags
-                fl = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                world = API.GetType().GetField("World", fl).GetValue(API)
-                tm = world.GetType().GetProperty("TargetManager", fl).GetValue(world, None)
-                refl["tm"], refl["la"] = tm, tm.GetType().GetProperty("LastAttack", fl)
-            except Exception: refl["tm"] = refl["la"] = None
-        if refl["la"] is None: return 0
-        return int(refl["la"].GetValue(refl["tm"], None) or 0)
-    def on_used(*args):
-        if not st["active"]: return
-        for a in args:
-            try: st["used"].append(int(a)); del st["used"][:-30]; return
-            except Exception: continue
-    def on_buff(*args):
-        if not st["active"]: return
-        for a in args:
-            t = safe(lambda: a.Title)
-            if t: st["buffq"].append(str(t)); del st["buffq"][:-50]; return
-    def sample():
-        now = time.time()
-        out = {"me": None, "dmg": [], "info": {}, "fhp": {}, "wst": {}, "used": [], "pack": None, "friends": None}
-        p = HOST.me()
-        if p is None: return out
-        ser = int(p.Serial)
-        if ser != st["my_ser"] or now >= st["next_name"]:
-            st["my_name"] = str(p.Name or ""); st["my_ser"], st["next_name"] = ser, now + NAME_EVERY
-        me = {"ser": ser, "name": st["my_name"], "hits": int(p.Hits),
-              "hmax": int(p.HitsMax), "mana": int(p.Mana), "x": int(p.X), "y": int(p.Y),
-              "gold": int(p.Gold or 0), "dead": bool(p.IsDead), "war": bool(p.InWarMode), "poison": bool(p.IsPoisoned),
-              "map": int(API.GetMap())}
-        out["me"] = me; q = feed["q"]
-        if q is not None:
-            for _ in range(FEED_BURST):
-                ok, item = q.TryDequeue()
-                if not ok: break
-                out["dmg"].append((int(item.Item1), int(item.Item2)))
-        mobs = st["mobs"]; info = out["info"]
-        for ser, _ in out["dmg"]:
-            if ser not in mobs and ser not in info and ser != me["ser"]:
-                m = find_mob(ser); info[ser] = str(m.Name or "") if m is not None else ""
-        out["lt"] = int(API.LastTargetSerial or 0); out["la"] = last_attack()
-        for sers in (st["engaged"], (out["lt"], out["la"])):
-            for ser in sers:
-                if is_mobile(ser) and ser not in mobs and ser not in info and ser != me["ser"]:
-                    m = find_mob(ser)
-                    if m is not None: info[ser] = str(m.Name or "")
-        if now >= st["next_friends"]:
-            st["next_friends"] = now + FRIENDS_EVERY
-            party = [int(s) for s in API.GetPartyMemberSerials() or []]; pets = pets_near()
-            friends = [int(s) for s in API.GetAllFriends() or []]
-            out["friends"] = (party, pets, friends); pres, seen = [], set()
-            for sers in (friends, pets, party):
-                for fs in sers:
-                    if fs != me["ser"] and fs not in seen:
-                        seen.add(fs)
-                        if find_mob(fs) is not None: pres.append(fs)
-        else: pres = None
-        names_due = out["friends"] is not None; fhp = out["fhp"]
-        for ser in st["present"]:
-            m = find_mob(ser)
-            if m is not None:
-                known = None if names_due else mobs.get(ser)
-                fhp[ser] = (int(m.Hits), int(m.HitsMax), bool(m.IsPoisoned), bool(m.IsDead), known or str(m.Name or ""))
-        if pres is not None: st["present"] = pres
-        wst = out["wst"]
-        for ser, w in st["watch"].items():
-            if now - w["t"] > DYING_CHECK_SECS: continue
-            if find_mob(ser) is not None: wst[ser] = "alive"
-            elif API.FindMobile(ser | DEATH_BIT) is not None: wst[ser] = "dying"
-            else: wst[ser] = "gone"
-        if st["used"]:
-            used, st["used"] = st["used"], []
-            for ser in used:
-                it = API.FindItem(ser)
-                if it is not None: out["used"].append((int(it.Graphic), str(it.Name or "")))
-        if not settings["scan"]: st["pscan"] = None
-        elif st["pscan"] is None and now >= st["next_scan"]:
-            st["next_scan"] = now + SCAN_EVERY
-            if API.Backpack: st["pscan"] = [HOST.pack_items(True), 0, [], 0, 0, now]
-        ps = st["pscan"]
-        if ps is not None: out["pack"] = pack_step(ps, now)
-        return out
-    def pack_step(ps, now):
-        items, i, pairs, ssum, asum, taken = ps; n = len(items); end = min(n, i + PACK_CHUNK)
-        try:
-            while i < end:
-                it = items[i]; a = int(it.Amount or 1) or 1; ssum += int(it.Serial or 0); asum += a
-                pairs.append((it, a)); i += 1
-        except Exception:
-            st["pscan"] = None
-            if taken == now: raise
-            st["next_scan"] = 0.0; return None
-        if i < n: ps[1], ps[3], ps[4] = i, ssum, asum; return None
-        st["pscan"] = None; sig = (len(pairs), ssum, asum)
-        if sig == st["pack_sig"] and st["pack"] is not None: st["pack_cand"] = None; return None
-        if taken != now and st.get("pack_cand") != sig: st["pack_cand"] = sig; st["next_scan"] = 0.0; return None
-        st["pack_cand"] = None; st["pack_sig"] = sig; tot = {}
-        for it, a in pairs:
-            k = (int(it.Graphic), int(it.Hue))
-            if k in tot: tot[k][0] += a
-            else: tot[k] = [a, None, it]
-        prev = st["pack"] or {}
-        for k, v in tot.items():
-            old = prev.get(k)
-            if old is None or v[0] > old[0]:
-                try: v[1] = str(v[2].Name or "")
-                except Exception: v[1] = ""
-            else: v[1] = old[1]
-            v[2] = None
-        return tot
-    def is_friend(ser): me = st["me"]; return (me is not None and ser == me["ser"]) or ser in st["friendly"]
-    def mob_name(ser):
-        me = st["me"]
-        if me is not None and ser == me["ser"]: return me["name"] or "You"
-        return st["mobs"].get(ser) or "Unknown"
-    def engaged(ser, now): t = st["engaged"].get(ser); return t is not None and now - t <= settings["engage"]
-    def add_pending(now, kind, method, secs):
-        multi = kind == "cure+"; kind = "cure" if multi else kind
-        for o in list(st["orph"]):
-            if o[1] == kind and now - o[0] <= ORPHAN_SECS:
-                st["orph"].remove(o); credit(kind, method, o[2], o[3], o[4])
-                if not multi: return
-        st["pend"].append([now + secs, kind, method, multi])
-    def credit(kind, method, ser, name, amt):
-        if kind == "heal":
-            record("heal_done", name, amt, ser)
-            if not pct_row(name): record("heal_by", method, amt)
-        else: record("cures_mine", method, 1)
-    def claim(kind, now, ser, name, amt):
-        for p in st["pend"]:
-            if p[1] == kind and now <= p[0]:
-                if not p[3]: st["pend"].remove(p)
-                credit(kind, p[2], ser, name, amt); return
-        st["orph"].append((now, kind, ser, name, amt))
-    def process(s, now):
-        me = s["me"]
-        if me is None: return
-        old_me, st["me"] = st["me"], me; mobs = st["mobs"]
-        if len(mobs) > MOBS_MAX: mobs.clear()
-        for ser, name in s["info"].items():
-            if name: mobs[ser] = name
-        if st["pend"]: st["pend"] = [p for p in st["pend"] if p[0] >= now]
-        if st["orph"]: st["orph"] = [o for o in st["orph"] if now - o[0] <= ORPHAN_SECS]
-        if s["friends"] is not None:
-            party, pets, friends = s["friends"]; fr = {}
-            for kind, sers in (("friend", friends), ("pet", pets), ("party", party)):
-                for ser in sers: fr[ser] = kind
-            fr.pop(me["ser"], None); st["friendly"] = fr
-        lt, la = s.get("lt", 0), s.get("la", 0)
-        if la and me["war"] and is_mobile(la) and not is_friend(la): st["engaged"][la] = now
-        if (is_mobile(lt) and not is_friend(lt) and (lt != st["prev_lt"] or now - st["cast_t"] <= 2.0)):
-            st["engaged"][lt] = now
-        st["prev_lt"] = lt
-        if st["engaged"]:
-            for ser in [k for k, t in st["engaged"].items() if now - t > settings["engage"]]:
-                st["engaged"].pop(ser, None)
-        budget = 0
-        if old_me is not None and me["hits"] < old_me["hits"]: budget = old_me["hits"] - me["hits"]
-        for ser, dmg in s["dmg"]: hit(ser, dmg, now)
-        if st["amtq"]:
-            tgt = None
-            for amt in st["amtq"]:
-                if budget >= amt: budget -= amt; hit(me["ser"], amt, now)
-                else:
-                    if tgt is None: tgt = max(st["engaged"].items(), key=lambda kv: kv[1])[0] if st["engaged"] else 0
-                    hit(tgt, amt, now) if tgt else record("dmg_nearby", "Unknown", amt)
-            st["amtq"] = []
-        hp = s["fhp"]; hp[me["ser"]] = (me["hits"], me["hmax"], me["poison"], me["dead"], me["name"] or "You")
-        for ser, (hits, hmax, poison, dead, name) in hp.items():
-            if name: mobs[ser] = name
-            name = mob_name(ser); prev = st["prev"].get(ser); st["prev"][ser] = (hits, hmax, poison, dead)
-            if prev is None: continue
-            if dead and not prev[3]:
-                if now - st["dead_seen"].get(ser, 0) > 10:
-                    record("deaths", name, 1, ser); st["dead_seen"][ser] = now
-                    if ser == me["ser"] and settings["recap"]: make_recap(now)
-                continue
-            if dead or prev[3]: continue
-            real = ser == me["ser"] or st["friendly"].get(ser) == "party" or hmax not in (25, 100); dh = hits - prev[0]
-            if dh >= (settings["min_heal"] if real else 1) and hmax == prev[1]:
-                row = name if real else name + " (%)"; amt = dh if real else dh * 100.0 / max(1, hmax)
-                record("heal_taken", row, amt, ser); claim("heal", now, ser, row, amt)
-            if poison and not prev[2]: record("poisoned", name, 1, ser)
-            elif prev[2] and not poison: record("cures", name, 1, ser); claim("cure", now, ser, name, 1)
-        if len(st["prev"]) != len(hp):
-            for ser in [k for k in st["prev"] if k not in hp]: st["prev"].pop(ser, None)
-        for ser, state in s["wst"].items():
-            w = st["watch"].get(ser)
-            if w is None: continue
-            if state == "dying":
-                st["watch"].pop(ser, None)
-                if w["friend"]:
-                    if now - st["dead_seen"].get(ser, 0) > 10:
-                        record("deaths", w["name"], 1, ser); st["dead_seen"][ser] = now
-                elif w["mine"] and now - w["mine"] <= KILL_CREDIT_SECS: record("kills", w["name"], 1)
-        if st["watch"]:
-            for ser in [k for k, w in st["watch"].items() if now - w["t"] > WATCH_SECS]: st["watch"].pop(ser, None)
-        if st["dead_seen"]:
-            for ser in [k for k, t in st["dead_seen"].items() if now - t > 30]: st["dead_seen"].pop(ser, None)
-        hl = st["hp_log"]
-        if not hl or hl[-1][1] != me["hits"] or hl[-1][2] != me["hmax"]:
-            hl.append((now, me["hits"], me["hmax"]))
-            if len(hl) > HP_KEEP: del hl[:len(hl) - HP_KEEP]
-        if old_me is not None and me["mana"] < old_me["mana"] and not me["dead"]:
-            ls = st["last_spell"]; row = ls[1] if ls is not None and now - ls[0] <= MANA_SECS else "Other"
-            record("mana", row, old_me["mana"] - me["mana"])
-        if old_me is not None and old_me["ser"] == me["ser"]:
-            dg = me["gold"] - old_me["gold"]
-            if dg > 0: record("gold", "Gained", dg); record("gold_place", st["place"] or PLACE_ELSEWHERE, dg)
-            elif dg < 0: record("gold", "Spent / banked", -dg)
-        pos = (me["x"], me["y"], me["map"])
-        if settings["travel"] and st["pos"] is not None and (me["x"] or me["y"]):
-            ox, oy, om = st["pos"]; dist = max(abs(me["x"] - ox), abs(me["y"] - oy))
-            if om != me["map"] or dist > JUMP_TILES: record("travel", "Recalls, gates & teleports", 1)
-            elif dist > 0: record("travel", "Tiles walked", dist)
-        st["pos"] = pos
-        for graphic, name in s["used"]:
-            pot = POTIONS.get(graphic)
-            if pot is None: continue
-            label = pot[0] + " potion"; record("consum", label, 1)
-            if pot[1]: add_pending(now, pot[1], pot[0] + " potion", POTION_SECS)
-        pack = s["pack"]
-        if pack is not None:
-            old = st["pack"]; fresh = old is not None and len(old) == 0 and len(pack) > 0
-            if old is not None and not fresh:
-                for k, v in pack.items():
-                    o = old.get(k); diff = v[0] - (o[0] if o else 0)
-                    if diff > 0 and k[0] != GOLD_GRAPHIC:
-                        nm = RE_COUNT.sub("", (v[1] or "").strip()) or "Item 0x%04X" % k[0]
-                        record("loot", nm.title(), diff)
-                    elif diff < 0 and k[0] in CONSUMABLES: record("consum", CONSUMABLES[k[0]], -diff)
-                for k, o in old.items():
-                    if k not in pack and k[0] in CONSUMABLES: record("consum", CONSUMABLES[k[0]], o[0])
-            st["pack"] = pack
-        if st["buffq"]:
-            for title in st["buffq"]: record("buffs", title, 1)
-            st["buffq"] = []
-    def hit(ser, dmg, now):
-        me = st["me"]; name = mob_name(ser); record("dmg_nearby", name, dmg, ser); w = st["watch"].get(ser)
-        if w is None:
-            if len(st["watch"]) >= WATCH_MAX:
-                oldest = min(st["watch"].items(), key=lambda kv: kv[1]["t"])[0]; st["watch"].pop(oldest, None)
-            w = st["watch"][ser] = {"name": name, "t": now, "mine": 0.0, "friend": False}
-        w["t"], w["name"] = now, name
-        if is_friend(ser):
-            w["friend"] = ser != me["ser"]; record("dmg_taken", name, dmg, ser); enter_combat()
-            if ser == me["ser"]: note_taken(dmg, now)
-        elif engaged(ser, now):
-            st["engaged"][ser] = now; w["mine"] = now; record("dmg_done", name, dmg, ser); record_big(dmg, name, ser)
-            enter_combat()
-    def read_journal(now):
-        me = st["me"]; my_name = me["name"] if me else None
-        for ln in st["jr"].new():
-            name = ln.name; low = ln.low.strip()
-            if my_name and name == my_name:
-                sp = SPELLS.get(low)
-                if sp is not None:
-                    record("spells", sp[0], 1); st["last_spell"] = (now, sp[0]); st["cast_t"] = now
-                    if sp[1] == "heal": add_pending(now, "heal", sp[0], HEAL_SPELL_SECS)
-                    elif sp[1] in ("cure", "cure+"): add_pending(now, sp[1], sp[0], CURE_SECS)
-                continue
-            if low.startswith(OWN_PREFIX): continue
-            if low.startswith(MSG_FIZZLE): record("spells", "Fizzled", 1)
-            elif low.startswith(MSG_INTERRUPT): record("spells", "Interrupted", 1)
-            elif low.startswith(MSG_NO_MANA): record("spells", "Out of mana", 1)
-            elif low.startswith(MSG_BANDAGE_BEGIN): record("consum", "Bandages", 1)
-            elif low.startswith(MSG_BANDAGE_CURE): add_pending(now, "cure", "Bandage", BANDAGE_SECS)
-            elif low.startswith(MSG_BANDAGE_HEALS): add_pending(now, "heal", "Bandage", BANDAGE_SECS)
-            else:
-                if name and my_name:
-                    sp = SPELLS.get(low)
-                    if sp is not None:
-                        if sp[0] in HARM_SET: note_cast(now, name, sp[0])
-                        continue
-                if "your skill in" in low:
-                    m = RE_SKILL.search(low)
-                    if m:
-                        v = float(m.group(3))
-                        record("skills", m.group(1).strip().title(), v if m.group(2).lower() == "increased" else -v)
-                        continue
-                if "your " in low and " has " in low:
-                    m = RE_STAT.search(low)
-                    if m:
-                        v = int(m.group(3))
-                        record("stats", m.group(1).title(), v if m.group(2).lower() == "increased" else -v); continue
-                if "you have " in low and ("fame" in low or "karma" in low):
-                    m = RE_FAME.search(low)
-                    if m: record("fame", "%s %s" % (m.group(2).title(), m.group(1).lower()), 1)
-    def find_place(me):
-        area = HOST.guard_area()
-        if area: return str(area)
-        best = None; x, y, m = me["x"], me["y"], me["map"]
-        for sp in spots:
-            if sp[3] == m:
-                d = max(abs(x - sp[1]), abs(y - sp[2]))
-                if d <= sp[4] and (best is None or d < best[0]): best = (d, sp[0])
-        return best[1] if best is not None else PLACE_ELSEWHERE
-    def track_place(now, dt):
-        me = st["me"]
-        if me is None: return
-        if st["place"] is None or now >= st["next_place"]:
-            st["next_place"] = now + PLACE_EVERY; st["place"] = find_place(me)
-        place = st["place"]
-        for seg in segs(): pt = seg["place_t"]; pt[place] = pt.get(place, 0.0) + dt
-    def add_spot(name, radius):
-        me = st["me"]
-        if me is None or not (me["x"] or me["y"]):
-            say("position unknown; try again.", Kit.HUE_BAD); return
-        name = spot_name(name) or "Spot %d" % (len(spots) + 1); lo, hi = SPOT_RADIUS_LIMITS
-        radius = max(lo, min(hi, int(radius))); old = [sp for sp in spots if sp[0].lower() == name.lower()]
-        if not old and len(spots) >= SPOTS_MAX:
-            say("%d spots at most; remove one first." % SPOTS_MAX, Kit.HUE_BAD); return
-        for sp in old: spots.remove(sp)
-        spots.append([name, me["x"], me["y"], me["map"], radius]); save_spots(); st["place"] = None
-        say("spot \"%s\" named here (%d, %d), %d tiles round." % (name, me["x"], me["y"], radius), Kit.HUE_GOOD)
-        HOST.refresh_settings(KEY)
-    def remove_spot(name):
-        n = len(spots); spots[:] = [sp for sp in spots if sp[0] != name]
-        if len(spots) != n: save_spots(); st["place"] = None; HOST.refresh_settings(KEY)
-    def friendly_names(now):
-        fn = st["fnames"]
-        if fn is not None and fn[0] == now: return fn[1]
-        mobs = st["mobs"]; names = set(mobs.get(ser) for ser in st["friendly"] if mobs.get(ser))
-        st["fnames"] = (now, names); return names
-    def note_cast(now, name, spell):
-        if name in friendly_names(now): return
-        info = Kit.spell_info(spell); delay = float(info[3]) if info else 0.0; cs = st["casts"]
-        cs.append([now, name, spell, False, delay])
-        while cs and (len(cs) > CASTS_KEEP or now - cs[0][0] > cs[0][4] + CAST_CREDIT_SECS): cs.pop(0)
-    def credit_hit(now):
-        for c in st["casts"]:
-            el = now - c[0]
-            if not c[3] and c[4] - CAST_EARLY <= el <= c[4] + CAST_CREDIT_SECS:
-                c[3] = True; return "%s: %s" % (c[1], c[2]), c[1], 0
-        best = None
-        for ser, t in st["engaged"].items():
-            if best is None or t > best[1]: best = (ser, t)
-        if best is not None and engaged(best[0], now): nm = mob_name(best[0]); return nm + "?", nm, best[0]
-        me = st["me"]
-        if me is not None and me["poison"]: return "Poison", None, 0
-        return "Unknown", None, 0
-    def note_taken(dmg, now):
-        me = st["me"]; who, nm, ser = credit_hit(now); tk = st["taken"]
-        tk.append((now, dmg, who, nm, ser, me["hits"], me["hmax"]))
-        if len(tk) > TAKEN_KEEP: del tk[:len(tk) - TAKEN_KEEP]
-    def make_recap(now):
-        t0 = now - RECAP_SECS; hits = [e for e in st["taken"] if e[0] >= t0]; hp, before = [], None
-        for h in st["hp_log"]:
-            if h[0] < t0: before = h
-            else: hp.append(h)
-        if before is not None: hp.insert(0, (t0, before[1], before[2]))
-        me = st["me"]
-        if me is not None: hp.append((now, me["hits"], me["hmax"]))
-        want = set(e[3] for e in hits if e[3] and not e[4]); sers = {}
-        if want:
-            for ser, nm in st["mobs"].items():
-                if nm in want: sers[nm] = ser
-            for m in API.GetAllMobiles() or []:
-                try:
-                    nm = str(m.Name or "")
-                    if nm in want: sers[nm] = int(m.Serial)
-                except Exception: continue
-        rows = [(e[0], e[1], e[2], e[4] or sers.get(e[3], 0), e[5], e[6]) for e in hits]
-        st["recap"] = {"t": now, "rows": rows, "hp": hp, "total": sum(e[1] for e in hits)}; st["recap_show"] = True
-    def export(w):
-        seg = seg_for(w); cap = seg_caption(w)
-        if seg is None: seg, cap = data["overall"], "Overall"
-        me = st["me"]; serial = me["ser"] if me else int(safe(lambda: API.Player.Serial, 0) or 0)
-        path = Kit.data_path(EXPORT_FILE % serial); what = seg["name"] if cap != seg["name"] else ""
-        lines = ["Meters export: %s%s, %s" % (cap, " (%s)" % what if what else "", time.strftime("%Y-%m-%d %H:%M:%S",
-                                                             time.localtime(time.time()))),
-                 ("Session time %s, in combat %s" % (fmt_time(wall_secs(seg)), fmt_time(seg["combat"]))
-                  if seg["kind"] == "overall" else "Fight time %s" % fmt_time(combat_secs(seg))), ""]
-        for mid in ORDER:
-            head, rows = view(mid, seg, EXPORT_ROWS); lines.append("== %s ==" % METRIC[mid][0])
-            lines.append("   " + "   ".join(h for h in head if h))
-            for i, r in enumerate(rows): lines.append("   %2d. %-30s %s" % (i + 1, r[0], r[2]))
-            if not rows: lines.append("   (nothing)")
-            lines.append("")
-        st["to_write"].append((path, "\n".join(lines) + "\n", cap))
-    def write_files():
-        while st["to_write"] and not st["shutting"]:
-            path, text, cap = st["to_write"].pop(0)
-            try:
-                with open(path, "w") as fh: fh.write(text)
-                say("%s exported to %s." % (cap, path), Kit.HUE_GOOD)
-            except Exception as ex: say("couldn't write %s (%s)." % (path, ex), Kit.HUE_BAD)
-    M = Kit.MARGIN
-    def dock_key(w): return KEY if w["id"] == 0 else "%s_%d" % (KEY, w["id"])
-    def win_title(w): return TITLE if w["id"] == 0 else "%s %d" % (TITLE, w["id"] + 1)
-    def on_disposed(w, g):
-        def handler(*args):
-            if w["g"] is g and not st["shutting"]:
-                w["g"] = None
-                if w["id"] == 0: HOST.disable(KEY)
-                else: queue.add(("closed", w["id"]), dup=True)
-        return handler
-    def on_sub_disposed(w, slot, g):
-        def handler(*args):
-            if w.get(slot) is g: w[slot] = None
-        return handler
-    def row_click(w, i):
-        def handler(*args):
-            slots = w["slots"]
-            if i >= len(slots): return
-            ser = slots[i].get("ser")
-            if Follow.alt_held():
-                if ser: queue(("follow", ser))()
-                return
-            queue(("detail", w["id"], i))()
-        return handler
-    def foot_need(w):
-        n = 8 + 35 + Kit.text_w("New") + 14 + 35 + Kit.text_w("Report") + 8
-        return n + 14 + 35 + Kit.text_w("Reset") if w["id"] == 0 else n
-    def build_window(w):
-        x, y = w["x"], w["y"]; old = w["g"]
-        if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-        w["g"] = None; store, c, slots, gcols = ({}, {}), {}, [], []; mid = w["metric"]
-        close_tip = ("Close " + win_title(w) + (" (this window only)" if w["id"]
-                      else " (turns it off; the Modules tab turns it back on)"))
-        w["resize_at"], w["preview"] = 0.0, False
-        if w["minimized"]:
-            g = G.CreateGump(True, True); ww, hh = MINI_W, MINI_H
-            c["status"] = Kit.mini_bar(g, store, ww, hh, win_title(w), dock_key(w),
-                                       queue(("toggle_min", w["id"])), close_tip=close_tip)
-        else:
-            rows = settings["rows"]; yb = M + 30 + Kit.GAP; yr = yb + 30 + Kit.GAP
-            extra_h = 56 + (GRAPH_BLOCK if w.get("graph") else 0)
-            foot_w = foot_need(w); fit = w["fit"]; want = fit if fit is not None else w["size"]
-            fw_room = (max(120, want[0]) if want else W) - 2 * M; two_rows = foot_w > fw_room
-            if two_rows: extra_h += 26
-            body_h = extra_h + rows * ROW_H; ww, hh = W, yr + body_h + M
-            if want is not None:
-                ww, hh = max(120, want[0]), want[1]; rows = max(1, (hh - yr - M - extra_h) // ROW_H)
-                body_h = max(extra_h + rows * ROW_H, hh - yr - M)
-                if fit is not None:
-                    body_h = max(30, min(body_h, hh - yr - M)); rows = max(0, (body_h - extra_h) // ROW_H)
-                hh = yr + body_h + M
-            IW = ww - 2 * M
-            if fit is None:
-                x, y = Kit.clamp(x, y, ww, hh); min_h = yr + extra_h + ROW_H + M
-                g = G.CreateModernGump(x, y, ww, hh, True, min(SIZE_MIN_W, ww), min(min_h, hh), on_resized(w))
-                g.SetAlpha(0)
-            else: g = G.CreateGump(True, True)
-            Kit.add_window_frame(g, ww, hh, mouse=False); chrome = 0 if Kit.zone_up(dock_key(w)) else 84 + Kit.DOCK_DX
-            title_room = (Kit.MARGIN + 30 + Kit.text_w(win_title(w).upper()) + 16 + chrome
-                          + 35 + Kit.text_w("Settings") + Kit.MARGIN)
-            Kit.title_bar(g, store, ww, win_title(w), dock_key(w), queue(("toggle_min", w["id"])),
-                          queue(("to_bar", w["id"])),
-                          queue(("settings",)) if ww >= title_room else None, close_tip=close_tip)
-            Kit.add_section(g, M, yb, IW, 30); bx = M + 8
-            Kit.art_button(g, store, "prev", ART_LEFT, bx, yb + 4, None,
-                           "Show previous display", on_click=queue(("step", w["id"], -1)))
-            Kit.art_button(g, store, "next", Kit.ART_PLAY, bx + 32, yb + 4, None,
-                           "Show next display", on_click=queue(("step", w["id"], 1)))
-            mt, _, _, color, mobrows = METRIC[mid]; mx = bx + 68
-            pick_cap = mt if mx + 35 + Kit.text_w(mt) + 10 + 35 + 40 <= M + IW - 6 else None
-            Kit.art_button(g, store, "pick", Kit.ART_PAGE, mx, yb + 4, pick_cap, "Pick what this window shows"
-                           + ("" if pick_cap else " (now: %s)" % mt), on_click=queue(("picker", w["id"])))
-            sx = mx + (35 + Kit.text_w(mt) if pick_cap else 30) + 10
-            c["seg_room"], c["iw"] = max(20, M + IW - 6 - sx - 35), IW; seg_cap = Kit.fit(seg_caption(w), c["seg_room"])
-            c["seg"] = Kit.art_button(g, store, "segs", Kit.ART_PAGE, sx, yb + 4, seg_cap,
-                                      "Pick a segment: current fight, Overall or an earlier fight",
-                                      on_click=queue(("segpick", w["id"])))
-            Kit.add_section(g, M, yr, IW, body_h); c["head"] = Kit.add_label(g, "", M + 8, yr + 5, Kit.HUE_INFO)
-            follow = "Alt+click: auto-follow (again to stop)"
-            if mid in ("session", "big", "gold"): tip = follow if mobrows else None
-            else: tip = "Show this row's details" + (". " + follow if mobrows else "")
-            val_w = min(VAL_W, int(IW * 0.45)); name_w = IW - 12 - val_w - 10
-            for i in range(rows):
-                ry = yr + 26 + i * ROW_H; pb = G.CreateGumpSimpleProgressBar(IW - 12, ROW_H - 2, BAR_BG, color, 0, 100)
-                pb.SetPos(M + 6, ry); pb.SetAcceptMouseInput(False); g.Add(pb)
-                ln = Kit.add_label(g, "", M + 10, ry + 1, Kit.HUE_TEXT)
-                lv = Kit.add_label(g, "", M + IW - 6 - val_w, ry + 1, Kit.HUE_TEXT)
-                slots.append({"bar": pb, "name": ln, "val": lv, "ser": None, "key": None,
-                              "prog": None, "nw": name_w, "vw": val_w})
-            for i in range(rows):
-                ry = yr + 26 + i * ROW_H; Kit.catcher(g, M + 6, ry, IW - 12, ROW_H - 2, row_click(w, i), tip)
-            fy = yr + 26 + rows * ROW_H + 4
-            if w.get("graph"):
-                gy = fy - 2; c["gcap"] = Kit.add_label(g, "", M + 10, gy, Kit.HUE_INFO); base = gy + 18 + GRAPH_H
-                ncol = max(1, min(GRAPH_MINUTES, (IW - 12) // (GRAPH_COL + 1)))
-                gx = M + 6 + (IW - 12 - ncol * (GRAPH_COL + 1)) // 2
-                for i in range(ncol):
-                    box = G.CreateGumpColorBox(0.9, color)
-                    box.SetRect(gx + i * (GRAPH_COL + 1), base - 1, GRAPH_COL, 1)
-                    box.IsVisible = False; box.SetAcceptMouseInput(False)
-                    g.Add(box); gcols.append({"box": box, "x": gx + i * (GRAPH_COL + 1), "h": 0})
-                c["gbase"] = base; fy += GRAPH_BLOCK
-            Kit.art_button(g, store, "new", Kit.ART_PAGE, M + 8, fy, "New",
-                           "Open another window (up to %d)" % MAX_WINDOWS, on_click=queue(("new",)))
-            rx = M + 8 + 35 + Kit.text_w("New") + 14
-            Kit.art_button(g, store, "report", Kit.ART_PAGE, rx, fy, "Report",
-                           "Post the top %d rows to party chat (if set and in a party), else the journal" % REPORT_ROWS,
-                           on_click=queue(("report", w["id"])))
-            if w["id"] == 0:
-                ry2 = fy + 26 if two_rows else fy
-                Kit.art_button(g, store, "reset", Kit.ART_CLOSE, ww - M - 8 - 35 - Kit.text_w("Reset"),
-                               ry2, "Reset", "Clear all meters; new session", on_click=queue(("reset",)))
-        w["x"], w["y"] = Kit.show_window(g, x, y, ww, hh, dock_key(w), w["minimized"] and w["docked"],
-                                         on_disposed(w, g), save_windows, w,
-                                         {"g": g, "c": c, "store": store, "slots": slots, "vkey": None,
-                                          "gcols": gcols, "gkey": None, "drawn": (ww, hh)})
-        for k in ("picker", "segpick", "detail"):
-            sub = w.get(k)
-            if Kit.is_open(sub) and not w["minimized"]:
-                info = Kit.scroll_info(sub)
-                if info is not None: sw, sh = int(info["w"]), int(info["h"])
-                else: sw, sh = int(sub.GetWidth() or PICK_W), int(sub.GetHeight() or 200)
-                sx, sy = side_pos(w, sw); Kit.place(sub, sx, sy, sw, sh); Kit.attach(sub, g)
-        refresh(w); Kit.dispose(old)
-    def on_resized(w):
-        def fn(*args):
-            w["resize_at"] = time.time(); g = w["g"]
-            if w["preview"] or w["fit"] is not None or w["minimized"] or not Kit.is_open(g): return
-            if (int(g.GetWidth()), int(g.GetHeight())) != w["drawn"]: w["preview"] = True; g.SetAlpha(0.55)
-        return fn
-    def apply_resize(w):
-        g = w["g"]; w["preview"] = False
-        if not Kit.is_open(g) or w["minimized"]: return
-        gw, gh = int(g.GetWidth()), int(g.GetHeight())
-        if w["fit"] is not None:
-            g.SetAlpha(0)
-            if (gw, gh) != w["drawn"]: build_window(w)
-            return
-        drawn = w["drawn"] or (0, 0)
-        if abs(gw - drawn[0]) <= 2 and abs(gh - drawn[1]) <= 2: g.SetAlpha(0); return
-        sh = Kit.screen()[1]
-        if sh > 0: gh = min(gh, sh)
-        w["size"] = own_size(gw, gh); build_window(w); save_windows()
-    def side_pos(w, width):
-        g = w["g"]; r = Kit.rect(g) if Kit.is_open(g) else None
-        x, y = (r[0], r[1]) if r is not None else (w["x"], w["y"])
-        sw = Kit.screen()[0]; nx = x + ((w.get("drawn") or (W, 0))[0]) + 4
-        if sw and nx + width > sw: nx = max(0, x - width - 4)
-        return nx, y
-    def sub_frame(width, hh, title, store, close_key, action, g=None):
-        if g is None: g = G.CreateGump(True, True)
-        Kit.add_window_frame(g, width, hh); Kit.add_section(g, M, M, width - 2 * M, 30)
-        Kit.add_label(g, title, M + 30, M + 7, Kit.HUE_TITLE)
-        Kit.art_button(g, store, close_key, Kit.ART_CLOSE, width - M - 54, M + 4, None, "Close this window",
-                   on_click=queue(action))
-        return g
-    def drop_sub(w, slot): Kit.dispose(w[slot]); w[slot] = None
-    def show_sub(w, slot, g, width, hh):
-        x0, y0 = side_pos(w, width)
-        Kit.show_window(g, x0, y0, width, hh, None, False, on_sub_disposed(w, slot, g), None, w, {slot: g})
-        Kit.attach(g, w["g"])
-    def build_picker(w):
-        drop_sub(w, "picker"); IW = PICK_W - 2 * M; col = (IW - 24) // 2
-        hs = [28 + ((len(ms) + 1) // 2) * 22 + 6 for _, ms in GROUPS]; h_win = 28 + 2 * 22 + 6
-        hh = M + 30 + sum(h + Kit.GAP for h in hs) + h_win + Kit.GAP + M
-        g = sub_frame(PICK_W, hh, "DISPLAYS", ({}, {}), "pclose", ("close_sub", w["id"], "picker"))
-        y = M + 30 + Kit.GAP
-        for (gname, ms), h in zip(GROUPS, hs):
-            Kit.add_section(g, M, y, IW, h, gname)
-            for i, mid in enumerate(ms):
-                cx = M + 12 + (i % 2) * (col + 12); cy = y + 28 + (i // 2) * 22
-                hue = Kit.HUE_TITLE if mid == w["metric"] else Kit.HUE_TEXT
-                Kit.add_label(g, Kit.fit(METRIC[mid][0], col - 4), cx, cy, hue)
-                Kit.catcher(g, cx - 2, cy - 2, col, 20, queue(("metric", w["id"], mid)),
-                            "Show %s in this window" % METRIC[mid][0])
-            y += h + Kit.GAP
-        Kit.add_section(g, M, y, IW, h_win, "THIS WINDOW"); on = bool(w.get("graph")); state = "on" if on else "off"
-        Kit.add_label(g, Kit.fit("Last-hour graph", IW - 36 - Kit.text_w(state)), M + 12, y + 28)
-        Kit.add_label(g, state, M + IW - 12 - Kit.text_w(state), y + 28, Kit.HUE_GOOD if on else Kit.HUE_INFO)
-        Kit.catcher(g, M + 8, y + 26, IW - 16, 20, queue(("graph", w["id"])),
-                    "Show or hide the last hour under the rows, one bar per minute")
-        Kit.add_label(g, Kit.fit("Export this segment", IW - 24), M + 12, y + 50)
-        Kit.catcher(g, M + 8, y + 48, IW - 16, 20, queue(("export", w["id"])),
-                    "Write every display to %s in the VirtueAssistantSettings folder"
-                    % (EXPORT_FILE.replace("%08X", "<serial>")))
-        show_sub(w, "picker", g, PICK_W, hh)
-    def build_segpick(w):
-        drop_sub(w, "segpick"); IW = PICK_W - 2 * M
-        items = [("current", "Current fight" + (" (going on)" if data["cur"] else " (or the last)"), ""),
-                 ("overall", "Overall (session)", fmt_time(time.time() - data["overall"]["start"]))]
-        for h in data["hist"]:
-            items.append((h["n"], "#%d  %s" % (h["n"], h["name"]),
-                          "%s  %s" % (fmt_time(combat_secs(h)), fmt_num(total(h, "dmg_done")))))
-        sh = 28 + len(items) * 22 + 6; hh = M + 30 + Kit.GAP + sh + M
-        g = sub_frame(PICK_W, hh, "SEGMENTS", ({}, {}), "sclose", ("close_sub", w["id"], "segpick"))
-        y = M + 30 + Kit.GAP; Kit.add_section(g, M, y, IW, sh, "WHAT TO SHOW  (fight time, damage done)"); rw = 110
-        for i, (val, text, right) in enumerate(items):
-            cy = y + 28 + i * 22; hue = Kit.HUE_TITLE if val == w["seg"] else Kit.HUE_TEXT
-            Kit.add_label(g, Kit.fit(text, IW - 24 - rw - 6), M + 12, cy, hue)
-            if right: Kit.add_label(g, right, M + IW - 12 - rw, cy, Kit.HUE_INFO)
-            Kit.catcher(g, M + 8, cy - 2, IW - 16, 20, queue(("seg", w["id"], val)), "Show this segment")
-        show_sub(w, "segpick", g, PICK_W, hh)
-    DETAIL_LINES = ("Total", "Share", "Rate", "Times", "Average", "Biggest", "Smallest", "First", "Last")
-    def build_detail(w):
-        drop_sub(w, "detail"); IW = DETAIL_W - 2 * M; sh = 30 + len(DETAIL_LINES) * 20 + 6
-        hh = M + 30 + Kit.GAP + sh + M
-        g = sub_frame(DETAIL_W, hh, "DETAILS", ({}, {}), "dclose", ("close_sub", w["id"], "detail")); c = {}
-        y = M + 30 + Kit.GAP; Kit.add_section(g, M, y, IW, sh)
-        c["name"] = Kit.add_label(g, "", M + 10, y + 6, Kit.HUE_TITLE)
-        lw = max(Kit.text_w(t) for t in DETAIL_LINES) + 14
-        for i, t in enumerate(DETAIL_LINES):
-            ly = y + 30 + i * 20; Kit.add_label(g, t, M + 10, ly, Kit.HUE_INFO)
-            c[t] = Kit.add_label(g, "", M + 10 + lw, ly, Kit.HUE_TEXT)
-        c["vw"] = IW - 20 - lw; w["dc"] = c; show_sub(w, "detail", g, DETAIL_W, hh); refresh_detail(w)
-    def refresh_graph(w):
-        mid = w["metric"]; m = int(time.time() // 60); key = (mid, m, graph["ver"], graph["vb"].get(mid, 0))
-        if key == w["gkey"]: return
-        w["gkey"] = key; hist = graph["hist"]; vals = []; top = 0.0
-        if mid != "session":
-            first = m - GRAPH_MINUTES + 1
-            for i in range(GRAPH_MINUTES):
-                b = hist.get(first + i); v = b.get(mid, 0.0) if b is not None else 0.0
-                if v > top: top = v
-                vals.append(v)
-        base = w["c"]["gbase"]; skip = len(vals) - len(w["gcols"])
-        for i, col in enumerate(w["gcols"]):
-            v = vals[i + skip] if vals else 0.0; h = int(round(GRAPH_H * v / top)) if top > 0 and v > 0 else 0
-            if v > 0 and h < 1: h = 1
-            if h != col["h"]:
-                box = col["box"]
-                if h: Kit.ui_rect(box, col["x"], base - h, GRAPH_COL, h)
-                if (h > 0) != (col["h"] > 0): box.IsVisible = h > 0
-                col["h"] = h
-        if mid == "session": cap = "No graph for the summary"
-        elif top <= 0: cap = "Last hour, per minute: nothing yet"
-        else:
-            cap = "Last hour, %s per minute: peak %s" % (
-                "biggest hit" if mid == "big" else "gained" if mid in ("gold", "gold_place")
-                else "total", fmt_num(top, METRIC[mid][2] or "n"))
-        Kit.set_text(w["c"]["gcap"], Kit.fit(cap, w["c"].get("iw", W - 2 * Kit.MARGIN) - 20))
-    def fit_once(holder, k, text, width):
-        f = holder.get(k)
-        if f is not None and f[0] == text and f[1] == width: return f[2]
-        cut = Kit.fit(text, width); holder[k] = (text, width, cut); return cut
-    def recap_click(i):
-        def handler(*args):
-            sers = recap["rows"]
-            if i < len(sers) and sers[i] and Follow.alt_held(): queue(("follow", sers[i]))()
-        return handler
-    def recap_hp_at(hp, t):
-        cur = hp[0] if hp else (t, 0, 0)
-        for h in hp:
-            if h[0] > t: break
-            cur = h
-        return cur[1], cur[2]
-    def build_recap():
-        rc = st["recap"]
-        if rc is None: return
-        IW = RECAP_W - 2 * M; rows = rc["rows"][-RECAP_ROWS:]; strip_h = 30
-        sh = 30 + 20 + strip_h + 8 + max(1, len(rows)) * 20 + 2 * 18 + 6; hh = M + 30 + Kit.GAP + sh + M
-        g, store, _c = recapw.begin(RECAP_W, hh, side_pos(wins[0], RECAP_W) if wins else None)
-        sub_frame(RECAP_W, hh, "DEATH RECAP", store, "close", ("recap_close",), g); y0 = M + 30 + Kit.GAP
-        Kit.add_section(g, M, y0, IW, sh, "LAST %d SECONDS  (damage you took)" % int(RECAP_SECS)); n = len(rc["rows"])
-        head = "Died %s: %s damage in %s" % (
-            time.strftime("%H:%M:%S", time.localtime(rc["t"])), fmt_num(rc["total"]), Kit.count(n, "hit"))
-        Kit.add_label(g, Kit.fit(head, IW - 20), M + 10, y0 + 26, Kit.HUE_TEXT); ys = y0 + 26 + 20
-        Kit.add_label(g, "HP", M + 10, ys + (strip_h - 16) // 2, Kit.HUE_INFO); sx0 = M + 10 + Kit.text_w("HP") + 8
-        cw = max(2, (M + IW - 10 - sx0) // RECAP_COLS); t0 = rc["t"] - RECAP_SECS
-        for i in range(RECAP_COLS):
-            hits, hmax = recap_hp_at(rc["hp"], t0 + (i + 1) * RECAP_SECS / RECAP_COLS)
-            bh = int(round(strip_h * max(0, hits) / float(hmax))) if hmax > 0 else 0
-            if bh > 0:
-                box = G.CreateGumpColorBox(0.9, "#c22d2d")
-                box.SetRect(sx0 + i * cw, ys + strip_h - bh, max(1, cw - 1), bh); g.Add(box)
-        yr = ys + strip_h + 8; sers = []
-        if not rows: Kit.add_label(g, "No damage seen.", M + 10, yr, Kit.HUE_INFO)
-        who_x, who_w = M + 60, IW - 166
-        for i, (t, dmg, who, ser, hits, hmax) in enumerate(rows):
-            ry = yr + i * 20; Kit.add_label(g, "-%.1fs" % max(0.0, rc["t"] - t), M + 10, ry, Kit.HUE_INFO)
-            Kit.add_label(g, Kit.fit(who, who_w), who_x, ry, Kit.HUE_TEXT); amt = "-%s" % fmt_num(dmg)
-            Kit.add_label(g, amt, M + IW - 64 - Kit.text_w(amt), ry, Kit.HUE_BAD)
-            Kit.add_label(g, "HP %d" % hits, M + IW - 58, ry, Kit.HUE_INFO); sers.append(ser if is_mobile(ser) else 0)
-            if sers[-1]:
-                Kit.catcher(g, who_x - 2, ry - 2, who_w + 4, 20, recap_click(i),
-                            "Alt+click: auto-follow (again to stop)")
-        for i, line in enumerate(RECAP_HINT):
-            Kit.add_label(g, Kit.fit(line, IW - 20), M + 10, y0 + sh - 40 + i * 18, Kit.HUE_INFO)
-        recapw.end(g, {"rows": sers})
-    recapw = Kit.Window(KEY, TITLE, None, recap, build_recap, RECAP_POS_KEY, cleanup=cleanup, names=None, lock=False,
-                        owner=False, clear={"rows": []})
-    wnd = None
-    def refresh(w):
-        g = w["g"]
-        if not Kit.is_open(g): return
-        mid = w["metric"]
-        if w.get("gcols") and not w["minimized"]: refresh_graph(w)
-        seg = seg_for(w); me = st["me"]; my_name = me["name"] if me else None; key = None
-        if seg is not None:
-            if seg["end"] is not None:
-                key = (mid, w["seg"], seg["uid"], seg["ver"], w["minimized"], settings["rank"],
-                       settings["pct"], my_name)
-            elif METRIC[mid][1] == "s":
-                key = (mid, w["seg"], seg["uid"], seg["ver"], seg["combat"], w["minimized"],
-                       settings["rank"], settings["pct"], my_name)
-            if key is not None and key == w.get("vkey"): refresh_detail(w); return
-        w["vkey"] = key; head, rows = view(mid, seg, 0 if w["minimized"] else len(w["slots"])); c = w["c"]
-        if w["minimized"]:
-            lbl = c.get("status")
-            if lbl is not None:
-                Kit.set_text(lbl, fit_once(c, "_fst", "%s: %s  %s" % (win_title(w), METRIC[mid][0],
-                                                                      "  ".join(head[:2])), MINI_W - 90))
-            return
-        Kit.set_text(c["head"], fit_once(c, "_fhd", "   ".join(h for h in head if h),
-                                         c.get("iw", W - 2 * Kit.MARGIN) - 16))
-        Kit.set_text(c["seg"], fit_once(c, "_fsg", seg_caption(w), c.get("seg_room", 400)))
-        top = max([r[1] for r in rows] + [0.0])
-        for i, slot in enumerate(w["slots"]):
-            if i < len(rows):
-                name, val, text, ser, _ = rows[i]; label = ("%d. %s" % (i + 1, name)) if settings["rank"] else name
-                hue = Kit.HUE_TITLE if (my_name and name == my_name) else Kit.HUE_TEXT
-                Kit.set_text(slot["name"], fit_once(slot, "_fn", label, slot["nw"]), hue)
-                Kit.set_text(slot["val"], fit_once(slot, "_fv", text, slot.get("vw", VAL_W)))
-                prog = (float(val), float(top or 1.0))
-                slot["ser"], slot["key"] = (ser if is_mobile(ser) else None), name
-            else:
-                Kit.set_text(slot["name"], ""); Kit.set_text(slot["val"], ""); prog = (0.0, 1.0)
-                slot["ser"], slot["key"] = None, None
-            if prog != slot["prog"]: slot["prog"] = prog; slot["bar"].SetProgress(prog[0], prog[1])
-        refresh_detail(w)
-    def refresh_detail(w):
-        if not Kit.is_open(w["detail"]): return
-        c = w["dc"]; mid, key = w["detail_metric"], w["detail_row"]; seg = seg_for(w)
-        r = seg["d"].get(mid, {}).get(key) if (seg is not None and mid) else None
-        Kit.set_text(c["name"], Kit.fit("%s (%s)" % (key or "", METRIC.get(mid, ("",))[0]),
-                                      DETAIL_W - 2 * Kit.MARGIN - 20))
-        vals = dict((t, "") for t in DETAIL_LINES)
-        if r is not None:
-            _, rate, f, _, _ = METRIC[mid]; now = time.time(); tot = total(seg, mid)
-            if mid == "gold_place":
-                pr, secs = place_rate(seg, key, r[0]); rate_txt = "%s/h (%s there)" % (fmt_rate(pr), fmt_time(secs))
-            elif rate: rate_txt = "%s %s" % (fmt_rate(rate_of(seg, rate, r[0]), f), RATE_WORD[rate])
-            else: rate_txt = "-"
-            vals.update({"Total": fmt_num(r[0], f),
-                "Share": ("%d%% of %s" % (int(round(100.0 * r[0] / tot)), fmt_num(tot, f))
-                          if tot and not pct_row(key) else "-"), "Rate": rate_txt, "Times": "%d" % r[1],
-                "Average": fmt_num(r[0] / max(1, r[1]), f), "Biggest": fmt_num(r[2], f), "Smallest": fmt_num(r[3], f),
-                "First": "%s ago" % fmt_time(now - r[4]), "Last": "%s ago" % fmt_time(now - r[5])})
-        elif key: vals["Total"] = "nothing in this segment"
-        for t in DETAIL_LINES: Kit.set_text(c[t], Kit.fit(vals[t], c["vw"]))
-    def drag_busy(): return bool(SNAP.drag) or SNAP.pressed() is True
-    def layout_fit(w):
-        def fit(fw, fh, mode):
-            new = (int(fw), int(fh)) if (fw is not None and fh is not None) else None
-            if new != w.get("fit") or (mode == "again" and new is not None):
-                w["fit"] = new; queue(("redraw", w["id"]))()
-        return fit
-    def layout_min(w):
-        def mn():
-            extra_h = 56 + (GRAPH_BLOCK if w.get("graph") else 0) + (26 if foot_need(w) > SIZE_MIN_W - 2 * M else 0)
-            return SIZE_MIN_W, M + 30 + Kit.GAP + 30 + Kit.GAP + extra_h + ROW_H + M
-        return mn
-    def check_zones():
-        if drag_busy(): return
-        for w in wins:
-            g = w["g"]
-            if w["minimized"] or w["docked"] or w["resize_at"] or not Kit.is_open(g): continue
-            want = HOST.layout_slot(dock_key(w))
-            if want is not None:
-                want = (int(want[0]), int(want[1])); fit = w["fit"]
-                if fit is None or abs(fit[0] - want[0]) > 4 or abs(fit[1] - want[1]) > 4:
-                    w["fit"] = want; build_window(w); continue
-                if w["drawn"] is None or w["drawn"][0] != max(120, fit[0]): build_window(w); continue
-                real = (int(g.GetWidth()), int(g.GetHeight()))
-                if abs(real[0] - w["drawn"][0]) > 2 or abs(real[1] - w["drawn"][1]) > 2:
-                    w["misfit"] = w.get("misfit", 0) + 1
-                    if w["misfit"] in (2, 6, 20): build_window(w)
-                else: w["misfit"] = 0
-            elif w["fit"] is not None and not HOST.layout_holds(dock_key(w)):
-                w["fit"] = None; build_window(w)
-    def dock_win(w):
-        hooks = Kit.dock_hooks(win_title(w), TRAY_ICON, w, w, queue(("redraw", w["id"])), fit=layout_fit(w))
-        hooks.update({"exact": True, "verify": True, "pieces_out": True, "min": layout_min(w)})
-        HOST.dock_add(dock_key(w), hooks)
-    def close_window(w, remove):
-        w["shutting"] = True; HOST.dock_remove(dock_key(w))
-        if remove: HOST.dock_forget(dock_key(w))
-        for k in ("picker", "segpick", "detail", "g"): g, w[k] = w[k], None; Kit.dispose(g)
-        if remove and w in wins: wins.remove(w)
-    def report(w):
-        mid = w["metric"]; seg = seg_for(w); head, rows = view(mid, seg, REPORT_ROWS)
-        title = "%s (%s)" % (METRIC[mid][0], seg_caption(w))
-        parts = ["%d. %s %s" % (i + 1, r[0], r[2]) for i, r in enumerate(rows[:REPORT_ROWS])]
-        if settings["party"] and API.GetPartyMemberSerials():
-            body = "; ".join(parts) or "nothing yet"; msg = "%s: %s; %s" % (title, "  ".join(head[:2]), body)
-            lines = [msg] if len(msg) <= PARTY_MSG_MAX else ["%s: %s" % (title, "  ".join(head[:2])), body]
-            for line in lines:
-                if len(line) > PARTY_MSG_MAX: line = line[:PARTY_MSG_MAX - 2] + ".."
-                API.PartyMsg(line)
-        else:
-            say("%s: %s." % (title, "  ".join(head)), Kit.HUE_INFO)
-            for p in parts or ["nothing yet"]: say("   %s." % p, Kit.HUE_TEXT)
-    def act_new(action, w):
-        if len(wins) >= MAX_WINDOWS: say("%d windows at most." % MAX_WINDOWS, Kit.HUE_INFO); return
-        base = wins[-1]; g = base["g"]; bx, by = (g.GetX(), g.GetY()) if Kit.is_open(g) else (base["x"], base["y"])
-        nid = max(x["id"] for x in wins) + 1; used = set(x["metric"] for x in wins)
-        metric = next((m for m in ORDER if m not in used), DEFAULT_METRIC)
-        nw = new_win(nid, metric, bx + 30, by + 30); wins.append(nw); build_window(nw); dock_win(nw); save_windows()
-    def act_own_size(action, w):
-        for ow in wins:
-            had = ow["size"] is not None; ow["size"] = None
-            if had and ow["fit"] is None and Kit.is_open(ow["g"]): build_window(ow)
-        save_windows()
-    def act_reset(action, w): reset_data(); st["next_ui"] = 0.0; say("all meters cleared; new session.", Kit.HUE_GOOD)
-    def act_recap(action, w):
-        if st["recap"] is None: say("no death this session.", Kit.HUE_INFO)
-        else: build_recap()
-    def act_graph(action, w):
-        w["graph"] = not w.get("graph"); build_window(w); dock_win(w)
-        if Kit.is_open(w["picker"]): build_picker(w)
-        save_windows()
-    def act_closed(action, w): st["redraw_wait"].discard(w["id"]); close_window(w, True); save_windows()
-    def act_toggle_min(action, w):
-        w["minimized"], w["docked"] = not w["minimized"], False; HOST.dock_forget(dock_key(w)); build_window(w)
-        save_windows()
-    def act_redraw(action, w):
-        if drag_busy(): st["redraw_wait"].add(w["id"]); return
-        st["redraw_wait"].discard(w["id"]); build_window(w); save_windows()
-    def act_step(action, w):
-        i = ORDER.index(w["metric"]) if w["metric"] in ORDER else 0
-        w["metric"] = ORDER[(i + action[2]) % len(ORDER)]; build_window(w)
-        if Kit.is_open(w["picker"]): build_picker(w)
-        save_windows()
-    def act_pick(action, w):
-        kind = action[0]
-        if Kit.is_open(w[kind]): Kit.dispose(w[kind])
-        else: (build_picker if kind == "picker" else build_segpick)(w)
-    def act_metric(action, w): w["metric"] = action[2]; Kit.dispose(w["picker"]); build_window(w); save_windows()
-    def act_seg(action, w): w["seg"] = action[2]; Kit.dispose(w["segpick"]); refresh(w); save_windows()
-    def act_detail(action, w):
-        slots = w["slots"]; i = action[2]; key = slots[i].get("key") if i < len(slots) else None
-        if key is None or w["metric"] in ("session", "big", "gold"): return
-        w["detail_row"], w["detail_metric"] = key, w["metric"]
-        if Kit.is_open(w["detail"]): refresh_detail(w)
-        else: build_detail(w)
-    ACTIONS = {"settings": lambda action, w: HOST.show_settings(KEY),
-               "follow": lambda action, w: Follow.toggle(action[1], TITLE), "new": act_new, "own_size": act_own_size,
-               "reset": act_reset, "spot_add": lambda action, w: add_spot(action[1], action[2]),
-               "spot_rm": lambda action, w: remove_spot(action[1]), "recap": act_recap,
-               "recap_close": lambda action, w: recapw.close(), "graph": act_graph,
-               "export": lambda action, w: export(w), "closed": act_closed, "toggle_min": act_toggle_min,
-               "to_bar": lambda action, w: HOST.dock_to_bar(dock_key(w), win_title(w)), "redraw": act_redraw,
-               "step": act_step, "picker": act_pick, "segpick": act_pick, "metric": act_metric, "seg": act_seg,
-               "close_sub": lambda action, w: Kit.dispose(w.get(action[2])), "detail": act_detail,
-               "report": lambda action, w: report(w)}
-    FREE_KINDS = ("settings", "follow", "new", "own_size", "reset", "spot_add", "spot_rm", "recap", "recap_close")
-    FIELDS = (("idle", "A fight ends after quiet of:", "No damage for this long ends the fight", "s"),
-              ("engage", "Your targets count for:", "Damage on what you attacked or targeted this recently is yours",
-               "s"), ("history", "Earlier fights kept:", "Finished fights in the segment list", "fights"),
-              ("min_heal", "Ignore HP rises under:", "Smaller rises count as regeneration", "HP"),
-              ("rows", "Rows per window:", "For windows at their own size; undoes corner drags", "rows"))
-    CHECKS = (("rank", "Number the rows", "A rank before each name"),
-              ("pct", "Show each row's share (%)", "Percentage of the total after the value"),
-              ("party", "Report to party chat in a party", "Unticked, Report goes to your journal"),
-              ("scan", "Watch the backpack (loot, reagents, ammo)",
-               "Open your backpack once after login so the client knows its contents"),
-              ("travel", "Count tiles walked and recalls / gates", "Fills the Travel display"),
-              ("recap", "Show a death recap when you die",
-               "The last %d s of damage taken: who, how much, your HP" % int(RECAP_SECS)))
-    PCT_HINT = "Pets' and strangers' healing is a \"(%)\" row outside the total."; SPOT_ROW = 24
-    def page_table(w):
-        return (("COUNTING  (fights, healing, rows)", [("num",) + r + LIMITS[r[0]] for r in FIELDS],
-                 {"align": True, "pad": 4}), ("SHOW AND TRACK", [("check",) + r for r in CHECKS] + [
-                    ("note", Kit.fit(PCT_HINT, w - 28), {"ndy": 2, "h": 18})], {"pad": 4}),
-                ("GOLD BY PLACE  (per character)",
-                 (("custom", 28 + max(1, len(spots)) * SPOT_ROW, draw_spots),), {"pad": 4}), ("TOOLS", (
-                    ("buttons", (("new", Kit.ART_PAGE, "New meter window", "Open one more (up to %d)" % MAX_WINDOWS),
-                                 ("recap", Kit.ART_PAGE, "Last death recap", "Show it again"),
-                                 ("own_size", Kit.ART_CLOSE, "Reset sizes",
-                                  "Give windows outside zones their own size (Rows above, %d px wide)" % W))),
-                    ("buttons", (("export", Kit.ART_OK, "Export",
-                                  "Write the first window's segment to %s in the VirtueAssistantSettings folder"
-                                  % EXPORT_FILE.replace("%08X", "<serial>")),
-                                 ("reset", Kit.ART_CLOSE, "Reset all meters", "Clear everything; new session"))),
-                    ("note", Kit.fit("Damage numbers: " + feed["kind"], w - 28), {"key": "feed", "h": 26})),
-                 {"pad": 4}))
-    def draw_spots(f, x, y):
-        g, c, w, store = f.g, f.c, f.w, f.store; Kit.add_label(g, "Name:", x + 12, y + 3)
-        nx = x + 12 + Kit.text_w("Name:") + 8
-        c["spot_name"] = Kit.with_tip(Kit.add_textbox(g, "", nx, y, 140, numbers=False),
-                                      "Spot name (up to %d letters)" % SPOT_NAME_MAX)
-        rx = nx + 140 + 12; Kit.add_label(g, "Radius:", rx, y + 3); rx += Kit.text_w("Radius:") + 8
-        c["spot_radius"] = Kit.with_tip(Kit.add_textbox(g, str(page.get("radius", SPOT_RADIUS)), rx, y, 44),
-                                        "Tiles round you (%d-%d)" % SPOT_RADIUS_LIMITS)
-        rx += 44 + 10; Kit.add_label(g, "tiles", rx, y + 3, Kit.HUE_INFO)
-        Kit.art_button(g, store, "spot_add", Kit.ART_OK, rx + Kit.text_w("tiles") + 12, y - 2,
-                       "Name this spot", "Gold gained within the radius counts here (a guarded town comes first)")
-        if not spots:
-            Kit.add_label(g, Kit.fit("No spots yet: stand where you farm, type a name, click Name this spot.",
-                                   w - 28), x + 12, y + 28 + 3, Kit.HUE_INFO)
-        rm_w = Kit.pic_size(Kit.ART_CLOSE[0])[0] or 30
-        c["spot_rm"] = [("spot_rm%d" % i, sp[0]) for i, sp in enumerate(spots)]
-        for i, sp in enumerate(spots):
-            ry = y + 28 + i * SPOT_ROW; where = "facet %d at %d, %d, %d tiles round" % (sp[3], sp[1], sp[2], sp[4])
-            ww_ = Kit.text_w(where); Kit.add_label(g, Kit.fit(sp[0], w - 24 - rm_w - 18 - ww_ - 12), x + 12, ry + 3)
-            Kit.add_label(g, where, x + w - 12 - rm_w - 12 - ww_, ry + 3, Kit.HUE_INFO)
-            Kit.art_button(g, store, "spot_rm%d" % i, Kit.ART_CLOSE, x + w - 12 - rm_w, ry, None, "Remove " + sp[0])
-    CONFIG_READ_EVERY = 0.2
-    def page_clicks(f):
-        c, store = f.c, f.store
-        for k in ("reset", "new"):
-            if Kit.was_clicked(store, k): queue((k,))()
-        if Kit.was_clicked(store, "own_size"):
-            if st["active"]: queue(("own_size",))()
-            else: forget_sizes_off()
-        todo = [a for k, a in (("export", ("export", 0)), ("recap", ("recap",))) if Kit.was_clicked(store, k)]
-        if Kit.was_clicked(store, "spot_add"):
-            page["radius"] = Kit.read_int(c["spot_radius"], SPOT_RADIUS, *SPOT_RADIUS_LIMITS)
-            todo.append(("spot_add", str(c["spot_name"].Text or ""), page["radius"]))
-        for action in todo:
-            if st["active"]: queue(action)()
-            else: say("turn Meters on first.", Kit.HUE_INFO)
-        for key, name in c["spot_rm"]:
-            if Kit.was_clicked(store, key):
-                if st["active"]: queue(("spot_rm", name))()
-                else: remove_spot(name)
-    def show_feed(f, new): Kit.set_text(f.c["feed"], Kit.fit("Damage numbers: " + feed["kind"], f.w - 28))
-    def on_change(old, new):
-        del data["hist"][new["history"]:]
-        if new["rows"] != old["rows"]:
-            if st["active"]:
-                for w in wins: w["size"] = None; queue(("redraw", w["id"]))()
-            else: forget_sizes_off()
-        st["next_ui"] = 0.0
-    cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=show_feed, clicks=page_clicks,
-                   every=CONFIG_READ_EVERY)
-    load_settings(); load_spots(); reset_data()
-    def _start():
-        st.update({"shutting": False, "active": True, "queue": [], "last_tick": time.time(),
-                   "next_ui": 0.0, "next_friends": 0.0, "next_scan": 0.0, "me": None,
-                   "pos": None, "pack": None, "prev": {}, "used": [], "buffq": [],
-                   "amtq": [], "poked": False, "place": None, "next_place": 0.0, "taken": [], "hp_log": [],
-                   "casts": [], "recap": None, "recap_show": False, "to_write": [],
-                   "redraw_wait": set(), "present": [], "pscan": None, "pack_cand": None, "my_ser": None,
-                   "my_name": "", "next_name": 0.0, "fnames": None})
-        st["jr"] = Journal.reader(); load_settings(); reset_data(); load_windows(); load_spots()
-        cleanup.add(unhook_damage)
-        for w in wins:
-            w["shutting"] = w["docked"] = False
-            if HOST.dock_wanted(dock_key(w)): w["minimized"] = True
-        Kit.hook_once(st, "hooked", ("ObjectUsed", on_used), ("OnBuffAdded", on_buff),
-                      ("OnEntityDamage", on_damage_amount))
-        if feed["handler"] is None: del jobs[:]; jobs.append(hook_damage)
-        for w in wins: build_window(w); dock_win(w)
-    def _tick():
-        st["poked"] = False
-        if not wins or wins[0]["g"] is None: return
-        now = time.time(); dt = max(0.0, min(1.0, now - st["last_tick"])); st["last_tick"] = now
-        for w in list(wins):
-            if Kit.was_clicked(w["store"], "close"):
-                if w["id"] == 0: Kit.dispose(w["g"]); return
-                queue.add(("closed", w["id"]), dup=True)
-        while st["queue"]:
-            action = st["queue"].pop(0); kind = action[0]
-            w = (next((x for x in wins if x["id"] == action[1]), None)
-                 if len(action) > 1 and isinstance(action[1], int) and kind != "follow" else None)
-            if w is not None or kind in FREE_KINDS: ACTIONS[kind](action, w)
-        if st["redraw_wait"] and not drag_busy():
-            ids, st["redraw_wait"] = st["redraw_wait"], set()
-            for w in list(wins):
-                if w["id"] in ids: build_window(w)
-            save_windows()
-        for w in wins:
-            if w["resize_at"] and now - w["resize_at"] >= RESIZE_SETTLE and not drag_busy():
-                w["resize_at"] = 0.0; apply_resize(w)
-        if now >= st.get("next_zone", 0.0): st["next_zone"] = now + ZONE_EVERY; check_zones()
-        try: s = sample()
-        except Exception as ex:
-            s = None; msg = str(ex)[:120]
-            if msg != st.get("err"): st["err"] = msg; say("couldn't read the client (%s)." % msg, Kit.HUE_BAD)
-        read_journal(now)
-        if s: process(s, now)
-        track_place(now, dt)
-        if st["recap_show"]: st["recap_show"] = False; build_recap()
-        if data["cur"] is not None:
-            data["cur"]["combat"] += dt; data["overall"]["combat"] += dt
-            if not 0.0 <= now - data["last_combat"] <= settings["idle"]: close_fight(now); st["next_ui"] = 0.0
-        if now >= st["next_ui"] or (st["changed"] and st["next_ui"] - now <= UI_EVERY - UI_SOON):
-            st["next_ui"] = now + UI_EVERY; st["changed"] = False
-            for w in wins:
-                if not w["docked"]: refresh(w)
-    def _thread_tick():
-        while jobs and not st["shutting"]: jobs.pop(0)()
-        if st["to_write"]: write_files()
-    def _thread_wanted(): return bool(jobs) or bool(st["to_write"])
-    def _stop():
-        st["shutting"], st["active"], st["jr"] = True, False, None; del jobs[:]; save_windows(); save_settings()
-        cleanup.close()
-        for w in list(wins): close_window(w, False)
-    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
-            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
-            "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
-
-
-if "HOST" not in globals():
-    import API
-    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
-HOST.add("meters", "Meters", "Damage, healing, loot and gold meters", _module_meters, 0.25, category="Extras")
+	bc=Follow.alt_held;bd=HOST.dock_forget;be=HOST.refresh_settings;Z=Kit.ART_CLOSE;bf=Kit.ART_OK;aa=Kit.ART_PAGE;B=Kit.GAP;ak=Kit.HUE_BAD;au=Kit.HUE_GOOD;q=Kit.HUE_INFO;P=Kit.HUE_TEXT;al=Kit.HUE_TITLE;ab=Kit.MARGIN;e=Kit.add_label;R=Kit.add_section;bg=Kit.add_textbox;bh=Kit.add_window_frame;O=Kit.art_button;bi=Kit.attach;ac=Kit.catcher;S=Kit.dispose;u=Kit.fit;bj=Kit.get_var;z=Kit.is_open;bk=Kit.put_var;bl=Kit.screen;J=Kit.set_text;bm=Kit.show_window;p=Kit.text_w;ad=Kit.was_clicked;bn=Kit.with_tip;T="meters";ae="Meters";bo="Meters_settings";bp="Meters_windows";W=360;av=240;b3=1200;b4=.35;b5=.5;bq,b6=320,46;V=360;aw=300;K=20;br=146;am=6;b7=3823;b8=(4014,4016,4015);b9="#17171a";bs=1.;ca=.25;cb=3.;cc=2.;bt=30.;cd=30.;bu=18;ce=12;cf=0x80000000;cg=3821;ch=8.;bv=2.;ci=2.5;cj=8.;bw=1.5;ck=4.;bx=25;aJ=5;aK="VirtueMeters.DamageHook";cl=4000;aL=220;cm=bt/2;cn=40;co=600;cp=800;by="Meters_spots";aM=20;bz=24;bA=20;ax=(1,300);cq=1.;bB="Elsewhere";bC=60.;ay=60;aN=40;af=4;aO=18+aN+4;aP="Meters_%08X.txt";cr=50;an=10.;cs=12;aQ=40;az=360;ct="Meters_recap_pos";cu=("Who: spell words heard before the hit,","else whom you fought (marked ?).");bD=200;bE=300;cv=20;bF=4.;cw=.5;cx=frozenset(("Magic Arrow","Harm","Fireball","Lightning","Mind Blast","Energy Bolt","Explosion","Flamestrike","Chain Lightning","Meteor Swarm","Earthquake","Poison","Poison Field","Fire Field","Holy Light","Pain Spike","Poison Strike","Strangle","Wither"));cy="you begin applying the bandages";cz=("you finish applying the bandages","you heal what little damage","you apply the bandages, but they barely help");cA="you have cured the target of all poisons";cB="the spell fizzles";cC="your concentration is disturbed";cD="insufficient mana";cE=re.compile(r"your skill in (.+?) has (increased|decreased) by "r"([0-9]+(?:\.[0-9]+)?)",re.I);cF=re.compile(r"your (strength|dexterity|intelligence) has (increased|decreased) by "r"([0-9]+)",re.I);cG=re.compile(r"you have (gained|lost) .*?\b(fame|karma)\b",re.I);bG=Kit.SPELL_WORDS;cH={3852:("Heal","heal"),3847:("Cure","cure"),3851:("Refresh",None),3849:("Strength",None),3848:("Agility",None),3853:("Explosion",None),3846:("Night Sight",None),3850:("Poison",None)};aA={3962:"Black Pearl",3963:"Blood Moss",3972:"Garlic",3973:"Ginseng",3974:"Mandrake Root",3976:"Nightshade",3981:"Spiders' Silk",3980:"Sulfurous Ash",3960:"Bat Wing",3983:"Grave Dust",3965:"Daemon Blood",3982:"Nox Crystal",3978:"Pig Iron",3903:"Arrows",7163:"Bolts"};F={"dmg_done":("Damage done","s","n","#c4562a",True),"dmg_taken":("Damage taken","s","n","#b02a2a",True),"dmg_nearby":("All damage nearby","s","n","#9a5a3a",True),"big":("Biggest hits","","n","#d07a2a",True),"kills":("Kills","h","n","#8a6ab0",False),"deaths":("Deaths","h","n","#6a6a78",True),"heal_done":("Healing done","s","n","#2f9a3c",True),"heal_taken":("Healing received","s","n","#3fae5a",True),"heal_by":("Healing by method","s","n","#4aa070",False),"cures":("Cures","m","n","#2a9a8a",True),"poisoned":("Poisonings","m","n","#5a9a2a",True),"spells":("Spells cast","m","n","#2f62cc",False),"mana":("Mana spent","m","n","#3a72d8",False),"consum":("Consumables","h","n","#a08a2a",False),"buffs":("Buffs & debuffs","h","n","#8a5ab0",False),"gold":("Gold","h","n","#cfae2a",False),"gold_place":("Gold by place","h","n","#d8b84a",False),"loot":("Items gained","h","n","#a8925a",False),"skills":("Skill gains","h","d1","#5a8acc",False),"stats":("Stat gains","h","n","#cc7a5a",False),"fame":("Fame & karma","h","n","#b0a050",False),"travel":("Travel","h","n","#6a9aaa",False),"session":("Session summary","","","#4a4a58",False)};aR=(("COMBAT",("dmg_done","dmg_taken","dmg_nearby","big","kills","deaths")),("HEALING",("heal_done","heal_taken","heal_by","cures","poisoned")),("MAGIC & ITEMS",("spells","mana","consum","buffs")),("ECONOMY & PROGRESS",("gold","gold_place","loot","skills","stats","fame","travel","session")));ag=[d0 for d1,d_ in aR for d0 in d_];aS="dmg_done";bH={"s":"per sec","m":"per min","h":"per hour"};m={"idle":6,"engage":12,"history":10,"min_heal":3,"rows":8,"rank":True,"pct":True,"scan":True,"travel":True,"party":True,"recap":True};cI=dict(m);aT={"idle":(2,60),"engage":(3,120),"history":(1,30),"min_heal":(1,50),"rows":(3,20)};cJ=5000;cK=4000;aU="(others)";cL=ae.lower()+":";a={"minimized":False,"shutting":False,"docked":False,"queue":[],"active":False,"hooked":False,"jr":None,"engaged":{},"watch":{},"friendly":{},"mobs":{},"dead_seen":{},"pack_sig":None,"pend":[],"orph":[],"last_spell":None,"cast_t":0.,"prev_lt":0,"to_write":[],"changed":False};dY={"g":None,"c":{},"store":({},{})};aV,h,H=Kit.basics(a,ae);o=[];C={"min":None,"b":None,"hist":{},"ver":0,"vb":{}};bI={"g":None,"c":{},"store":({},{}),"rows":[]};b={};j=[];aW={};L={"q":None,"handler":None,"event":None,"kind":"not hooked"};Q={"tried":False,"tm":None,"la":None};ah=[];bJ=[0];import heapq;cM=re.compile(r"^[0-9,]+\s+");cN=60;cO=1.;ao=HOST.mobile
+	def cP():
+		a=HOST.services.get("pets.list")
+		if a is not None:
+			try:
+				b=a(distance=bu)
+				if b is not None:return[int(d)for d in b]
+			except Exception:pass
+		c=[]
+		for m in HOST.mobiles(bu):
+			try:
+				if m.IsRenamable:c.append(int(m.Serial))
+			except Exception:pass
+		return c
+	def l(v,f="n"):
+		if f=="d1":return "%.1f"%v
+		a=abs(v)
+		if a>=1e6:return "%.2fM"%(v/1e6)
+		if a>=1e4:return "%.1fk"%(v/1e3)
+		if a>=1000:return "%.2fk"%(v/1e3)
+		if abs(v-round(v))<.05:return "%d"%int(round(v))
+		return "%.1f"%v
+	def U(v,f="n"):
+		if f=="d1":return "%.1f"%v if abs(v)<100 else "%d"%int(round(v))
+		if abs(v)<10:return "%.1f"%v
+		if abs(v)<1000:return "%d"%int(round(v))
+		return l(v)
+	def ai(v,f="n"):s=l(v,f);return s if v<0 else "+"+s
+	def D(a):a=int(max(0,a));h,m,s=a//3600,(a//60)%60,a%60;return "%d:%02d:%02d"%(h,m,s)if h else "%d:%02d"%(m,s)
+	def ap(ser):return 0<int(ser or 0)<0x40000000
+	def aX(name):return name.endswith(" (%)")
+	def bK():Kit.kv_load(bo,"|",m,aT)
+	def bL():Kit.kv_save(bo,"|",m,sorted(cI),aT)
+	def aY(a,metric=aS,x=200,y=200,minimized=False):return{"id":a,"metric":metric if metric in F else aS,"seg":"current","x":x,"y":y,"minimized":minimized,"docked":False,"shutting":False,"g":None,"c":{},"store":({},{}),"slots":[],"picker":None,"segpick":None,"detail":None,"dc":{},"detail_row":None,"detail_metric":None,"graph":False,"gcols":[],"gkey":None,"fit":None,"size":None,"drawn":None,"resize_at":0.,"preview":False}
+	def bM():
+		a=[]
+		for f in bj(bp).split(";"):
+			p=f.split(",")
+			if len(p)<6:continue
+			try:c,x,y=int(p[0]),int(p[3]),int(p[4])
+			except ValueError:continue
+			if any(g["id"]==c for g in a):continue
+			x,y=Kit.adapt(x,y,W,0);b=aY(c,p[1],x,y,p[5]=="1");b["seg"]="overall"if p[2]=="overall"else "current";b["graph"]=len(p)>6 and p[6]=="1"
+			if len(p)>8:
+				try:
+					d,e=int(p[7]),int(p[8])
+					if d>0 and e>0:b["size"]=bN(d,e)
+				except ValueError:pass
+			a.append(b)
+		a.sort(key=lambda w:w["id"])
+		if not a or a[0]["id"]!=0:a.insert(0,aY(0))
+		del j[:];j.extend(a[:am])
+	def bN(sw,sh):return max(av,min(b3,sw)),max(60,sh)
+	def bO():
+		if not j:bM()
+		for w in j:w["size"]=None
+		E()
+	def E():
+		a=[]
+		for w in j:
+			g=w["g"]
+			if z(g):w["x"],w["y"]=g.GetX(),g.GetY()
+			b=w.get("size")or(0,0);a.append("%d,%s,%s,%d,%d,%s,%s,%d,%d"%(w["id"],w["metric"],"overall"if w["seg"]=="overall"else "current",int(w["x"]),int(w["y"]),"1"if w["minimized"]else "0","1"if w.get("graph")else "0",int(b[0]),int(b[1])))
+		bk(bp,";".join(a))
+	def bP():
+		del o[:];b,c=ax
+		for d in bj(by).split(";"):
+			p=d.split(",")
+			if len(p)<5 or not p[0].strip():continue
+			try:a=[p[0].strip(),int(p[1]),int(p[2]),int(p[3]),max(b,min(c,int(p[4])))]
+			except ValueError:continue
+			if all(f[0]!=a[0]for f in o)and len(o)<aM:o.append(a)
+	def bQ():bk(by,";".join("%s,%d,%d,%d,%d"%tuple(d)for d in o))
+	def cQ(text):
+		for a in ";,|":text=text.replace(a," ")
+		return " ".join(text.split())[:bz]
+	def bR(kind,n=0):a=time.time();bJ[0]+=1;return{"kind":kind,"n":n,"name":"Fight %d"%n if n else "Overall","start":a,"end":None,"combat":0.,"d":{},"serial":{},"big":[],"fights":0,"uid":bJ[0],"ver":0,"tot":{},"place_t":{}}
+	def aZ():b.clear();b.update({"overall":bR("overall"),"cur":None,"hist":[],"n":0,"last_combat":0.,"c_at":None});a["watch"].clear();a["engaged"].clear();a["pend"],a["orph"]=[],[];C.update({"min":None,"b":None,"ver":C["ver"]+1});C["hist"].clear();C["vb"].clear()
+	def a_():a=b["cur"];return(b["overall"],a)if a is not None else(b["overall"],)
+	def bS(now):
+		m=int(now//60)
+		if m!=C["min"]:
+			a=C["hist"]
+			for k in[d for d in a if d<=m-ay]:del a[k]
+			C["min"]=m;C["b"]=a.setdefault(m,{})
+		return C["b"]
+	def c(b,row,c,ser=None):
+		f=time.time();g=row.endswith(" (%)")
+		if not g and(b!="gold"or row=="Gained"):h=bS(f);h[b]=h.get(b,0.)+c;i=C["vb"];i[b]=i.get(b,0)+1
+		for d in a_():
+			e=d["d"].get(b)
+			if e is None:e=d["d"][b]={}
+			r=e.get(row)
+			if r is None:
+				if len(e)>=cJ:cR(d,b,e)
+				r=e[row]=[0.,0,c,c,f,f]
+			r[0]+=c;r[1]+=1
+			if c>r[2]:r[2]=c
+			if c<r[3]:r[3]=c
+			r[5]=f
+			if ser:d["serial"][(b,row)]=ser
+			if not g:k=d["tot"];k[b]=k.get(b,0.)+c
+			d["ver"]+=1
+		if c and any(n["metric"]in(b,"session")and not n["docked"]for n in j):a["changed"]=True
+	def cR(seg,a,d):
+		b=sorted((abs(g[0]),f)for f,g in d.items()if f!=aU and not f.endswith(" (%)"));o=d.get(aU);c=seg["serial"]
+		for e,k in b[:max(0,len(d)-cK)]:
+			r=d.pop(k);c.pop((a,k),None)
+			if o is None:o=d[aU]=list(r)
+			else:o[0]+=r[0];o[1]+=r[1];o[2],o[3]=max(o[2],r[2]),min(o[3],r[3]);o[4],o[5]=min(o[4],r[4]),max(o[5],r[5])
+	def cS(b,name,ser):
+		c=bS(time.time())
+		if b>c.get("big",0.):c["big"]=b;d=C["vb"];d["big"]=d.get("big",0)+1
+		for e in a_():
+			a=e["big"]
+			if len(a)>=bx and b<=a[-1][0]:continue
+			i=len(a)
+			while i>0 and a[i-1][0]<b:i-=1
+			a.insert(i,(b,name,ser));del a[bx:]
+	def N(seg,a):return seg["tot"].get(a,0)
+	def bT():
+		a=time.time()
+		if b["cur"]is None:b["n"]+=1;b["cur"]=bR("fight",b["n"]);b["overall"]["fights"]+=1
+		b["last_combat"]=a;b["c_at"]=(b["cur"]["combat"],b["overall"]["combat"])
+	def cT(now):
+		a=b["cur"]
+		if a is None:return
+		c=b.get("c_at")
+		if c is not None:a["combat"],b["overall"]["combat"]=c
+		else:
+			f=max(0.,now-b["last_combat"])
+			for e in(a,b["overall"]):e["combat"]=max(0.,e["combat"]-f)
+		b["c_at"]=None;a["end"]=b["last_combat"];d=a["d"].get("dmg_done",{})
+		if d:g=max(d.items(),key=lambda a:a[1][0])[0];a["name"]=g+(" +%d"%(len(d)-1)if len(d)>1 else "")
+		b["hist"].insert(0,a);del b["hist"][m["history"]:];b["cur"]=None
+	def aB(seg):return max(1.,seg["combat"])
+	def aC(seg):return max(1.,(seg["end"]or time.time())-seg["start"])
+	def aj(seg,a,value):
+		if a=="s":return value/aB(seg)
+		if a=="m":return value/(aC(seg)/60.)
+		return value/(max(60.,aC(seg))/3600.)
+	def aD(w):
+		s=w["seg"]
+		if s=="overall":return b["overall"]
+		if s!="current":
+			for h in b["hist"]:
+				if h["n"]==s:return h
+			w["seg"]="current"
+		return b["cur"]or(b["hist"][0]if b["hist"]else None)
+	cU={"overall":"Overall","current":"Current"}
+	def aE(w):return cU.get(w["seg"])or "Fight %d"%w["seg"]
+	def cV(seg):
+		if seg is None:return ""
+		if seg["kind"]=="overall":return D(time.time()-seg["start"])
+		return D(aB(seg))
+	def bU(a):return abs(a[1][0])
+	def X(seg,v,r,head=l):return "%s (%s/%s)"%(head(v),U(aj(seg,r,v)),r)
+	def a0(a,seg,e=None):
+		r,b,f,r,r=F[a]
+		if seg is None:return(["No fight yet."],[])
+		i=cV(seg)
+		if a=="session":return cY(seg)
+		if a=="big":t=seg["big"]if e is None else seg["big"][:e];g=[(G,y,l(y),d_,None)for y,G,d_ in t];c=(["Biggest %s on %s"%(l(seg["big"][0][0]),seg["big"][0][1])]if seg["big"]else["No hits yet."]);return(c+[i],g)
+		d=seg["d"].get(a,{})
+		if a=="gold":n=d.get("Gained",[0.])[0];o=d.get("Spent / banked",[0.])[0];j=n-o;g=[("Gained",n,X(seg,n,"h"),None,d.get("Gained")),("Spent / banked",o,l(o),None,d.get("Spent / banked")),("Net",abs(j),X(seg,j,"h",ai),None,None)];return(["Net %s"%ai(j),"%s per hour"%U(aj(seg,"h",j)),i],g)
+		if a=="gold_place":return cX(seg,d,e,i)
+		h=N(seg,a)
+		if e is None:p=sorted(d.items(),key=bU,reverse=True)
+		elif e<=0:p=[]
+		else:p=heapq.nlargest(e,d.items(),key=bU)
+		g=[]
+		for q,s in p:
+			v=s[0];k=[]
+			if b:k.append(U(aj(seg,b,v),f)+(""if b=="s"else "/"+b))
+			if m["pct"]and h and not aX(q)and v>0:k.append("%d%%"%int(round(100.*v/h)))
+			u=(ai(v,f)if a in("skills","stats")else l(v,f));w=u+(" (%s)"%", ".join(k)if k else "");g.append((q,abs(v),w,seg["serial"].get((a,q)),s))
+		if a in("skills","stats"):c=["Total %s"%ai(h,f)]
+		elif a=="cures":x=N(seg,"cures_mine");c=["Cures %s"%l(h),"by you %s"%l(x)]
+		else:c=["Total %s"%l(h,f)]
+		if b:c.append("%s %s"%(U(aj(seg,b,h),f),bH[b]))
+		c.append("in combat "+D(seg["combat"])if b=="s"else i);return(c,g)
+	def bV(seg,name,gold):a=seg["place_t"].get(name,0.);return gold/(max(bC,a)/3600.),a
+	def cW(row):return row[1]
+	def cX(seg,d,g,dur):
+		j=seg["place_t"];c=list(d)
+		for k,n in j.items():
+			if n>=bC and k not in d:c.append(k)
+		e=sum(s[0]for s in d.values());a=[]
+		for f in c:
+			r=d.get(f);b=r[0]if r is not None else 0.;h,p=bV(seg,f,b);i=[l(b)]
+			if m["pct"]and e and b>0:i.append("%d%%"%int(round(100.*b/e)))
+			a.append((f,h,"%s/h (%s)"%(U(h),", ".join(i)),None,r))
+		a.sort(key=cW,reverse=True)
+		if g is not None:del a[max(0,g):]
+		o=len(c);return(["Gained %s"%l(e),Kit.count(o,"place"),dur],a)
+	def cY(seg):
+		a=aC(seg);c=seg["combat"];f,g,h=N(seg,"dmg_done"),N(seg,"dmg_taken"),N(seg,"heal_done");i,j=N(seg,"kills"),N(seg,"deaths");d=seg["d"].get("gold",{});k=d.get("Gained",[0.])[0]-d.get("Spent / banked",[0.])[0];e=N(seg,"skills");b=[("Time",D(a)),("In combat","%s (%d%%)"%(D(c),int(100*c/a)))]
+		if seg["kind"]=="overall":b.append(("Fights","%d"%seg["fights"]))
+		b+=[("Damage done",X(seg,f,"s")),("Damage taken",X(seg,g,"s")),("Healing done",X(seg,h,"s")),("Kills",X(seg,i,"h")),("Deaths",l(j)),("Gold",X(seg,k,"h",ai)),("Skill gain","%s (%s/h)"%(ai(e,"d1"),U(aj(seg,"h",e),"d1"))),("Items gained",l(N(seg,"loot"))),("Spells cast",l(sum(s[1]for n,s in seg["d"].get("spells",{}).items()if n not in("Fizzled","Interrupted","Out of mana"))))];m=[(r,0.,t,None,None)for r,t in b];return([seg["name"]if seg["kind"]=="fight"else "Session",D(a)],m)
+	def cZ():
+		try:
+			import clr;clr.AddReference("System.Collections.Concurrent");clr.AddReference("System.Linq.Expressions");from System import Array,Int32,UInt32,Object,EventHandler,Tuple,Type,AppDomain;from System.Reflection import BindingFlags;from System.Collections.Concurrent import ConcurrentQueue;from System.Linq.Expressions import Expression,ParameterExpression;m=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static;e=API.GetType().Assembly;n=e.GetType("ClassicUO.Game.Managers.EventSink");f=e.GetType("ClassicUO.Game.GameObjects.Entity");a=n.GetEvent("OnEntityDamage",m);o,b,g=(clr.GetClrType(Object),clr.GetClrType(Int32),clr.GetClrType(UInt32));h=Tuple[UInt32,Int32];q=ConcurrentQueue[h]();c=Expression.Parameter(o,"sender");i=Expression.Parameter(b,"amount");j=Expression.Constant(q);p=Expression.Convert(Expression.PropertyOrField(Expression.Convert(c,f),"Serial"),g);r=clr.GetClrType(h).GetConstructor(Array[Type]([g,b]));s=Expression.Call(j,q.GetType().GetMethod("Enqueue"),Array[Expression]([Expression.New(r,Array[Expression]([p,i]))]));t=Expression.LessThan(Expression.Property(j,"Count"),Expression.Constant(cl,b));u=Expression.IfThen(Expression.AndAlso(Expression.TypeIs(c,f),t),s);d=Expression.Lambda[EventHandler[Int32]](u,Array[ParameterExpression]([c,i])).Compile();k=AppDomain.CurrentDomain;l=k.GetData(aK)
+			if l is not None:safe(lambda:a.GetRemoveMethod(True).Invoke(None,Array[Object]([l])))
+			a.GetAddMethod(True).Invoke(None,Array[Object]([d]));k.SetData(aK,d);L.update({"q":q,"handler":d,"event":a,"kind":"exact (per mobile)"});return True
+		except Exception as v:L.update({"q":None,"handler":None,"event":None});L["kind"]="amounts only (%s)"%(str(v)[:50]or "no hook");return False
+	def c_():
+		h,a=L.get("handler"),L.get("event")
+		if h is None or a is None:return
+		with Kit.quiet:from System import Array,Object,AppDomain;a.GetRemoveMethod(True).Invoke(None,Array[Object]([h]));AppDomain.CurrentDomain.SetData(aK,None)
+		L.update({"q":None,"handler":None,"event":None,"kind":"not hooked"})
+	def c0(*b):
+		if not a["active"]:return
+		if not a["poked"]:a["poked"]=True;HOST.poke(T,False)
+		if L.get("q")is not None:return
+		for c in b:
+			try:a["amtq"].append(int(c))
+			except Exception:continue
+			del a["amtq"][:-200];return
+	def c1():
+		if not Q["tried"]:
+			Q["tried"]=True
+			try:from System.Reflection import BindingFlags;a=BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic;b=API.GetType().GetField("World",a).GetValue(API);c=b.GetType().GetProperty("TargetManager",a).GetValue(b,None);Q["tm"],Q["la"]=c,c.GetType().GetProperty("LastAttack",a)
+			except Exception:Q["tm"]=Q["la"]=None
+		if Q["la"]is None:return 0
+		return int(Q["la"].GetValue(Q["tm"],None)or 0)
+	def c2(*b):
+		if not a["active"]:return
+		for c in b:
+			try:a["used"].append(int(c));del a["used"][:-30];return
+			except Exception:continue
+	def c3(*b):
+		if not a["active"]:return
+		for c in b:
+			t=safe(lambda:c.Title)
+			if t:a["buffq"].append(str(t));del a["buffq"][:-50];return
+	def c4():
+		e=time.time();c={"me":None,"dmg":[],"info":{},"fhp":{},"wst":{},"used":[],"pack":None,"friends":None};p=HOST.me()
+		if p is None:return c
+		b=int(p.Serial)
+		if b!=a["my_ser"]or e>=a["next_name"]:a["my_name"]=str(p.Name or "");a["my_ser"],a["next_name"]=b,e+cO
+		g={"ser":b,"name":a["my_name"],"hits":int(p.Hits),"hmax":int(p.HitsMax),"mana":int(p.Mana),"x":int(p.X),"y":int(p.Y),"gold":int(p.Gold or 0),"dead":bool(p.IsDead),"war":bool(p.InWarMode),"poison":bool(p.IsPoisoned),"map":int(API.GetMap())};c["me"]=g;q=L["q"]
+		if q is not None:
+			for w in range(co):
+				x,o=q.TryDequeue()
+				if not x:break
+				c["dmg"].append((int(o.Item1),int(o.Item2)))
+		j=a["mobs"];h=c["info"]
+		for b,w in c["dmg"]:
+			if b not in j and b not in h and b!=g["ser"]:d=ao(b);h[b]=str(d.Name or "")if d is not None else ""
+		c["lt"]=int(API.LastTargetSerial or 0);c["la"]=c1()
+		for k in(a["engaged"],(c["lt"],c["la"])):
+			for b in k:
+				if ap(b)and b not in j and b not in h and b!=g["ser"]:
+					d=ao(b)
+					if d is not None:h[b]=str(d.Name or "")
+		if e>=a["next_friends"]:
+			a["next_friends"]=e+cb;r=[int(G)for G in API.GetPartyMemberSerials()or[]];s=cP();t=[int(d_)for d_ in API.GetAllFriends()or[]];c["friends"]=(r,s,t);i,u=[],set()
+			for k in(t,s,r):
+				for f in k:
+					if f!=g["ser"]and f not in u:
+						u.add(f)
+						if ao(f)is not None:i.append(f)
+		else:i=None
+		y=c["friends"]is not None;z=c["fhp"]
+		for b in a["present"]:
+			d=ao(b)
+			if d is not None:A=None if y else j.get(b);z[b]=(int(d.Hits),int(d.HitsMax),bool(d.IsPoisoned),bool(d.IsDead),A or str(d.Name or ""))
+		if i is not None:a["present"]=i
+		l=c["wst"]
+		for b,B in a["watch"].items():
+			if e-B["t"]>cm:continue
+			if ao(b)is not None:l[b]="alive"
+			elif API.FindMobile(b|cf)is not None:l[b]="dying"
+			else:l[b]="gone"
+		if a["used"]:
+			C,a["used"]=a["used"],[]
+			for b in C:
+				n=API.FindItem(b)
+				if n is not None:c["used"].append((int(n.Graphic),str(n.Name or "")))
+		if not m["scan"]:a["pscan"]=None
+		elif a["pscan"]is None and e>=a["next_scan"]:
+			a["next_scan"]=e+cc
+			if API.Backpack:a["pscan"]=[HOST.pack_items(True),0,[],0,0,e]
+		v=a["pscan"]
+		if v is not None:c["pack"]=c5(v,e)
+		return c
+	def c5(e,now):
+		m,i,g,h,j,n=e;o=len(m);p=min(o,i+cN)
+		try:
+			while i<p:b=m[i];c=int(b.Amount or 1)or 1;h+=int(b.Serial or 0);j+=c;g.append((b,c));i+=1
+		except Exception:
+			a["pscan"]=None
+			if n==now:raise
+			a["next_scan"]=0.;return
+		if i<o:e[1],e[3],e[4]=i,h,j;return
+		a["pscan"]=None;f=(len(g),h,j)
+		if f==a["pack_sig"]and a["pack"]is not None:a["pack_cand"]=None;return
+		if n!=now and a.get("pack_cand")!=f:a["pack_cand"]=f;a["next_scan"]=0.;return
+		a["pack_cand"]=None;a["pack_sig"]=f;d={}
+		for b,c in g:
+			k=(int(b.Graphic),int(b.Hue))
+			if k in d:d[k][0]+=c
+			else:d[k]=[c,None,b]
+		q=a["pack"]or{}
+		for k,v in d.items():
+			l=q.get(k)
+			if l is None or v[0]>l[0]:
+				try:v[1]=str(v[2].Name or "")
+				except Exception:v[1]=""
+			else:v[1]=l[1]
+			v[2]=None
+		return d
+	def a1(ser):b=a["me"];return(b is not None and ser==b["ser"])or ser in a["friendly"]
+	def a2(ser):
+		b=a["me"]
+		if b is not None and ser==b["ser"]:return b["name"]or "You"
+		return a["mobs"].get(ser)or "Unknown"
+	def bW(ser,now):t=a["engaged"].get(ser);return t is not None and now-t<=m["engage"]
+	def aq(now,kind,method,secs):
+		b=kind=="cure+";kind="cure"if b else kind
+		for o in list(a["orph"]):
+			if o[1]==kind and now-o[0]<=bw:
+				a["orph"].remove(o);bX(kind,method,o[2],o[3],o[4])
+				if not b:return
+		a["pend"].append([now+secs,kind,method,b])
+	def bX(kind,method,ser,name,a):
+		if kind=="heal":
+			c("heal_done",name,a,ser)
+			if not aX(name):c("heal_by",method,a)
+		else:c("cures_mine",method,1)
+	def bY(kind,now,ser,name,b):
+		for p in a["pend"]:
+			if p[1]==kind and now<=p[0]:
+				if not p[3]:a["pend"].remove(p)
+				bX(kind,p[2],ser,name,b);return
+		a["orph"].append((now,kind,ser,name,b))
+	def c6(s,now):
+		d=s["me"]
+		if d is None:return
+		f,a["me"]=a["me"],d;q=a["mobs"]
+		if len(q)>cp:q.clear()
+		for b,e in s["info"].items():
+			if e:q[b]=e
+		if a["pend"]:a["pend"]=[d_ for d_ in a["pend"]if d_[0]>=now]
+		if a["orph"]:a["orph"]=[d0 for d0 in a["orph"]if now-d0[0]<=bw]
+		if s["friends"]is not None:
+			K,L,M=s["friends"];A={}
+			for N,O in(("friend",M),("pet",L),("party",K)):
+				for b in O:A[b]=N
+			A.pop(d["ser"],None);a["friendly"]=A
+		j,r=s.get("lt",0),s.get("la",0)
+		if r and d["war"]and ap(r)and not a1(r):a["engaged"][r]=now
+		if(ap(j)and not a1(j)and(j!=a["prev_lt"]or now-a["cast_t"]<=2.)):a["engaged"][j]=now
+		a["prev_lt"]=j
+		if a["engaged"]:
+			for b in[d1 for d1,d2 in a["engaged"].items()if now-d2>m["engage"]]:a["engaged"].pop(b,None)
+		B=0
+		if f is not None and d["hits"]<f["hits"]:B=f["hits"]-d["hits"]
+		for b,P in s["dmg"]:a3(b,P,now)
+		if a["amtq"]:
+			t=None
+			for g in a["amtq"]:
+				if B>=g:B-=g;a3(d["ser"],g,now)
+				else:
+					if t is None:t=max(a["engaged"].items(),key=lambda a:a[1])[0]if a["engaged"]else 0
+					a3(t,g,now)if t else c("dmg_nearby","Unknown",g)
+			a["amtq"]=[]
+		u=s["fhp"];u[d["ser"]]=(d["hits"],d["hmax"],d["poison"],d["dead"],d["name"]or "You")
+		for b,(I,v,C,D,e)in u.items():
+			if e:q[b]=e
+			e=a2(b);h=a["prev"].get(b);a["prev"][b]=(I,v,C,D)
+			if h is None:continue
+			if D and not h[3]:
+				if now-a["dead_seen"].get(b,0)>10:
+					c("deaths",e,1,b);a["dead_seen"][b]=now
+					if b==d["ser"]and m["recap"]:df(now)
+				continue
+			if D or h[3]:continue
+			E=b==d["ser"]or a["friendly"].get(b)=="party"or v not in(25,100);F=I-h[0]
+			if F>=(m["min_heal"]if E else 1)and v==h[1]:x=e if E else e+" (%)";g=F if E else F*100./max(1,v);c("heal_taken",x,g,b);bY("heal",now,b,x,g)
+			if C and not h[2]:c("poisoned",e,1,b)
+			elif h[2]and not C:c("cures",e,1,b);bY("cure",now,b,e,1)
+		if len(a["prev"])!=len(u):
+			for b in[d3 for d3 in a["prev"]if d3 not in u]:a["prev"].pop(b,None)
+		for b,Q in s["wst"].items():
+			w=a["watch"].get(b)
+			if w is None:continue
+			if Q=="dying":
+				a["watch"].pop(b,None)
+				if w["friend"]:
+					if now-a["dead_seen"].get(b,0)>10:c("deaths",w["name"],1,b);a["dead_seen"][b]=now
+				elif w["mine"]and now-w["mine"]<=cd:c("kills",w["name"],1)
+		if a["watch"]:
+			for b in[d4 for d4,d5 in a["watch"].items()if now-d5["t"]>bt]:a["watch"].pop(b,None)
+		if a["dead_seen"]:
+			for b in[d6 for d6,d7 in a["dead_seen"].items()if now-d7>30]:a["dead_seen"].pop(b,None)
+		i=a["hp_log"]
+		if not i or i[-1][1]!=d["hits"]or i[-1][2]!=d["hmax"]:
+			i.append((now,d["hits"],d["hmax"]))
+			if len(i)>bE:del i[:len(i)-bE]
+		if f is not None and d["mana"]<f["mana"]and not d["dead"]:G=a["last_spell"];x=G[1]if G is not None and now-G[0]<=ck else "Other";c("mana",x,f["mana"]-d["mana"])
+		if f is not None and f["ser"]==d["ser"]:
+			l=d["gold"]-f["gold"]
+			if l>0:c("gold","Gained",l);c("gold_place",a["place"]or bB,l)
+			elif l<0:c("gold","Spent / banked",-l)
+		R=(d["x"],d["y"],d["map"])
+		if m["travel"]and a["pos"]is not None and(d["x"]or d["y"]):
+			S,T,U=a["pos"];H=max(abs(d["x"]-S),abs(d["y"]-T))
+			if U!=d["map"]or H>ce:c("travel","Recalls, gates & teleports",1)
+			elif H>0:c("travel","Tiles walked",H)
+		a["pos"]=R
+		for V,e in s["used"]:
+			n=cH.get(V)
+			if n is None:continue
+			W=n[0]+" potion";c("consum",W,1)
+			if n[1]:aq(now,n[1],n[0]+" potion",ci)
+		o=s["pack"]
+		if o is not None:
+			p=a["pack"];X=p is not None and len(p)==0 and len(o)>0
+			if p is not None and not X:
+				for k,J in o.items():
+					y=p.get(k);z=J[0]-(y[0]if y else 0)
+					if z>0 and k[0]!=cg:Y=cM.sub("",(J[1]or "").strip())or "Item 0x%04X"%k[0];c("loot",Y.title(),z)
+					elif z<0 and k[0]in aA:c("consum",aA[k[0]],-z)
+				for k,y in p.items():
+					if k not in o and k[0]in aA:c("consum",aA[k[0]],y[0])
+			a["pack"]=o
+		if a["buffq"]:
+			for Z in a["buffq"]:c("buffs",Z,1)
+			a["buffq"]=[]
+	def a3(ser,dmg,now):
+		d=a["me"];b=a2(ser);c("dmg_nearby",b,dmg,ser);w=a["watch"].get(ser)
+		if w is None:
+			if len(a["watch"])>=cn:e=min(a["watch"].items(),key=lambda a:a[1]["t"])[0];a["watch"].pop(e,None)
+			w=a["watch"][ser]={"name":b,"t":now,"mine":0.,"friend":False}
+		w["t"],w["name"]=now,b
+		if a1(ser):
+			w["friend"]=ser!=d["ser"];c("dmg_taken",b,dmg,ser);bT()
+			if ser==d["ser"]:de(dmg,now)
+		elif bW(ser,now):a["engaged"][ser]=now;w["mine"]=now;c("dmg_done",b,dmg,ser);cS(dmg,b,ser);bT()
+	def c7(now):
+		g=a["me"];e=g["name"]if g else None
+		for h in a["jr"].new():
+			f=h.name;b=h.low.strip()
+			if e and f==e:
+				d=bG.get(b)
+				if d is not None:
+					c("spells",d[0],1);a["last_spell"]=(now,d[0]);a["cast_t"]=now
+					if d[1]=="heal":aq(now,"heal",d[0],ch)
+					elif d[1]in("cure","cure+"):aq(now,d[1],d[0],cj)
+				continue
+			if b.startswith(cL):continue
+			if b.startswith(cB):c("spells","Fizzled",1)
+			elif b.startswith(cC):c("spells","Interrupted",1)
+			elif b.startswith(cD):c("spells","Out of mana",1)
+			elif b.startswith(cy):c("consum","Bandages",1)
+			elif b.startswith(cA):aq(now,"cure","Bandage",bv)
+			elif b.startswith(cz):aq(now,"heal","Bandage",bv)
+			else:
+				if f and e:
+					d=bG.get(b)
+					if d is not None:
+						if d[0]in cx:dc(now,f,d[0])
+						continue
+				if "your skill in"in b:
+					m=cE.search(b)
+					if m:v=float(m.group(3));c("skills",m.group(1).strip().title(),v if m.group(2).lower()=="increased"else-v);continue
+				if "your "in b and " has "in b:
+					m=cF.search(b)
+					if m:v=int(m.group(3));c("stats",m.group(1).title(),v if m.group(2).lower()=="increased"else-v);continue
+				if "you have "in b and("fame"in b or "karma"in b):
+					m=cG.search(b)
+					if m:c("fame","%s %s"%(m.group(2).title(),m.group(1).lower()),1)
+	def c8(me):
+		c=HOST.guard_area()
+		if c:return str(c)
+		a=None;x,y,m=me["x"],me["y"],me["map"]
+		for b in o:
+			if b[3]==m:
+				d=max(abs(x-b[1]),abs(y-b[2]))
+				if d<=b[4]and(a is None or d<a[0]):a=(d,b[0])
+		return a[1]if a is not None else bB
+	def c9(now,e):
+		b=a["me"]
+		if b is None:return
+		if a["place"]is None or now>=a["next_place"]:a["next_place"]=now+cq;a["place"]=c8(b)
+		c=a["place"]
+		for f in a_():d=f["place_t"];d[c]=d.get(c,0.)+e
+	def da(name,radius):
+		b=a["me"]
+		if b is None or not(b["x"]or b["y"]):H("position unknown; try again.",ak);return
+		name=cQ(name)or "Spot %d"%(len(o)+1);d,e=ax;radius=max(d,min(e,int(radius)));c=[g for g in o if g[0].lower()==name.lower()]
+		if not c and len(o)>=aM:H("%d spots at most; remove one first."%aM,ak);return
+		for f in c:o.remove(f)
+		o.append([name,b["x"],b["y"],b["map"],radius]);bQ();a["place"]=None;H("spot \"%s\" named here (%d, %d), %d tiles round."%(name,b["x"],b["y"],radius),au);be(T)
+	def bZ(name):
+		n=len(o);o[:]=[d for d in o if d[0]!=name]
+		if len(o)!=n:bQ();a["place"]=None;be(T)
+	def db(now):
+		b=a["fnames"]
+		if b is not None and b[0]==now:return b[1]
+		c=a["mobs"];d=set(c.get(f)for f in a["friendly"]if c.get(f));a["fnames"]=(now,d);return d
+	def dc(now,name,spell):
+		if name in db(now):return
+		c=Kit.spell_info(spell);d=float(c[3])if c else 0.;b=a["casts"];b.append([now,name,spell,False,d])
+		while b and(len(b)>cv or now-b[0][0]>b[0][4]+bF):b.pop(0)
+	def dd(now):
+		for c in a["casts"]:
+			f=now-c[0]
+			if not c[3]and c[4]-cw<=f<=c[4]+bF:c[3]=True;return "%s: %s"%(c[1],c[2]),c[1],0
+		b=None
+		for g,t in a["engaged"].items():
+			if b is None or t>b[1]:b=(g,t)
+		if b is not None and bW(b[0],now):d=a2(b[0]);return d+"?",d,b[0]
+		e=a["me"]
+		if e is not None and e["poison"]:return "Poison",None,0
+		return "Unknown",None,0
+	def de(dmg,now):
+		c=a["me"];d,e,f=dd(now);b=a["taken"];b.append((now,dmg,d,e,f,c["hits"],c["hmax"]))
+		if len(b)>bD:del b[:len(b)-bD]
+	def df(now):
+		e=now-an;f=[n for n in a["taken"]if n[0]>=e];c,d=[],None
+		for h in a["hp_log"]:
+			if h[0]<e:d=h
+			else:c.append(h)
+		if d is not None:c.insert(0,(e,d[1],d[2]))
+		g=a["me"]
+		if g is not None:c.append((now,g["hits"],g["hmax"]))
+		i=set(r[3]for r in f if r[3]and not r[4]);j={}
+		if i:
+			for k,b in a["mobs"].items():
+				if b in i:j[b]=k
+			for m in API.GetAllMobiles()or[]:
+				try:
+					b=str(m.Name or "")
+					if b in i:j[b]=int(m.Serial)
+				except Exception:continue
+		l=[(s[0],s[1],s[2],s[4]or j.get(s[3],0),s[5],s[6])for s in f];a["recap"]={"t":now,"rows":l,"hp":c,"total":sum(t[1]for t in f)};a["recap_show"]=True
+	def dg(w):
+		c=aD(w);e=aE(w)
+		if c is None:c,e=b["overall"],"Overall"
+		f=a["me"];j=f["ser"]if f else int(safe(lambda:API.Player.Serial,0)or 0);k=Kit.data_path(aP%j);g=c["name"]if e!=c["name"]else "";d=["Meters export: %s%s, %s"%(e," (%s)"%g if g else "",time.strftime("%Y-%m-%d %H:%M:%S",time.localtime(time.time()))),("Session time %s, in combat %s"%(D(aC(c)),D(c["combat"]))if c["kind"]=="overall"else "Fight time %s"%D(aB(c))),""]
+		for h in ag:
+			l,i=a0(h,c,cr);d.append("== %s =="%F[h][0]);d.append("   "+"   ".join(n for n in l if n))
+			for m,r in enumerate(i):d.append("   %2d. %-30s %s"%(m+1,r[0],r[2]))
+			if not i:d.append("   (nothing)")
+			d.append("")
+		a["to_write"].append((k,"\n".join(d)+"\n",e))
+	def dh():
+		while a["to_write"]and not a["shutting"]:
+			b,c,d=a["to_write"].pop(0)
+			try:
+				with open(b,"w")as e:e.write(c)
+				H("%s exported to %s."%(d,b),au)
+			except Exception as f:H("couldn't write %s (%s)."%(b,f),ak)
+	M=ab
+	def I(w):return T if w["id"]==0 else "%s_%d"%(T,w["id"])
+	def Y(w):return ae if w["id"]==0 else "%s %d"%(ae,w["id"]+1)
+	def di(w,g):
+		def b(*b):
+			if w["g"]is g and not a["shutting"]:
+				w["g"]=None
+				if w["id"]==0:HOST.disable(T)
+				else:h.add(("closed",w["id"]),dup=True)
+		return b
+	def dj(w,slot,g):
+		def a(*a):
+			if w.get(slot)is g:w[slot]=None
+		return a
+	def dk(w,i):
+		def a(*c):
+			a=w["slots"]
+			if i>=len(a):return
+			b=a[i].get("ser")
+			if bc():
+				if b:h(("follow",b))()
+				return
+			h(("detail",w["id"],i))()
+		return a
+	def b_(w):n=8+35+p("New")+14+35+p("Report")+8;return n+14+35+p("Reset")if w["id"]==0 else n
+	def A(w):
+		x,y=w["x"],w["y"];C=w["g"]
+		if z(C):x,y=C.GetX(),C.GetY()
+		w["g"]=None;f,i,ad,ae=({},{}),{},[],[];ag=w["metric"];ah=("Close "+Y(w)+(" (this window only)"if w["id"]else " (turns it off; the Modules tab turns it back on)"));w["resize_at"],w["preview"]=0.,False
+		if w["minimized"]:g=G.CreateGump(True,True);a,b=bq,b6;i["status"]=Kit.mini_bar(g,f,a,b,Y(w),I(w),h(("toggle_min",w["id"])),close_tip=ah)
+		else:
+			j=m["rows"];n=M+30+B;d=n+30+B;o=56+(aO if w.get("graph")else 0);aq=b_(w);D=w["fit"];t=D if D is not None else w["size"];ar=(max(120,t[0])if t else W)-2*M;ai=aq>ar
+			if ai:o+=26
+			k=o+j*K;a,b=W,d+k+M
+			if t is not None:
+				a,b=max(120,t[0]),t[1];j=max(1,(b-d-M-o)//K);k=max(o+j*K,b-d-M)
+				if D is not None:k=max(30,min(k,b-d-M));j=max(0,(k-o)//K)
+				b=d+k+M
+			c=a-2*M
+			if D is None:x,y=Kit.clamp(x,y,a,b);at=d+o+K+M;g=G.CreateModernGump(x,y,a,b,True,min(av,a),min(at,b),dl(w));g.SetAlpha(0)
+			else:g=G.CreateGump(True,True)
+			bh(g,a,b,mouse=False);au=0 if Kit.zone_up(I(w))else 84+Kit.DOCK_DX;aw=(ab+30+p(Y(w).upper())+16+au+35+p("Settings")+ab);Kit.title_bar(g,f,a,Y(w),I(w),h(("toggle_min",w["id"])),h(("to_bar",w["id"])),h(("settings",))if a>=aw else None,close_tip=ah);R(g,M,n,c,30);N=M+8;O(g,f,"prev",b8,N,n+4,None,"Show previous display",on_click=h(("step",w["id"],-1)));O(g,f,"next",Kit.ART_PLAY,N+32,n+4,None,"Show next display",on_click=h(("step",w["id"],1)));H,ax,ax,aj,ak=F[ag];Q=N+68;T=H if Q+35+p(H)+10+35+40<=M+c-6 else None;O(g,f,"pick",aa,Q,n+4,T,"Pick what this window shows"+(""if T else " (now: %s)"%H),on_click=h(("picker",w["id"])));J=Q+(35+p(H)if T else 30)+10;i["seg_room"],i["iw"]=max(20,M+c-6-J-35),c;az=u(aE(w),i["seg_room"]);i["seg"]=O(g,f,"segs",aa,J,n+4,az,"Pick a segment: current fight, Overall or an earlier fight",on_click=h(("segpick",w["id"])));R(g,M,d,c,k);i["head"]=e(g,"",M+8,d+5,q);al="Alt+click: auto-follow (again to stop)"
+			if ag in("session","big","gold"):an=al if ak else None
+			else:an="Show this row's details"+(". "+al if ak else "")
+			U=min(br,int(c*.45));aA=c-12-U-10
+			for l in range(j):v=d+26+l*K;L=G.CreateGumpSimpleProgressBar(c-12,K-2,b9,aj,0,100);L.SetPos(M+6,v);L.SetAcceptMouseInput(False);g.Add(L);ln=e(g,"",M+10,v+1,P);lv=e(g,"",M+c-6-U,v+1,P);ad.append({"bar":L,"name":ln,"val":lv,"ser":None,"key":None,"prog":None,"nw":aA,"vw":U})
+			for l in range(j):v=d+26+l*K;ac(g,M+6,v,c-12,K-2,dk(w,l),an)
+			r=d+26+j*K+4
+			if w.get("graph"):
+				gy=r-2;i["gcap"]=e(g,"",M+10,gy,q);ao=gy+18+aN;ap=max(1,min(ay,(c-12)//(af+1)));gx=M+6+(c-12-ap*(af+1))//2
+				for l in range(ap):A=G.CreateGumpColorBox(.9,aj);A.SetRect(gx+l*(af+1),ao-1,af,1);A.IsVisible=False;A.SetAcceptMouseInput(False);g.Add(A);ae.append({"box":A,"x":gx+l*(af+1),"h":0})
+				i["gbase"]=ao;r+=aO
+			O(g,f,"new",aa,M+8,r,"New","Open another window (up to %d)"%am,on_click=h(("new",)));rx=M+8+35+p("New")+14;O(g,f,"report",aa,rx,r,"Report","Post the top %d rows to party chat (if set and in a party), else the journal"%aJ,on_click=h(("report",w["id"])))
+			if w["id"]==0:aB=r+26 if ai else r;O(g,f,"reset",Z,a-M-8-35-p("Reset"),aB,"Reset","Clear all meters; new session",on_click=h(("reset",)))
+		w["x"],w["y"]=bm(g,x,y,a,b,I(w),w["minimized"]and w["docked"],di(w,g),E,w,{"g":g,"c":i,"store":f,"slots":ad,"vkey":None,"gcols":ae,"gkey":None,"drawn":(a,b)})
+		for aC in("picker","segpick","detail"):
+			s=w.get(aC)
+			if z(s)and not w["minimized"]:
+				X=Kit.scroll_info(s)
+				if X is not None:sw,sh=int(X["w"]),int(X["h"])
+				else:sw,sh=int(s.GetWidth()or V),int(s.GetHeight()or 200)
+				J,sy=a4(w,sw);Kit.place(s,J,sy,sw,sh);bi(s,g)
+		ba(w);S(C)
+	def dl(w):
+		def a(*a):
+			w["resize_at"]=time.time();g=w["g"]
+			if w["preview"]or w["fit"]is not None or w["minimized"]or not z(g):return
+			if(int(g.GetWidth()),int(g.GetHeight()))!=w["drawn"]:w["preview"]=True;g.SetAlpha(.55)
+		return a
+	def dm(w):
+		g=w["g"];w["preview"]=False
+		if not z(g)or w["minimized"]:return
+		b,a=int(g.GetWidth()),int(g.GetHeight())
+		if w["fit"]is not None:
+			g.SetAlpha(0)
+			if(b,a)!=w["drawn"]:A(w)
+			return
+		c=w["drawn"]or(0,0)
+		if abs(b-c[0])<=2 and abs(a-c[1])<=2:g.SetAlpha(0);return
+		d=bl()[1]
+		if d>0:a=min(a,d)
+		w["size"]=bN(b,a);A(w);E()
+	def a4(w,width):
+		g=w["g"];r=Kit.rect(g)if z(g)else None;x,y=(r[0],r[1])if r is not None else(w["x"],w["y"]);b=bl()[0];a=x+((w.get("drawn")or(W,0))[0])+4
+		if b and a+width>b:a=max(0,x-width-4)
+		return a,y
+	def aF(width,a,title,store,b,action,g=None):
+		if g is None:g=G.CreateGump(True,True)
+		bh(g,width,a);R(g,M,M,width-2*M,30);e(g,title,M+30,M+7,al);O(g,store,b,Z,width-M-54,M+4,None,"Close this window",on_click=h(action));return g
+	def a5(w,slot):S(w[slot]);w[slot]=None
+	def a6(w,slot,g,width,a):b,c=a4(w,width);bm(g,b,c,width,a,None,False,dj(w,slot,g),None,w,{slot:g});bi(g,w["g"])
+	def a7(w):
+		a5(w,"picker");a=V-2*M;c=(a-24)//2;f=[28+((len(v)+1)//2)*22+6 for x,v in aR];i=28+2*22+6;j=M+30+sum(G+B for G in f)+i+B+M;g=aF(V,j,"DISPLAYS",({},{}),"pclose",("close_sub",w["id"],"picker"));y=M+30+B
+		for(r,s),k in zip(aR,f):
+			R(g,M,y,a,k,r)
+			for l,b in enumerate(s):m=M+12+(l%2)*(c+12);n=y+28+(l//2)*22;t=al if b==w["metric"]else P;e(g,u(F[b][0],c-4),m,n,t);ac(g,m-2,n-2,c,20,h(("metric",w["id"],b)),"Show %s in this window"%F[b][0])
+			y+=k+B
+		R(g,M,y,a,i,"THIS WINDOW");o=bool(w.get("graph"));d="on"if o else "off";e(g,u("Last-hour graph",a-36-p(d)),M+12,y+28);e(g,d,M+a-12-p(d),y+28,au if o else q);ac(g,M+8,y+26,a-16,20,h(("graph",w["id"])),"Show or hide the last hour under the rows, one bar per minute");e(g,u("Export this segment",a-24),M+12,y+50);ac(g,M+8,y+48,a-16,20,h(("export",w["id"])),"Write every display to %s in the VirtueAssistantSettings folder"%(aP.replace("%08X","<serial>")));a6(w,"picker",g,V,j)
+	def dn(w):
+		a5(w,"segpick");c=V-2*M;d=[("current","Current fight"+(" (going on)"if b["cur"]else " (or the last)"),""),("overall","Overall (session)",D(time.time()-b["overall"]["start"]))]
+		for a in b["hist"]:d.append((a["n"],"#%d  %s"%(a["n"],a["name"]),"%s  %s"%(D(aB(a)),l(N(a,"dmg_done")))))
+		i=28+len(d)*22+6;j=M+30+B+i+M;g=aF(V,j,"SEGMENTS",({},{}),"sclose",("close_sub",w["id"],"segpick"));y=M+30+B;R(g,M,y,c,i,"WHAT TO SHOW  (fight time, damage done)");k=110
+		for o,(m,p,n)in enumerate(d):
+			f=y+28+o*22;r=al if m==w["seg"]else P;e(g,u(p,c-24-k-6),M+12,f,r)
+			if n:e(g,n,M+c-12-k,f,q)
+			ac(g,M+8,f-2,c-16,20,h(("seg",w["id"],m)),"Show this segment")
+		a6(w,"segpick",g,V,j)
+	ar=("Total","Share","Rate","Times","Average","Biggest","Smallest","First","Last")
+	def do(w):
+		a5(w,"detail");a=aw-2*M;b=30+len(ar)*20+6;d=M+30+B+b+M;g=aF(aw,d,"DETAILS",({},{}),"dclose",("close_sub",w["id"],"detail"));c={};y=M+30+B;R(g,M,y,a,b);c["name"]=e(g,"",M+10,y+6,al);f=max(p(k)for k in ar)+14
+		for i,t in enumerate(ar):h=y+30+i*20;e(g,t,M+10,h,q);c[t]=e(g,"",M+10+f,h,P)
+		c["vw"]=a-20-f;w["dc"]=c;a6(w,"detail",g,aw,d);aG(w)
+	def dp(w):
+		a=w["metric"];m=int(time.time()//60);f=(a,m,C["ver"],C["vb"].get(a,0))
+		if f==w["gkey"]:return
+		w["gkey"]=f;k=C["hist"];d=[];b=0.
+		if a!="session":
+			n=m-ay+1
+			for i in range(ay):
+				g=k.get(n+i);v=g.get(a,0.)if g is not None else 0.
+				if v>b:b=v
+				d.append(v)
+		o=w["c"]["gbase"];p=len(d)-len(w["gcols"])
+		for i,c in enumerate(w["gcols"]):
+			v=d[i+p]if d else 0.;h=int(round(aN*v/b))if b>0 and v>0 else 0
+			if v>0 and h<1:h=1
+			if h!=c["h"]:
+				j=c["box"]
+				if h:Kit.ui_rect(j,c["x"],o-h,af,h)
+				if(h>0)!=(c["h"]>0):j.IsVisible=h>0
+				c["h"]=h
+		if a=="session":e="No graph for the summary"
+		elif b<=0:e="Last hour, per minute: nothing yet"
+		else:e="Last hour, %s per minute: peak %s"%("biggest hit"if a=="big"else "gained"if a in("gold","gold_place")else "total",l(b,F[a][2]or "n"))
+		J(w["c"]["gcap"],u(e,w["c"].get("iw",W-2*ab)-20))
+	def at(a,k,text,width):
+		f=a.get(k)
+		if f is not None and f[0]==text and f[1]==width:return f[2]
+		b=u(text,width);a[k]=(text,width,b);return b
+	def dq(i):
+		def a(*b):
+			a=bI["rows"]
+			if i<len(a)and a[i]and bc():h(("follow",a[i]))()
+		return a
+	def dr(hp,t):
+		a=hp[0]if hp else(t,0,0)
+		for h in hp:
+			if h[0]>t:break
+			a=h
+		return a[1],a[2]
+	def a8():
+		b=a["recap"]
+		if b is None:return
+		c=az-2*M;k=b["rows"][-cs:];d=30;m=30+20+d+8+max(1,len(k))*20+2*18+6;v=M+30+B+m+M;g,F,Q=a9.begin(az,v,a4(j[0],az)if j else None);aF(az,v,"DEATH RECAP",F,"close",("recap_close",),g);h=M+30+B;R(g,M,h,c,m,"LAST %d SECONDS  (damage you took)"%int(an));H=len(b["rows"]);I="Died %s: %s damage in %s"%(time.strftime("%H:%M:%S",time.localtime(b["t"])),l(b["total"]),Kit.count(H,"hit"));e(g,u(I,c-20),M+10,h+26,P);n=h+26+20;e(g,"HP",M+10,n+(d-16)//2,q);w=M+10+p("HP")+8;x=max(2,(M+c-10-w)//aQ);J=b["t"]-an
+		for i in range(aQ):
+			o,r=dr(b["hp"],J+(i+1)*an/aQ);s=int(round(d*max(0,o)/float(r)))if r>0 else 0
+			if s>0:y=G.CreateGumpColorBox(.9,"#c22d2d");y.SetRect(w+i*x,n+d-s,max(1,x-1),s);g.Add(y)
+		z=n+d+8;t=[]
+		if not k:e(g,"No damage seen.",M+10,z,q)
+		A,C=M+60,c-166
+		for i,(K,L,N,D,o,r)in enumerate(k):
+			f=z+i*20;e(g,"-%.1fs"%max(0.,b["t"]-K),M+10,f,q);e(g,u(N,C),A,f,P);E="-%s"%l(L);e(g,E,M+c-64-p(E),f,ak);e(g,"HP %d"%o,M+c-58,f,q);t.append(D if ap(D)else 0)
+			if t[-1]:ac(g,A-2,f-2,C+4,20,dq(i),"Alt+click: auto-follow (again to stop)")
+		for i,O in enumerate(cu):e(g,u(O,c-20),M+10,h+m-40+i*18,q)
+		a9.end(g,{"rows":t})
+	a9=Kit.Window(T,ae,None,bI,a8,ct,cleanup=aV,names=None,lock=False,owner=False,clear={"rows":[]});dZ=None
+	def ba(w):
+		q=w["g"]
+		if not z(q):return
+		e=w["metric"]
+		if w.get("gcols")and not w["minimized"]:dp(w)
+		c=aD(w);l=a["me"];h=l["name"]if l else None;f=None
+		if c is not None:
+			if c["end"]is not None:f=(e,w["seg"],c["uid"],c["ver"],w["minimized"],m["rank"],m["pct"],h)
+			elif F[e][1]=="s":f=(e,w["seg"],c["uid"],c["ver"],c["combat"],w["minimized"],m["rank"],m["pct"],h)
+			if f is not None and f==w.get("vkey"):aG(w);return
+		w["vkey"]=f;n,j=a0(e,c,0 if w["minimized"]else len(w["slots"]));d=w["c"]
+		if w["minimized"]:
+			o=d.get("status")
+			if o is not None:J(o,at(d,"_fst","%s: %s  %s"%(Y(w),F[e][0],"  ".join(n[:2])),bq-90))
+			return
+		J(d["head"],at(d,"_fhd","   ".join(y for y in n if y),d.get("iw",W-2*ab)-16));J(d["seg"],at(d,"_fsg",aE(w),d.get("seg_room",400)));r=max([G[1]for G in j]+[0.])
+		for k,b in enumerate(w["slots"]):
+			if k<len(j):i,s,t,p,x=j[k];u=("%d. %s"%(k+1,i))if m["rank"]else i;v=al if(h and i==h)else P;J(b["name"],at(b,"_fn",u,b["nw"]),v);J(b["val"],at(b,"_fv",t,b.get("vw",br)));g=(float(s),float(r or 1.));b["ser"],b["key"]=(p if ap(p)else None),i
+			else:J(b["name"],"");J(b["val"],"");g=(0.,1.);b["ser"],b["key"]=None,None
+			if g!=b["prog"]:b["prog"]=g;b["bar"].SetProgress(g[0],g[1])
+		aG(w)
+	def aG(w):
+		if not z(w["detail"]):return
+		d=w["dc"];a,b=w["detail_metric"],w["detail_row"];c=aD(w);r=c["d"].get(a,{}).get(b)if(c is not None and a)else None;J(d["name"],u("%s (%s)"%(b or "",F.get(a,("",))[0]),aw-2*ab-20));e=dict((s,"")for s in ar)
+		if r is not None:
+			j,g,f,j,j=F[a];k=time.time();h=N(c,a)
+			if a=="gold_place":m,n=bV(c,b,r[0]);i="%s/h (%s there)"%(U(m),D(n))
+			elif g:i="%s %s"%(U(aj(c,g,r[0]),f),bH[g])
+			else:i="-"
+			e.update({"Total":l(r[0],f),"Share":("%d%% of %s"%(int(round(100.*r[0]/h)),l(h,f))if h and not aX(b)else "-"),"Rate":i,"Times":"%d"%r[1],"Average":l(r[0]/max(1,r[1]),f),"Biggest":l(r[2],f),"Smallest":l(r[3],f),"First":"%s ago"%D(k-r[4]),"Last":"%s ago"%D(k-r[5])})
+		elif b:e["Total"]="nothing in this segment"
+		for t in ar:J(d[t],u(e[t],d["vw"]))
+	def aH():return bool(SNAP.drag)or SNAP.pressed()is True
+	def ds(w):
+		def a(fw,fh,mode):
+			a=(int(fw),int(fh))if(fw is not None and fh is not None)else None
+			if a!=w.get("fit")or(mode=="again"and a is not None):w["fit"]=a;h(("redraw",w["id"]))()
+		return a
+	def dt(w):
+		def a():a=56+(aO if w.get("graph")else 0)+(26 if b_(w)>av-2*M else 0);return av,M+30+B+30+B+a+K+M
+		return a
+	def du():
+		if aH():return
+		for w in j:
+			g=w["g"]
+			if w["minimized"]or w["docked"]or w["resize_at"]or not z(g):continue
+			a=HOST.layout_slot(I(w))
+			if a is not None:
+				a=(int(a[0]),int(a[1]));b=w["fit"]
+				if b is None or abs(b[0]-a[0])>4 or abs(b[1]-a[1])>4:w["fit"]=a;A(w);continue
+				if w["drawn"]is None or w["drawn"][0]!=max(120,b[0]):A(w);continue
+				c=(int(g.GetWidth()),int(g.GetHeight()))
+				if abs(c[0]-w["drawn"][0])>2 or abs(c[1]-w["drawn"][1])>2:
+					w["misfit"]=w.get("misfit",0)+1
+					if w["misfit"]in(2,6,20):A(w)
+				else:w["misfit"]=0
+			elif w["fit"]is not None and not HOST.layout_holds(I(w)):w["fit"]=None;A(w)
+	def bb(w):a=Kit.dock_hooks(Y(w),b7,w,w,h(("redraw",w["id"])),fit=ds(w));a.update({"exact":True,"verify":True,"pieces_out":True,"min":dt(w)});HOST.dock_add(I(w),a)
+	def b0(w,remove):
+		w["shutting"]=True;HOST.dock_remove(I(w))
+		if remove:bd(I(w))
+		for k in("picker","segpick","detail","g"):g,w[k]=w[k],None;S(g)
+		if remove and w in j:j.remove(w)
+	def dv(w):
+		d=w["metric"];h=aD(w);b,i=a0(d,h,aJ);c="%s (%s)"%(F[d][0],aE(w));e=["%d. %s %s"%(n+1,k[0],k[2])for n,k in enumerate(i[:aJ])]
+		if m["party"]and API.GetPartyMemberSerials():
+			f="; ".join(e)or "nothing yet";g="%s: %s; %s"%(c,"  ".join(b[:2]),f);j=[g]if len(g)<=aL else["%s: %s"%(c,"  ".join(b[:2])),f]
+			for a in j:
+				if len(a)>aL:a=a[:aL-2]+".."
+				API.PartyMsg(a)
+		else:
+			H("%s: %s."%(c,"  ".join(b)),q)
+			for p in e or["nothing yet"]:H("   %s."%p,P)
+	def dw(action,w):
+		if len(j)>=am:H("%d windows at most."%am,q);return
+		a=j[-1];g=a["g"];c,d=(g.GetX(),g.GetY())if z(g)else(a["x"],a["y"]);e=max(i["id"]for i in j)+1;f=set(k["metric"]for k in j);h=next((n for n in ag if n not in f),aS);b=aY(e,h,c+30,d+30);j.append(b);A(b);bb(b);E()
+	def dx(action,w):
+		for a in j:
+			b=a["size"]is not None;a["size"]=None
+			if b and a["fit"]is None and z(a["g"]):A(a)
+		E()
+	def dy(action,w):aZ();a["next_ui"]=0.;H("all meters cleared; new session.",au)
+	def dz(action,w):
+		if a["recap"]is None:H("no death this session.",q)
+		else:a8()
+	def dA(action,w):
+		w["graph"]=not w.get("graph");A(w);bb(w)
+		if z(w["picker"]):a7(w)
+		E()
+	def dB(action,w):a["redraw_wait"].discard(w["id"]);b0(w,True);E()
+	def dC(action,w):w["minimized"],w["docked"]=not w["minimized"],False;bd(I(w));A(w);E()
+	def dD(action,w):
+		if aH():a["redraw_wait"].add(w["id"]);return
+		a["redraw_wait"].discard(w["id"]);A(w);E()
+	def dE(action,w):
+		i=ag.index(w["metric"])if w["metric"]in ag else 0;w["metric"]=ag[(i+action[2])%len(ag)];A(w)
+		if z(w["picker"]):a7(w)
+		E()
+	def b1(action,w):
+		a=action[0]
+		if z(w[a]):S(w[a])
+		else:(a7 if a=="picker"else dn)(w)
+	def dF(action,w):w["metric"]=action[2];S(w["picker"]);A(w);E()
+	def dG(action,w):w["seg"]=action[2];S(w["segpick"]);ba(w);E()
+	def dH(action,w):
+		a=w["slots"];i=action[2];b=a[i].get("key")if i<len(a)else None
+		if b is None or w["metric"]in("session","big","gold"):return
+		w["detail_row"],w["detail_metric"]=b,w["metric"]
+		if z(w["detail"]):aG(w)
+		else:do(w)
+	dI={"settings":lambda action,w:HOST.show_settings(T),"follow":lambda action,w:Follow.toggle(action[1],ae),"new":dw,"own_size":dx,"reset":dy,"spot_add":lambda action,w:da(action[1],action[2]),"spot_rm":lambda action,w:bZ(action[1]),"recap":dz,"recap_close":lambda action,w:a9.close(),"graph":dA,"export":lambda action,w:dg(w),"closed":dB,"toggle_min":dC,"to_bar":lambda action,w:HOST.dock_to_bar(I(w),Y(w)),"redraw":dD,"step":dE,"picker":b1,"segpick":b1,"metric":dF,"seg":dG,"close_sub":lambda action,w:S(w.get(action[2])),"detail":dH,"report":lambda action,w:dv(w)};dJ=("settings","follow","new","own_size","reset","spot_add","spot_rm","recap","recap_close");dK=(("idle","A fight ends after quiet of:","No damage for this long ends the fight","s"),("engage","Your targets count for:","Damage on what you attacked or targeted this recently is yours","s"),("history","Earlier fights kept:","Finished fights in the segment list","fights"),("min_heal","Ignore HP rises under:","Smaller rises count as regeneration","HP"),("rows","Rows per window:","For windows at their own size; undoes corner drags","rows"));dL=(("rank","Number the rows","A rank before each name"),("pct","Show each row's share (%)","Percentage of the total after the value"),("party","Report to party chat in a party","Unticked, Report goes to your journal"),("scan","Watch the backpack (loot, reagents, ammo)","Open your backpack once after login so the client knows its contents"),("travel","Count tiles walked and recalls / gates","Fills the Travel display"),("recap","Show a death recap when you die","The last %d s of damage taken: who, how much, your HP"%int(an)));dM="Pets' and strangers' healing is a \"(%)\" row outside the total.";b2=24
+	def dN(w):return(("COUNTING  (fights, healing, rows)",[("num",)+d+aT[d[0]]for d in dK],{"align":True,"pad":4}),("SHOW AND TRACK",[("check",)+f for f in dL]+[("note",u(dM,w-28),{"ndy":2,"h":18})],{"pad":4}),("GOLD BY PLACE  (per character)",(("custom",28+max(1,len(o))*b2,dO),),{"pad":4}),("TOOLS",(("buttons",(("new",aa,"New meter window","Open one more (up to %d)"%am),("recap",aa,"Last death recap","Show it again"),("own_size",Z,"Reset sizes","Give windows outside zones their own size (Rows above, %d px wide)"%W))),("buttons",(("export",bf,"Export","Write the first window's segment to %s in the VirtueAssistantSettings folder"%aP.replace("%08X","<serial>")),("reset",Z,"Reset all meters","Clear everything; new session"))),("note",u("Damage numbers: "+L["kind"],w-28),{"key":"feed","h":26})),{"pad":4}))
+	def dO(f,x,y):
+		g,c,w,i=f.g,f.c,f.w,f.store;e(g,"Name:",x+12,y+3);j=x+12+p("Name:")+8;c["spot_name"]=bn(bg(g,"",j,y,140,numbers=False),"Spot name (up to %d letters)"%bz);a=j+140+12;e(g,"Radius:",a,y+3);a+=p("Radius:")+8;c["spot_radius"]=bn(bg(g,str(aW.get("radius",bA)),a,y,44),"Tiles round you (%d-%d)"%ax);a+=44+10;e(g,"tiles",a,y+3,q);O(g,i,"spot_add",bf,a+p("tiles")+12,y-2,"Name this spot","Gold gained within the radius counts here (a guarded town comes first)")
+		if not o:e(g,u("No spots yet: stand where you farm, type a name, click Name this spot.",w-28),x+12,y+28+3,q)
+		d=Kit.pic_size(Z[0])[0]or 30;c["spot_rm"]=[("spot_rm%d"%n,r[0])for n,r in enumerate(o)]
+		for k,b in enumerate(o):h=y+28+k*b2;l="facet %d at %d, %d, %d tiles round"%(b[3],b[1],b[2],b[4]);m=p(l);e(g,u(b[0],w-24-d-18-m-12),x+12,h+3);e(g,l,x+w-12-d-12-m,h+3,q);O(g,i,"spot_rm%d"%k,Z,x+w-12-d,h,None,"Remove "+b[0])
+	dP=.2
+	def dQ(f):
+		c,b=f.c,f.store
+		for k in("reset","new"):
+			if ad(b,k):h((k,))()
+		if ad(b,"own_size"):
+			if a["active"]:h(("own_size",))()
+			else:bO()
+		d=[r for n,r in(("export",("export",0)),("recap",("recap",)))if ad(b,n)]
+		if ad(b,"spot_add"):aW["radius"]=Kit.read_int(c["spot_radius"],bA,*ax);d.append(("spot_add",str(c["spot_name"].Text or ""),aW["radius"]))
+		for g in d:
+			if a["active"]:h(g)()
+			else:H("turn Meters on first.",q)
+		for i,e in c["spot_rm"]:
+			if ad(b,i):
+				if a["active"]:h(("spot_rm",e))()
+				else:bZ(e)
+	def dR(f,new):J(f.c["feed"],u("Damage numbers: "+L["kind"],f.w-28))
+	def dS(c,new):
+		del b["hist"][new["history"]:]
+		if new["rows"]!=c["rows"]:
+			if a["active"]:
+				for w in j:w["size"]=None;h(("redraw",w["id"]))()
+			else:bO()
+		a["next_ui"]=0.
+	aI=Kit.Page(m,dN,bL,dS,adjust=dR,clicks=dQ,every=dP);bK();bP();aZ()
+	def dT():
+		a.update({"shutting":False,"active":True,"queue":[],"last_tick":time.time(),"next_ui":0.,"next_friends":0.,"next_scan":0.,"me":None,"pos":None,"pack":None,"prev":{},"used":[],"buffq":[],"amtq":[],"poked":False,"place":None,"next_place":0.,"taken":[],"hp_log":[],"casts":[],"recap":None,"recap_show":False,"to_write":[],"redraw_wait":set(),"present":[],"pscan":None,"pack_cand":None,"my_ser":None,"my_name":"","next_name":0.,"fnames":None});a["jr"]=Journal.reader();bK();aZ();bM();bP();aV.add(c_)
+		for w in j:
+			w["shutting"]=w["docked"]=False
+			if HOST.dock_wanted(I(w)):w["minimized"]=True
+		Kit.hook_once(a,"hooked",("ObjectUsed",c2),("OnBuffAdded",c3),("OnEntityDamage",c0))
+		if L["handler"]is None:del ah[:];ah.append(cZ)
+		for w in j:A(w);bb(w)
+	def dU():
+		a["poked"]=False
+		if not j or j[0]["g"]is None:return
+		c=time.time();e=max(0.,min(1.,c-a["last_tick"]));a["last_tick"]=c
+		for w in list(j):
+			if ad(w["store"],"close"):
+				if w["id"]==0:S(w["g"]);return
+				h.add(("closed",w["id"]),dup=True)
+		while a["queue"]:
+			d=a["queue"].pop(0);f=d[0];w=(next((n for n in j if n["id"]==d[1]),None)if len(d)>1 and isinstance(d[1],int)and f!="follow"else None)
+			if w is not None or f in dJ:dI[f](d,w)
+		if a["redraw_wait"]and not aH():
+			i,a["redraw_wait"]=a["redraw_wait"],set()
+			for w in list(j):
+				if w["id"]in i:A(w)
+			E()
+		for w in j:
+			if w["resize_at"]and c-w["resize_at"]>=b4 and not aH():w["resize_at"]=0.;dm(w)
+		if c>=a.get("next_zone",0.):a["next_zone"]=c+b5;du()
+		try:s=c4()
+		except Exception as k:
+			s=None;g=str(k)[:120]
+			if g!=a.get("err"):a["err"]=g;H("couldn't read the client (%s)."%g,ak)
+		c7(c)
+		if s:c6(s,c)
+		c9(c,e)
+		if a["recap_show"]:a["recap_show"]=False;a8()
+		if b["cur"]is not None:
+			b["cur"]["combat"]+=e;b["overall"]["combat"]+=e
+			if not 0.<=c-b["last_combat"]<=m["idle"]:cT(c);a["next_ui"]=0.
+		if c>=a["next_ui"]or(a["changed"]and a["next_ui"]-c<=bs-ca):
+			a["next_ui"]=c+bs;a["changed"]=False
+			for w in j:
+				if not w["docked"]:ba(w)
+	def dV():
+		while ah and not a["shutting"]:ah.pop(0)()
+		if a["to_write"]:dh()
+	def dW():return bool(ah)or bool(a["to_write"])
+	def dX():
+		a["shutting"],a["active"],a["jr"]=True,False,None;del ah[:];E();bL();aV.close()
+		for w in list(j):b0(w,False)
+	return{"start":dT,"tick":dU,"stop":dX,"client_tick":True,"config_height":aI.height,"build_config":aI.build,"poll_config":aI.poll,"config_closed":aI.closed,"thread_tick":dV,"thread_wanted":dW}
+if "HOST"not in globals():
+	import API
+	exec(open(API.ScriptPath+"/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("meters","Meters","Damage, healing, loot and gold meters",_module_meters,.25,category="Extras")

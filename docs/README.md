@@ -44,6 +44,10 @@ Saved files (lists, layouts, exports, profiles) go in the VirtueAssistantSetting
 5. A module's window closes only from its X (which turns the module off); right-click does nothing.
 6. The X on the Virtue Assistant window stops everything.
 
+## Two copies of the code
+
+The files at the top of the GitHub page (and in the zip on the Releases page) are the ones to install. They are packed small to download: tabs for indents, few spaces and short names for values used inside one function. The `readable` folder holds the same code laid out normally, with a note on every function and comments where the code isn't obvious, for anyone who wants to read how it works. Both run the same, but install only the packed files. When the journal shows an error with a file and line, it names a line of the packed files.
+
 ## A module on its own
 
 Any module also runs alone: pick its file (in the VirtueAssistantModules group) in the Legion Script Manager. The main script must be in LegionScripts, but isn't started. Alone, a module has its own window, its settings (the window's Settings button) and its hotkeys, and the shard-rule pauses still apply. It has no main window, profiles, zones, tray or other modules, and it doesn't change which modules the full suite turns on. A themed module's parts are ticked under PARTS in its settings. Closing its window stops it. It won't start while the full suite runs, and stops if the suite starts.

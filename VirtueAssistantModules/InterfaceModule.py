@@ -1,1317 +1,846 @@
 def _module_interface():
-    KEY = "interface"; TITLE = "Interface"; SETUP_KEY = "interface.setup"; SETUP_POS = "Interface_setup_pos"
-    SEEN_KEY = "Interface_setup_seen"; EDITOR_POS = "VirtueAssistant_layout_editor_pos"
-    SETUP_W, SETUP_MINI = 600, (260, 46); CARD_W, CARD_H, CARD_GAP = 100, 64, 12; DD_W = 170; BACK_EVERY = 0.25
-    RING, RING_GOLD, RING_DARK = 3, "#D4AF37", "#3A2A08"
-    PRESETS = (("Sides", "Bags and paperdoll left; map and trackers right"),
-               ("Mirrored", "Map and trackers left; bags and paperdoll right"),
-               ("Bottom bar", "Game on top; every window in one band below"),
-               ("Right column", "Game left; windows stacked on the right"),
-               ("Compact", "Windows stacked on the left; game on the right"))
-    ROLES = (("unitframes.", "frames"), ("actionbar", "bar"), ("character", "gear"), ("bag", "bag"),
-             ("ultima.", "watch"), ("hub", "watch"), ("meters", "watch"), ("worldmap", "map"))
-    LOOK_ROWS = (("seam", "Join windows in zones into one panel",
-                  "One frame round every zone, gold round the game view; hover a window's top for its title"),
-                 ("fit_view", "Fit the game view to the game area", "Borderless, sized and locked to the game area"),
-                 ("game", "Give an empty zone's room to the game area", "Widens the game area beside an empty zone"))
-    settings = {"seam": False, "fit_view": True, "game": True, "snap": True, "grid_on": False, "grid": GRID_DEFAULT,
-                "dark": False}
-    DEFAULTS = dict(settings)
-    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "editor": None, "back_sig": None,
-          "back_at": 0.0}
-    win = {"g": None, "c": {}, "store": ({}, {})}
-    back = {"g": None}; ring = {"g": None}; preview = {"g": None}
-    sinker = {"gumps": None, "ver": None, "same": None, "off": False, "seen": None, "raw": None}
-    page = {"zones": None, "windows": None, "zone_dd": [], "frame_names": [], "layout_names": []}
-    setup = {"open": False, "step": 0, "preset": 0, "zs": None, "fname": LAYOUT_DEFAULT, "assign": {}, "look": {},
-             "cards": {}}
-    cleanup, queue, say = Kit.basics(st, TITLE)
-    def load_settings():
-        L = LAYOUT
-        settings.update({"seam": L.seamless, "fit_view": L.fit_view, "game": L.game_grows, "snap": SNAP.enabled,
-                         "grid_on": HOST.grid_shown(), "grid": HOST.grid_size(), "dark": Kit.dark()})
-    def save_settings(): pass
-    def touch(a, b):
-        ax, ay, aw, ah = a; bx, by, bw, bh = b; D = SNAP_DIST
-        for lo, hi in ((ax + aw, bx), (bx + bw, ax)):
-            y0, y1 = max(ay, by), min(ay + ah, by + bh)
-            if abs(hi - lo) <= D and y1 > y0: return "v", min(lo, hi), max(lo, hi), y0, y1
-        for lo, hi in ((ay + ah, by), (by + bh, ay)):
-            x0, x1 = max(ax, bx), min(ax + aw, bx + bw)
-            if abs(hi - lo) <= D and x1 > x0: return "h", min(lo, hi), max(lo, hi), x0, x1
-        return None
-    def gaps_of(s0, s1, cov):
-        out, at = [], s0
-        for a, b in sorted(cov):
-            if a > at: out.append((at, min(a, s1)))
-            at = max(at, b)
-        if at < s1: out.append((at, s1))
-        return [(a, b) for a, b in out if b > a]
-    class LayoutEditor(object):
-        BAR_W = 720; SETTLE = 0.3; FIELD_W = 52; ROW = 28
-        KEYS = {"up": ("UP",), "down": ("DOWN",), "left": ("LEFT",), "right": ("RIGHT",),
-                "delete": ("DELETE",), "z": ("Z",), "y": ("Y",), "enter": ("RETURN", "KP_ENTER"), "esc": ("ESCAPE",)}
-        FIELDS = ("col", "row", "w", "h")
-        def __init__(self, layout, zs, on_close):
-            self.layout = layout; self.zs = zs; self.on_close = on_close; self.frames = {}; self.bar = None
-            self.store = ({}, {}); self.c = {}
-            self.renames = {}; self.sel = zs.zones[0].id if zs.zones else None; self.multi = set(); self.grid_was = None
-            self.fields = None; self.saveas_text = ""; self.bar_pos = None; self.rebuild = False; self.closed = False
-            self.others = None
-            self.W, self.H = Kit.screen(); self.px_mode = False; self.undo, self.redo = [], []; self.keys_was = {}
-            self.focus_was = None; self.raws = {}; self.said = None; self.del_armed = None; self.marks = None
-            self.marks_sig = None; self.counts = (0, 0); self.handles = []; self.handles_sig = None; self.edge = None
-            self.edge_g = None; self.edge_at = 0.0; self.pressed_was = False; self.pick = 0; self.pick_keys = []
-            self.preview = ""; self.raws_ok = False; self._pick_next = 0.0
-        def open(self):
-            self.grid_was = HOST.grid_shown()
-            if not self.grid_was: safe(HOST.grid_toggle)
-            for z in self.zs.zones: self.build_zone(z)
-            self.build_bar(); self.draw_marks()
-        def close(self, keep, quiet=False):
-            if self.closed: return
-            self.closed = True
-            for zid, fr in list(self.frames.items()): Kit.dispose(fr.get("g"))
-            self.frames = {}; self._drop_handles()
-            for a in ("bar", "marks", "edge_g"): Kit.dispose(getattr(self, a)); setattr(self, a, None)
-            if self.grid_was is not None and HOST.grid_shown() != self.grid_was: safe(HOST.grid_toggle)
-            self.on_close(); self.layout.dirty = True; self.layout.page_refresh = True
-            if not keep and not quiet: Kit.say("the saved zones are back.", Kit.HUE_INFO)
-        def _snap(self): return ([z.copy() for z in self.zs.zones], self.sel, dict(self.renames))
-        def push(self):
-            self.undo.append(self._snap())
-            if len(self.undo) > 50: del self.undo[0]
-            self.redo = []
-        def _restore(self, snap):
-            zones, sel, renames = snap
-            for zid in list(self.frames): Kit.dispose(self.frames[zid].get("g"))
-            self.frames = {}; self.zs.zones = [z.copy() for z in zones]; self.renames = dict(renames)
-            self.sel = (sel if self.zs.by_id(sel) is not None else (self.zs.zones[0].id if self.zs.zones else None))
-            self.multi = set()
-            for z in self.zs.zones: self.build_zone(z)
-            self.rebuild = True
-        def _hist(self, a, b, word):
-            if not a: self.say("nothing to %s." % word, Kit.HUE_INFO); return
-            b.append(self._snap()); self._restore(a.pop())
-        def do_undo(self): self._hist(self.undo, self.redo, "undo")
-        def do_redo(self): self._hist(self.redo, self.undo, "redo")
-        def say(self, text, hue=None):
-            if text == self.said: return
-            self.said = text; Kit.say(text, Kit.HUE_BAD if hue is None else hue)
-        def _windows_in(self, z):
-            L = self.layout; zid = self.orig_id(z.id); return [L.title_of(k) for k in L.assign.get(zid, [])]
-        def orig_id(self, zid):
-            for was, now in self.renames.items():
-                if now == zid: return was
-            return zid
-        def build_zone(self, z):
-            old = self.frames.get(z.id, {}).get("g"); x, y, w, h = z.px; M = Kit.MARGIN
-            fr = {"g": None, "resize_at": 0.0, "size": (w, h)}
-            g = G.CreateModernGump(x, y, w, h, not z.lock, ZONE_MIN_W, ZONE_MIN_H, self._resized(z.id)); g.SetAlpha(0)
-            if z.lock: g.CanMove = False
-            Kit.add_window_frame(g, w, h, corners=False, mouse=False)
-            Kit.add_box(g, M, M, w - 2 * M, h - 2 * M, 0.25, ZONE_COLORS.get(z.kind, "#FFFFFF"))
-            self._draw_overlaps(g, z)
-            if z.kind == "k": self._draw_game(g, z)
-            if z.id == self.sel and self.pick: self._draw_preview(g, z)
-            Kit.add_section(g, M, M, w - 2 * M, 30); sel = z.id == self.sel or z.id in self.multi
-            fr["lbl"] = Kit.add_label(g, Kit.fit(z.id + ("  (locked)" if z.lock else ""), w - 2 * M - 24),
-                                      M + 12, M + 7, Kit.HUE_TITLE if sel else Kit.HUE_TEXT)
-            wins = self._windows_in(z) if z.kind == "w" else []
-            fr["wins"] = Kit.add_label(g, Kit.fit(", ".join(wins), w - 2 * M - 24) if wins else "",
-                                       M + 12, M + 30 + 6, Kit.HUE_TEXT)
-            fr["sum"] = Kit.add_label(g, "", M + 12, M + 30 + 6 + (20 if wins else 0), Kit.HUE_INFO)
-            Kit.catcher(g, M, M, w - 2 * M, 30, self._select(z.id), "Select the zone (Shift+click: pick more)" + (
-                "; locked" if z.lock else "; drag to move it on the grid"), movable=not z.lock)
-            Kit.place(g, x, y, w, h); G.AddGump(g); Kit.no_snap(g); Kit.on_moved(g, self._moved(z.id))
-            fr["g"] = g; self.frames[z.id] = fr; self.update_zone(z); Kit.dispose(old)
-        def _draw_overlaps(self, g, z):
-            x, y, w, h = z.px
-            for o in self.zs.zones:
-                if o is z or o.px is None or not (z.overlap or o.overlap): continue
-                ox, oy, ow, oh = o.px; ax, ay = max(x, ox), max(y, oy)
-                bx, by = min(x + w, ox + ow), min(y + h, oy + oh)
-                if bx - ax < 4 or by - ay < 4: continue
-                for sx in range(ax, bx, 12): Kit.add_box(g, sx - x, ay - y, min(4, bx - sx), by - ay, 0.45, "#E8C15A")
-        def _draw_game(self, g, z):
-            zs = self.zs.copy(); Layout._overlap_shape(zs); kx, ky, kw, kh = zs.by_id(z.id).px; kx -= z.px[0]
-            ky -= z.px[1]
-            for r in ((kx, ky + kh - 2, kw, 2), (kx, ky, 2, kh), (kx + kw - 2, ky, 2, kh), (kx, ky, kw, 2)):
-                Kit.add_box(g, r[0], r[1], r[2], r[3], 0.9, "#E8C15A")
-        def _draw_preview(self, g, z):
-            key = self.pick_keys[self.pick] if 0 < self.pick < len(self.pick_keys) else None
-            if key is None or z.kind != "w": return
-            L = self.layout; keys = [k for k in L.assign.get(self.orig_id(z.id), []) if k != key] + [key]
-            x, y = z.px[0], z.px[1]
-            for k, (sx, sy, sw, sh) in L.slots_for(z, keys):
-                Kit.add_box(g, sx - x, sy - y, max(1, sw), max(1, sh), 0.55, "#E8C15A" if k == key else "#202020")
-                Kit.add_label(g, Kit.fit(L.title_of(k), max(20, sw - 16)), sx - x + 8, sy - y + sh - 26, Kit.HUE_TEXT)
-        def update_zone(self, z):
-            fr = self.frames.get(z.id)
-            if fr is None: return
-            step = HOST.grid_size(); x, y, w, h = z.px
-            text = "%s, %d x %d squares" % (z.kind_name(), max(1, int(round(float(w) / step))),
-                                            max(1, int(round(float(h) / step))))
-            if z.overlap: text += ", overlaps"
-            Kit.set_text(fr["sum"], Kit.fit(text, w - 2 * Kit.MARGIN - 24))
-            Kit.set_text(fr["lbl"], Kit.fit(z.id + ("  (locked)" if z.lock else ""), w - 2 * Kit.MARGIN - 24),
-                         Kit.HUE_TITLE if (z.id == self.sel or z.id in self.multi) else Kit.HUE_TEXT)
-        def _select(self, zid):
-            def hit():
-                shift = bool(Client.key_held("shift"))
-                if shift and self.sel is not None and zid != self.sel:
-                    if zid in self.multi: self.multi.discard(zid)
-                    else: self.multi.add(zid); self.multi.add(self.sel)
-                    self.rebuild = True; HOST.poke(); return
-                if zid != self.sel or self.multi:
-                    self.multi = set(); self.sel = zid; self.pick = 0; self.rebuild = True; HOST.poke()
-            return hit
-        def _resized(self, zid):
-            def hit(*args):
-                fr = self.frames.get(zid)
-                if fr is not None: fr["resize_at"] = time.time()
-            return hit
-        def _moved(self, zid):
-            def hit():
-                z = self.zs.by_id(zid); fr = self.frames.get(zid)
-                if z is None or fr is None or not Kit.is_open(fr["g"]): return
-                r = Snap.rect(fr["g"])
-                if r is None: return
-                if (r[0], r[1]) == (z.px[0], z.px[1]): return
-                if z.lock:
-                    self.place_zone(z); self.say('zone "%s" is locked; click Lock to move it.' % z.id, Kit.HUE_INFO)
-                    return
-                self.landed(z, r[0], r[1], z.px[2], z.px[3], resized=False)
-            return hit
-        def _blocker(self, z): hits = self.zs.overlaps(z); return hits[0] if hits else None
-        def landed(self, z, x, y, w, h, resized=True):
-            W, H = self.W, self.H; step = HOST.grid_size()
-            if resized:
-                sn = 1 if z.free else step; w = max(ZONE_MIN_W, int(round(float(w) / sn)) * sn)
-                h = max(ZONE_MIN_H, int(round(float(h) / sn)) * sn)
-            w, h = min(w, W), min(h, H); best = (0, int(x), int(y)) if z.free else Snap.near_anchor(x, y, w, h)
-            if best is not None: nx, ny = best[1], best[2]
-            else:
-                nx = ny = None
-                for tx in (0, max(0, W - w)):
-                    if abs(tx - x) <= SNAP_DIST: nx = tx
-                for ty in (0, max(0, H - h)):
-                    if abs(ty - y) <= SNAP_DIST: ny = ty
-                for o in self.zs.zones:
-                    if o is z or o.px is None: continue
-                    ox, oy, ow, oh = o.px
-                    if nx is None and oy < y + h + SNAP_DIST and y < oy + oh + SNAP_DIST:
-                        for tx in (ox + ow, ox - w, ox, ox + ow - w):
-                            if abs(tx - x) <= SNAP_DIST: nx = tx
-                    if ny is None and ox < x + w + SNAP_DIST and x < ox + ow + SNAP_DIST:
-                        for ty in (oy + oh, oy - h, oy, oy + oh - h):
-                            if abs(ty - y) <= SNAP_DIST: ny = ty
-                if nx is None: nx = int(round(float(x) / step)) * step
-                if ny is None: ny = int(round(float(y) / step)) * step
-            was = z.px; self.push(); z.set_px(nx, ny, w, h, W, H)
-            if not self.zs.push_clear(z, W, H, None if z.free else step):
-                z.set_px(was[0], was[1], was[2], was[3], W, H); self.undo.pop(); o = self._blocker(z)
-                self.say('no room for zone "%s" there%s; it stays where it was.' % (
-                    z.id, (' (it would cover "%s")' % o.id) if o is not None else ""))
-            z.note_pins(W, H); self.place_zone(z); self.changed()
-        def _refields(self): self.fields = None; self.show_fields()
-        def changed(self): self._refields(); self.draw_marks()
-        def place_zone(self, z):
-            fr = self.frames.get(z.id)
-            if fr is None: return
-            x, y, w, h = z.px
-            if ((w, h) != fr["size"] or z.overlap or z.kind == "k" or any(o.overlap for o in self.zs.zones)):
-                self.build_zone(z); return
-            with Kit.quiet: Kit.place(fr["g"], x, y, w, h); Kit.moved_by_code(fr["g"])
-            self.update_zone(z)
-        def keep(self, W, H):
-            if (W, H) != (self.W, self.H):
-                self.W, self.H = W, H; self.zs.reflow(W, H, HOST.grid_size())
-                for z in self.zs.zones: self.place_zone(z)
-                self.draw_marks()
-        def gaps(self):
-            W, H = self.W, self.H; zs = [z.px for z in self.zs.zones if z.px is not None]
-            xs = [v for v in sorted(set([0, W] + [p[0] for p in zs] + [p[0] + p[2] for p in zs])) if 0 <= v <= W]
-            ys = [v for v in sorted(set([0, H] + [p[1] for p in zs] + [p[1] + p[3] for p in zs])) if 0 <= v <= H]
-            nx, ny = len(xs) - 1, len(ys) - 1; free = {}
-            for j in range(ny):
-                cy = (ys[j] + ys[j + 1]) / 2.0
-                for i in range(nx):
-                    cx = (xs[i] + xs[i + 1]) / 2.0
-                    if not any(p[0] <= cx < p[0] + p[2] and p[1] <= cy < p[1] + p[3] for p in zs): free[(i, j)] = True
-            seen, n = set(), 0
-            for cell in free:
-                if cell in seen: continue
-                n += 1; stack = [cell]; seen.add(cell)
-                while stack:
-                    i, j = stack.pop()
-                    for nb in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
-                        if nb in free and nb not in seen: seen.add(nb); stack.append(nb)
-            rects = []
-            for j in range(ny):
-                i = 0
-                while i < nx:
-                    if (i, j) in free:
-                        i0 = i
-                        while i < nx and (i, j) in free: i += 1
-                        rects.append((xs[i0], ys[j], xs[i] - xs[i0], ys[j + 1] - ys[j]))
-                    else: i += 1
-            merged = []
-            for r in rects:
-                for k, m in enumerate(merged):
-                    if m[0] == r[0] and m[2] == r[2] and m[1] + m[3] == r[1]:
-                        merged[k] = (m[0], m[1], m[2], m[3] + r[3]); break
-                else: merged.append(r)
-            return merged, n
-        def bad_overlaps(self):
-            out = []; zones = self.zs.zones
-            for i, a in enumerate(zones):
-                for b in zones[i + 1:]:
-                    if a.px is None or b.px is None or b not in self.zs.overlaps(a): continue
-                    if a in self.zs.overlaps(b) or not b.overlap:
-                        x0, y0 = max(a.px[0], b.px[0]), max(a.px[1], b.px[1])
-                        x1 = min(a.px[0] + a.px[2], b.px[0] + b.px[2]); y1 = min(a.px[1] + a.px[3], b.px[1] + b.px[3])
-                        if x1 > x0 and y1 > y0: out.append((a, b, (x0, y0, x1 - x0, y1 - y0)))
-            return out
-        def draw_marks(self):
-            sig = (self.W, self.H, tuple((z.id, z.kind, z.overlap, z.solo, tuple(z.px or ())) for z in self.zs.zones))
-            if sig == self.marks_sig and Kit.is_open(self.marks): return
-            self.marks_sig = sig; gaps, n = self.gaps(); bad = self.bad_overlaps(); counts = (n, len(bad))
-            old, self.marks = self.marks, None; Kit.dispose(old)
-            wz = [z for z in self.zs.zones if z.kind == "w" and z.px is not None and not z.solo]
-            joins = [s for i, a in enumerate(wz) for b in wz[i + 1:] for s in (touch(a.px, b.px),) if s is not None]
-            if gaps or bad or joins:
-                g = G.CreateGump(False, False)
-                for (x, y, w, h) in gaps: Kit.add_box(g, x, y, w, h, 0.45, "#C83030")
-                for a, b, (x, y, w, h) in bad: Kit.add_box(g, x, y, w, h, 0.55, "#C83030")
-                for o, lo, hi, a, b in joins:
-                    c = (lo + hi) // 2
-                    Kit.add_box(g, *(((c - 2, a, 4, b - a) if o == "v" else (a, c - 2, b - a, 4)) + (0.9, "#E8C15A")))
-                Grid.show_overlay(g, 0, 0, self.W, self.H); self.marks = g
-            if counts != self.counts: self.counts = counts; self.rebuild = True
-        def _drop_handles(self):
-            for g, side, r in self.handles: Kit.dispose(g)
-            self.handles = []; self.handles_sig = None
-        def _sync_handles(self):
-            z = self.zs.by_id(self.sel) if self.sel else None; fr = self.frames.get(z.id) if z is not None else None
-            sig = (z.id, tuple(z.px), z.lock,
-                   fr.get("g") if fr else None) if z is not None and z.px is not None else None
-            if sig == self.handles_sig: return
-            self._drop_handles(); self.handles_sig = sig
-            if z is None or z.lock: return
-            x, y, w, h = z.px; T = 10; L_ = max(24, min(80, w // 3)); V_ = max(24, min(80, h // 3))
-            for side, r in (("l", (x, y + (h - V_) // 2, T, V_)), ("r", (x + w - T, y + (h - V_) // 2, T, V_)),
-                            ("t", (x + (w - L_) // 2, y + Kit.MARGIN + 30, L_, T)),
-                            ("b", (x + (w - L_) // 2, y + h - T, L_, T))):
-                g = G.CreateGump(True, False); Kit.add_box(g, 0, 0, r[2], r[3], 0.9, "#E8C15A")
-                Kit.catcher(g, 0, 0, r[2], r[3], lambda: None, "Drag to move this edge on the grid")
-                g.SetRect(r[0], r[1], r[2], r[3]); G.AddGump(g); SNAP.skip_gump(g); self.handles.append((g, side, r))
-        def _edge_tick(self, pressed):
-            now = time.time()
-            if self.edge is None:
-                if pressed and not self.pressed_was and self.handles:
-                    m = Kit.mouse_pos()
-                    if m is not None:
-                        for g, side, r in self.handles:
-                            if r[0] <= m[0] < r[0] + r[2] and r[1] <= m[1] < r[1] + r[3]:
-                                z = self.zs.by_id(self.sel)
-                                if z is not None: self.edge = (z.id, side, m, tuple(z.px))
-                                break
-                return
-            zid, side, m0, p0 = self.edge; z = self.zs.by_id(zid); m = Kit.mouse_pos()
-            if z is None or m is None: self.edge = None; Kit.dispose(self.edge_g); self.edge_g = None; return
-            x, y, w, h = p0; dx, dy = m[0] - m0[0], m[1] - m0[1]
-            if side == "l": nx = min(x + w - ZONE_MIN_W, max(0, x + dx)); x, w = nx, w + (x - nx)
-            elif side == "r": w = max(ZONE_MIN_W, min(self.W - x, w + dx))
-            elif side == "t": ny = min(y + h - ZONE_MIN_H, max(0, y + dy)); y, h = ny, h + (y - ny)
-            else: h = max(ZONE_MIN_H, min(self.H - y, h + dy))
-            if pressed:
-                if now - self.edge_at >= 0.05:
-                    self.edge_at = now; step = HOST.grid_size(); old, self.edge_g = self.edge_g, None; Kit.dispose(old)
-                    g = G.CreateGump(False, False)
-                    for bx, by, bw_, bh in ((0, 0, w, 2), (0, h - 2, w, 2), (0, 0, 2, h), (w - 2, 0, 2, h)):
-                        Kit.add_box(g, bx, by, bw_, bh, 0.95, "#E8C15A")
-                    t = "%d x %d squares (%d x %d)" % (max(1, int(round(float(w) / step))),
-                                                        max(1, int(round(float(h) / step))), w, h)
-                    Kit.add_box(g, 6, 6, Kit.text_w(t) + 12, 22, 0.85, "#000000")
-                    Kit.add_label(g, t, 12, 8, Kit.HUE_TITLE)
-                    Grid.show_overlay(g, x, y, w, h); self.edge_g = g
-                return
-            self.edge = None; Kit.dispose(self.edge_g); self.edge_g = None
-            if (x, y, w, h) != p0: self.landed_rect(z, x, y, w, h)
-        def landed_rect(self, z, x, y, w, h):
-            step = 1 if z.free else HOST.grid_size()
-            x0, y0, x1, y1 = [int(round(float(v) / step)) * step for v in (x, y, x + w, y + h)]
-            x1, y1 = min(x1, self.W), min(y1, self.H)
-            if not z.free and x + w >= self.W - SNAP_DIST: x1 = self.W
-            if not z.free and y + h >= self.H - SNAP_DIST: y1 = self.H
-            self.apply_rect(z, x0, y0, max(ZONE_MIN_W, x1 - x0), max(ZONE_MIN_H, y1 - y0))
-        def apply_rect(self, z, x, y, w, h, typed=None):
-            W, H = self.W, self.H
-            if w > W or h > H or x < 0 or y < 0 or x + w > W or y + h > H:
-                self.say('zone "%s" can\'t be %s there: it would run off the screen; make it '
-                         'smaller or move it.' % (z.id, typed or "that size"))
-                return False
-            was = z.px; z.set_px(x, y, w, h, W, H); o = self._blocker(z)
-            if o is not None:
-                z.set_px(was[0], was[1], was[2], was[3], W, H)
-                self.say('zone "%s" can\'t be %s there: it would cover "%s"; make it %s or move ' 'it.' % (
-                    z.id, typed or "that size", o.id,
-                    "shorter" if (h > was[3] and w <= was[2]) else "narrower" if w > was[2] else "smaller"))
-                return False
-            nw = z.px; z.set_px(was[0], was[1], was[2], was[3], W, H); self.push()
-            z.set_px(nw[0], nw[1], nw[2], nw[3], W, H); z.note_pins(W, H); self.said = None; self.place_zone(z)
-            self.changed(); return True
-        @staticmethod
-        def _cap_w(cap): return 35 + Kit.text_w(cap)
-        def _flow(self, g, store, items, x0, y, x_max):
-            x = x0
-            for key, art, cap, tip in items:
-                cw = self._cap_w(cap)
-                if x > x0 and x + cw > x_max: x = x0; y += self.ROW
-                if g is not None: Kit.art_button(g, store, key, art, x, y - 2, cap, tip)
-                x += cw + 16
-            return y
-        def build_bar(self): Binds.scoped("interface.editor", self.draw_bar)
-        def draw_bar(self):
-            old = self.bar; W = self.BAR_W; M, GAP = Kit.MARGIN, Kit.GAP; store = ({}, {}); c = {}
-            g = G.CreateGump(True, True); IW = W - 2 * M; x_max = M + IW - 12
-            z = self.zs.by_id(self.sel) if self.sel else None; L = self.layout; step = HOST.grid_size(); ops = []
-            y1 = M + 30 + GAP; ry = y1 + 32; body = []
-            if z is None:
-                body.append(("label", "Click Add zone, then drag it into place.", M + 12, ry + 3, Kit.HUE_INFO))
-                ry += self.ROW
-            else:
-                nx = M + 12 + Kit.text_w("Name:") + 8; body.append(("label", "Name:", M + 12, ry + 3, None))
-                body.append(("box", "name", z.id, nx, ry, 130, False,
-                             "Zone name, unique in this frame layout; Enter uses it"))
-                items = [("kind", Kit.ART_PAGE, "Kind: " + z.kind_name(), "Switch kind: window, keep clear, reserved"),
-                         ("stack", Kit.ART_PAGE, "Stack: " + z.stack_name(),
-                          "Switch the way windows stack in this zone"),
-                         ("prio", Kit.ART_PAGE, "Shrinks: " + _ordinal(z.prio),
-                          "Change when this zone shrinks to minimized bars on a small screen"),
-                         ("overlap", Kit.ART_PAGE, "Overlap: " + ("on" if z.overlap else "off"),
-                          "Let this zone lie over others (on) or keep clear of them (off)"),
-                         ("lock", Kit.ART_PAGE, "Lock: " + ("on" if z.lock else "off"),
-                          "Lock the zone against moving and resizing, or unlock it"),
-                         ("split", Kit.ART_PLAY, "Split", "Cut this zone in two along its long side"),
-                         ("join", Kit.ART_OK, "Join", "Merge with a zone flush beside it of the same height or width"),
-                         ("solo", Kit.ART_PAGE, "Apart: " + ("on" if z.solo else "off"),
-                          "Keep this zone's panel apart from zones it touches (on) or join them (off)"),
-                         ("free", Kit.ART_PAGE, "Snap: " + ("off" if z.free else "on"),
-                          "Snap this zone to the grid and its neighbours (on) or place it to the pixel (off)"),
-                         ("dup", Kit.ART_OK, "Duplicate", "Add a copy of this zone beside it"),
-                         ("remove", Kit.ART_CLOSE, "Remove",
-                          "Remove this zone (or Delete twice); its windows become free")]
-                ops.append(("flow", items, nx + 130 + 16, ry))
-                ry = self._flow(None, None, items, nx + 130 + 16, ry, x_max) + self.ROW; fx = M + 12
-                unit = "px" if self.px_mode else "squares"
-                for key, label, tip in (("col", "X:" if self.px_mode else "Col:",
-                                         "Left edge in %s from the screen's left"),
-                                        ("row", "Y:" if self.px_mode else "Row:",
-                                         "Top edge in %s from the screen's top"),
-                                        ("w", "W:", "Width in %s"), ("h", "H:", "Height in %s")):
-                    hi = (self.W if key in ("col", "w") else self.H)
-                    if not self.px_mode: hi = (hi + step - 1) // step
-                    body.append(("label", label, fx, ry + 3, None)); fx += Kit.text_w(label) + 6
-                    body.append(("box", key, "", fx, ry, self.FIELD_W, True,
-                                 (tip % unit) + " (%d-%d); Enter or Apply uses it, "
-                                 "Esc puts it back" % (0 if key in ("col", "row") else 1, hi)))
-                    fx += self.FIELD_W + 14
-                items = [("apply", Kit.ART_OK, "Apply", "Use the typed values (Enter does too)"),
-                         ("units", Kit.ART_PAGE, "Units: " + unit, "Switch between grid squares and pixels")]
-                ops.append(("flow", items, fx + 4, ry))
-                ry = self._flow(None, None, items, fx + 4, ry, x_max) + self.ROW
-                c["px_y"] = ry + 3; body.append(("px", M + 12, ry + 3)); ry += 20
-                pins = ", ".join(n for p, n in (("L", "left"), ("T", "top"), ("R", "right"), ("B", "bottom"),
-                                                ("X", "centre"), ("Y", "middle")) if p in z.pins)
-                body.append(("pins", "Pinned: " + (pins or "none"), M + 12, ry + 3)); ry += 28
-                items = [("even", Kit.ART_PLAY, "Even out", "Give this zone and those flush beside it in its row (or "
-                          "column) equal sizes")]
-                if len(self.multi) >= 2:
-                    items += [("al_" + e[0], Kit.ART_PLAY, "Align " + e,
-                               "Line the picked zones' %s edges up with this zone's" % e)
-                              for e in ("left", "top", "right", "bottom")]
-                    items.append(("same", Kit.ART_PLAY, "Same size", "Make the picked zones this zone's size"))
-                ops.append(("flow", items, M + 12, ry))
-                ry = self._flow(None, None, items, M + 12, ry, x_max) + self.ROW
-                if len(self.multi) >= 2:
-                    body.append(("label", Kit.fit("%d zones picked (Shift+click picks more or fewer)."
-                                                  % len(self.multi), IW - 24), M + 12, ry + 3, Kit.HUE_INFO))
-                    ry += 20
-            ZH = ry - y1 + 6; y2 = y1 + ZH + GAP; wins_rows = []; WH = 0
-            if z is not None and z.kind == "w":
-                wins_rows = list(L.assign.get(self.orig_id(z.id), []))
-                WH = 30 + 28 + 26 * len(wins_rows) + (20 if self.preview else 0) + 14
-                if not wins_rows: WH += 20
-            y3 = y2 + (WH + GAP if WH else 0); cls = ratio_class(self.W, self.H)
-            others = [k for k in ("narrow", "wide", "ultrawide") if k != cls]
-            presets = [("undo", Kit.ART_PAGE, "Undo", "Undo the last change (Ctrl+Z)"),
-                       ("redo", Kit.ART_PAGE, "Redo", "Redo the last undo (Ctrl+Y)"),
-                       ("from_default", Kit.ART_PLAY, "New from Default", "Start again from the Default layout"),
-                       ("mirror", Kit.ART_PLAY, "Mirror", "Swap the zones left and right"),
-                       ("copyto", Kit.ART_OK, "Copy to others",
-                        "Use these zones on %s and %s screens too (save them first)" % tuple(others))]
-            if self.others is None or self.others[0] != (self.zs.name, cls):
-                named = FRAMES_NAMED % self.zs.name
-                self.others = ((self.zs.name, cls), [k for k in others if Kit.get_var(named + "@" + k, "")])
-            saved_other = self.others[1]
-            if saved_other:
-                presets.append(("reflow", Kit.ART_PLAY, "Reflow from: " + saved_other[0],
-                                "Rebuild from this layout's %s-screen version" % saved_other[0]))
-                c["reflow_from"] = saved_other[0]
-            prow = self._flow(None, None, presets, M + 12, 0, x_max); FH = 30 + 28 * 2 + prow + 20 * 3 + 10
-            H = y3 + FH + M
-            Kit.add_window_frame(g, W, H); Kit.add_section(g, M, M, IW, 30)
-            Kit.add_label(g, "ZONES", M + 30, M + 7, Kit.HUE_TITLE)
-            Kit.add_label(g, Kit.fit('frame layout "%s"' % self.zs.name, IW - 250),
-                          M + 30 + Kit.text_w("ZONES") + 12, M + 7, Kit.HUE_INFO)
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None,
-                           "Close the editor and bring back the saved zones")
-            Kit.add_section(g, M, y1, IW, ZH, "ZONE  (selected)"); boxes = []
-            for item in body:
-                if item[0] == "label": Kit.add_label(g, item[1], item[2], item[3], item[4])
-                elif item[0] == "box":
-                    key, text, bx, by, bw_, num, tip = item[1:]
-                    c[key] = Kit.with_tip(Kit.add_textbox(g, text, bx, by, bw_, numbers=num), tip); boxes.append(key)
-                elif item[0] == "px":
-                    c["px"] = Kit.add_label(g, "", item[1], item[2], Kit.HUE_INFO); c["px_x"] = item[1]
-                elif item[0] == "pins":
-                    Kit.with_tip(Kit.add_label(g, item[1], item[2], item[3], Kit.HUE_INFO),
-                                 "Edges kept on the screen's edge (or centre line) on other screen sizes")
-            for op in ops: self._flow(g, store, op[1], op[2], op[3], x_max)
-            if WH:
-                Kit.add_section(g, M, y2, IW, WH, "WINDOWS  (in this zone, top to bottom)"); ry = y2 + 32
-                Kit.add_label(g, "Window:", M + 12, ry + 3); dd_x = M + 12 + Kit.text_w("Window:") + 8; dd_w = 300
-                bx = dd_x + dd_w + 16
-                Kit.art_button(g, store, "w_add", Kit.ART_OK, bx, ry - 2, "Put it here",
-                               "Put the picked window in this zone (no Arrange mode needed)")
-                ry += 28
-                if not wins_rows:
-                    Kit.add_label(g, "Pick a window above, then click Put it here.", M + 12, ry + 3, Kit.HUE_INFO)
-                    ry += 20
-                for i, k in enumerate(wins_rows):
-                    Kit.add_label(g, Kit.fit(L.title_of(k), 300), M + 12, ry + 3)
-                    self._flow(g, store, [("w_%s_%d" % (w_, i), art, cap, tip % L.title_of(k))
-                                          for w_, art, cap, tip in (
-                        ("up", Kit.ART_PAGE, "Up", "Move %s up the zone's stack"),
-                        ("down", Kit.ART_PAGE, "Down", "Move %s down the zone's stack"),
-                        ("out", Kit.ART_CLOSE, "Take out", "Free %s from the zone (it stays where it is)"))],
-                        M + 12 + 310, ry, 1 << 30)
-                    ry += 26
-                c["wins_rows"] = wins_rows
-                if self.preview:
-                    Kit.add_label(g, Kit.fit(self.preview.lstrip("!"), IW - 24), M + 12, ry + 3,
-                                  Kit.HUE_BAD if self.preview.startswith("!") else Kit.HUE_INFO)
-            Kit.add_section(g, M, y3, IW, FH, "FRAME LAYOUT"); ry = y3 + 32; x = M + 12
-            for key, art, cap, tip in (("add", Kit.ART_OK, "Add zone", "Add a zone mid-screen to drag into place"),
-                                       ("fill", Kit.ART_PLAY, "Fill the gaps",
-                                        "Grow every zone into empty room beside it"), ("save", Kit.ART_OK, "Save",
-                                        "Save as the frame layout in use (Default saves as Default (mine))"),
-                                       ("saveas", Kit.ART_OK, "Save as", "Save under the name in the box")):
-                Kit.art_button(g, store, key, art, x, ry - 2, cap, tip); x += self._cap_w(cap) + 16
-            c["saveas"] = Kit.with_tip(Kit.add_textbox(g, self.saveas_text, x, ry, max(
-                60, W - M - 12 - self._cap_w("Discard") - 16 - x), numbers=False),
-                "A name for Save as (letters, digits, spaces)")
-            cap = "Discard"
-            Kit.art_button(g, store, "discard", Kit.ART_CLOSE, W - M - 12 - self._cap_w(cap), ry - 2,
-                           cap, "Close the editor and bring back the saved zones")
-            ry += 28; ry = self._flow(g, store, presets, M + 12, ry, x_max) + 28; n = len(self.zs.zones)
-            nk = sum(1 for zz in self.zs.zones if zz.kind == "k"); nr = sum(1 for zz in self.zs.zones if zz.kind == "r")
-            gaps, over = self.counts
-            status = "%s, %d keep clear, %d reserved; %s, %s; %d x %d, %s" % (
-                Kit.count(n, "zone"), nk, nr, Kit.count(gaps, "gap"), Kit.count(over, "overlap"), self.W, self.H, cls)
-            Kit.add_label(g, Kit.fit(status, IW - 24), M + 12, ry + 3, Kit.HUE_BAD if (gaps or over) else Kit.HUE_INFO)
-            ry += 20; lx = M + 12
-            for col, name in ((ZONE_COLORS["w"], "window"), (ZONE_COLORS["k"], "keep clear"),
-                              (ZONE_COLORS["r"], "reserved"), ("#C83030", "gap or overlap"),
-                              ("#E8C15A", "overlap allowed")):
-                Kit.add_box(g, lx, ry + 6, 12, 12, 0.9, col); Kit.add_label(g, name, lx + 16, ry + 3, Kit.HUE_INFO)
-                lx += 16 + Kit.text_w(name) + 14
-            ry += 20
-            Kit.add_label(g, Kit.fit("Mouse on the zone: arrows nudge it a square; Shift+arrows resize "
-                                     "it; Delete twice removes it.", IW - 24), M + 12, ry + 3, Kit.HUE_INFO)
-            if WH:
-                wl = L.all_windows(); names = ["(pick a window)"]; self.pick_keys = [None]
-                for k, t in wl:
-                    zid = L.zone_of(k); names.append(Kit.fit(t + (' (in "%s")' % zid if zid else ""), 290))
-                    self.pick_keys.append(k)
-                if self.pick >= len(names): self.pick = 0
-                dd = G.CreateDropDown(dd_w, names, self.pick); dd.SetPos(dd_x, y2 + 32); g.Add(dd)
-                c["w_pick"] = Kit.with_tip(dd, "A window for this zone; the zone shows where it would sit")
-            ax, ay = Kit.anchor_pos("B", W, H)
-            if Kit.is_open(old): x, y = old.GetX(), old.GetY()
-            else: x, y = self.bar_pos or Kit.load_pos(EDITOR_POS, (ax or 200, ay or 200), (W, H))
-            Kit.place(g, x, y, W, H); G.AddGump(g); Kit.on_moved(g, self._bar_moved)
-            self.bar, self.store, self.c = g, store, c; self.raws = {}
-            for key in boxes + ["saveas"]:
-                raw = Kit.client_control(c[key]) if key in c else None
-                if raw is not None: self.raws[key] = raw
-            self.fields = None; self.focus_was = None; self.show_fields(); Kit.dispose(old)
-        def _bar_moved(self): Kit.save_pos(EDITOR_POS, self.bar); self.bar_pos = Snap.pos(self.bar)
-        def _values(self, z):
-            x, y, w, h = z.px
-            if self.px_mode: return tuple(str(v) for v in (x, y, w, h))
-            step = HOST.grid_size()
-            return tuple(str(v) for v in (int(round(float(x) / step)), int(round(float(y) / step)),
-                                          max(1, int(round(float(w) / step))), max(1, int(round(float(h) / step)))))
-        def show_fields(self):
-            c = self.c; z = self.zs.by_id(self.sel) if self.sel else None
-            if z is None or "col" not in c: return
-            texts = self._values(z)
-            if texts != self.fields:
-                self.fields = texts
-                for key, t in zip(self.FIELDS, texts): c[key].SetText(t)
-            x, y, w, h = z.px
-            if self.px_mode:
-                step = HOST.grid_size()
-                text = "%d x %d squares at square %d, %d" % (
-                    max(1, int(round(float(w) / step))), max(1, int(round(float(h) / step))),
-                    int(round(float(x) / step)), int(round(float(y) / step)))
-            else: text = "%d x %d px at %d, %d" % (w, h, x, y)
-            Kit.set_text(c["px"], Kit.fit(text, self.BAR_W - Kit.MARGIN - 12 - c["px_x"]))
-        def _over(self, z):
-            m = Kit.mouse_pos()
-            if m is None: return True
-            for r in (Snap.rect(self.bar), tuple(z.px)):
-                if r is not None and r[0] <= m[0] < r[0] + r[2] and r[1] <= m[1] < r[1] + r[3]: return True
-            return False
-        def _key(self, name):
-            down = False
-            for k in self.KEYS[name]:
-                if API.IsKeyPressed(k): down = True; break
-            was = self.keys_was.get(name, False); self.keys_was[name] = down; return down and not was
-        def _focus(self):
-            if not self.raws: return None
-            try:
-                Typing._find()
-                f = (Typing._get(None, "KeyboardFocusControl", Typing.uim) if Typing.uim is not None else None)
-            except Exception: f = None
-            self.raws_ok = Typing.uim is not None; n = 0
-            while f is not None and n < 4:
-                for key, raw in self.raws.items():
-                    if Typing._same(f, raw): return key
-                f = Typing._get(f, "Parent"); n += 1
-            return None
-        def _box_texts(self):
-            c = self.c
-            try: return tuple(str(c[k].Text or "").strip() for k in self.FIELDS)
-            except Exception: return None
-        def poll(self):
-            if self.closed: return
-            if not Kit.is_open(self.bar): self.close(keep=False); return
-            now = time.time()
-            for zid, fr in list(self.frames.items()):
-                z = self.zs.by_id(zid); g = fr.get("g")
-                if z is None or not Kit.is_open(g): continue
-                if fr["resize_at"]:
-                    r = Snap.rect(g)
-                    if r is not None and (r[2], r[3]) != fr["size"]:
-                        step = HOST.grid_size()
-                        Kit.set_text(fr["sum"], Kit.fit("%d x %d squares" % (max(1, int(round(float(r[2]) / step))),
-                                                                             max(1, int(round(float(r[3]) / step)))),
-                                                        max(40, r[2] - 2 * Kit.MARGIN - 24)), Kit.HUE_TITLE)
-                    if now - fr["resize_at"] >= self.SETTLE:
-                        fr["resize_at"] = 0.0
-                        if r is not None and (r[2], r[3]) != fr["size"]:
-                            if z.lock: self.build_zone(z)
-                            else: self.landed(z, r[0], r[1], r[2], r[3], resized=True)
-            pressed = SNAP.pressed() is True; self._sync_handles(); self._edge_tick(pressed); self.pressed_was = pressed
-            store, c = self.store, self.c; z = self.zs.by_id(self.sel) if self.sel else None
-            if Kit.was_clicked(store, "close") or Kit.was_clicked(store, "discard"): self.close(keep=False); return
-            focus = self._focus(); typing = Client.typing(); enter = self._key("enter")
-            esc = self._key("esc")
-            if not typing and not self.edge:
-                ctrl = bool(Client.key_held("ctrl")); shift = bool(Client.key_held("shift"))
-                if self._key("z") and ctrl: self.do_undo()
-                elif self._key("y") and ctrl: self.do_redo()
-                elif z is not None:
-                    for name, d in (("left", (-1, 0)), ("right", (1, 0)), ("up", (0, -1)), ("down", (0, 1))):
-                        if self._key(name) and self._over(z): self.nudge(z, d, shift)
-                    if self._key("delete"): self.delete_pressed(z)
-            if Kit.was_clicked(store, "add"):
-                self.push(); zid = self.zs.new_id(); nz = Zone(zid, "w", (0, 0, 1, 1), "", (0, 0), "d", 0)
-                nz.set_px((self.W - 320) // 2, (self.H - 240) // 2, 320, 240, self.W, self.H)
-                if not self._add_zone(nz, True, "no room for another zone; remove one or make one smaller."): return
-            elif Kit.was_clicked(store, "undo"): self.do_undo()
-            elif Kit.was_clicked(store, "redo"): self.do_redo()
-            elif Kit.was_clicked(store, "even") and z is not None:
-                self.push(); n = self.zs.even_out(z, self.W, self.H, HOST.grid_size())
-                if n < 2: self.undo.pop(); self.say("no zone sits flush beside this one in its row or column.")
-                else: self._all_moved()
-            elif Kit.was_clicked(store, "fill"):
-                self.push(); self.zs.fill_gaps(self.W, self.H, HOST.grid_size()); self._all_moved()
-            elif Kit.was_clicked(store, "save"):
-                self.save(self.zs.name if self.zs.name != LAYOUT_DEFAULT else LAYOUT_MINE); return
-            elif Kit.was_clicked(store, "saveas"):
-                name = Layout.clean_name(safe(lambda: c["saveas"].Text, ""), "")
-                if not name: self.say("type a name in the box, then click Save as.")
-                else: self.save(name if name != LAYOUT_DEFAULT else LAYOUT_MINE); return
-            elif Kit.was_clicked(store, "reflow") and c.get("reflow_from"):
-                other = ZoneSet.parse(self.zs.name,
-                                      Kit.get_var((FRAMES_NAMED % self.zs.name) + "@" + c["reflow_from"], ""))
-                if other is not None:
-                    other.reflow(self.W, self.H, HOST.grid_size()); self.push()
-                    self._restore(([zz.copy() for zz in other.zones], self.sel, {})); self.changed()
-            elif Kit.was_clicked(store, "from_default"):
-                self.push(); d = ZoneSet.default(self.W, self.H, (), False)
-                self._restore(([zz.copy() for zz in d.zones], self.sel, {})); self.changed()
-            elif Kit.was_clicked(store, "mirror"):
-                self.push()
-                for zz in self.zs.zones:
-                    x, y, w, h = zz.px; zz.set_px(self.W - x - w, y, w, h, self.W, self.H)
-                self._all_moved()
-            elif Kit.was_clicked(store, "copyto"): self.copy_to()
-            elif Kit.was_clicked(store, "units"):
-                self.commit_rect(z, quiet=True) if z is not None else None; self.px_mode = not self.px_mode
-                self.rebuild = True
-            if z is not None and not self.rebuild: self.poll_zone(z, store)
-            if z is not None and z.kind == "w" and not self.rebuild: self.poll_windows(z, store, c)
-            if not self.rebuild: self.poll_fields(z, focus, enter, esc, Kit.was_clicked(store, "apply"))
-            self.focus_was = focus; self.draw_marks()
-            if self.rebuild:
-                self.rebuild = False; self.saveas_text = str(safe(lambda: c["saveas"].Text, self.saveas_text) or "")
-                for zz in self.zs.zones: self.update_zone(zz)
-                self.build_bar()
-        def _all_moved(self):
-            for zz in self.zs.zones: zz.note_pins(self.W, self.H); self.place_zone(zz)
-            self.changed()
-        def poll_zone(self, z, store):
-            if Kit.was_clicked(store, "kind"):
-                self.push(); kinds = [k for k, n in ZONE_KINDS]; z.kind = kinds[(kinds.index(z.kind) + 1) % len(kinds)]
-                z.hug = z.hug and z.kind == "w"; self.build_zone(z); self.changed()
-                self.rebuild = True
-            elif Kit.was_clicked(store, "stack"):
-                self.push(); stacks = [k for k, n in ZONE_STACKS]
-                z.stack = stacks[(stacks.index(z.stack) + 1) % len(stacks)]; self.rebuild = True
-            elif Kit.was_clicked(store, "prio"):
-                self.push(); z.prio = (z.prio + 1) % (SHRINK_MAX + 1); self.rebuild = True
-            elif Kit.was_clicked(store, "overlap"):
-                self.push(); z.overlap = not z.overlap
-                if not z.overlap:
-                    if not self.zs.push_clear(z, self.W, self.H, HOST.grid_size()):
-                        o = self._blocker(z)
-                        self.say('zone "%s" still lies over "%s"; move it or make it smaller.'
-                                 % (z.id, o.id if o is not None else "a zone"), Kit.HUE_INFO)
-                    z.note_pins(self.W, self.H)
-                for zz in self.zs.zones: self.build_zone(zz)
-                self.changed(); self.rebuild = True
-            elif Kit.was_clicked(store, "lock"):
-                self.push(); z.lock = not z.lock; self.build_zone(z); self.rebuild = True
-            elif Kit.was_clicked(store, "split"): self.split(z)
-            elif Kit.was_clicked(store, "join"): self.join(z)
-            elif Kit.was_clicked(store, "solo"): self.push(); z.solo = not z.solo; self.changed(); self.rebuild = True
-            elif Kit.was_clicked(store, "free"):
-                self.push(); z.free = not z.free; self.px_mode = self.px_mode or z.free; z.note_pins(self.W, self.H)
-                self.changed(); self.rebuild = True
-            elif Kit.was_clicked(store, "dup"): self.duplicate(z)
-            elif Kit.was_clicked(store, "remove"): self.remove(z)
-            else:
-                for key, edge in (("al_l", "l"), ("al_t", "t"), ("al_r", "r"), ("al_b", "b"), ("same", "s")):
-                    if Kit.was_clicked(store, key): self.align(z, edge); break
-        def poll_windows(self, z, store, c):
-            L = self.layout; dd = c.get("w_pick"); now = time.time(); add = Kit.was_clicked(store, "w_add")
-            if dd is not None and (now >= self._pick_next or now - HOST.input_at <= HOST.INPUT_FAST):
-                self._pick_next = now + 0.2; i = Kit.dd_index(dd, self.pick)
-                if i != self.pick:
-                    self.pick = i; key = self.pick_keys[i] if 0 < i < len(self.pick_keys) else None
-                    self.preview = self.preview_text(key, z) if key else ""; self.build_zone(z); self.rebuild = True
-                    if not add: return
-            zid = self.orig_id(z.id)
-            if add:
-                key = self.pick_keys[self.pick] if 0 < self.pick < len(self.pick_keys) else None
-                if key is None:
-                    self.say("pick a window in the list first, then click Put it here.", Kit.HUE_INFO); return
-                if L.frames is None or L.frames.by_id(zid) is None:
-                    self.say('zone "%s" isn\'t saved yet; click Save, then put the window in it.' % z.id); return
-                if L.zone_of(key) == zid:
-                    self.say("%s already sits in this zone." % L.title_of(key), Kit.HUE_INFO); return
-                mz = L._map_zone()
-                if (key != "worldmap" and zid == mz) or (key == "worldmap" and L.assign.get(zid)):
-                    self.say("TazUO's World Map keeps its zone to itself; pick another zone for %s."
-                             % (L.title_of(key) if key != "worldmap" else "it"))
-                    return
-                if L._too_small(key, L.frames.by_id(zid)): return
-                L.assign_to(key, zid); self.pick, self.preview = 0, ""; self.build_zone(z); self.rebuild = True; return
-            rows = c.get("wins_rows") or []
-            for i, k in enumerate(rows):
-                for what in ("up", "down", "out"):
-                    if not Kit.was_clicked(store, "w_%s_%d" % (what, i)): continue
-                    keys = L.assign.get(zid, [])
-                    if k not in keys: break
-                    if what == "out": L.assign_to(k, None)
-                    else:
-                        j = keys.index(k); t = j - 1 if what == "up" else j + 1
-                        if 0 <= t < len(keys):
-                            keys[j], keys[t] = keys[t], keys[j]
-                            for kk in keys: L._refit(kk)
-                            L.save_assign(); L.dirty = L.fresh = True; HOST.poke()
-                    self.build_zone(z); self.rebuild = True; return
-        def preview_text(self, key, z):
-            return self.layout.preview_text(key, z, self.layout.assign.get(self.orig_id(z.id), []))
-        def poll_fields(self, z, focus, enter, esc, apply):
-            c = self.c
-            if z is None or "name" not in c: return
-            left = self.focus_was if (self.focus_was is not None and focus != self.focus_was) else None
-            if esc and (focus is not None or self._edited(z)): self._refields(); c["name"].SetText(z.id); return
-            if (enter and focus == "name") or left == "name" or apply:
-                name = str(safe(lambda: c["name"].Text, z.id) or "").strip()
-                if name != z.id: self.rename(z, name); return
-            if focus is None and left is None and enter and not self.raws_ok:
-                name = str(safe(lambda: c["name"].Text, z.id) or "").strip()
-                if name != z.id: self.rename(z, name); return
-                self.commit_rect(z); return
-            if ((enter and focus in self.FIELDS) or (left in self.FIELDS and focus not in self.FIELDS) or apply):
-                self.commit_rect(z)
-        def _edited(self, z):
-            texts = self._box_texts(); name = str(safe(lambda: self.c["name"].Text, z.id) or "").strip()
-            return (texts is not None and texts != self._values(z)) or name != z.id
-        def commit_rect(self, z, quiet=False):
-            texts = self._box_texts()
-            if texts is None or texts == self._values(z): return
-            try: col, row, w, h = [int(t) for t in texts]
-            except Exception:
-                if not quiet: self.say("type whole numbers in Col, Row, W and H.")
-                self._refields(); return
-            step = 1 if self.px_mode else HOST.grid_size(); x, y = max(0, col) * step, max(0, row) * step
-            w, h = max(1, w) * step, max(1, h) * step
-            typed = "%d x %d %s" % (max(1, int(texts[2])), max(1, int(texts[3])), "px" if self.px_mode else "squares")
-            if w < ZONE_MIN_W or h < ZONE_MIN_H:
-                if not quiet:
-                    self.say('zone "%s" can\'t be %s: the smallest zone is %d x %d px.' % (
-                        z.id, typed, ZONE_MIN_W, ZONE_MIN_H))
-                self._refields(); return
-            if z.lock:
-                self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); self._refields(); return
-            if not self.apply_rect(z, x, y, w, h, typed): self._refields()
-        def rename(self, z, name):
-            name = Layout.clean_name(name, "")
-            if not name or name.lower() == "frames" or self.zs.by_id(name) is not None:
-                self.say('zone "%s" can\'t be called "%s": %s.' % (
-                    z.id, name, "a name needs letters or digits" if not name else
-                    "the name is taken" if self.zs.by_id(name) is not None else "that name is kept"))
-                self.c["name"].SetText(z.id); return
-            self.push(); old = z.id; z.id = name
-            for k, v in self.renames.items():
-                if v == old: self.renames[k] = name; break
-            else: self.renames[old] = name
-            fr = self.frames.pop(old, None)
-            if fr is not None: self.frames[name] = fr
-            self.sel = name; self.multi = set(name if m == old else m for m in self.multi); self.said = None
-            self.build_zone(z); self.rebuild = True
-        def nudge(self, z, d, resize):
-            if z.lock: self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); return
-            step = 1 if z.free else HOST.grid_size(); x, y, w, h = z.px
-            if resize: self.apply_rect(z, x, y, max(ZONE_MIN_W, w + d[0] * step), max(ZONE_MIN_H, h + d[1] * step))
-            else: self.apply_rect(z, x + d[0] * step, y + d[1] * step, w, h)
-        def delete_pressed(self, z):
-            now = time.time()
-            if (self.del_armed is not None and self.del_armed[0] == z.id and now - self.del_armed[1] <= 3.0):
-                self.del_armed = None; self.remove(z); return
-            self.del_armed = (z.id, now); Kit.say('press Delete again to remove zone "%s".' % z.id, Kit.HUE_INFO)
-        def remove(self, z):
-            if z.lock: self.say('zone "%s" is locked; click Lock to remove it.' % z.id, Kit.HUE_INFO); return
-            self.push(); self.zs.zones = [zz for zz in self.zs.zones if zz is not z]; fr = self.frames.pop(z.id, None)
-            if fr is not None: Kit.dispose(fr.get("g"))
-            self.multi.discard(z.id); self.sel = self.zs.zones[0].id if self.zs.zones else None; self.changed()
-            self.rebuild = True
-        def split(self, z):
-            if z.lock: self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); return
-            x, y, w, h = z.px; wide = w >= h; size = w if wide else h; least = ZONE_MIN_W if wide else ZONE_MIN_H
-            step = HOST.grid_size(); half = int(round(size / 2.0 / step)) * step
-            if not least <= half <= size - least: half = size // 2
-            if half < least or size - half < least: self.say('zone "%s" is too small to split.' % z.id); return
-            self.push(); nz = z.copy(); nz.id = self.zs.new_id(); W, H = self.W, self.H
-            if wide: z.set_px(x, y, half, h, W, H); nz.set_px(x + half, y, w - half, h, W, H)
-            else: z.set_px(x, y, w, half, W, H); nz.set_px(x, y + half, w, h - half, W, H)
-            z.note_pins(W, H); nz.note_pins(W, H); self.zs.zones.append(nz); self.build_zone(z); self.build_zone(nz)
-            self.changed(); self.rebuild = True
-        def join(self, z):
-            if z.lock: self.say('zone "%s" is locked; click Lock to change it.' % z.id, Kit.HUE_INFO); return
-            x, y, w, h = z.px; D = SNAP_DIST; mate = None
-            for o in self.zs.zones:
-                if o is z or o.px is None or o.lock or o.kind != z.kind: continue
-                ox, oy, ow, oh = o.px
-                if abs(oy - y) <= D and abs(oh - h) <= D and (abs(ox - (x + w)) <= D or abs(x - (ox + ow)) <= D):
-                    mate = o
-                elif abs(ox - x) <= D and abs(ow - w) <= D and (abs(oy - (y + h)) <= D or abs(y - (oy + oh)) <= D):
-                    mate = o
-                if mate is not None: break
-            if mate is None: self.say('no zone of the same height or width sits flush beside "%s".' % z.id); return
-            self.push(); ox, oy, ow, oh = mate.px; x0, y0 = min(x, ox), min(y, oy)
-            z.set_px(x0, y0, max(x + w, ox + ow) - x0, max(y + h, oy + oh) - y0, self.W, self.H)
-            z.note_pins(self.W, self.H)
-            self.zs.zones = [zz for zz in self.zs.zones if zz is not mate]; fr = self.frames.pop(mate.id, None)
-            if fr is not None: Kit.dispose(fr.get("g"))
-            self.multi.discard(mate.id); self.build_zone(z); self.changed(); self.rebuild = True
-            self.say('zone "%s" joined into "%s"; its windows become free when saved.' % (mate.id, z.id), Kit.HUE_INFO)
-        def _add_zone(self, nz, check, text):
-            self.zs.zones.append(nz)
-            if check and not self.zs.push_clear(nz, self.W, self.H, HOST.grid_size()):
-                self.zs.zones.remove(nz); self.undo.pop(); self.say(text); return False
-            nz.note_pins(self.W, self.H); self.sel, self.multi = nz.id, set(); self.build_zone(nz); self.changed()
-            self.rebuild = True; return True
-        def duplicate(self, z):
-            self.push(); nz = z.copy(); nz.id = self.zs.new_id(); nz.lock = False; step = HOST.grid_size()
-            x, y, w, h = z.px; nz.set_px(x + step, y + step, w, h, self.W, self.H)
-            self._add_zone(nz, not nz.overlap, "no room for a copy of zone \"%s\"; make room first." % z.id)
-        def align(self, z, edge):
-            picked = [p for p in [self.zs.by_id(i) for i in self.multi if i != z.id] if p is not None and not p.lock]
-            if not picked: return
-            self.push(); x, y, w, h = z.px; refused = []
-            for p in picked:
-                px, py, pw, ph = p.px
-                r = {"l": (x, py, pw, ph), "t": (px, y, pw, ph), "r": (x + w - pw, py, pw, ph),
-                     "b": (px, y + h - ph, pw, ph)}.get(edge, (px, py, w, h))
-                was = p.px; p.set_px(r[0], r[1], r[2], r[3], self.W, self.H)
-                if self._blocker(p) is not None:
-                    p.set_px(was[0], was[1], was[2], was[3], self.W, self.H); refused.append(p.id)
-                p.note_pins(self.W, self.H)
-            if refused:
-                self.say("%s would cover another zone, so %s stayed where %s %s." % (
-                    ", ".join('"%s"' % r for r in refused), "it" if len(refused) == 1 else "they",
-                    "it" if len(refused) == 1 else "they", "was" if len(refused) == 1 else "were"), Kit.HUE_INFO)
-            self._all_moved()
-        def copy_to(self):
-            name = self.zs.name; self.others = None
-            if self.zs.generated or name == LAYOUT_DEFAULT or name not in self.layout.frame_names():
-                self.say("save these zones first (Save or Save as), then click Copy to.", Kit.HUE_INFO); return
-            cls = ratio_class(self.W, self.H); zs = self.zs.copy(name); zs.screen = (self.W, self.H)
-            zs.grid = HOST.grid_size()
-            for zz in zs.zones: zz.note_pins(self.W, self.H)
-            text = zs.save_text(); others = [k for k in ("narrow", "wide", "ultrawide") if k != cls]
-            for k in others: Kit.put_var((FRAMES_NAMED % name) + "@" + k, text)
-            Kit.say('frame layout "%s" copied to %s screens.' % (name, " and ".join(others)), Kit.HUE_GOOD)
-        def warnings(self):
-            out = []; L = self.layout
-            for z in self.zs.zones:
-                if z.kind != "w" or z.px is None: continue
-                for k in L.assign.get(self.orig_id(z.id), []):
-                    mn = L._min_of(k)
-                    if mn and (z.px[2] < mn[0] or z.px[3] < mn[1]):
-                        out.append('zone "%s" is %d x %d, smaller than %s can be (%d x %d)' % (
-                            z.id, z.px[2], z.px[3], L.title_of(k), mn[0], mn[1]))
-            gaps, over = self.counts
-            if gaps: out.append("the zones leave %s (Fill the gaps closes them)" % Kit.count(gaps, "gap"))
-            if over: out.append("%s of zones without Overlap on" % Kit.count(over, "overlap"))
-            if not any(z.kind == "k" for z in self.zs.zones):
-                out.append("no keep-clear zone: nothing marks the game view")
-            return out
-        def save(self, name):
-            self.others = None
-            for w in self.warnings(): Kit.say("note: %s." % w, Kit.HUE_INFO)
-            zs = self.zs.copy(name); zs.generated = False; zs.ver = 2; self.layout.save_frames(zs, name, self.W, self.H)
-            L, moved = self.layout, False
-            for was, now in self.renames.items():
-                if was != now and was in L.assign and now not in L.assign:
-                    L.assign[now] = L.assign.pop(was); moved = True
-            if moved: L.save_assign()
-            Kit.say('frame layout "%s" saved.' % name, Kit.HUE_GOOD); self.close(keep=True)
-            self.layout.use_frames(name, tell=False)
-    def editor_closed(): st["editor"] = None
-    def edit(fresh=False):
-        L = LAYOUT; W, H = Kit.screen()
-        if st["editor"] is not None or W <= 0 or H <= 0 or not L.enabled: return
-        if fresh:
-            names = L.frame_names(); n, name = 2, "Mine"
-            while name in names or name == LAYOUT_DEFAULT: name = "Mine %d" % n; n += 1
-            zs = ZoneSet(name, [], HOST.grid_size(), (W, H)); z = Zone("Zone 1", "w", (0, 0, 1, 1), "", (0, 0), "d", 0)
-            z.set_px((W - 320) // 2, (H - 240) // 2, 320, 240, W, H); zs.zones.append(z)
-        elif L.frames_name == LAYOUT_DEFAULT: zs = ZoneSet.default(W, H, L.occupied(), False); zs.generated = False
-        else: zs = L.load_frames(L.frames_name, W, H) or L.frames_in_use(W, H).copy()
-        st["editor"] = LayoutEditor(L, zs, editor_closed); st["editor"].open()
-    def backdrop_items():
-        L = LAYOUT; zs = L.frames
-        if zs is None or not (L.seamless and L.enabled) or st["editor"] is not None: return (), None
-        gp = Layout._game_px(zs)
-        def clear(r): return gp is None or not (r[0] < gp[0] + gp[2] and gp[0] < r[0] + r[2] and r[1] < gp[1] + gp[3]
-                                                 and gp[1] < r[1] + r[3])
-        items = tuple((tuple(z.px), z.solo) for z in zs.zones if z.kind != "k" and z.px is not None and clear(z.px))
-        return items, gp if L.fit_view else None
-    def draw_backdrop(items, gp, W, H):
-        g = G.CreateGump(False, False); base = Kit.WINDOW_BG; P = [Kit.pic_size(base + i) for i in range(9)]
-        rects = [it[0] for it in items]; cover = [{"T": [], "B": [], "L": [], "R": []} for _ in rects]
-        def solid(x, y, w, h):
-            Kit.add_tiled(g, base + 4, x, y, w, h); b = Kit.add_box(g, x, y, w, h, 0.01, "#000000")
-            if b is not None: b.SetAcceptMouseInput(True)
-        for x, y, w, h in rects: solid(x, y, w, h)
-        for i in range(len(rects)):
-            for j in range(i + 1, len(rects)):
-                s = None if items[i][1] or items[j][1] else touch(rects[i], rects[j])
-                if s is None: continue
-                o, lo, hi, a, b = s; k = 0 if o == "v" else 1
-                near, far = (i, j) if rects[i][k] < rects[j][k] else (j, i)
-                cover[near]["R" if o == "v" else "B"].append((a, b))
-                cover[far]["L" if o == "v" else "T"].append((a, b))
-                if hi > lo: solid(*((lo, a, hi - lo, b - a) if o == "v" else (a, lo, b - a, hi - lo)))
-        for i, (x, y, w, h) in enumerate(rects):
-            for sd, art, s0, s1, fx in (("T", 1, x, x + w, lambda a, b: (a, y, b - a, P[1][1])),
-                                        ("B", 7, x, x + w, lambda a, b: (a, y + h - P[7][1], b - a, P[7][1])),
-                                        ("L", 3, y, y + h, lambda a, b: (x, a, P[3][0], b - a)),
-                                        ("R", 5, y, y + h, lambda a, b: (x + w - P[5][0], a, P[5][0], b - a))):
-                for a, b in gaps_of(s0, s1, cover[i][sd]): Kit.add_tiled(g, base + art, *fx(a, b))
-        Grid.show_overlay(g, 0, 0, W, H, True); back["g"] = g
-        if gp is None or gp[2] <= 2 * RING or gp[3] <= 2 * RING: return
-        r = G.CreateGump(False, False); x, y, w, h = gp
-        for bx, by, bw, bh, col in ((0, 0, w, RING, RING_GOLD), (0, h - RING, w, RING, RING_GOLD),
-                                    (0, 0, RING, h, RING_GOLD), (w - RING, 0, RING, h, RING_GOLD),
-                                    (RING, RING, w - 2 * RING, 1, RING_DARK),
-                                    (RING, h - RING - 1, w - 2 * RING, 1, RING_DARK),
-                                    (RING, RING, 1, h - 2 * RING, RING_DARK),
-                                    (w - RING - 1, RING, 1, h - 2 * RING, RING_DARK)):
-            Kit.add_box(r, bx, by, bw, bh, 1.0, col)
-        Grid.show_overlay(r, x, y, w, h); ring["g"] = r
-    def sink():
-        raw = Kit._raw_gump(back["g"]) if back["g"] is not None and not sinker["off"] else None
-        if raw is None or not Client.on_client_thread(): return
-        try:
-            gumps = sinker["gumps"]
-            if gumps is None:
-                import System; t = Tz.T("ClassicUO.Game.Managers.UIManager")
-                sinker["same"] = System.Object.ReferenceEquals
-                sinker["ver"] = t.GetField("_gumpsStructureVersion", Client.flags(static=True, public=False))
-                gumps = sinker["gumps"] = Tz.get(None, "Gumps", t)
-            ver = sinker["ver"]; cur = int(ver.GetValue(None)) if ver is not None else None
-            if cur is not None and cur == sinker["seen"] and raw is sinker["raw"]: return
-            sinker["seen"], sinker["raw"] = cur, raw; last = gumps.Last; same = sinker["same"]
-            if last is None or same(last.Value, raw) or (last.Previous is not None and same(last.Previous.Value, raw)):
-                return
-            node = gumps.Find(raw)
-            if node is None: return
-            gumps.Remove(node); gumps.AddBefore(gumps.Last, node)
-            if ver is not None: ver.SetValue(None, cur + 1); sinker["seen"] = cur + 1
-        except Exception: sinker["off"] = True
-    def backdrop_tick(now):
-        if now < st["back_at"]: return
-        st["back_at"] = now + BACK_EVERY; W, H = Kit.screen(); items, gp = backdrop_items()
-        sig = (W, H, items, gp, Kit.dark())
-        if sig == st["back_sig"] and (not items or (Kit.is_open(back["g"]) and (gp is None or Kit.is_open(ring["g"])))):
-            return
-        st["back_sig"] = sig; old, back["g"] = back["g"], None; old_r, ring["g"] = ring["g"], None
-        if items and W > 0 and H > 0: draw_backdrop(items, gp, W, H)
-        Kit.dispose(old); Kit.dispose(old_r)
-    def role_of(key):
-        for pre, role in ROLES:
-            if key == pre or (pre.endswith(".") and key.startswith(pre)): return role
-        return None
-    def cut(total, shares):
-        out, at = [], 0
-        for i, sh in enumerate(shares):
-            n = total - at if i == len(shares) - 1 else int(round(total * sh)); out.append((at, n)); at += n
-        return out
-    def custom_zones(i, W, H):
-        t = int(_clampv(STRIP_SHARE * H, TOP_MIN, TOP_MAX)); b = int(_clampv(STRIP_SHARE * H, BOT_MIN, BOT_MAX))
-        if i == 2:
-            band = int(_clampv(0.30 * H, 200, 340))
-            spec = [("Frames", "w", 0, 0, W, t, "r", "frames"), ("Game", "k", 0, t, W, H - t - band, "d", None)]
-            names = (("Paperdoll", "gear"), ("Bags", "bag"), ("Action bar", "bar"), ("Trackers", "watch"),
-                     ("Map", "map"))
-            spec += [(nm, "w", x, H - band, w, band, "d", role)
-                     for (x, w), (nm, role) in zip(cut(W, (0.18, 0.18, 0.28, 0.18, 0.18)), names)]
-        else:
-            col = int(_clampv(0.24 * W, 260, 460)) if i == 3 else int(_clampv(SIDE_SHARE * W, SIDE_MIN, SIDE_MAX))
-            cx, gx = (W - col, 0) if i == 3 else (0, col)
-            spec = [("Game", "k", gx, 0, W - col, H - b, "d", None),
-                    ("Action bar", "w", gx, H - b, W - col, b, "r", "bar")]
-            names = (("Frames", "frames"), ("Paperdoll", "gear"), ("Bags", "bag"), ("Trackers", "watch"))
-            spec += [(nm, "w", cx, y, col, h, "d", role)
-                     for (y, h), (nm, role) in zip(cut(H, (0.22, 0.26, 0.26, 0.26)), names)]
-        zs = ZoneSet(PRESETS[i][0], [], HOST.grid_size(), (W, H)); roles = {}
-        for zid, kind, x, y, w, h, stack, role in spec:
-            z = Zone(zid, kind, (0, 0, 1, 1), "", (0, 0), stack, 0); z.set_px(x, y, w, h, W, H); z.note_pins(W, H)
-            zs.zones.append(z)
-            if role: roles[role] = zid
-        return zs, roles
-    def plan_of(i, W, H):
-        L = LAYOUT; std = L.parse_windows(WINDOWS_DEFAULT)[1]
-        if i < 2:
-            assign = std if i == 0 else L.parse_windows(WINDOWS_MIRRORED)[1]
-            occ = set(zid for zid, ks in assign.items() if any(L.gump_of(k) is not None for k in ks))
-            return ZoneSet.default(W, H, occ, setup["look"].get("game", True)), LAYOUT_DEFAULT, assign
-        zs, roles = custom_zones(i, W, H); assign = {}
-        for k in sorted(set(L.wins) | set(k for ks in std.values() for k in ks)):
-            zid = roles.get(role_of(k))
-            if zid: assign.setdefault(zid, []).append(k)
-        return zs, PRESETS[i][0], assign
-    def card_zones(i, W, H):
-        ck = (i, W, H, setup["look"].get("game", True)); zs = setup["cards"].get(ck)
-        if zs is None: zs = setup["cards"][ck] = plan_of(i, W, H)[0]
-        return zs
-    def zone_in(key):
-        for zid, ks in setup["assign"].items():
-            if key in ks: return zid
-        return None
-    def draw_preview():
-        old, preview["g"] = preview["g"], None; Kit.dispose(old); zs = setup["zs"]; W, H = Kit.screen(); L = LAYOUT
-        if zs is None or W <= 0 or H <= 0: return
-        g = G.CreateGump(False, False)
-        for z in zs.zones:
-            if z.px is None or z.kind == "r": continue
-            x, y, w, h = z.px; col = ZONE_COLORS.get(z.kind, "#3A78C8"); Kit.add_box(g, x, y, w, h, 0.22, col)
-            for bx, by, bw, bh in ((x, y, w, 2), (x, y + h - 2, w, 2), (x, y, 2, h), (x + w - 2, y, 2, h)):
-                Kit.add_box(g, bx, by, bw, bh, 0.9, col)
-            if z.kind == "k": lines = ["Game area"]
-            else:
-                lines = [z.id] + ([L.title_of(k) for k in setup["assign"].get(z.id, []) if k in L.wins] or ["(empty)"])
-            lines = [Kit.fit(t, max(20, w - 28)) for t in lines[:max(1, (h - 16) // 20)]]
-            Kit.add_box(g, x + 6, y + 6, max(Kit.text_w(t) for t in lines) + 12, 20 * len(lines) + 6, 0.85, "#000000")
-            for n, t in enumerate(lines):
-                Kit.add_label(g, t, x + 12, y + 9 + 20 * n, Kit.HUE_TITLE if n == 0 else Kit.HUE_TEXT)
-        Grid.show_overlay(g, 0, 0, W, H); preview["g"] = g
-    def preset_plan(i):
-        W, H = Kit.screen(); zs, fname, assign = plan_of(i, W, H)
-        setup.update({"preset": i, "zs": zs, "fname": fname, "assign": dict((z, list(v)) for z, v in assign.items())})
-    def read_look():
-        c, look = win["c"], setup["look"]
-        for k in look:
-            if k in c: look[k] = bool(c[k].IsChecked)
-    def draw_setup():
-        s = setup; step = s["step"]; M, GAP = Kit.MARGIN, Kit.GAP; W = SETUP_W; IW = W - 2 * M; L = LAYOUT
-        wins = L.all_windows() if step == 1 else []
-        body_h = (30 + CARD_H + 56 + 10, 32 + 26 * max(1, len(wins)) + 8, 32 + 26 * len(LOOK_ROWS) + 30)[step]
-        h = M + 30 + GAP + body_h + GAP + 44 + M; g, store, c = wnd.begin(W, h)
-        if not st["minimized"]:
-            wnd.frame(g, settings=False, after="Step %d of 3" % (step + 1)); y = M + 30 + GAP
-            if step == 0:
-                Kit.add_section(g, M, y, IW, body_h, "LAYOUT  (click one; the screen shows it)"); SW, SH = Kit.screen()
-                cy = y + 32; cx0 = M + (IW - 5 * CARD_W - 4 * CARD_GAP) // 2
-                for i, (name, desc) in enumerate(PRESETS):
-                    cx = cx0 + i * (CARD_W + CARD_GAP); sel = i == s["preset"]
-                    if sel: Kit.add_box(g, cx - 2, cy - 2, CARD_W + 4, CARD_H + 4, 0.95, "#E8C15A")
-                    Kit.add_box(g, cx, cy, CARD_W, CARD_H, 1.0, "#101010")
-                    if SW > 0 and SH > 0:
-                        kx, ky = CARD_W / float(SW), CARD_H / float(SH)
-                        for z in card_zones(i, SW, SH).zones:
-                            if z.px is None or z.kind == "r": continue
-                            zx, zy, zw, zh = z.px
-                            Kit.add_box(g, cx + int(zx * kx) + 1, cy + int(zy * ky) + 1, max(1, int(zw * kx) - 2),
-                                        max(1, int(zh * ky) - 2), 0.85 if sel else 0.5,
-                                        ZONE_COLORS.get(z.kind, "#3A78C8"))
-                    t = Kit.fit(name, CARD_W)
-                    Kit.add_label(g, t, cx + (CARD_W - Kit.text_w(t)) // 2, cy + CARD_H + 6,
-                                  Kit.HUE_TITLE if sel else Kit.HUE_TEXT)
-                    Kit.catcher(g, cx, cy, CARD_W, CARD_H + 26, queue(("preset", i)),
-                                "Use %s: %s" % (name, desc[:1].lower() + desc[1:]))
-                Kit.add_label(g, Kit.fit(PRESETS[s["preset"]][1], IW - 24), M + 12, cy + CARD_H + 32, Kit.HUE_INFO)
-            elif step == 1:
-                Kit.add_section(g, M, y, IW, body_h, "WINDOWS  (click to change a zone)"); ry = y + 32
-                if not wins:
-                    Kit.add_label(g, "No windows yet; turn modules on, then come back.", M + 12, ry + 3, Kit.HUE_INFO)
-                for key, title in wins:
-                    zid = zone_in(key); Kit.add_label(g, Kit.fit(title, 300), M + 12, ry + 3)
-                    Kit.art_button(g, store, "z_" + key, Kit.ART_PAGE, M + 330, ry - 2, "Zone: " + (zid or "free"),
-                                   "Click: next zone (free: stays where it is)", on_click=queue(("cycle", key)))
-                    ry += 26
-            else:
-                Kit.add_section(g, M, y, IW, body_h, "LOOK"); ry = y + 32
-                for k, cap, tip in LOOK_ROWS: c[k] = Kit.add_check(g, cap, M + 12, ry, s["look"][k], tip); ry += 26
-                Kit.add_label(g, "Change any of this later in Settings > Interface.", M + 12, ry + 5, Kit.HUE_INFO)
-            ny = y + body_h + GAP; Kit.add_section(g, M, ny, IW, 44)
-            Kit.art_button(g, store, "cancel", Kit.ART_CLOSE, M + 12, ny + 10, "Cancel",
-                           "Close without changing anything", on_click=queue("cancel"))
-            nxt = ("done", Kit.ART_OK, "Done", "Use this layout") if step == 2 else ("next", Kit.ART_PLAY, "Next",
-                                                                                     "Go to the next step")
-            x = W - M - 12 - 35 - Kit.text_w(nxt[2])
-            Kit.art_button(g, store, nxt[0], nxt[1], x, ny + 10, nxt[2], nxt[3], on_click=queue(nxt[0]))
-            if step:
-                x -= 55 + Kit.text_w("Back")
-                Kit.art_button(g, store, "back", Kit.ART_PAGE, x, ny + 10, "Back", "Go back a step",
-                               on_click=queue("back"))
-        wnd.end(g); refresh()
-    def build_window(): Binds.scoped("interface.setup", draw_setup)
-    wnd = Kit.Window(SETUP_KEY, "Interface Setup", st, win, build_window, SETUP_POS, default=(200, 120),
-                     mini=SETUP_MINI, owner=False, lock=False, close_tip="Close without changing anything")
-    def refresh():
-        c = win["c"]
-        if "status" in c: Kit.set_text(c["status"], "%s: step %d of 3" % ("Interface Setup", setup["step"] + 1))
-    def open_setup():
-        L = LAYOUT
-        if not L.enabled: return
-        if not setup["open"]:
-            Kit.put_var(SEEN_KEY, "1"); setup.update({"open": True, "step": 0, "cards": {},
-                          "look": {"seam": True, "fit_view": L.fit_view, "game": L.game_grows}})
-            st["minimized"] = False; preset_plan(setup["preset"])
-        draw_preview(); build_window()
-    def close_setup():
-        setup["open"] = False; old, preview["g"] = preview["g"], None; Kit.dispose(old); wnd.close()
-    def act_preset(i): preset_plan(i); draw_preview(); build_window()
-    def act_cycle(key):
-        s = setup; ids = [None] + [z.id for z in s["zs"].zones if z.kind == "w"]; cur = zone_in(key)
-        mapz = zone_in("worldmap"); i = ids.index(cur) if cur in ids else 0
-        for _ in ids:
-            i = (i + 1) % len(ids); zid = ids[i]
-            if zid is None: break
-            others = [k for k in s["assign"].get(zid, []) if k != key]
-            if not ((key == "worldmap" and others) or (key != "worldmap" and zid == mapz)): break
-        if cur is not None: s["assign"][cur] = [k for k in s["assign"][cur] if k != key]
-        if zid is not None: s["assign"].setdefault(zid, []).append(key)
-        draw_preview(); build_window()
-    def act_step(d): read_look(); setup["step"] = max(0, min(2, setup["step"] + d)); build_window()
-    def act_done():
-        read_look(); s = setup; L = LAYOUT; W, H = Kit.screen(); zs, fname, look = s["zs"], s["fname"], s["look"]
-        L.seamless, L.fit_view, L.game_grows = look["seam"], look["fit_view"], look["game"]; L.save_opts()
-        if fname != LAYOUT_DEFAULT: zs.generated = False; L.save_frames(zs.copy(fname), fname, W, H)
-        L.use_frames(fname, tell=False); L.assign = dict((z, list(v)) for z, v in s["assign"].items() if v)
-        L.unfree(None); L.save_assign(); name = PRESETS[s["preset"]][0]
-        name = name + " (mine)" if name in (LAYOUT_DEFAULT, LAYOUT_MIRRORED) else name
-        Kit.put_var(LAYOUT_NAMED % name, L.windows_text()); names = L.layout_names()
-        if name not in names: names.append(name); Kit.put_var(LAYOUT_LIST, ",".join(names))
-        L.layout_name = name; Kit.put_var(LAYOUT_ACTIVE, name); L.free_scrolled(); L.placed = {}
-        L.refit_all(); HOST.poke(); close_setup(); load_settings()
-        n = sum(1 for ks in L.assign.values() for k in ks if L.gump_of(k) is not None)
-        say('"%s" in use: %s placed.' % (name, Kit.count(n, "window")), Kit.HUE_GOOD)
-    def act_cancel(): close_setup(); say("setup closed; nothing changed.", Kit.HUE_INFO)
-    ACTIONS = {"setup": open_setup, "preset": act_preset, "cycle": act_cycle, "next": lambda: act_step(1),
-               "back": lambda: act_step(-1), "done": act_done, "cancel": act_cancel}
-    def windows_line():
-        L = LAYOUT; n = sum(len(ks) for ks in L.assign.values()); zs = L.frames
-        if not n: return "No window in a zone yet: click Set up, or Arrange windows"
-        gp = Layout._game_px(zs) if zs is not None else None
-        return "%s in %s%s" % (Kit.count(n, "window"), Kit.count(len(L.assign), "zone"),
-                               "; game area %d x %d" % gp[2:] if gp else "")
-    def drop(g, names, i, x, y, tip):
-        dd = G.CreateDropDown(DD_W, names, i); dd.SetPos(x, y); g.Add(dd); return Kit.with_tip(dd, tip)
-    def draw_drops(f, x, y):
-        L = LAYOUT; names = page["frame_names"] = [LAYOUT_DEFAULT] + L.frame_names()
-        fi = names.index(L.frames_name) if L.frames_name in names else 0
-        lnames = page["layout_names"] = ["(none)", LAYOUT_DEFAULT, LAYOUT_MIRRORED] + L.layout_names()
-        cur = L.layout_name or "(none)"; li = lnames.index(cur) if cur in lnames else 0
-        Kit.add_label(f.g, "Zones:", x + 12, y + 3, Kit.HUE_TEXT)
-        Kit.add_label(f.g, "Windows:", x + 12, y + 31, Kit.HUE_TEXT)
-        page["zones"] = (drop(f.g, names, fi, x + 92, y, "The frame layout in use (its zones)"), fi)
-        page["windows"] = (drop(f.g, lnames, li, x + 92, y + 28,
-                                "The window layout in use; pick one to place every window"), li)
-    def zone_drops(f, x, y):
-        L = LAYOUT; wins = L.all_windows(); pv = L.page_preview; ry = y - 26 * len(wins) - (20 if pv else 0)
-        zones = ["free"] + [z for z in L.zone_choices() if z]; page["zone_dd"] = []
-        for key, title in wins:
-            zid = L.zone_of(key); ids = labels = zones
-            if zid is not None and zid not in zones:
-                ids, labels = zones + [zid], zones + [Kit.fit("%s (missing)" % zid, DD_W - 30)]
-            zi = ids.index(zid) if zid in ids else 0
-            dd = drop(f.g, labels, zi, x + 302, ry, "The zone it sits in (free: stays where you put it)")
-            page["zone_dd"].append((key, dd, zi, ids)); ry += 26
-    def page_table(w):
-        load_settings(); L = LAYOUT; wins = L.all_windows(); pv = L.page_preview
-        snap = ("check", "snap", "Snap windows together", "Windows dropped near each other line up")
-        dark = ("check", "dark", "Dark mode", "Tint every window's stone frame charcoal")
-        grid = (snap, ("check", "grid_on", "Show the grid", "Show the snapping grid over the screen"),
-                ("num", "grid", "Grid:", "Grid spacing for snapping", "px", 8, 512))
-        if VA_ALONE: return (("ZONES", (("note", "Zones, layout and snapping are set in the full"),
-                                        ("note", "Virtue Assistant."))),)
-        if not L.enabled: return (("ZONES", (("note", "Interface is off, so zones are off."),
-                                             ("note", "Tick Interface on the Modules tab to use them."))),
-                                  ("LOOK", (dark,)), ("SNAPPING", grid))
-        arr = (("arrange", Kit.ART_OK, "Done", "Lock every window in its zone") if L.arrange else
-               ("arrange", Kit.ART_PLAY, "Arrange windows",
-                "Unlock windows to drag them between zones (Esc or Done locks them)"))
-        undo = ((("reclaim_undo", Kit.ART_CLOSE, "Undo", "Put the zones back as before Reclaim space"),)
-                if L._undo_load() is not None else ())
-        out = (("SCREEN", (("note", Kit.fit(windows_line(), w - 24)), ("note", Kit.fit(L.status_text(), w - 24)),
-                           ("buttons", (("setup", Kit.ART_PLAY, "Set up", "Pick a ready-made layout in three steps"),
-                                        arr)),
-                           ("buttons", (("edit", Kit.ART_PAGE, "Edit zones", "Drag, resize, split or join zones"),
-                                        ("new", Kit.ART_OK, "New zones", "Start a new frame layout with one zone"))))),
-               ("LOOK", tuple(("check", k, cap, tip) for k, cap, tip in LOOK_ROWS) + (dark,)), ("SNAPPING", grid),
-               ("LAYOUTS  (saved)", (("buttons", (("save", Kit.ART_OK, "Save windows",
-                                 "Save where every window sits as the window layout in use"),
-                                ("reset", Kit.ART_CLOSE, "Reset", "Go back to the Default window layout"),
-                                ("free", Kit.ART_CLOSE, "Free all", "Take every window out of its zone"))),
-                   ("buttons", (("remove", Kit.ART_CLOSE, "Remove zones",
-                                 "Delete the frame layout in use (not Default)"), ("check", Kit.ART_PLAY, "Check fit",
-                                 "Print where each window in a zone sits and if it fills it"))),
-                   ("buttons", (("reclaim", Kit.ART_PLAY, "Reclaim space",
-                                 "Give the game area every gap beside it; windows keep their size"),) + undo),
-                   ("custom", 60, draw_drops))))
-        if not wins: return out
-        rows = [("note", Kit.fit(t, 270), {"hue": Kit.HUE_TEXT, "ndy": 3, "h": 26}) for k, t in wins]
-        if pv: rows.append(("note", Kit.fit(pv.lstrip("!"), w - 24), {"ndy": 3, "hue": Kit.HUE_BAD if pv.startswith("!")
-                                                                       else Kit.HUE_INFO}))
-        return out + (("WINDOWS  (the zone each sits in)", rows + [("custom", 0, zone_drops)]),)
-    def on_change(old, new):
-        L = LAYOUT; ch = set(k for k in new if new[k] != old.get(k))
-        if ch & set(("seam", "fit_view", "game")):
-            L.seamless, L.fit_view, L.game_grows = new["seam"], new["fit_view"], new["game"]; L.save_opts()
-            L.dirty = True
-            if ch & set(("seam", "fit_view")): L.fresh = True; L.seam_skip = {}; L.seam_wait = {}
-        if "snap" in ch:
-            SNAP.enabled = new["snap"]
-            if not SNAP.enabled: SNAP.links.clear()
-            HOST.save_prefs()
-        if "grid" in ch:
-            HOST.prefs["grid"] = str(new["grid"]); HOST.save_prefs()
-            if HOST.grid is not None: HOST.grid.redraw()
-        if "grid_on" in ch and new["grid_on"] != HOST.grid_shown(): HOST.grid_toggle()
-        if "dark" in ch and new["dark"] != Kit.dark(): HOST.set_dark(new["dark"])
-    def remove_frames():
-        if not LAYOUT.remove_frames(LAYOUT.frames_name):
-            say("Default can't be deleted; pick another frame layout first.", Kit.HUE_BAD)
-    PAGE_ACTIONS = (("setup", open_setup), ("arrange", lambda: LAYOUT.set_arrange(not LAYOUT.arrange)),
-                    ("edit", lambda: edit(False)), ("new", lambda: edit(True)), ("remove", remove_frames),
-                    ("save", lambda: LAYOUT.save_windows()), ("reset", lambda: LAYOUT.use_windows(LAYOUT_DEFAULT)),
-                    ("free", lambda: LAYOUT.use_windows("")), ("reclaim", lambda: LAYOUT.reclaim_space()),
-                    ("reclaim_undo", lambda: LAYOUT.reclaim_back()), ("check", lambda: LAYOUT.report_fit()))
-    def page_clicks(f):
-        L = LAYOUT
-        if L.page_refresh: L.page_refresh = False; cfg.f = None; HOST.refresh_settings(KEY); return
-        for n, (key, dd, zi, ids) in enumerate(page["zone_dd"]):
-            i = Kit.dd_index(dd, zi)
-            if i != zi and 0 <= i < len(ids):
-                page["zone_dd"][n] = (key, dd, i, ids); zid = None if i == 0 else ids[i]; L.page_preview = ""
-                if zid:
-                    W, H = Kit.screen(); zs = L.frames_in_use(W, H) if W > 0 and H > 0 else None
-                    L.page_preview = L.preview_text(key, zs.by_id(zid) if zs is not None else None)
-                L.assign_to(key, zid); L.page_refresh = True; return
-        if page["zones"] is not None:
-            dd, fi = page["zones"]; i = Kit.dd_index(dd, fi)
-            if i != fi and 0 <= i < len(page["frame_names"]):
-                page["zones"] = (dd, i); L.use_frames(page["frame_names"][i]); return
-            dd, li = page["windows"]; i = Kit.dd_index(dd, li)
-            if i != li and 0 <= i < len(page["layout_names"]):
-                page["windows"] = (dd, i); L.use_windows("" if i == 0 else page["layout_names"][i]); return
-        for k, fn in PAGE_ACTIONS:
-            if Kit.was_clicked(f.store, k): fn(); return
-    cfg = Kit.Page(settings, page_table, save_settings, on_change, clicks=page_clicks)
-    def page_closed(): page.update({"zones": None, "windows": None, "zone_dd": []}); cfg.closed()
-    def _start():
-        st.update({"shutting": False, "docked": False, "queue": [], "minimized": False, "editor": None,
-                   "back_sig": None, "back_at": 0.0, "alone_up": False}); setup["open"] = False
-        if VA_ALONE: load_settings(); HOST.show_settings(KEY); return
-        LAYOUT.set_enabled(True); load_settings(); cleanup.service("interface.page", lambda: HOST.show_settings(KEY))
-        if not Kit.get_var(SEEN_KEY, "") and not LAYOUT.assign and not Kit.get_var(LAYOUT_ACTIVE, ""): queue("setup")()
-    def _tick():
-        if VA_ALONE:
-            up = HOST.config.win["g"] is not None
-            if st["alone_up"] and not up: HOST.disable(KEY)
-            st["alone_up"] = st["alone_up"] or up; return
-        q = st["queue"]
-        while q:
-            action = q.pop(0); action = "toggle_min" if action == "to_bar" else action
-            if isinstance(action, tuple): ACTIONS[action[0]](*action[1:])
-            elif not wnd.action(action): ACTIONS[action]()
-        if setup["open"] and Kit.was_clicked(win["store"], "close"): act_cancel()
-        ed = st["editor"]
-        if ed is not None:
-            W, H = Kit.screen()
-            if W > 0 and H > 0: ed.keep(W, H)
-            ed.poll()
-        Seam.hover(LAYOUT.arrange); backdrop_tick(time.time()); sink()
-    def _interval():
-        idle = not (st["queue"] or setup["open"] or Seam.recs or Seam.bare or VA_ALONE)
-        return 0.25 if idle and st["editor"] is None and back["g"] is None else 0.05
-    def _stop():
-        st["shutting"] = True; ed = st["editor"]
-        if ed is not None: ed.close(keep=False, quiet=True)
-        if setup["open"]: close_setup()
-        for hold in (back, ring, preview): old, hold["g"] = hold["g"], None; Kit.dispose(old)
-        if not VA_ALONE: LAYOUT.set_enabled(False)
-        cleanup.close()
-    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
-            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": page_closed, "interval": _interval}
-
-
-if "HOST" not in globals():
-    import API
-    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
-HOST.add("interface", "Interface", "Zones, layout and the unified UI", _module_interface, 0.05, default_on=True,
-         category="On screen")
+	an=Client.key_held;ae=HOST.grid_shown;o=HOST.grid_size;ao=HOST.grid_toggle;af=HOST.poke;aC=HOST.save_prefs;aD=HOST.show_settings;D=Kit.ART_CLOSE;B=Kit.ART_OK;u=Kit.ART_PAGE;v=Kit.ART_PLAY;U=Kit.HUE_BAD;ap=Kit.HUE_GOOD;e=Kit.HUE_INFO;E=Kit.HUE_TEXT;O=Kit.HUE_TITLE;K=Kit.MARGIN;q=Kit.add_box;k=Kit.add_label;F=Kit.add_section;aE=Kit.add_textbox;aF=Kit.add_tiled;aG=Kit.add_window_frame;I=Kit.art_button;aq=Kit.catcher;L=Kit.count;ar=Kit.dark;ag=Kit.dd_index;t=Kit.dispose;l=Kit.fit;ah=Kit.get_var;P=Kit.is_open;at=Kit.mouse_pos;aH=Kit.on_moved;au=Kit.place;V=Kit.put_var;R=Kit.say;J=Kit.screen;X=Kit.set_text;C=Kit.text_w;j=Kit.was_clicked;Y=Kit.with_tip;ai="interface";aX="Interface";aY="interface.setup";aZ="Interface_setup_pos";aI="Interface_setup_seen";aJ="VirtueAssistant_layout_editor_pos";a_,a0=600,(260,46);M,Q,aK=100,64,12;aL=170;a1=.25;p,aj,ak=3,"#D4AF37","#3A2A08";Z=(("Sides","Bags and paperdoll left; map and trackers right"),("Mirrored","Map and trackers left; bags and paperdoll right"),("Bottom bar","Game on top; every window in one band below"),("Right column","Game left; windows stacked on the right"),("Compact","Windows stacked on the left; game on the right"));a2=(("unitframes.","frames"),("actionbar","bar"),("character","gear"),("bag","bag"),("ultima.","watch"),("hub","watch"),("meters","watch"),("worldmap","map"));av=(("seam","Join windows in zones into one panel","One frame round every zone, gold round the game view; hover a window's top for its title"),("fit_view","Fit the game view to the game area","Borderless, sized and locked to the game area"),("game","Give an empty zone's room to the game area","Widens the game area beside an empty zone"));aw={"seam":False,"fit_view":True,"game":True,"snap":True,"grid_on":False,"grid":GRID_DEFAULT,"dark":False};bv=dict(aw);m={"minimized":False,"shutting":False,"docked":False,"queue":[],"editor":None,"back_sig":None,"back_at":0.};al={"g":None,"c":{},"store":({},{})};N={"g":None};aa={"g":None};S={"g":None};A={"gumps":None,"ver":None,"same":None,"off":False,"seen":None,"raw":None};s={"zones":None,"windows":None,"zone_dd":[],"frame_names":[],"layout_names":[]};n={"open":False,"step":0,"preset":0,"zs":None,"fname":LAYOUT_DEFAULT,"assign":{},"look":{},"cards":{}};aM,T,ax=Kit.basics(m,aX)
+	def am():L=LAYOUT;aw.update({"seam":L.seamless,"fit_view":L.fit_view,"game":L.game_grows,"snap":SNAP.enabled,"grid_on":ae(),"grid":o(),"dark":ar()})
+	def a3():pass
+	def aN(a,b):
+		e,f,i,j=a;g,h,k,l=b;D=SNAP_DIST
+		for c,d in((e+i,g),(g+k,e)):
+			m,n=max(f,h),min(f+j,h+l)
+			if abs(d-c)<=D and n>m:return "v",min(c,d),max(c,d),m,n
+		for c,d in((f+j,h),(h+l,f)):
+			o,p=max(e,g),min(e+i,g+k)
+			if abs(d-c)<=D and p>o:return "h",min(c,d),max(c,d),o,p
+		return
+	def a4(e,b,f):
+		c,a=[],e
+		for d,g in sorted(f):
+			if d>a:c.append((a,min(d,b)))
+			a=max(a,g)
+		if a<b:c.append((a,b))
+		return[(h,i)for h,i in c if i>h]
+	class LayoutEditor(object):
+		BAR_W=720;SETTLE=.3;FIELD_W=52;ROW=28;KEYS={"up":("UP",),"down":("DOWN",),"left":("LEFT",),"right":("RIGHT",),"delete":("DELETE",),"z":("Z",),"y":("Y",),"enter":("RETURN","KP_ENTER"),"esc":("ESCAPE",)};FIELDS=("col","row","w","h")
+		def __init__(self,layout,zs,a):self.layout=layout;self.zs=zs;self.on_close=a;self.frames={};self.bar=None;self.store=({},{});self.c={};self.renames={};self.sel=zs.zones[0].id if zs.zones else None;self.multi=set();self.grid_was=None;self.fields=None;self.saveas_text="";self.bar_pos=None;self.rebuild=False;self.closed=False;self.others=None;self.W,self.H=J();self.px_mode=False;self.undo,self.redo=[],[];self.keys_was={};self.focus_was=None;self.raws={};self.said=None;self.del_armed=None;self.marks=None;self.marks_sig=None;self.counts=(0,0);self.handles=[];self.handles_sig=None;self.edge=None;self.edge_g=None;self.edge_at=0.;self.pressed_was=False;self.pick=0;self.pick_keys=[];self.preview="";self.raws_ok=False;self._pick_next=0.
+		def open(self):
+			self.grid_was=ae()
+			if not self.grid_was:safe(ao)
+			for z in self.zs.zones:self.build_zone(z)
+			self.build_bar();self.draw_marks()
+		def close(self,keep,quiet=False):
+			if self.closed:return
+			self.closed=True
+			for c,b in list(self.frames.items()):t(b.get("g"))
+			self.frames={};self._drop_handles()
+			for a in("bar","marks","edge_g"):t(getattr(self,a));setattr(self,a,None)
+			if self.grid_was is not None and ae()!=self.grid_was:safe(ao)
+			self.on_close();self.layout.dirty=True;self.layout.page_refresh=True
+			if not keep and not quiet:R("the saved zones are back.",e)
+		def _snap(self):return([a.copy()for a in self.zs.zones],self.sel,dict(self.renames))
+		def push(self):
+			self.undo.append(self._snap())
+			if len(self.undo)>50:del self.undo[0]
+			self.redo=[]
+		def _restore(self,snap):
+			b,a,c=snap
+			for d in list(self.frames):t(self.frames[d].get("g"))
+			self.frames={};self.zs.zones=[f.copy()for f in b];self.renames=dict(c);self.sel=(a if self.zs.by_id(a)is not None else(self.zs.zones[0].id if self.zs.zones else None));self.multi=set()
+			for z in self.zs.zones:self.build_zone(z)
+			self.rebuild=True
+		def _hist(self,a,b,word):
+			if not a:self.say("nothing to %s."%word,e);return
+			b.append(self._snap());self._restore(a.pop())
+		def do_undo(self):self._hist(self.undo,self.redo,"undo")
+		def do_redo(self):self._hist(self.redo,self.undo,"redo")
+		def say(self,text,hue=None):
+			if text==self.said:return
+			self.said=text;R(text,U if hue is None else hue)
+		def _windows_in(self,z):L=self.layout;a=self.orig_id(z.id);return[L.title_of(b)for b in L.assign.get(a,[])]
+		def orig_id(self,a):
+			for b,c in self.renames.items():
+				if c==a:return b
+			return a
+		def build_zone(self,z):
+			c=self.frames.get(z.id,{}).get("g");x,y,w,h=z.px;M=K;a={"g":None,"resize_at":0.,"size":(w,h)};g=G.CreateModernGump(x,y,w,h,not z.lock,ZONE_MIN_W,ZONE_MIN_H,self._resized(z.id));g.SetAlpha(0)
+			if z.lock:g.CanMove=False
+			aG(g,w,h,corners=False,mouse=False);q(g,M,M,w-2*M,h-2*M,.25,ZONE_COLORS.get(z.kind,"#FFFFFF"));self._draw_overlaps(g,z)
+			if z.kind=="k":self._draw_game(g,z)
+			if z.id==self.sel and self.pick:self._draw_preview(g,z)
+			F(g,M,M,w-2*M,30);d=z.id==self.sel or z.id in self.multi;a["lbl"]=k(g,l(z.id+("  (locked)"if z.lock else ""),w-2*M-24),M+12,M+7,O if d else E);b=self._windows_in(z)if z.kind=="w"else[];a["wins"]=k(g,l(", ".join(b),w-2*M-24)if b else "",M+12,M+30+6,E);a["sum"]=k(g,"",M+12,M+30+6+(20 if b else 0),e);aq(g,M,M,w-2*M,30,self._select(z.id),"Select the zone (Shift+click: pick more)"+("; locked"if z.lock else "; drag to move it on the grid"),movable=not z.lock);au(g,x,y,w,h);G.AddGump(g);Kit.no_snap(g);aH(g,self._moved(z.id));a["g"]=g;self.frames[z.id]=a;self.update_zone(z);t(c)
+		def _draw_overlaps(self,g,z):
+			x,y,w,i=z.px
+			for o in self.zs.zones:
+				if o is z or o.px is None or not(z.overlap or o.overlap):continue
+				c,d,j,k=o.px;e,a=max(x,c),max(y,d);b,f=min(x+w,c+j),min(y+i,d+k)
+				if b-e<4 or f-a<4:continue
+				for h in range(e,b,12):q(g,h-x,a-y,min(4,b-h),f-a,.45,"#E8C15A")
+		def _draw_game(self,g,z):
+			e=self.zs.copy();Layout._overlap_shape(e);a,b,c,d=e.by_id(z.id).px;a-=z.px[0];b-=z.px[1]
+			for r in((a,b+d-2,c,2),(a,b,2,d),(a+c-2,b,2,d),(a,b,c,2)):q(g,r[0],r[1],r[2],r[3],.9,"#E8C15A")
+		def _draw_preview(self,g,z):
+			a=self.pick_keys[self.pick]if 0<self.pick<len(self.pick_keys)else None
+			if a is None or z.kind!="w":return
+			L=self.layout;h=[i for i in L.assign.get(self.orig_id(z.id),[])if i!=a]+[a];x,y=z.px[0],z.px[1]
+			for b,(c,d,e,f)in L.slots_for(z,h):q(g,c-x,d-y,max(1,e),max(1,f),.55,"#E8C15A"if b==a else "#202020");k(g,l(L.title_of(b),max(20,e-16)),c-x+8,d-y+f-26,E)
+		def update_zone(self,z):
+			a=self.frames.get(z.id)
+			if a is None:return
+			b=o();x,y,w,h=z.px;c="%s, %d x %d squares"%(z.kind_name(),max(1,int(round(float(w)/b))),max(1,int(round(float(h)/b))))
+			if z.overlap:c+=", overlaps"
+			X(a["sum"],l(c,w-2*K-24));X(a["lbl"],l(z.id+("  (locked)"if z.lock else ""),w-2*K-24),O if(z.id==self.sel or z.id in self.multi)else E)
+		def _select(self,a):
+			def b():
+				b=bool(an("shift"))
+				if b and self.sel is not None and a!=self.sel:
+					if a in self.multi:self.multi.discard(a)
+					else:self.multi.add(a);self.multi.add(self.sel)
+					self.rebuild=True;af();return
+				if a!=self.sel or self.multi:self.multi=set();self.sel=a;self.pick=0;self.rebuild=True;af()
+			return b
+		def _resized(self,a):
+			def b(*c):
+				b=self.frames.get(a)
+				if b is not None:b["resize_at"]=time.time()
+			return b
+		def _moved(self,a):
+			def b():
+				z=self.zs.by_id(a);b=self.frames.get(a)
+				if z is None or b is None or not P(b["g"]):return
+				r=Snap.rect(b["g"])
+				if r is None:return
+				if(r[0],r[1])==(z.px[0],z.px[1]):return
+				if z.lock:self.place_zone(z);self.say('zone "%s" is locked; click Lock to move it.'%z.id,e);return
+				self.landed(z,r[0],r[1],z.px[2],z.px[3],resized=False)
+			return b
+		def _blocker(self,z):a=self.zs.overlaps(z);return a[0]if a else None
+		def landed(self,z,x,y,w,h,resized=True):
+			W,H=self.W,self.H;c=o()
+			if resized:j=1 if z.free else c;w=max(ZONE_MIN_W,int(round(float(w)/j))*j);h=max(ZONE_MIN_H,int(round(float(h)/j))*j)
+			w,h=min(w,W),min(h,H);l=(0,int(x),int(y))if z.free else Snap.near_anchor(x,y,w,h)
+			if l is not None:a,b=l[1],l[2]
+			else:
+				a=b=None
+				for g in(0,max(0,W-w)):
+					if abs(g-x)<=SNAP_DIST:a=g
+				for i in(0,max(0,H-h)):
+					if abs(i-y)<=SNAP_DIST:b=i
+				for d in self.zs.zones:
+					if d is z or d.px is None:continue
+					e,f,m,n=d.px
+					if a is None and f<y+h+SNAP_DIST and y<f+n+SNAP_DIST:
+						for g in(e+m,e-w,e,e+m-w):
+							if abs(g-x)<=SNAP_DIST:a=g
+					if b is None and e<x+w+SNAP_DIST and x<e+m+SNAP_DIST:
+						for i in(f+n,f-h,f,f+n-h):
+							if abs(i-y)<=SNAP_DIST:b=i
+				if a is None:a=int(round(float(x)/c))*c
+				if b is None:b=int(round(float(y)/c))*c
+			k=z.px;self.push();z.set_px(a,b,w,h,W,H)
+			if not self.zs.push_clear(z,W,H,None if z.free else c):z.set_px(k[0],k[1],k[2],k[3],W,H);self.undo.pop();d=self._blocker(z);self.say('no room for zone "%s" there%s; it stays where it was.'%(z.id,(' (it would cover "%s")'%d.id)if d is not None else ""))
+			z.note_pins(W,H);self.place_zone(z);self.changed()
+		def _refields(self):self.fields=None;self.show_fields()
+		def changed(self):self._refields();self.draw_marks()
+		def place_zone(self,z):
+			a=self.frames.get(z.id)
+			if a is None:return
+			x,y,w,h=z.px
+			if((w,h)!=a["size"]or z.overlap or z.kind=="k"or any(b.overlap for b in self.zs.zones)):self.build_zone(z);return
+			with Kit.quiet:au(a["g"],x,y,w,h);Kit.moved_by_code(a["g"])
+			self.update_zone(z)
+		def keep(self,W,H):
+			if(W,H)!=(self.W,self.H):
+				self.W,self.H=W,H;self.zs.reflow(W,H,o())
+				for z in self.zs.zones:self.place_zone(z)
+				self.draw_marks()
+		def gaps(self):
+			W,H=self.W,self.H;c=[w.px for w in self.zs.zones if w.px is not None];a=[x for x in sorted(set([0,W]+[y[0]for y in c]+[z[0]+z[2]for z in c]))if 0<=x<=W];b=[G for G in sorted(set([0,H]+[bw[1]for bw in c]+[bx[1]+bx[3]for bx in c]))if 0<=G<=H];h,n=len(a)-1,len(b)-1;d={}
+			for j in range(n):
+				s=(b[j]+b[j+1])/2.
+				for i in range(h):
+					t=(a[i]+a[i+1])/2.
+					if not any(by[0]<=t<by[0]+by[2]and by[1]<=s<by[1]+by[3]for by in c):d[(i,j)]=True
+			e,o=set(),0
+			for k in d:
+				if k in e:continue
+				o+=1;l=[k];e.add(k)
+				while l:
+					i,j=l.pop()
+					for f in((i+1,j),(i-1,j),(i,j+1),(i,j-1)):
+						if f in d and f not in e:e.add(f);l.append(f)
+			p=[]
+			for j in range(n):
+				i=0
+				while i<h:
+					if(i,j)in d:
+						q=i
+						while i<h and(i,j)in d:i+=1
+						p.append((a[q],b[j],a[i]-a[q],b[j+1]-b[j]))
+					else:i+=1
+			g=[]
+			for r in p:
+				for u,m in enumerate(g):
+					if m[0]==r[0]and m[2]==r[2]and m[1]+m[3]==r[1]:g[u]=(m[0],m[1],m[2],m[3]+r[3]);break
+				else:g.append(r)
+			return g,o
+		def bad_overlaps(self):
+			e=[];f=self.zs.zones
+			for i,a in enumerate(f):
+				for b in f[i+1:]:
+					if a.px is None or b.px is None or b not in self.zs.overlaps(a):continue
+					if a in self.zs.overlaps(b)or not b.overlap:
+						c,d=max(a.px[0],b.px[0]),max(a.px[1],b.px[1]);g=min(a.px[0]+a.px[2],b.px[0]+b.px[2]);h=min(a.px[1]+a.px[3],b.px[1]+b.px[3])
+						if g>c and h>d:e.append((a,b,(c,d,g-c,h-d)))
+			return e
+		def draw_marks(self):
+			d=(self.W,self.H,tuple((r.id,r.kind,r.overlap,r.solo,tuple(r.px or()))for r in self.zs.zones))
+			if d==self.marks_sig and P(self.marks):return
+			self.marks_sig=d;e,n=self.gaps();b=self.bad_overlaps();f=(n,len(b));l,self.marks=self.marks,None;t(l);i=[H for H in self.zs.zones if H.kind=="w"and H.px is not None and not H.solo];j=[z for W,bw in enumerate(i)for bx in i[W+1:]for z in(aN(bw.px,bx.px),)if z is not None]
+			if e or b or j:
+				g=G.CreateGump(False,False)
+				for(x,y,w,h)in e:q(g,x,y,w,h,.45,"#C83030")
+				for a,c,(x,y,w,h)in b:q(g,x,y,w,h,.55,"#C83030")
+				for o,m,p,a,c in j:k=(m+p)//2;q(g,*(((k-2,a,4,c-a)if o=="v"else(a,k-2,c-a,4))+(.9,"#E8C15A")))
+				Grid.show_overlay(g,0,0,self.W,self.H);self.marks=g
+			if f!=self.counts:self.counts=f;self.rebuild=True
+		def _drop_handles(self):
+			for g,a,r in self.handles:t(g)
+			self.handles=[];self.handles_sig=None
+		def _sync_handles(self):
+			z=self.zs.by_id(self.sel)if self.sel else None;c=self.frames.get(z.id)if z is not None else None;d=(z.id,tuple(z.px),z.lock,c.get("g")if c else None)if z is not None and z.px is not None else None
+			if d==self.handles_sig:return
+			self._drop_handles();self.handles_sig=d
+			if z is None or z.lock:return
+			x,y,w,h=z.px;T=10;a=max(24,min(80,w//3));b=max(24,min(80,h//3))
+			for e,r in(("l",(x,y+(h-b)//2,T,b)),("r",(x+w-T,y+(h-b)//2,T,b)),("t",(x+(w-a)//2,y+K+30,a,T)),("b",(x+(w-a)//2,y+h-T,a,T))):g=G.CreateGump(True,False);q(g,0,0,r[2],r[3],.9,"#E8C15A");aq(g,0,0,r[2],r[3],lambda:None,"Drag to move this edge on the grid");g.SetRect(r[0],r[1],r[2],r[3]);G.AddGump(g);SNAP.skip_gump(g);self.handles.append((g,e,r))
+		def _edge_tick(self,pressed):
+			b=time.time()
+			if self.edge is None:
+				if pressed and not self.pressed_was and self.handles:
+					m=at()
+					if m is not None:
+						for g,a,r in self.handles:
+							if r[0]<=m[0]<r[0]+r[2]and r[1]<=m[1]<r[1]+r[3]:
+								z=self.zs.by_id(self.sel)
+								if z is not None:self.edge=(z.id,a,m,tuple(z.px))
+								break
+				return
+			p,a,c,d=self.edge;z=self.zs.by_id(p);m=at()
+			if z is None or m is None:self.edge=None;t(self.edge_g);self.edge_g=None;return
+			x,y,w,h=d;e,f=m[0]-c[0],m[1]-c[1]
+			if a=="l":i=min(x+w-ZONE_MIN_W,max(0,x+e));x,w=i,w+(x-i)
+			elif a=="r":w=max(ZONE_MIN_W,min(self.W-x,w+e))
+			elif a=="t":j=min(y+h-ZONE_MIN_H,max(0,y+f));y,h=j,h+(y-j)
+			else:h=max(ZONE_MIN_H,min(self.H-y,h+f))
+			if pressed:
+				if b-self.edge_at>=.05:
+					self.edge_at=b;l=o();s,self.edge_g=self.edge_g,None;t(s);g=G.CreateGump(False,False)
+					for u,v,A,B in((0,0,w,2),(0,h-2,w,2),(0,0,2,h),(w-2,0,2,h)):q(g,u,v,A,B,.95,"#E8C15A")
+					n="%d x %d squares (%d x %d)"%(max(1,int(round(float(w)/l))),max(1,int(round(float(h)/l))),w,h);q(g,6,6,C(n)+12,22,.85,"#000000");k(g,n,12,8,O);Grid.show_overlay(g,x,y,w,h);self.edge_g=g
+				return
+			self.edge=None;t(self.edge_g);self.edge_g=None
+			if(x,y,w,h)!=d:self.landed_rect(z,x,y,w,h)
+		def landed_rect(self,z,x,y,w,h):
+			c=1 if z.free else o();d,e,a,b=[int(round(float(f)/c))*c for f in(x,y,x+w,y+h)];a,b=min(a,self.W),min(b,self.H)
+			if not z.free and x+w>=self.W-SNAP_DIST:a=self.W
+			if not z.free and y+h>=self.H-SNAP_DIST:b=self.H
+			self.apply_rect(z,d,e,max(ZONE_MIN_W,a-d),max(ZONE_MIN_H,b-e))
+		def apply_rect(self,z,x,y,w,h,typed=None):
+			W,H=self.W,self.H
+			if w>W or h>H or x<0 or y<0 or x+w>W or y+h>H:self.say('zone "%s" can\'t be %s there: it would run off the screen; make it smaller or move it.'%(z.id,typed or "that size"));return False
+			a=z.px;z.set_px(x,y,w,h,W,H);o=self._blocker(z)
+			if o is not None:z.set_px(a[0],a[1],a[2],a[3],W,H);self.say('zone "%s" can\'t be %s there: it would cover "%s"; make it %s or move it.'%(z.id,typed or "that size",o.id,"shorter"if(h>a[3]and w<=a[2])else "narrower"if w>a[2]else "smaller"));return False
+			b=z.px;z.set_px(a[0],a[1],a[2],a[3],W,H);self.push();z.set_px(b[0],b[1],b[2],b[3],W,H);z.note_pins(W,H);self.said=None;self.place_zone(z);self.changed();return True
+		@staticmethod
+		def _cap_w(cap):return 35+C(cap)
+		def _flow(self,g,store,items,a,y,d):
+			x=a
+			for e,f,b,h in items:
+				c=self._cap_w(b)
+				if x>a and x+c>d:x=a;y+=self.ROW
+				if g is not None:I(g,store,e,f,x,y-2,b,h)
+				x+=c+16
+			return y
+		def build_bar(self):Binds.scoped("interface.editor",self.draw_bar)
+		def draw_bar(self):
+			E=self.bar;W=self.BAR_W;M,T=K,Kit.GAP;j=({},{});d={};g=G.CreateGump(True,True);f=W-2*M;n=M+f-12;z=self.zs.by_id(self.sel)if self.sel else None;s=self.layout;ac=o();H=[];J=M+30+T;a=J+32;i=[]
+			if z is None:i.append(("label","Click Add zone, then drag it into place.",M+12,a+3,e));a+=self.ROW
+			else:
+				V=M+12+C("Name:")+8;i.append(("label","Name:",M+12,a+3,None));i.append(("box","name",z.id,V,a,130,False,"Zone name, unique in this frame layout; Enter uses it"));h=[("kind",u,"Kind: "+z.kind_name(),"Switch kind: window, keep clear, reserved"),("stack",u,"Stack: "+z.stack_name(),"Switch the way windows stack in this zone"),("prio",u,"Shrinks: "+_ordinal(z.prio),"Change when this zone shrinks to minimized bars on a small screen"),("overlap",u,"Overlap: "+("on"if z.overlap else "off"),"Let this zone lie over others (on) or keep clear of them (off)"),("lock",u,"Lock: "+("on"if z.lock else "off"),"Lock the zone against moving and resizing, or unlock it"),("split",v,"Split","Cut this zone in two along its long side"),("join",B,"Join","Merge with a zone flush beside it of the same height or width"),("solo",u,"Apart: "+("on"if z.solo else "off"),"Keep this zone's panel apart from zones it touches (on) or join them (off)"),("free",u,"Snap: "+("off"if z.free else "on"),"Snap this zone to the grid and its neighbours (on) or place it to the pixel (off)"),("dup",B,"Duplicate","Add a copy of this zone beside it"),("remove",D,"Remove","Remove this zone (or Delete twice); its windows become free")];H.append(("flow",h,V+130+16,a));a=self._flow(None,None,h,V+130+16,a,n)+self.ROW;p=M+12;ad="px"if self.px_mode else "squares"
+				for c,ae,w in(("col","X:"if self.px_mode else "Col:","Left edge in %s from the screen's left"),("row","Y:"if self.px_mode else "Row:","Top edge in %s from the screen's top"),("w","W:","Width in %s"),("h","H:","Height in %s")):
+					X=(self.W if c in("col","w")else self.H)
+					if not self.px_mode:X=(X+ac-1)//ac
+					i.append(("label",ae,p,a+3,None));p+=C(ae)+6;i.append(("box",c,"",p,a,self.FIELD_W,True,(w%ad)+" (%d-%d); Enter or Apply uses it, Esc puts it back"%(0 if c in("col","row")else 1,X)));p+=self.FIELD_W+14
+				h=[("apply",B,"Apply","Use the typed values (Enter does too)"),("units",u,"Units: "+ad,"Switch between grid squares and pixels")];H.append(("flow",h,p+4,a));a=self._flow(None,None,h,p+4,a,n)+self.ROW;d["px_y"]=a+3;i.append(("px",M+12,a+3));a+=20;aq=", ".join(bz for bw,bz in(("L","left"),("T","top"),("R","right"),("B","bottom"),("X","centre"),("Y","middle"))if bw in z.pins);i.append(("pins","Pinned: "+(aq or "none"),M+12,a+3));a+=28;h=[("even",v,"Even out","Give this zone and those flush beside it in its row (or column) equal sizes")]
+				if len(self.multi)>=2:h+=[("al_"+bA[0],v,"Align "+bA,"Line the picked zones' %s edges up with this zone's"%bA)for bA in("left","top","right","bottom")];h.append(("same",v,"Same size","Make the picked zones this zone's size"))
+				H.append(("flow",h,M+12,a));a=self._flow(None,None,h,M+12,a,n)+self.ROW
+				if len(self.multi)>=2:i.append(("label",l("%d zones picked (Shift+click picks more or fewer)."%len(self.multi),f-24),M+12,a+3,e));a+=20
+			ZH=a-J+6;N=J+ZH+T;r=[];m=0
+			if z is not None and z.kind=="w":
+				r=list(s.assign.get(self.orig_id(z.id),[]));m=30+28+26*len(r)+(20 if self.preview else 0)+14
+				if not r:m+=20
+			Z=N+(m+T if m else 0);Q=ratio_class(self.W,self.H);af=[bB for bB in("narrow","wide","ultrawide")if bB!=Q];aa=[("undo",u,"Undo","Undo the last change (Ctrl+Z)"),("redo",u,"Redo","Redo the last undo (Ctrl+Y)"),("from_default",v,"New from Default","Start again from the Default layout"),("mirror",v,"Mirror","Swap the zones left and right"),("copyto",B,"Copy to others","Use these zones on %s and %s screens too (save them first)"%tuple(af))]
+			if self.others is None or self.others[0]!=(self.zs.name,Q):ar=FRAMES_NAMED%self.zs.name;self.others=((self.zs.name,Q),[bC for bC in af if ah(ar+"@"+bC,"")])
+			R=self.others[1]
+			if R:aa.append(("reflow",v,"Reflow from: "+R[0],"Rebuild from this layout's %s-screen version"%R[0]));d["reflow_from"]=R[0]
+			at=self._flow(None,None,aa,M+12,0,n);FH=30+28*2+at+20*3+10;S=Z+FH+M;aG(g,W,S);F(g,M,M,f,30);k(g,"ZONES",M+30,M+7,O);k(g,l('frame layout "%s"'%self.zs.name,f-250),M+30+C("ZONES")+12,M+7,e);I(g,j,"close",D,W-M-54,M+4,None,"Close the editor and bring back the saved zones");F(g,M,J,f,ZH,"ZONE  (selected)");ag=[]
+			for b in i:
+				if b[0]=="label":k(g,b[1],b[2],b[3],b[4])
+				elif b[0]=="box":c,av,bx,by,aw,ax,w=b[1:];d[c]=Y(aE(g,av,bx,by,aw,numbers=ax),w);ag.append(c)
+				elif b[0]=="px":d["px"]=k(g,"",b[1],b[2],e);d["px_x"]=b[1]
+				elif b[0]=="pins":Y(k(g,b[1],b[2],b[3],e),"Edges kept on the screen's edge (or centre line) on other screen sizes")
+			for op in H:self._flow(g,j,op[1],op[2],op[3],n)
+			if m:
+				F(g,M,N,f,m,"WINDOWS  (in this zone, top to bottom)");a=N+32;k(g,"Window:",M+12,a+3);ai=M+12+C("Window:")+8;aj=300;bx=ai+aj+16;I(g,j,"w_add",B,bx,a-2,"Put it here","Put the picked window in this zone (no Arrange mode needed)");a+=28
+				if not r:k(g,"Pick a window above, then click Put it here.",M+12,a+3,e);a+=20
+				for ay,y in enumerate(r):k(g,l(s.title_of(y),300),M+12,a+3);self._flow(g,j,[("w_%s_%d"%(bD,ay),bE,bF,bG%s.title_of(y))for bD,bE,bF,bG in(("up",u,"Up","Move %s up the zone's stack"),("down",u,"Down","Move %s down the zone's stack"),("out",D,"Take out","Free %s from the zone (it stays where it is)"))],M+12+310,a,1<<30);a+=26
+				d["wins_rows"]=r
+				if self.preview:k(g,l(self.preview.lstrip("!"),f-24),M+12,a+3,U if self.preview.startswith("!")else e)
+			F(g,M,Z,f,FH,"FRAME LAYOUT");a=Z+32;x=M+12
+			for c,az,A,w in(("add",B,"Add zone","Add a zone mid-screen to drag into place"),("fill",v,"Fill the gaps","Grow every zone into empty room beside it"),("save",B,"Save","Save as the frame layout in use (Default saves as Default (mine))"),("saveas",B,"Save as","Save under the name in the box")):I(g,j,c,az,x,a-2,A,w);x+=self._cap_w(A)+16
+			d["saveas"]=Y(aE(g,self.saveas_text,x,a,max(60,W-M-12-self._cap_w("Discard")-16-x),numbers=False),"A name for Save as (letters, digits, spaces)");A="Discard";I(g,j,"discard",D,W-M-12-self._cap_w(A),a-2,A,"Close the editor and bring back the saved zones");a+=28;a=self._flow(g,j,aa,M+12,a,n)+28;aA=len(self.zs.zones);nk=sum(1 for bH in self.zs.zones if bH.kind=="k");nr=sum(1 for bI in self.zs.zones if bI.kind=="r");ak,al=self.counts;aB="%s, %d keep clear, %d reserved; %s, %s; %d x %d, %s"%(L(aA,"zone"),nk,nr,L(ak,"gap"),L(al,"overlap"),self.W,self.H,Q);k(g,l(aB,f-24),M+12,a+3,U if(ak or al)else e);a+=20;lx=M+12
+			for aC,am in((ZONE_COLORS["w"],"window"),(ZONE_COLORS["k"],"keep clear"),(ZONE_COLORS["r"],"reserved"),("#C83030","gap or overlap"),("#E8C15A","overlap allowed")):q(g,lx,a+6,12,12,.9,aC);k(g,am,lx+16,a+3,e);lx+=16+C(am)+14
+			a+=20;k(g,l("Mouse on the zone: arrows nudge it a square; Shift+arrows resize it; Delete twice removes it.",f-24),M+12,a+3,e)
+			if m:
+				wl=s.all_windows();ab=["(pick a window)"];self.pick_keys=[None]
+				for y,aD in wl:an=s.zone_of(y);ab.append(l(aD+(' (in "%s")'%an if an else ""),290));self.pick_keys.append(y)
+				if self.pick>=len(ab):self.pick=0
+				dd=G.CreateDropDown(aj,ab,self.pick);dd.SetPos(ai,N+32);g.Add(dd);d["w_pick"]=Y(dd,"A window for this zone; the zone shows where it would sit")
+			aF,aI=Kit.anchor_pos("B",W,S)
+			if P(E):x,ao=E.GetX(),E.GetY()
+			else:x,ao=self.bar_pos or Kit.load_pos(aJ,(aF or 200,aI or 200),(W,S))
+			au(g,x,ao,W,S);G.AddGump(g);aH(g,self._bar_moved);self.bar,self.store,self.c=g,j,d;self.raws={}
+			for c in ag+["saveas"]:
+				ap=Kit.client_control(d[c])if c in d else None
+				if ap is not None:self.raws[c]=ap
+			self.fields=None;self.focus_was=None;self.show_fields();t(E)
+		def _bar_moved(self):Kit.save_pos(aJ,self.bar);self.bar_pos=Snap.pos(self.bar)
+		def _values(self,z):
+			x,y,w,h=z.px
+			if self.px_mode:return tuple(str(b)for b in(x,y,w,h))
+			a=o();return tuple(str(c)for c in(int(round(float(x)/a)),int(round(float(y)/a)),max(1,int(round(float(w)/a))),max(1,int(round(float(h)/a)))))
+		def show_fields(self):
+			c=self.c;z=self.zs.by_id(self.sel)if self.sel else None
+			if z is None or "col"not in c:return
+			b=self._values(z)
+			if b!=self.fields:
+				self.fields=b
+				for e,t in zip(self.FIELDS,b):c[e].SetText(t)
+			x,y,w,h=z.px
+			if self.px_mode:a=o();d="%d x %d squares at square %d, %d"%(max(1,int(round(float(w)/a))),max(1,int(round(float(h)/a))),int(round(float(x)/a)),int(round(float(y)/a)))
+			else:d="%d x %d px at %d, %d"%(w,h,x,y)
+			X(c["px"],l(d,self.BAR_W-K-12-c["px_x"]))
+		def _over(self,z):
+			m=at()
+			if m is None:return True
+			for r in(Snap.rect(self.bar),tuple(z.px)):
+				if r is not None and r[0]<=m[0]<r[0]+r[2]and r[1]<=m[1]<r[1]+r[3]:return True
+			return False
+		def _key(self,name):
+			a=False
+			for k in self.KEYS[name]:
+				if API.IsKeyPressed(k):a=True;break
+			b=self.keys_was.get(name,False);self.keys_was[name]=a;return a and not b
+		def _focus(self):
+			if not self.raws:return
+			try:Typing._find();f=(Typing._get(None,"KeyboardFocusControl",Typing.uim)if Typing.uim is not None else None)
+			except Exception:f=None
+			self.raws_ok=Typing.uim is not None;n=0
+			while f is not None and n<4:
+				for a,b in self.raws.items():
+					if Typing._same(f,b):return a
+				f=Typing._get(f,"Parent");n+=1
+			return
+		def _box_texts(self):
+			c=self.c
+			try:return tuple(str(c[a].Text or "").strip()for a in self.FIELDS)
+			except Exception:return
+		def poll(self):
+			if self.closed:return
+			if not P(self.bar):self.close(keep=False);return
+			s=time.time()
+			for f,b in list(self.frames.items()):
+				z=self.zs.by_id(f);i=b.get("g")
+				if z is None or not P(i):continue
+				if b["resize_at"]:
+					r=Snap.rect(i)
+					if r is not None and(r[2],r[3])!=b["size"]:k=o();X(b["sum"],l("%d x %d squares"%(max(1,int(round(float(r[2])/k))),max(1,int(round(float(r[3])/k)))),max(40,r[2]-2*K-24)),O)
+					if s-b["resize_at"]>=self.SETTLE:
+						b["resize_at"]=0.
+						if r is not None and(r[2],r[3])!=b["size"]:
+							if z.lock:self.build_zone(z)
+							else:self.landed(z,r[0],r[1],r[2],r[3],resized=True)
+			m=SNAP.pressed()is True;self._sync_handles();self._edge_tick(m);self.pressed_was=m;a,c=self.store,self.c;z=self.zs.by_id(self.sel)if self.sel else None
+			if j(a,"close")or j(a,"discard"):self.close(keep=False);return
+			n=self._focus();t=Client.typing();u=self._key("enter");v=self._key("esc")
+			if not t and not self.edge:
+				p=bool(an("ctrl"));x=bool(an("shift"))
+				if self._key("z")and p:self.do_undo()
+				elif self._key("y")and p:self.do_redo()
+				elif z is not None:
+					for d,g in(("left",(-1,0)),("right",(1,0)),("up",(0,-1)),("down",(0,1))):
+						if self._key(d)and self._over(z):self.nudge(z,g,x)
+					if self._key("delete"):self.delete_pressed(z)
+			if j(a,"add"):
+				self.push();f=self.zs.new_id();q=Zone(f,"w",(0,0,1,1),"",(0,0),"d",0);q.set_px((self.W-320)//2,(self.H-240)//2,320,240,self.W,self.H)
+				if not self._add_zone(q,True,"no room for another zone; remove one or make one smaller."):return
+			elif j(a,"undo"):self.do_undo()
+			elif j(a,"redo"):self.do_redo()
+			elif j(a,"even")and z is not None:
+				self.push();y=self.zs.even_out(z,self.W,self.H,o())
+				if y<2:self.undo.pop();self.say("no zone sits flush beside this one in its row or column.")
+				else:self._all_moved()
+			elif j(a,"fill"):self.push();self.zs.fill_gaps(self.W,self.H,o());self._all_moved()
+			elif j(a,"save"):self.save(self.zs.name if self.zs.name!=LAYOUT_DEFAULT else LAYOUT_MINE);return
+			elif j(a,"saveas"):
+				d=Layout.clean_name(safe(lambda:c["saveas"].Text,""),"")
+				if not d:self.say("type a name in the box, then click Save as.")
+				else:self.save(d if d!=LAYOUT_DEFAULT else LAYOUT_MINE);return
+			elif j(a,"reflow")and c.get("reflow_from"):
+				h=ZoneSet.parse(self.zs.name,ah((FRAMES_NAMED%self.zs.name)+"@"+c["reflow_from"],""))
+				if h is not None:h.reflow(self.W,self.H,o());self.push();self._restore(([G.copy()for G in h.zones],self.sel,{}));self.changed()
+			elif j(a,"from_default"):self.push();g=ZoneSet.default(self.W,self.H,(),False);self._restore(([H.copy()for H in g.zones],self.sel,{}));self.changed()
+			elif j(a,"mirror"):
+				self.push()
+				for e in self.zs.zones:A,B,w,C=e.px;e.set_px(self.W-A-w,B,w,C,self.W,self.H)
+				self._all_moved()
+			elif j(a,"copyto"):self.copy_to()
+			elif j(a,"units"):self.commit_rect(z,quiet=True)if z is not None else None;self.px_mode=not self.px_mode;self.rebuild=True
+			if z is not None and not self.rebuild:self.poll_zone(z,a)
+			if z is not None and z.kind=="w"and not self.rebuild:self.poll_windows(z,a,c)
+			if not self.rebuild:self.poll_fields(z,n,u,v,j(a,"apply"))
+			self.focus_was=n;self.draw_marks()
+			if self.rebuild:
+				self.rebuild=False;self.saveas_text=str(safe(lambda:c["saveas"].Text,self.saveas_text)or "")
+				for e in self.zs.zones:self.update_zone(e)
+				self.build_bar()
+		def _all_moved(self):
+			for a in self.zs.zones:a.note_pins(self.W,self.H);self.place_zone(a)
+			self.changed()
+		def poll_zone(self,z,store):
+			if j(store,"kind"):self.push();a=[h for h,i in ZONE_KINDS];z.kind=a[(a.index(z.kind)+1)%len(a)];z.hug=z.hug and z.kind=="w";self.build_zone(z);self.changed();self.rebuild=True
+			elif j(store,"stack"):self.push();b=[r for r,w in ZONE_STACKS];z.stack=b[(b.index(z.stack)+1)%len(b)];self.rebuild=True
+			elif j(store,"prio"):self.push();z.prio=(z.prio+1)%(SHRINK_MAX+1);self.rebuild=True
+			elif j(store,"overlap"):
+				self.push();z.overlap=not z.overlap
+				if not z.overlap:
+					if not self.zs.push_clear(z,self.W,self.H,o()):c=self._blocker(z);self.say('zone "%s" still lies over "%s"; move it or make it smaller.'%(z.id,c.id if c is not None else "a zone"),e)
+					z.note_pins(self.W,self.H)
+				for d in self.zs.zones:self.build_zone(d)
+				self.changed();self.rebuild=True
+			elif j(store,"lock"):self.push();z.lock=not z.lock;self.build_zone(z);self.rebuild=True
+			elif j(store,"split"):self.split(z)
+			elif j(store,"join"):self.join(z)
+			elif j(store,"solo"):self.push();z.solo=not z.solo;self.changed();self.rebuild=True
+			elif j(store,"free"):self.push();z.free=not z.free;self.px_mode=self.px_mode or z.free;z.note_pins(self.W,self.H);self.changed();self.rebuild=True
+			elif j(store,"dup"):self.duplicate(z)
+			elif j(store,"remove"):self.remove(z)
+			else:
+				for f,g in(("al_l","l"),("al_t","t"),("al_r","r"),("al_b","b"),("same","s")):
+					if j(store,f):self.align(z,g);break
+		def poll_windows(self,z,store,c):
+			L=self.layout;l=c.get("w_pick");g=time.time();m=j(store,"w_add")
+			if l is not None and(g>=self._pick_next or g-HOST.input_at<=HOST.INPUT_FAST):
+				self._pick_next=g+.2;i=ag(l,self.pick)
+				if i!=self.pick:
+					self.pick=i;a=self.pick_keys[i]if 0<i<len(self.pick_keys)else None;self.preview=self.preview_text(a,z)if a else "";self.build_zone(z);self.rebuild=True
+					if not m:return
+			d=self.orig_id(z.id)
+			if m:
+				a=self.pick_keys[self.pick]if 0<self.pick<len(self.pick_keys)else None
+				if a is None:self.say("pick a window in the list first, then click Put it here.",e);return
+				if L.frames is None or L.frames.by_id(d)is None:self.say('zone "%s" isn\'t saved yet; click Save, then put the window in it.'%z.id);return
+				if L.zone_of(a)==d:self.say("%s already sits in this zone."%L.title_of(a),e);return
+				n=L._map_zone()
+				if(a!="worldmap"and d==n)or(a=="worldmap"and L.assign.get(d)):self.say("TazUO's World Map keeps its zone to itself; pick another zone for %s."%(L.title_of(a)if a!="worldmap"else "it"));return
+				if L._too_small(a,L.frames.by_id(d)):return
+				L.assign_to(a,d);self.pick,self.preview=0,"";self.build_zone(z);self.rebuild=True;return
+			o=c.get("wins_rows")or[]
+			for i,k in enumerate(o):
+				for h in("up","down","out"):
+					if not j(store,"w_%s_%d"%(h,i)):continue
+					b=L.assign.get(d,[])
+					if k not in b:break
+					if h=="out":L.assign_to(k,None)
+					else:
+						f=b.index(k);t=f-1 if h=="up"else f+1
+						if 0<=t<len(b):
+							b[f],b[t]=b[t],b[f]
+							for p in b:L._refit(p)
+							L.save_assign();L.dirty=L.fresh=True;af()
+					self.build_zone(z);self.rebuild=True;return
+		def preview_text(self,key,z):return self.layout.preview_text(key,z,self.layout.assign.get(self.orig_id(z.id),[]))
+		def poll_fields(self,z,a,enter,esc,apply):
+			c=self.c
+			if z is None or "name"not in c:return
+			d=self.focus_was if(self.focus_was is not None and a!=self.focus_was)else None
+			if esc and(a is not None or self._edited(z)):self._refields();c["name"].SetText(z.id);return
+			if(enter and a=="name")or d=="name"or apply:
+				b=str(safe(lambda:c["name"].Text,z.id)or "").strip()
+				if b!=z.id:self.rename(z,b);return
+			if a is None and d is None and enter and not self.raws_ok:
+				b=str(safe(lambda:c["name"].Text,z.id)or "").strip()
+				if b!=z.id:self.rename(z,b);return
+				self.commit_rect(z);return
+			if((enter and a in self.FIELDS)or(d in self.FIELDS and a not in self.FIELDS)or apply):self.commit_rect(z)
+		def _edited(self,z):a=self._box_texts();b=str(safe(lambda:self.c["name"].Text,z.id)or "").strip();return(a is not None and a!=self._values(z))or b!=z.id
+		def commit_rect(self,z,quiet=False):
+			a=self._box_texts()
+			if a is None or a==self._values(z):return
+			try:d,f,w,h=[int(g)for g in a]
+			except Exception:
+				if not quiet:self.say("type whole numbers in Col, Row, W and H.")
+				self._refields();return
+			b=1 if self.px_mode else o();x,y=max(0,d)*b,max(0,f)*b;w,h=max(1,w)*b,max(1,h)*b;c="%d x %d %s"%(max(1,int(a[2])),max(1,int(a[3])),"px"if self.px_mode else "squares")
+			if w<ZONE_MIN_W or h<ZONE_MIN_H:
+				if not quiet:self.say('zone "%s" can\'t be %s: the smallest zone is %d x %d px.'%(z.id,c,ZONE_MIN_W,ZONE_MIN_H))
+				self._refields();return
+			if z.lock:self.say('zone "%s" is locked; click Lock to change it.'%z.id,e);self._refields();return
+			if not self.apply_rect(z,x,y,w,h,c):self._refields()
+		def rename(self,z,name):
+			name=Layout.clean_name(name,"")
+			if not name or name.lower()=="frames"or self.zs.by_id(name)is not None:self.say('zone "%s" can\'t be called "%s": %s.'%(z.id,name,"a name needs letters or digits"if not name else "the name is taken"if self.zs.by_id(name)is not None else "that name is kept"));self.c["name"].SetText(z.id);return
+			self.push();a=z.id;z.id=name
+			for k,v in self.renames.items():
+				if v==a:self.renames[k]=name;break
+			else:self.renames[a]=name
+			b=self.frames.pop(a,None)
+			if b is not None:self.frames[name]=b
+			self.sel=name;self.multi=set(name if c==a else c for c in self.multi);self.said=None;self.build_zone(z);self.rebuild=True
+		def nudge(self,z,d,b):
+			if z.lock:self.say('zone "%s" is locked; click Lock to change it.'%z.id,e);return
+			a=1 if z.free else o();x,y,w,h=z.px
+			if b:self.apply_rect(z,x,y,max(ZONE_MIN_W,w+d[0]*a),max(ZONE_MIN_H,h+d[1]*a))
+			else:self.apply_rect(z,x+d[0]*a,y+d[1]*a,w,h)
+		def delete_pressed(self,z):
+			a=time.time()
+			if(self.del_armed is not None and self.del_armed[0]==z.id and a-self.del_armed[1]<=3.):self.del_armed=None;self.remove(z);return
+			self.del_armed=(z.id,a);R('press Delete again to remove zone "%s".'%z.id,e)
+		def remove(self,z):
+			if z.lock:self.say('zone "%s" is locked; click Lock to remove it.'%z.id,e);return
+			self.push();self.zs.zones=[b for b in self.zs.zones if b is not z];a=self.frames.pop(z.id,None)
+			if a is not None:t(a.get("g"))
+			self.multi.discard(z.id);self.sel=self.zs.zones[0].id if self.zs.zones else None;self.changed();self.rebuild=True
+		def split(self,z):
+			if z.lock:self.say('zone "%s" is locked; click Lock to change it.'%z.id,e);return
+			x,y,w,h=z.px;f=w>=h;c=w if f else h;d=ZONE_MIN_W if f else ZONE_MIN_H;g=o();a=int(round(c/2./g))*g
+			if not d<=a<=c-d:a=c//2
+			if a<d or c-a<d:self.say('zone "%s" is too small to split.'%z.id);return
+			self.push();b=z.copy();b.id=self.zs.new_id();W,H=self.W,self.H
+			if f:z.set_px(x,y,a,h,W,H);b.set_px(x+a,y,w-a,h,W,H)
+			else:z.set_px(x,y,w,a,W,H);b.set_px(x,y+a,w,h-a,W,H)
+			z.note_pins(W,H);b.note_pins(W,H);self.zs.zones.append(b);self.build_zone(z);self.build_zone(b);self.changed();self.rebuild=True
+		def join(self,z):
+			if z.lock:self.say('zone "%s" is locked; click Lock to change it.'%z.id,e);return
+			x,y,w,h=z.px;D=SNAP_DIST;a=None
+			for o in self.zs.zones:
+				if o is z or o.px is None or o.lock or o.kind!=z.kind:continue
+				b,c,d,f=o.px
+				if abs(c-y)<=D and abs(f-h)<=D and(abs(b-(x+w))<=D or abs(x-(b+d))<=D):a=o
+				elif abs(b-x)<=D and abs(d-w)<=D and(abs(c-(y+h))<=D or abs(y-(c+f))<=D):a=o
+				if a is not None:break
+			if a is None:self.say('no zone of the same height or width sits flush beside "%s".'%z.id);return
+			self.push();b,c,d,f=a.px;g,i=min(x,b),min(y,c);z.set_px(g,i,max(x+w,b+d)-g,max(y+h,c+f)-i,self.W,self.H);z.note_pins(self.W,self.H);self.zs.zones=[r for r in self.zs.zones if r is not a];j=self.frames.pop(a.id,None)
+			if j is not None:t(j.get("g"))
+			self.multi.discard(a.id);self.build_zone(z);self.changed();self.rebuild=True;self.say('zone "%s" joined into "%s"; its windows become free when saved.'%(a.id,z.id),e)
+		def _add_zone(self,a,check,text):
+			self.zs.zones.append(a)
+			if check and not self.zs.push_clear(a,self.W,self.H,o()):self.zs.zones.remove(a);self.undo.pop();self.say(text);return False
+			a.note_pins(self.W,self.H);self.sel,self.multi=a.id,set();self.build_zone(a);self.changed();self.rebuild=True;return True
+		def duplicate(self,z):self.push();a=z.copy();a.id=self.zs.new_id();a.lock=False;b=o();x,y,w,h=z.px;a.set_px(x+b,y+b,w,h,self.W,self.H);self._add_zone(a,not a.overlap,"no room for a copy of zone \"%s\"; make room first."%z.id)
+		def align(self,z,edge):
+			h=[G for G in[self.zs.by_id(H)for H in self.multi if H!=z.id]if G is not None and not G.lock]
+			if not h:return
+			self.push();x,y,w,i=z.px;a=[]
+			for p in h:
+				f,g,b,c=p.px;r={"l":(x,g,b,c),"t":(f,y,b,c),"r":(x+w-b,g,b,c),"b":(f,y+i-c,b,c)}.get(edge,(f,g,w,i));d=p.px;p.set_px(r[0],r[1],r[2],r[3],self.W,self.H)
+				if self._blocker(p)is not None:p.set_px(d[0],d[1],d[2],d[3],self.W,self.H);a.append(p.id)
+				p.note_pins(self.W,self.H)
+			if a:self.say("%s would cover another zone, so %s stayed where %s %s."%(", ".join('"%s"'%W for W in a),"it"if len(a)==1 else "they","it"if len(a)==1 else "they","was"if len(a)==1 else "were"),e)
+			self._all_moved()
+		def copy_to(self):
+			a=self.zs.name;self.others=None
+			if self.zs.generated or a==LAYOUT_DEFAULT or a not in self.layout.frame_names():self.say("save these zones first (Save or Save as), then click Copy to.",e);return
+			d=ratio_class(self.W,self.H);b=self.zs.copy(a);b.screen=(self.W,self.H);b.grid=o()
+			for f in b.zones:f.note_pins(self.W,self.H)
+			g=b.save_text();c=[h for h in("narrow","wide","ultrawide")if h!=d]
+			for k in c:V((FRAMES_NAMED%a)+"@"+k,g)
+			R('frame layout "%s" copied to %s screens.'%(a," and ".join(c)),ap)
+		def warnings(self):
+			a=[];c=self.layout
+			for z in self.zs.zones:
+				if z.kind!="w"or z.px is None:continue
+				for k in c.assign.get(self.orig_id(z.id),[]):
+					b=c._min_of(k)
+					if b and(z.px[2]<b[0]or z.px[3]<b[1]):a.append('zone "%s" is %d x %d, smaller than %s can be (%d x %d)'%(z.id,z.px[2],z.px[3],c.title_of(k),b[0],b[1]))
+			d,e=self.counts
+			if d:a.append("the zones leave %s (Fill the gaps closes them)"%L(d,"gap"))
+			if e:a.append("%s of zones without Overlap on"%L(e,"overlap"))
+			if not any(f.kind=="k"for f in self.zs.zones):a.append("no keep-clear zone: nothing marks the game view")
+			return a
+		def save(self,name):
+			self.others=None
+			for w in self.warnings():R("note: %s."%w,e)
+			a=self.zs.copy(name);a.generated=False;a.ver=2;self.layout.save_frames(a,name,self.W,self.H);L,d=self.layout,False
+			for b,c in self.renames.items():
+				if b!=c and b in L.assign and c not in L.assign:L.assign[c]=L.assign.pop(b);d=True
+			if d:L.save_assign()
+			R('frame layout "%s" saved.'%name,ap);self.close(keep=True);self.layout.use_frames(name,tell=False)
+	def a5():m["editor"]=None
+	def aO(fresh=False):
+		L=LAYOUT;W,H=J()
+		if m["editor"]is not None or W<=0 or H<=0 or not L.enabled:return
+		if fresh:
+			c=L.frame_names();n,b=2,"Mine"
+			while b in c or b==LAYOUT_DEFAULT:b="Mine %d"%n;n+=1
+			a=ZoneSet(b,[],o(),(W,H));z=Zone("Zone 1","w",(0,0,1,1),"",(0,0),"d",0);z.set_px((W-320)//2,(H-240)//2,320,240,W,H);a.zones.append(z)
+		elif L.frames_name==LAYOUT_DEFAULT:a=ZoneSet.default(W,H,L.occupied(),False);a.generated=False
+		else:a=L.load_frames(L.frames_name,W,H)or L.frames_in_use(W,H).copy()
+		m["editor"]=LayoutEditor(L,a,a5);m["editor"].open()
+	def a6():
+		L=LAYOUT;b=L.frames
+		if b is None or not(L.seamless and L.enabled)or m["editor"]is not None:return(),None
+		a=Layout._game_px(b)
+		def c(r):return a is None or not(r[0]<a[0]+a[2]and a[0]<r[0]+r[2]and r[1]<a[1]+a[3]and a[1]<r[1]+r[3])
+		d=tuple((tuple(f.px),f.solo)for f in b.zones if f.kind!="k"and f.px is not None and c(f.px));return d,a if L.fit_view else None
+	def a7(items,o,W,H):
+		l=G.CreateGump(False,False);s=Kit.WINDOW_BG;P=[Kit.pic_size(s+bw)for bw in range(9)];g=[bx[0]for bx in items];t=[{"T":[],"B":[],"L":[],"R":[]}for by in g]
+		def z(x,y,w,h):
+			aF(l,s+4,x,y,w,h);b=q(l,x,y,w,h,.01,"#000000")
+			if b is not None:b.SetAcceptMouseInput(True)
+		for e,f,c,d in g:z(e,f,c,d)
+		for i in range(len(g)):
+			for m in range(i+1,len(g)):
+				A=None if items[i][1]or items[m][1]else aN(g[i],g[m])
+				if A is None:continue
+				r,n,u,j,k=A;B=0 if r=="v"else 1;C,D=(i,m)if g[i][B]<g[m][B]else(m,i);t[C]["R"if r=="v"else "B"].append((j,k));t[D]["L"if r=="v"else "T"].append((j,k))
+				if u>n:z(*((n,j,u-n,k-j)if r=="v"else(j,n,k-j,u-n)))
+		for i,(e,f,c,d)in enumerate(g):
+			for E,F,I,J,K in(("T",1,e,e+c,lambda a,b:(a,f,b-a,P[1][1])),("B",7,e,e+c,lambda a,b:(a,f+d-P[7][1],b-a,P[7][1])),("L",3,f,f+d,lambda a,b:(e,a,P[3][0],b-a)),("R",5,f,f+d,lambda a,b:(e+c-P[5][0],a,P[5][0],b-a))):
+				for j,k in a4(I,J,t[i][E]):aF(l,s+F,*K(j,k))
+		Grid.show_overlay(l,0,0,W,H,True);N["g"]=l
+		if o is None or o[2]<=2*p or o[3]<=2*p:return
+		v=G.CreateGump(False,False);e,f,c,d=o
+		for L,M,O,Q,R in((0,0,c,p,aj),(0,d-p,c,p,aj),(0,0,p,d,aj),(c-p,0,p,d,aj),(p,p,c-2*p,1,ak),(p,d-p-1,c-2*p,1,ak),(p,p,1,d-2*p,ak),(c-p-1,p,1,d-2*p,ak)):q(v,L,M,O,Q,1.,R)
+		Grid.show_overlay(v,e,f,c,d);aa["g"]=v
+	def a8():
+		b=Kit._raw_gump(N["g"])if N["g"]is not None and not A["off"]else None
+		if b is None or not Client.on_client_thread():return
+		try:
+			a=A["gumps"]
+			if a is None:import System;t=Tz.T("ClassicUO.Game.Managers.UIManager");A["same"]=System.Object.ReferenceEquals;A["ver"]=t.GetField("_gumpsStructureVersion",Client.flags(static=True,public=False));a=A["gumps"]=Tz.get(None,"Gumps",t)
+			d=A["ver"];c=int(d.GetValue(None))if d is not None else None
+			if c is not None and c==A["seen"]and b is A["raw"]:return
+			A["seen"],A["raw"]=c,b;e=a.Last;g=A["same"]
+			if e is None or g(e.Value,b)or(e.Previous is not None and g(e.Previous.Value,b)):return
+			f=a.Find(b)
+			if f is None:return
+			a.Remove(f);a.AddBefore(a.Last,f)
+			if d is not None:d.SetValue(None,c+1);A["seen"]=c+1
+		except Exception:A["off"]=True
+	def a9(now):
+		if now<m["back_at"]:return
+		m["back_at"]=now+a1;W,H=J();a,b=a6();c=(W,H,a,b,ar())
+		if c==m["back_sig"]and(not a or(P(N["g"])and(b is None or P(aa["g"])))):return
+		m["back_sig"]=c;d,N["g"]=N["g"],None;e,aa["g"]=aa["g"],None
+		if a and W>0 and H>0:a7(a,b,W,H)
+		t(d);t(e)
+	def ba(key):
+		for a,b in a2:
+			if key==a or(a.endswith(".")and key.startswith(a)):return b
+		return
+	def aP(total,b):
+		c,a=[],0
+		for i,d in enumerate(b):n=total-a if i==len(b)-1 else int(round(total*d));c.append((a,n));a+=n
+		return c
+	def bb(i,W,H):
+		t=int(_clampv(STRIP_SHARE*H,TOP_MIN,TOP_MAX));c=int(_clampv(STRIP_SHARE*H,BOT_MIN,BOT_MAX))
+		if i==2:d=int(_clampv(.3*H,200,340));b=[("Frames","w",0,0,W,t,"r","frames"),("Game","k",0,t,W,H-t-d,"d",None)];e=(("Paperdoll","gear"),("Bags","bag"),("Action bar","bar"),("Trackers","watch"),("Map","map"));b+=[(bw,"w",r,H-d,G,d,"d",bx)for(r,G),(bw,bx)in zip(aP(W,(.18,.18,.28,.18,.18)),e)]
+		else:a=int(_clampv(.24*W,260,460))if i==3 else int(_clampv(SIDE_SHARE*W,SIDE_MIN,SIDE_MAX));l,f=(W-a,0)if i==3 else(0,a);b=[("Game","k",f,0,W-a,H-c,"d",None),("Action bar","w",f,H-c,W-a,c,"r","bar")];e=(("Frames","frames"),("Paperdoll","gear"),("Bags","bag"),("Trackers","watch"));b+=[(bA,"w",l,by,a,bz,"d",bB)for(by,bz),(bA,bB)in zip(aP(H,(.22,.26,.26,.26)),e)]
+		g=ZoneSet(Z[i][0],[],o(),(W,H));h={}
+		for j,m,x,y,w,n,p,k in b:
+			z=Zone(j,m,(0,0,1,1),"",(0,0),p,0);z.set_px(x,y,w,n,W,H);z.note_pins(W,H);g.zones.append(z)
+			if k:h[k]=j
+		return g,h
+	def aQ(i,W,H):
+		L=LAYOUT;b=L.parse_windows(WINDOWS_DEFAULT)[1]
+		if i<2:a=b if i==0 else L.parse_windows(WINDOWS_MIRRORED)[1];d=set(g for g,h in a.items()if any(L.gump_of(r)is not None for r in h));return ZoneSet.default(W,H,d,n["look"].get("game",True)),LAYOUT_DEFAULT,a
+		e,f=bb(i,W,H);a={}
+		for k in sorted(set(L.wins)|set(x for w in b.values()for x in w)):
+			c=f.get(ba(k))
+			if c:a.setdefault(c,[]).append(k)
+		return e,Z[i][0],a
+	def bc(i,W,H):
+		b=(i,W,H,n["look"].get("game",True));a=n["cards"].get(b)
+		if a is None:a=n["cards"][b]=aQ(i,W,H)[0]
+		return a
+	def ay(key):
+		for a,b in n["assign"].items():
+			if key in b:return a
+		return
+	def az():
+		e,S["g"]=S["g"],None;t(e);b=n["zs"];W,H=J();L=LAYOUT
+		if b is None or W<=0 or H<=0:return
+		g=G.CreateGump(False,False)
+		for z in b.zones:
+			if z.px is None or z.kind=="r":continue
+			x,y,w,h=z.px;c=ZONE_COLORS.get(z.kind,"#3A78C8");q(g,x,y,w,h,.22,c)
+			for f,i,j,m in((x,y,w,2),(x,y+h-2,w,2),(x,y,2,h),(x+w-2,y,2,h)):q(g,f,i,j,m,.9,c)
+			if z.kind=="k":a=["Game area"]
+			else:a=[z.id]+([L.title_of(r)for r in n["assign"].get(z.id,[])if r in L.wins]or["(empty)"])
+			a=[l(bw,max(20,w-28))for bw in a[:max(1,(h-16)//20)]];q(g,x+6,y+6,max(C(bx)for bx in a)+12,20*len(a)+6,.85,"#000000")
+			for d,o in enumerate(a):k(g,o,x+12,y+9+20*d,O if d==0 else E)
+		Grid.show_overlay(g,0,0,W,H);S["g"]=g
+	def aR(i):W,H=J();a,b,c=aQ(i,W,H);n.update({"preset":i,"zs":a,"fname":b,"assign":dict((d,list(f))for d,f in c.items())})
+	def aS():
+		c,a=al["c"],n["look"]
+		for k in a:
+			if k in c:a[k]=bool(c[k].IsChecked)
+	def bd():
+		s=n;c=s["step"];a,o=K,Kit.GAP;W=a_;d=W-2*a;X=LAYOUT;w=X.all_windows()if c==1 else[];i=(30+Q+56+10,32+26*max(1,len(w))+8,32+26*len(av)+30)[c];Y=a+30+o+i+o+44+a;g,p,aa=ac.begin(W,Y)
+		if not m["minimized"]:
+			ac.frame(g,settings=False,after="Step %d of 3"%(c+1));y=a+30+o
+			if c==0:
+				F(g,a,y,d,i,"LAYOUT  (click one; the screen shows it)");x,A=J();f=y+32;ab=a+(d-5*M-4*aK)//2
+				for r,(N,P)in enumerate(Z):
+					j=ab+r*(M+aK);G=r==s["preset"]
+					if G:q(g,j-2,f-2,M+4,Q+4,.95,"#E8C15A")
+					q(g,j,f,M,Q,1.,"#101010")
+					if x>0 and A>0:
+						R,S=M/float(x),Q/float(A)
+						for z in bc(r,x,A).zones:
+							if z.px is None or z.kind=="r":continue
+							zx,zy,zw,zh=z.px;q(g,j+int(zx*R)+1,f+int(zy*S)+1,max(1,int(zw*R)-2),max(1,int(zh*S)-2),.85 if G else.5,ZONE_COLORS.get(z.kind,"#3A78C8"))
+					U=l(N,M);k(g,U,j+(M-C(U))//2,f+Q+6,O if G else E);aq(g,j,f,M,Q+26,T(("preset",r)),"Use %s: %s"%(N,P[:1].lower()+P[1:]))
+				k(g,l(Z[s["preset"]][1],d-24),a+12,f+Q+32,e)
+			elif c==1:
+				F(g,a,y,d,i,"WINDOWS  (click to change a zone)");b=y+32
+				if not w:k(g,"No windows yet; turn modules on, then come back.",a+12,b+3,e)
+				for H,ad in w:ae=ay(H);k(g,l(ad,300),a+12,b+3);I(g,p,"z_"+H,u,a+330,b-2,"Zone: "+(ae or "free"),"Click: next zone (free: stays where it is)",on_click=T(("cycle",H)));b+=26
+			else:
+				F(g,a,y,d,i,"LOOK");b=y+32
+				for V,af,ag in av:aa[V]=Kit.add_check(g,af,a+12,b,s["look"][V],ag);b+=26
+				k(g,"Change any of this later in Settings > Interface.",a+12,b+5,e)
+			t=y+i+o;F(g,a,t,d,44);I(g,p,"cancel",D,a+12,t+10,"Cancel","Close without changing anything",on_click=T("cancel"));h=("done",B,"Done","Use this layout")if c==2 else("next",v,"Next","Go to the next step");L=W-a-12-35-C(h[2]);I(g,p,h[0],h[1],L,t+10,h[2],h[3],on_click=T(h[0]))
+			if c:L-=55+C("Back");I(g,p,"back",u,L,t+10,"Back","Go back a step",on_click=T("back"))
+		ac.end(g);be()
+	def ab():Binds.scoped("interface.setup",bd)
+	ac=Kit.Window(aY,"Interface Setup",m,al,ab,aZ,default=(200,120),mini=a0,owner=False,lock=False,close_tip="Close without changing anything")
+	def be():
+		c=al["c"]
+		if "status"in c:X(c["status"],"%s: step %d of 3"%("Interface Setup",n["step"]+1))
+	def aT():
+		L=LAYOUT
+		if not L.enabled:return
+		if not n["open"]:V(aI,"1");n.update({"open":True,"step":0,"cards":{},"look":{"seam":True,"fit_view":L.fit_view,"game":L.game_grows}});m["minimized"]=False;aR(n["preset"])
+		az();ab()
+	def aA():n["open"]=False;a,S["g"]=S["g"],None;t(a);ac.close()
+	def bf(i):aR(i);az();ab()
+	def bg(key):
+		s=n;a=[None]+[g.id for g in s["zs"].zones if g.kind=="w"];b=ay(key);d=ay("worldmap");i=a.index(b)if b in a else 0
+		for f in a:
+			i=(i+1)%len(a);c=a[i]
+			if c is None:break
+			e=[h for h in s["assign"].get(c,[])if h!=key]
+			if not((key=="worldmap"and e)or(key!="worldmap"and c==d)):break
+		if b is not None:s["assign"][b]=[r for r in s["assign"][b]if r!=key]
+		if c is not None:s["assign"].setdefault(c,[]).append(key)
+		az();ab()
+	def aU(d):aS();n["step"]=max(0,min(2,n["step"]+d));ab()
+	def bh():
+		aS();s=n;a=LAYOUT;W,H=J();f,c,d=s["zs"],s["fname"],s["look"];a.seamless,a.fit_view,a.game_grows=d["seam"],d["fit_view"],d["game"];a.save_opts()
+		if c!=LAYOUT_DEFAULT:f.generated=False;a.save_frames(f.copy(c),c,W,H)
+		a.use_frames(c,tell=False);a.assign=dict((i,list(h))for i,h in s["assign"].items()if h);a.unfree(None);a.save_assign();b=Z[s["preset"]][0];b=b+" (mine)"if b in(LAYOUT_DEFAULT,LAYOUT_MIRRORED)else b;V(LAYOUT_NAMED%b,a.windows_text());e=a.layout_names()
+		if b not in e:e.append(b);V(LAYOUT_LIST,",".join(e))
+		a.layout_name=b;V(LAYOUT_ACTIVE,b);a.free_scrolled();a.placed={};a.refit_all();af();aA();am();g=sum(1 for r in a.assign.values()for w in r if a.gump_of(w)is not None);ax('"%s" in use: %s placed.'%(b,L(g,"window")),ap)
+	def aV():aA();ax("setup closed; nothing changed.",e)
+	aW={"setup":aT,"preset":bf,"cycle":bg,"next":lambda:aU(1),"back":lambda:aU(-1),"done":bh,"cancel":aV}
+	def bi():
+		a=LAYOUT;n=sum(len(d)for d in a.assign.values());b=a.frames
+		if not n:return "No window in a zone yet: click Set up, or Arrange windows"
+		c=Layout._game_px(b)if b is not None else None;return "%s in %s%s"%(L(n,"window"),L(len(a.assign),"zone"),"; game area %d x %d"%c[2:]if c else "")
+	def aB(g,names,i,x,y,tip):a=G.CreateDropDown(aL,names,i);a.SetPos(x,y);g.Add(a);return Y(a,tip)
+	def bj(f,x,y):L=LAYOUT;a=s["frame_names"]=[LAYOUT_DEFAULT]+L.frame_names();c=a.index(L.frames_name)if L.frames_name in a else 0;b=s["layout_names"]=["(none)",LAYOUT_DEFAULT,LAYOUT_MIRRORED]+L.layout_names();d=L.layout_name or "(none)";e=b.index(d)if d in b else 0;k(f.g,"Zones:",x+12,y+3,E);k(f.g,"Windows:",x+12,y+31,E);s["zones"]=(aB(f.g,a,c,x+92,y,"The frame layout in use (its zones)"),c);s["windows"]=(aB(f.g,b,e,x+92,y+28,"The window layout in use; pick one to place every window"),e)
+	def bk(f,x,y):
+		L=LAYOUT;d=L.all_windows();j=L.page_preview;e=y-26*len(d)-(20 if j else 0);b=["free"]+[r for r in L.zone_choices()if r];s["zone_dd"]=[]
+		for g,m in d:
+			a=L.zone_of(g);c=h=b
+			if a is not None and a not in b:c,h=b+[a],b+[l("%s (missing)"%a,aL-30)]
+			i=c.index(a)if a in c else 0;k=aB(f.g,h,i,x+302,e,"The zone it sits in (free: stays where you put it)");s["zone_dd"].append((g,k,i,c));e+=26
+	def bl(w):
+		am();L=LAYOUT;b=L.all_windows();a=L.page_preview;h=("check","snap","Snap windows together","Windows dropped near each other line up");c=("check","dark","Dark mode","Tint every window's stone frame charcoal");d=(h,("check","grid_on","Show the grid","Show the snapping grid over the screen"),("num","grid","Grid:","Grid spacing for snapping","px",8,512))
+		if VA_ALONE:return(("ZONES",(("note","Zones, layout and snapping are set in the full"),("note","Virtue Assistant."))),)
+		if not L.enabled:return(("ZONES",(("note","Interface is off, so zones are off."),("note","Tick Interface on the Modules tab to use them."))),("LOOK",(c,)),("SNAPPING",d))
+		i=(("arrange",B,"Done","Lock every window in its zone")if L.arrange else("arrange",v,"Arrange windows","Unlock windows to drag them between zones (Esc or Done locks them)"));j=((("reclaim_undo",D,"Undo","Put the zones back as before Reclaim space"),)if L._undo_load()is not None else());f=(("SCREEN",(("note",l(bi(),w-24)),("note",l(L.status_text(),w-24)),("buttons",(("setup",v,"Set up","Pick a ready-made layout in three steps"),i)),("buttons",(("edit",u,"Edit zones","Drag, resize, split or join zones"),("new",B,"New zones","Start a new frame layout with one zone"))))),("LOOK",tuple(("check",r,x,y)for r,x,y in av)+(c,)),("SNAPPING",d),("LAYOUTS  (saved)",(("buttons",(("save",B,"Save windows","Save where every window sits as the window layout in use"),("reset",D,"Reset","Go back to the Default window layout"),("free",D,"Free all","Take every window out of its zone"))),("buttons",(("remove",D,"Remove zones","Delete the frame layout in use (not Default)"),("check",v,"Check fit","Print where each window in a zone sits and if it fills it"))),("buttons",(("reclaim",v,"Reclaim space","Give the game area every gap beside it; windows keep their size"),)+j),("custom",60,bj))))
+		if not b:return f
+		g=[("note",l(z,270),{"hue":E,"ndy":3,"h":26})for G,z in b]
+		if a:g.append(("note",l(a.lstrip("!"),w-24),{"ndy":3,"hue":U if a.startswith("!")else e}))
+		return f+(("WINDOWS  (the zone each sits in)",g+[("custom",0,bk)]),)
+	def bm(b,new):
+		L=LAYOUT;a=set(c for c in new if new[c]!=b.get(c))
+		if a&set(("seam","fit_view","game")):
+			L.seamless,L.fit_view,L.game_grows=new["seam"],new["fit_view"],new["game"];L.save_opts();L.dirty=True
+			if a&set(("seam","fit_view")):L.fresh=True;L.seam_skip={};L.seam_wait={}
+		if "snap"in a:
+			SNAP.enabled=new["snap"]
+			if not SNAP.enabled:SNAP.links.clear()
+			aC()
+		if "grid"in a:
+			HOST.prefs["grid"]=str(new["grid"]);aC()
+			if HOST.grid is not None:HOST.grid.redraw()
+		if "grid_on"in a and new["grid_on"]!=ae():ao()
+		if "dark"in a and new["dark"]!=ar():HOST.set_dark(new["dark"])
+	def bn():
+		if not LAYOUT.remove_frames(LAYOUT.frames_name):ax("Default can't be deleted; pick another frame layout first.",U)
+	bo=(("setup",aT),("arrange",lambda:LAYOUT.set_arrange(not LAYOUT.arrange)),("edit",lambda:aO(False)),("new",lambda:aO(True)),("remove",bn),("save",lambda:LAYOUT.save_windows()),("reset",lambda:LAYOUT.use_windows(LAYOUT_DEFAULT)),("free",lambda:LAYOUT.use_windows("")),("reclaim",lambda:LAYOUT.reclaim_space()),("reclaim_undo",lambda:LAYOUT.reclaim_back()),("check",lambda:LAYOUT.report_fit()))
+	def bp(f):
+		L=LAYOUT
+		if L.page_refresh:L.page_refresh=False;ad.f=None;HOST.refresh_settings(ai);return
+		for n,(b,a,e,c)in enumerate(s["zone_dd"]):
+			i=ag(a,e)
+			if i!=e and 0<=i<len(c):
+				s["zone_dd"][n]=(b,a,i,c);d=None if i==0 else c[i];L.page_preview=""
+				if d:W,H=J();g=L.frames_in_use(W,H)if W>0 and H>0 else None;L.page_preview=L.preview_text(b,g.by_id(d)if g is not None else None)
+				L.assign_to(b,d);L.page_refresh=True;return
+		if s["zones"]is not None:
+			a,h=s["zones"];i=ag(a,h)
+			if i!=h and 0<=i<len(s["frame_names"]):s["zones"]=(a,i);L.use_frames(s["frame_names"][i]);return
+			a,k=s["windows"];i=ag(a,k)
+			if i!=k and 0<=i<len(s["layout_names"]):s["windows"]=(a,i);L.use_windows(""if i==0 else s["layout_names"][i]);return
+		for l,m in bo:
+			if j(f.store,l):m();return
+	ad=Kit.Page(aw,bl,a3,bm,clicks=bp)
+	def bq():s.update({"zones":None,"windows":None,"zone_dd":[]});ad.closed()
+	def br():
+		m.update({"shutting":False,"docked":False,"queue":[],"minimized":False,"editor":None,"back_sig":None,"back_at":0.,"alone_up":False});n["open"]=False
+		if VA_ALONE:am();aD(ai);return
+		LAYOUT.set_enabled(True);am();aM.service("interface.page",lambda:aD(ai))
+		if not ah(aI,"")and not LAYOUT.assign and not ah(LAYOUT_ACTIVE,""):T("setup")()
+	def bs():
+		if VA_ALONE:
+			c=HOST.config.win["g"]is not None
+			if m["alone_up"]and not c:HOST.disable(ai)
+			m["alone_up"]=m["alone_up"]or c;return
+		q=m["queue"]
+		while q:
+			a=q.pop(0);a="toggle_min"if a=="to_bar"else a
+			if isinstance(a,tuple):aW[a[0]](*a[1:])
+			elif not ac.action(a):aW[a]()
+		if n["open"]and j(al["store"],"close"):aV()
+		b=m["editor"]
+		if b is not None:
+			W,H=J()
+			if W>0 and H>0:b.keep(W,H)
+			b.poll()
+		Seam.hover(LAYOUT.arrange);a9(time.time());a8()
+	def bt():a=not(m["queue"]or n["open"]or Seam.recs or Seam.bare or VA_ALONE);return.25 if a and m["editor"]is None and N["g"]is None else.05
+	def bu():
+		m["shutting"]=True;a=m["editor"]
+		if a is not None:a.close(keep=False,quiet=True)
+		if n["open"]:aA()
+		for b in(N,aa,S):c,b["g"]=b["g"],None;t(c)
+		if not VA_ALONE:LAYOUT.set_enabled(False)
+		aM.close()
+	return{"start":br,"tick":bs,"stop":bu,"client_tick":True,"config_height":ad.height,"build_config":ad.build,"poll_config":ad.poll,"config_closed":bq,"interval":bt}
+if "HOST"not in globals():
+	import API
+	exec(open(API.ScriptPath+"/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("interface","Interface","Zones, layout and the unified UI",_module_interface,.05,default_on=True,category="On screen")

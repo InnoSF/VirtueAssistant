@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "VirtueAssistantV*.py"
+      - "VirtueAssistantModules/**"
+      - "PATCHLOG-*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the version
+        id: find
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mothers=(VirtueAssistantV*.py)
+          if [ "${#mothers[@]}" -ne 1 ]; then
+            echo "expected exactly one VirtueAssistantV*.py at the top, found ${#mothers[@]}"
+            exit 1
+          fi
+          mother="${mothers[0]}"
+          ver="${mother#VirtueAssistantV}"
+          ver="${ver%.py}"
+          ver="${ver//-/.}"
+          test -f "PATCHLOG-${ver}.md" || { echo "missing PATCHLOG-${ver}.md"; exit 1; }
+          test -d VirtueAssistantModules || { echo "missing VirtueAssistantModules"; exit 1; }
+          echo "mother=$mother" >> "$GITHUB_OUTPUT"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Skip a version that already has a release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.find.outputs.ver }}" > /dev/null 2>&1; then
+            echo "v${{ steps.find.outputs.ver }} is already released; nothing to do"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the install zip and create the release
+        if: steps.check.outputs.skip == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOTHER: ${{ steps.find.outputs.mother }}
+          VER: ${{ steps.find.outputs.ver }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zip -9 -X "dist/VirtueAssistant-${VER}.zip" "$MOTHER" VirtueAssistantModules/*.py
+          unzip -l "dist/VirtueAssistant-${VER}.zip"
+          gh release create "v${VER}" "dist/VirtueAssistant-${VER}.zip" \
+            --target "$GITHUB_SHA" \
+            --title "Virtue Assistant ${VER}" \
+            --notes-file "PATCHLOG-${VER}.md"

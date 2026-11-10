@@ -1,748 +1,474 @@
 def _module_butler():
-    KEY = "butler"; TITLE = "Property Butler"; SETTINGS_KEY = "PropertyButler_settings"; POS_KEY = "PropertyButler_pos"
-    MIN_KEY = "PropertyButler_min"; VIEW_KEY = "PropertyButler_view"; LOG_KEY = "PropertyButler_log"
-    LOG_POS_KEY = "PropertyButler_log_pos"; W = 520; MINI_W, MINI_H = 300, 46; TRAY_ICON = 0x0BD2; MAX_ROWS = 8
-    ROW_H = 22; LOG_LINES = 3; LOG_KEEP = 30; LOG_W = 520; LOG_ROW_H = 18; LOG_SAVE_EVERY = 1.0; NAME_CACHE_SECS = 2.5
-    NAME_CACHE_MAX = 200; PICK_WAIT = 15.0; VISITS_KEY = "PropertyButler_visits"
-    LOG_VIEW_KEY = "PropertyButler_log_view"; LOG_DOCK = "butler.log"; LOG_TITLE = "Property Butler Log"
-    LOG_MIN_ROWS = 4; LOG_FIXED = 2 * Kit.MARGIN + 30 + Kit.GAP + 30 + 8
-    VISIT_KEEP = 30; VISIT_MERGE = 60.0; VISIT_SAVE_EVERY = 5.0
-    HOUSE_EVERY = 2.0; HOUSE_CHECKS = 6; EJECT_FOE_EVERY = 10.0; FOE_SERVICE = "ultima.is_foe"
-    DETECT_SKILL = "Detect Hidden"; DEFAULT_COOLDOWN = 10.0; COOLDOWN_MIN, COOLDOWN_MAX = 3.0, 120.0; DEFAULT_RANGE = 12
-    RANGE_MIN, RANGE_MAX = 1, 18; CURSOR_WAIT = 3.0; REPLY_WAIT = 3.0; REVEAL_WINDOW = 1.0; RETRY_SOON = 1.5
-    CONFIRM_SECS = 3.0; STILL_SECS = 1.0; SCAN_EVERY = 0.3; SCAN_POKE = 0.1; HELD_EVERY = 0.5; REVEAL_SOUND = 0x01F1
-    ALERT_REVEAL = "butler.revealed"; ALERT_FOE = "butler.foe"; ALERT_FOE_SOUND = 0x338
-    HELD_UNKNOWN = HOLD_TEXT["unknown"]
-    J_WAIT = ("must wait a few moments to use another skill", "must wait to perform another action")
-    J_NOTHING = ("you can see nothing hidden there",)
-    J_REVEAL = ("reveal one other person", "reveal several people", "you carefully check the house")
-    J_DONE = {"eject": ("has been ejected from this house",), "ban": ("has been banned from this house",),
-              "friend": ("is now a friend of this house", "made a friend of this house"), "lock": ("locked down!",),
-              "release": ("no longer locked down",)}
-    J_HOUSE_NO = ("you are not around your house", "not a co-owner of this house",
-                  "only the house owner", "this person is already banned",
-                  "is already the house owner", "already a house owner",
-                  "cannot eject a friend", "not in your house", "already a friend",
-                  "cannot be a friend of the house", "can't be a friend of the house",
-                  "is already locked down", "isn't locked down", "is not locked down",
-                  "cannot lock", "cannot be locked down", "refuse to lock this down",
-                  "did not lock this down", "may not release this", "locked down items would be exceeded",
-                  "place it on the ground first", "when the front door is open")
-    CMDS = {"eject": ("eject_cmd", "ejected", "mobile"), "ban": ("ban_cmd", "banned", "mobile"),
-            "friend": ("friend_cmd", "befriended", "mobile"), "lock": ("lock_cmd", "locked down", "item"),
-            "release": ("release_cmd", "released", "item")}
-    VERBS = {"eject": "Eject", "ban": "Ban", "friend": "Befriend", "lock": "Lock down", "release": "Release"}
-    EMPTY_ROWS = "No players in range."; EMPTY_LOG = "No actions yet."; EMPTY_VISITS = "No visits yet."
-    settings = {"cooldown": DEFAULT_COOLDOWN, "range": DEFAULT_RANGE, "still": False, "sound": True, "friends": True,
-                "confirm": True, "eject_cmd": "Remove thyself", "ban_cmd": "I ban thee",
-                "friend_cmd": "I wish to make this a friend", "lock_cmd": "I wish to lock this down",
-                "release_cmd": "I wish to release this", "eject_foes": False}
-    DEFAULTS = dict(settings)
-    FIELDS = ("still", "sound", "friends", "confirm", "eject_cmd", "ban_cmd", "friend_cmd", "lock_cmd",
-              "release_cmd", None, "eject_foes")
-    st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "sweep": False, "next_at": 0.0,
-          "deadline": 0.0, "cast_at": 0.0, "seen": set(), "sweeps": 0, "revealed": 0, "eject_at": {}, "first_d": {},
-          "reveal_line": False, "hooked": False, "scan_poke": False}
-    win = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "log_view": "log"}
-    logs = {"g": None, "c": {}, "store": ({}, {}), "rows": [], "minimized": False, "shutting": False, "docked": False,
-            "w": LOG_W, "queue": []}
-    cleanup, queue, say = Kit.basics(st, TITLE)
-    log = []; visits = []
-    NOTO_HUE = {"innocent": 90, "ally": 68, "gray": 946, "criminal": 946, "murderer": 33,
-                "enemy": 43, "invulnerable": 53}
-    def load_settings():
-        p = Kit.get_var(SETTINGS_KEY).split("|")
-        if len(p) >= 8:
-            for i, k, lo, hi, cast in ((0, "cooldown", COOLDOWN_MIN, COOLDOWN_MAX, float),
-                                       (1, "range", RANGE_MIN, RANGE_MAX, int)):
-                with Kit.quiet: settings[k] = max(lo, min(hi, cast(p[i])))
-            n = len(p); p = p + [""] * (13 - len(p))
-            for i, k in enumerate(FIELDS, 2):
-                if k: settings[k] = p[i] == "1" if isinstance(DEFAULTS[k], bool) else (p[i] if i < n else DEFAULTS[k])
-        st["sweep"] = Kit.get_var(VIEW_KEY) == "1"; del log[:]
-        for line in Kit.get_var(LOG_KEY).split("\n"):
-            q = line.split("\t")
-            if len(q) >= 3:
-                with Kit.quiet: log.append((float(q[0]), q[2], int(q[1])))
-        del log[:-LOG_KEEP]; del visits[:]
-        for line in Kit.get_var(VISITS_KEY).split("\n"):
-            q = line.split("\t", 6)
-            if len(q) >= 7:
-                with Kit.quiet:
-                    visits.append([float(q[0]), float(q[1]), int(q[2]), q[6], q[3] or "unknown",
-                                   max(1, int(q[4])), int(q[5])])
-        del visits[:-VISIT_KEEP]; win["log_view"] = "visits" if Kit.get_var(LOG_VIEW_KEY) == "visits" else "log"
-    def save_settings():
-        Kit.put_var(SETTINGS_KEY, "|".join(["%.1f" % settings["cooldown"], str(settings["range"])] + [
-            "0" if k is None else ("1" if settings[k] else "0") if isinstance(DEFAULTS[k], bool)
-            else settings[k].replace("|", "/") for k in FIELDS]))
-        Kit.put_var(VIEW_KEY, "1" if st["sweep"] else "0")
-    def save_log():
-        st["log_dirty"] = False
-        Kit.put_var(LOG_KEY, "\n".join(["%d\t%d\t%s" % (t, hue, text.replace("\t", " ").replace("\n", " "))
-                                         for (t, text, hue) in log[-LOG_KEEP:]]))
-    def save_visits():
-        st["visits_dirty"] = False
-        Kit.put_var(VISITS_KEY, "\n".join(["%d\t%d\t%d\t%s\t%d\t%d\t%s" % (
-            e[0], e[1], e[2], str(e[4]).replace("\t", " "), e[5], e[6],
-            str(e[3]).replace("\t", " ").replace("\n", " ")) for e in visits[-VISIT_KEEP:]]))
-    def visits_changed():
-        st["visits_dirty"] = True
-        if win["log_view"] == "visits" and logs["g"] is not None: st["visits_redraw"] = True
-    def add_log(text, hue=None):
-        hue = Kit.HUE_INFO if hue is None else hue; log.append((time.time(), text, hue)); del log[:-LOG_KEEP]
-        st["log_dirty"] = True; say(text + ("" if text.endswith((".", "!", "?")) else "."), hue); refresh_log()
-    def note(text, secs=4.0): st["note"], st["note_until"] = text, time.time() + secs
-    def has_target(): return bool(API.HasTarget("any"))
-    def cursor_free(): return HOST.cursor_busy(KEY) is None and not has_target()
-    def short(name, width): return Kit.fit(name or "(unknown)", width)
-    def find_t(kind, serial): return (API.FindMobile if CMDS[kind][2] == "mobile" else API.FindItem)(serial)
-    def who(h): return VERBS[h["kind"]].lower(), h["name"] or "the target"
-    SWEEP_H = 82; NAME_W = 150; LOG_PITCH = 20
-    VIS_H = 30 + MAX_ROWS * ROW_H + 8; ACT_H = 30 + 26 + 26 + LOG_LINES * LOG_PITCH + 8
-    H = Kit.MARGIN + 30 + Kit.GAP + SWEEP_H + Kit.GAP + VIS_H + Kit.GAP + ACT_H + Kit.MARGIN; MIN_ROWS = 2
-    NAME_MIN = 60; RUNNING = "A house command is still running"
-    NO_CURSOR = "A target cursor is up: use it or press Esc"; ALT = ". Alt+click: auto-follow (again to stop)"
-    LAST_TIP = "Set as last target" + ALT; fit = {"k": 1.0, "full": None}
-    def drawn_at(): return fit["k"], fit["full"]
-    def at_k(ctrl, x, y):
-        k = fit["k"]
-        if k != 1.0: ctrl.SetPos(int(round(x * k)), int(round(y * k)))
-        else: Kit.ui_pos(ctrl, x, y)
-    def cap_w(text): return 35 + Kit.text_w(text)
-    BUTTONS = ((("pick_ej", Kit.ART_PLAY, "Eject...", "Pick a player to eject", "pick_eject"),
-                ("pick_ban", Kit.ART_CLOSE, "Ban...", "Pick a player to ban", "pick_ban"),
-                ("pick_fr", Kit.ART_OK, "Friend...", "Pick a player to befriend", "pick_friend")),
-               (("pick_lock", Kit.ART_OK, "Lock down...", "Pick a house item to lock down", "pick_lock"),
-                ("pick_rel", Kit.ART_CLOSE, "Release...", "Pick a locked-down item to release", "pick_release"),
-                ("clear", Kit.ART_CLOSE, "Clear log", "Forget the actions below (visits stay)", "clear_log"),
-                ("showlog", Kit.ART_PAGE, "Show log",
-                 "Open or close the log window (last %d actions and visits)" % LOG_KEEP, "show_log")))
-    def flow(items, x0, right):
-        out, x, row = [], x0, 0
-        for cap in items:
-            w = cap_w(cap)
-            if x > x0 and x + w > right: x, row = x0, row + 1
-            out.append((x, row)); x += w + 16
-        return out
-    def btn_line_w(): return cap_w("Friend") + 12 + cap_w("Eject") + 12 + cap_w("Ban")
-    def min_w(): return 2 * Kit.MARGIN + 12 + max(btn_line_w(), NAME_MIN + 6 + Kit.text_w("18 tiles")) + 10
-    def layout(w, h):
-        M = Kit.MARGIN; IW = w - 2 * M; ys = M + 30 + Kit.GAP; sw_w = max(cap_w("Sweep: off"), cap_w("Sweep: on"))
-        one = 10 + sw_w + 16 + cap_w("Sweep now") <= IW - 4; sweep_h = SWEEP_H if one else SWEEP_H + 26
-        count_room = min(Kit.text_w("999 sweeps, 999 revealed"), max(40, IW - 20 - 80)); yv = ys + sweep_h + Kit.GAP
-        dist_w = Kit.text_w("18 tiles"); single = 12 + NAME_MIN + 6 + dist_w + 10 + btn_line_w() + 10 <= IW
-        row_h = ROW_H if single else 2 * ROW_H
-        if single:
-            x_ban = M + IW - 10 - cap_w("Ban"); x_ej = x_ban - 12 - cap_w("Eject"); x_fr = x_ej - 12 - cap_w("Friend")
-            x_dist = x_fr - 10 - dist_w
-        else:
-            x_fr = M + 12; x_ej = x_fr + cap_w("Friend") + 12; x_ban = x_ej + cap_w("Eject") + 12
-            x_dist = M + IW - 10 - dist_w
-        groups, rows_used = [], 0
-        for grp in BUTTONS:
-            fl = flow([b[2] for b in grp], M + 10, M + IW - 4); groups.append([(x, rows_used + r) for x, r in fl])
-            rows_used += fl[-1][1] + 1
-        fixed = (M + 30 + Kit.GAP + sweep_h + Kit.GAP + 30 + 8 + Kit.GAP + 30 + 26 * rows_used + 8 + M)
-        if h is None: rows_n, log_n = MAX_ROWS, LOG_LINES
-        else:
-            room = h - fixed; log_n, rows_n = LOG_LINES, MAX_ROWS
-            while log_n > 1 and rows_n * row_h + log_n * LOG_PITCH > room: log_n -= 1
-            while rows_n > MIN_ROWS and rows_n * row_h + log_n * LOG_PITCH > room: rows_n -= 1
-            while rows_n == MAX_ROWS and log_n < LOG_KEEP and rows_n * row_h + (log_n + 1) * LOG_PITCH <= room:
-                log_n += 1
-        vis_h = 30 + rows_n * row_h + 8; act_h = 30 + 26 * rows_used + log_n * LOG_PITCH + 8
-        nat = fixed - (30 + 8) - (30 + 26 * rows_used + 8) + vis_h + act_h
-        if h is not None and h > nat: vis_h += h - nat
-        ya = yv + vis_h + Kit.GAP
-        return {"IW": IW, "ys": ys, "sweep_xy": (M + 10, ys + 26), "sweep_h": sweep_h, "yv": yv, "row_h": row_h,
-                "now_xy": (M + 10 + sw_w + 16, ys + 26) if one else (M + 10, ys + 52),
-                "status_y": ys + 58 if one else ys + 84, "count_room": count_room,
-                "status_room": max(40, IW - 20 - count_room - 10), "btn_dy": 0 if single else ROW_H,
-                "x": (x_fr, x_ej, x_ban, x_dist), "dist_w": dist_w,
-                "name_w": max(20, min(NAME_W, x_dist - 6 - (M + 12))),
-                "empty": Kit.wrap(EMPTY_ROWS, max(60, IW - 24)), "act_rows": rows_used, "groups": groups,
-                "rows_n": rows_n, "log_n": log_n, "vis_h": vis_h, "act_h": act_h, "ya": ya, "h": ya + act_h + M}
-    def section_title(title, hint, room):
-        full = "%s  (%s)" % (title, hint); return full if Kit.text_w(full) <= room else title
-    def build_window():
-        slot = wnd.slot
-        if st["minimized"]: w, h = (max(MINI_W, slot[0]) if slot else MINI_W), MINI_H
-        elif slot is None: w, h = W, H
-        else: w, h = slot
-        g, store, c = wnd.begin(w, h); M = Kit.MARGIN; rows = []; k = 1.0; fit["k"], fit["full"] = 1.0, None
-        if st["minimized"]: c["mini_w"] = w
-        else:
-            lw, lh, body = w, h, None
-            if slot is None: P = layout(lw, None); lh = P["h"]
-            elif w < min_w():
-                k = w / float(min_w()); P = layout(min_w(), int(h / k))
-                if P["h"] > int(h / k) + 1: k = min(k, h / float(P["h"]))
-                lw, lh = int(round(w / k)), int(round(h / k)); P = layout(lw, lh)
-            else:
-                P = layout(lw, lh)
-                if P["h"] > lh + 1: lw = w - Kit.SCROLL_BAND; P = layout(lw, lh); body = P["h"]
-            win["P"] = P; IW = P["IW"]; wnd.frame(g, lw, lh)
-            ys = P["ys"]
-            Kit.add_section(g, M, ys, IW, P["sweep_h"], section_title("SWEEP", "Detect Hidden on your spot", IW - 12))
-            c["sweep_lbl"] = Kit.art_button(g, store, "sweep", Kit.ART_PAGE, P["sweep_xy"][0],
-                                            P["sweep_xy"][1], "Sweep: off",
-                                            "Switch the automatic sweep: Detect Hidden on your spot whenever ready",
-                                            on_click=queue("sweep"))
-            Kit.art_button(g, store, "now", Kit.ART_PLAY, P["now_xy"][0], P["now_xy"][1], "Sweep now",
-                           "Use Detect Hidden once, if ready", on_click=queue("now"))
-            c["status"] = Kit.add_label(g, "", M + 10, P["status_y"], Kit.HUE_INFO)
-            c["count"] = Kit.add_label(g, "", M + IW - 10, P["status_y"], Kit.HUE_INFO); c["count_y"] = P["status_y"]
-            yv = P["yv"]; near_w = Kit.text_w("99 near (%d shown)" % MAX_ROWS)
-            Kit.add_section(g, M, yv, IW, P["vis_h"],
-                            section_title("VISITORS", "players near you", IW - 12 - near_w - 16))
-            c["near"] = Kit.add_label(g, "", M + IW - 10, yv + 6, Kit.HUE_INFO); c["near_y"] = yv + 6
-            x_fr, x_ej, x_ban, x_dist = P["x"]; c["name_w"], c["hidden_w"] = P["name_w"], Kit.text_w(" (hidden)")
-            say_tip = "Say the %s command at them"
-            btns = (("fr", Kit.ART_OK, x_fr, "Friend", say_tip % "friend" + ALT, "friend"),
-                    ("ej", Kit.ART_PLAY, x_ej, "Eject", say_tip % "eject" + ALT, "eject"),
-                    ("ban", Kit.ART_CLOSE, x_ban, "Ban", say_tip % "ban" + ("; click again within %d s to confirm"
-                     % int(CONFIRM_SECS) if settings["confirm"] else "") + ALT, "ban"))
-            row_h, bdy = P["row_h"], P["btn_dy"]
-            for i in range(P["rows_n"]):
-                ry = yv + 30 + i * row_h; row = {"val": None, "prev": None, "changed": 0.0}
-                row["name_lbl"] = Kit.add_label(g, "", M + 12, ry + 3, Kit.HUE_TEXT)
-                row["dist_lbl"] = Kit.add_label(g, "", x_dist, ry + 3, Kit.HUE_INFO)
-                row["catch"] = Kit.catcher(g, M + 10, ry, x_dist - M - 10 + P["dist_w"], ROW_H,
-                                           Kit.row_clicker(row, queue, "last"), LAST_TIP)
-                for bk, art, bx, cap, tip, act in btns:
-                    row[bk] = Kit.art_button(g, store, "%s%d" % (bk, i), art, bx, ry + bdy, cap, tip,
-                                             on_click=Kit.row_clicker(row, queue, act))
-                    row[bk + "_btn"] = store[0]["%s%d" % (bk, i)]
-                rows.append(row)
-            c["empty"] = [Kit.add_label(g, line, M + 12, yv + 33 + 20 * i, Kit.HUE_INFO)
-                          for i, line in enumerate(P["empty"][:max(1, (P["vis_h"] - 33) // 20)])]
-            ya = P["ya"]
-            Kit.add_section(g, M, ya, IW, P["act_h"], section_title("ACTIONS", "pick with a cursor", IW - 12))
-            for grp, places in zip(BUTTONS, P["groups"]):
-                for (key, art, cap, tip, act_), (bx, brow) in zip(grp, places):
-                    Kit.art_button(g, store, key, art, bx, ya + 26 + 26 * brow, cap, tip, on_click=queue(act_))
-            ly = ya + 30 + 26 * P["act_rows"]
-            c["log"] = [Kit.add_label(g, "", M + 12, ly + i * LOG_PITCH, Kit.HUE_INFO) for i in range(P["log_n"])]
-            c["log_w"], c["log_full"] = IW - 70, IW - 24
-            if k != 1.0:
-                fit["k"], fit["full"] = k, (int(min_w()), int(round(layout(min_w(), None)["h"])))
-                Kit.scale_window(g, k)
-            elif body is not None: w, h = lw, body
-            else: w, h = lw, lh
-        wnd.end(g, {"rows": rows}, w, h, slot[1] if (slot is not None and not st["minimized"]) else None); refresh()
-    wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, icon=TRAY_ICON, cleanup=cleanup,
-                     clear={"rows": []})
-    def refresh(): refresh_log(); refresh_rows(); refresh_status()
-    ROW_CTRLS = ("name_lbl", "dist_lbl", "catch", "fr", "fr_btn", "ej", "ej_btn", "ban", "ban_btn")
-    def set_vis(ctrl, on, row, key):
-        if row.get(key + "_vis") != on:
-            row[key + "_vis"] = on; ctrl.IsVisible = on
-    def refresh_rows():
-        rows = win["rows"]
-        if not rows or st["minimized"]: return
-        c = win["c"]; vis = st["visitors"]; now = time.time(); name_w, hidden_w = c["name_w"], c["hidden_w"]
-        for i, row in enumerate(rows):
-            if i < len(vis):
-                v = vis[i]; Kit.row_set(row, (v["serial"], v["name"]), now)
-                sig = (v["serial"], v["name"], v["noto"], v["hidden"], v["dist"], name_w, hidden_w)
-                if row.get("sig") == sig: continue
-                row["sig"] = sig; hue = NOTO_HUE.get(v["noto"], Kit.HUE_TEXT)
-                if v["hidden"]:
-                    hue = Kit.HUE_TITLE
-                    Kit.set_text(row["name_lbl"], short(v["name"], name_w - hidden_w) + " (hidden)", hue)
-                else: Kit.set_text(row["name_lbl"], short(v["name"], name_w), hue)
-                Kit.set_text(row["dist_lbl"], Kit.count(v["dist"], "tile"))
-                for k in ROW_CTRLS: set_vis(row[k], True, row, k)
-            else:
-                Kit.row_set(row, None, now); row["sig"] = None
-                for k in ROW_CTRLS: set_vis(row[k], False, row, k)
-        lines = win["P"]["empty"]; ek = c.get("empty_k")
-        if ek is None or ek[0] != (not vis) or ek[1] is not lines:
-            c["empty_k"] = (not vis, lines)
-            for i, lbl in enumerate(c["empty"]): Kit.set_text(lbl, lines[i] if (not vis and i < len(lines)) else "")
-        near = c["near"]; nk = (st["near"], len(vis) > len(rows), len(rows))
-        if c.get("near_k") != nk:
-            c["near_k"] = nk; txt = "%d near" % st["near"] if st["near"] else ""
-            if len(vis) > len(rows): txt = "%d near (%d shown)" % (st["near"], len(rows))
-            Kit.set_text(near, txt); tw = Kit.text_w(txt)
-            if c.get("near_w") != tw:
-                c["near_w"] = tw; IW = win["P"]["IW"]; at_k(near, Kit.MARGIN + IW - 10 - tw, c["near_y"])
-    def log_line(entry, width):
-        t, text, hue = entry; return "%s  %s" % (time.strftime("%H:%M", time.localtime(t)), short(text, width)), hue
-    def refresh_log():
-        c = win["c"]; lbls = c.get("log")
-        if lbls:
-            tail = log[-len(lbls):]
-            for i, lbl in enumerate(lbls):
-                if i < len(tail):
-                    text, hue = log_line(tail[len(tail) - 1 - i], c["log_w"]); Kit.set_text(lbl, text, hue)
-                else: Kit.set_text(lbl, Kit.fit(EMPTY_LOG, c["log_full"]) if i == 0 else "", Kit.HUE_INFO)
-        refresh_logwin()
-    def log_min(): return LOG_W, LOG_FIXED + LOG_MIN_ROWS * LOG_ROW_H
-    def log_close():
-        if Kit.zone_up(LOG_DOCK): build_logwin()
-        else: logw.close()
-    def build_logwin():
-        M = Kit.MARGIN; visits_view = win["log_view"] == "visits"; held = Kit.zone_up(LOG_DOCK)
-        lines, keep = (visits, VISIT_KEEP) if visits_view else (log, LOG_KEEP); mw, mh = log_min()
-        z = logw.slot if held and logw.slot is not None and logw.slot[0] >= mw and logw.slot[1] >= mh else None
-        n = logw.rows(LOG_ROW_H, LOG_FIXED, 0) if z else min(keep, max(10, (len(lines) + 9) // 10 * 10))
-        w, h = z if z else (LOG_W, LOG_FIXED + n * LOG_ROW_H); sh = h - M - 30 - Kit.GAP - M
-        g, store, _c = logw.begin(w, h); Kit.add_window_frame(g, w, h); Kit.add_section(g, M, M, w - 2 * M, 30)
-        Kit.add_label(g, LOG_TITLE.upper(), M + 30, M + 7, Kit.HUE_TITLE)
-        if not held:
-            Kit.art_button(g, store, "close", Kit.ART_CLOSE, w - M - 54, M + 4, None, "Close the log",
-                           on_click=queue("show_log"))
-        x_clr = w - M - (10 if held else 66) - 35 - Kit.text_w("Clear")
-        Kit.art_button(g, store, "clear", Kit.ART_CLOSE, x_clr, M + 4, "Clear",
-                       "Forget these visits" if visits_view else "Forget these actions", on_click=queue("log_clear"))
-        cap = "Actions" if visits_view else "Visitors"
-        Kit.art_button(g, store, "view", Kit.ART_PAGE, x_clr - 12 - 35 - Kit.text_w(cap), M + 4, cap,
-                       "Show what the butler did" if visits_view else "Show who came into the house",
-                       on_click=queue("log_view"))
-        ys = M + 30 + Kit.GAP
-        Kit.add_section(g, M, ys, w - 2 * M, sh, "VISITORS  (while you were inside)" if visits_view
-                        else "ACTIONS  (newest first, %d kept)" % LOG_KEEP)
-        rows = []
-        for i in range(n):
-            ry = ys + 30 + i * LOG_ROW_H
-            row = {"lbl": Kit.add_label(g, "", M + 12, ry, Kit.HUE_INFO), "catch": None,
-                   "val": None, "prev": None, "changed": 0.0}
-            if visits_view:
-                row["catch"] = Kit.catcher(g, M + 10, ry - 1, w - 2 * M - 20, LOG_ROW_H,
-                                           Kit.row_clicker(row, queue, "last"), LAST_TIP)
-            rows.append(row)
-        logw.end(g, {"rows": rows, "w": w}); refresh_logwin()
-    logw = Kit.Window(LOG_DOCK, LOG_TITLE, logs, logs, build_logwin, LOG_POS_KEY, default=(240, 240), cleanup=cleanup,
-                      lock=True, owner=False, clear={"rows": []})
-    def visit_line(e, width, now):
-        t_in, t_out, serial, name, noto, times, flag = e; lt = time.localtime(t_in)
-        when = time.strftime("%H:%M" if lt[:3] == time.localtime(now)[:3] else "%b %d %H:%M", lt)
-        if st["open_visits"].get(serial) is e: when += ", inside"
-        elif t_out: when += "-" + time.strftime("%H:%M", time.localtime(t_out))
-        else: when += "-?"
-        tail = " (%s)" % noto
-        if times > 1: tail += "  %d times" % times
-        if flag: tail += "  banned" if flag == 2 else "  ejected"
-        name_w = max(60, width - Kit.text_px(when + "  " + tail))
-        return "%s  %s%s" % (when, short(name, name_w), tail), NOTO_HUE.get(noto, Kit.HUE_TEXT)
-    def refresh_logwin():
-        g = logs["g"]
-        if not Kit.is_open(g): return
-        rows = logs["rows"]; visits_view = win["log_view"] == "visits"; lines = visits if visits_view else log
-        if len(lines) > len(rows) and not Kit.zone_up(LOG_DOCK): build_logwin(); return
-        n = len(lines); now = time.time()
-        for i, row in enumerate(rows):
-            if i < n:
-                e = lines[n - 1 - i]
-                if visits_view:
-                    key = (e[0], e[2], e[1], e[5], e[6], st["open_visits"].get(e[2]) is e)
-                    if row.get("key") != key:
-                        row["key"] = key; text, hue = visit_line(e, logs["w"] - 2 * Kit.MARGIN - 28, now)
-                        Kit.set_text(row["lbl"], text, hue)
-                    Kit.row_set(row, (e[2], e[3]), now)
-                else: text, hue = log_line(e, logs["w"] - 2 * Kit.MARGIN - 70); Kit.set_text(row["lbl"], text, hue)
-            else:
-                Kit.set_text(row["lbl"], (EMPTY_VISITS if visits_view else EMPTY_LOG) if i == 0 else "", Kit.HUE_INFO)
-                row["key"] = None; Kit.row_set(row, None, now)
-            if row["catch"] is not None: set_vis(row["catch"], i < n, row, "catch")
-    def status_text(now):
-        h = st["house"] or st["house_wait"]
-        if h is not None:
-            return ("%s %s: waiting for the %s cursor" % (VERBS[h["kind"]], h["name"] or "the target",
-                    "house" if st["house"] is not None else "sweep"), Kit.HUE_TITLE)
-        if st["note"] and now < st["note_until"]: return st["note"], Kit.HUE_INFO
-        if st["phase"] == "cursor": return "Detect Hidden: waiting for cursor", Kit.HUE_TITLE
-        if st["phase"] == "cast": return "Detect Hidden: sweeping", Kit.HUE_GOOD
-        rem = wait_left(now)
-        if not st["sweep"]:
-            return ("Sweep off; ready in %d s" % int(rem + 0.99) if rem > 0 else "Sweep off; ready"), Kit.HUE_INFO
-        if st["held"] == HELD_UNKNOWN: return HELD_UNKNOWN, Kit.HUE_INFO
-        if st["held"]: return "Sweep on, waiting: %s" % st["held"], Kit.HUE_INFO
-        if rem > 0: return "Sweep on: next in %d s" % int(rem + 0.99), Kit.HUE_GOOD
-        if settings["still"] and now - st["moved_at"] < STILL_SECS: return "Sweep on: stand still", Kit.HUE_INFO
-        return "Sweep on: ready", Kit.HUE_GOOD
-    def mini_text():
-        if st["house"] is not None or st["house_wait"] is not None: s = "house command"
-        elif st["phase"] != "idle": s = "sweeping"
-        elif st["sweep"]: s = "sweep on, waiting" if st["held"] else "sweep on"
-        else: s = "sweep off"
-        if st["near"]: s += ", %d near" % st["near"]
-        return "%s: %s" % (TITLE, s)
-    def cut_once(c, key, text, room):
-        e = c.get(key)
-        if e is not None and e[0] == text and e[1] == room: return e[2]
-        cut = short(text, room); c[key] = (text, room, cut); return cut
-    def refresh_status():
-        c = win["c"]
-        if win["g"] is None or (st["minimized"] and st["docked"]): return
-        now = time.time(); text, hue = status_text(now)
-        if st["minimized"]:
-            lbl = c.get("status")
-            if lbl is not None: Kit.set_text(lbl, cut_once(c, "mini_k", mini_text(), c.get("mini_w", MINI_W) - 90), hue)
-            return
-        P = win.get("P") or {}; lbl = c.get("status")
-        if lbl is not None:
-            cut = cut_once(c, "status_k", text, P.get("status_room", W - 2 * Kit.MARGIN - 160))
-            if Kit.set_text(lbl, cut, hue): lbl.SetTooltip(text if cut != text else "")
-        sl = c.get("sweep_lbl")
-        if sl is not None:
-            Kit.set_text(sl, "Sweep: on" if st["sweep"] else "Sweep: off",
-                         Kit.HUE_GOOD if st["sweep"] else Kit.HUE_TEXT)
-        cnt = c.get("count"); ck = (st["sweeps"], st["revealed"], P.get("count_room", 400))
-        if cnt is not None and c.get("count_k") != ck:
-            c["count_k"] = ck; txt = ("%s, %d revealed" % (Kit.count(st["sweeps"], "sweep"), st["revealed"]))
-            txt = Kit.fit(txt, P.get("count_room", 400))
-            if Kit.set_text(cnt, txt) or c.get("count_w") is None:
-                tw = Kit.text_w(txt)
-                if c.get("count_w") != tw:
-                    c["count_w"] = tw; IW = P.get("IW", W - 2 * Kit.MARGIN)
-                    at_k(cnt, Kit.MARGIN + IW - 10 - tw, c["count_y"])
-    def scan_visitors(now, me):
-        if 0 <= now - st["scan_at"] < (SCAN_POKE if st["scan_poke"] else SCAN_EVERY): return False
-        st["scan_at"] = now; st["scan_poke"] = False; mx, my = int(me.X), int(me.Y); my_serial = me.Serial
-        if st["pos"] != (mx, my): st["pos"], st["moved_at"] = (mx, my), now
-        rng = settings["range"]; mobs = API.GetAllMobiles(distance=rng, isHuman=True) or []; cache = st["ncache"]
-        if len(cache) > NAME_CACHE_MAX:
-            for k in [k for k, e in cache.items() if now >= e[0]]: del cache[k]
-            if len(cache) > NAME_CACHE_MAX: cache.clear()
-        out = []
-        for m in mobs:
-            try:
-                serial = m.Serial
-                if serial == my_serial: continue
-                e = cache.get(serial)
-                if e is not None and now < e[0]: name, noto = e[1], e[2]
-                elif m.IsRenamable: cache[serial] = (now + NAME_CACHE_SECS, None, "pet"); continue
-                else:
-                    noto = Kit.noto_name(m); name = str(m.Name or "")
-                    cache[serial] = (now + NAME_CACHE_SECS, name, noto)
-                if name is None or noto == "invulnerable" or (noto == "ally" and not settings["friends"]): continue
-                vx, vy = int(m.X), int(m.Y); dist = max(abs(vx - mx), abs(vy - my))
-                if dist > rng: continue
-                out.append({"serial": serial, "name": name, "noto": noto, "dist": dist, "hidden": bool(m.IsHidden),
-                            "x": vx, "y": vy, "inside": False})
-            except Exception: continue
-        out.sort(key=_by_dist); st["near"] = len(out); st["visitors"] = out; track_house(now, mx, my, out)
-        refresh_rows(); return True
-    def _by_dist(v): return (v["dist"], v["name"].lower())
-    def multi_at(x, y): return len(API.GetMultisAt(x, y) or ()) > 0
-    def track_house(now, mx, my, out):
-        if st["house_pos"] != (mx, my) or now >= st["house_at"]:
-            st["house_pos"], st["house_at"] = (mx, my), now + HOUSE_EVERY; st["in_house"] = multi_at(mx, my)
-        opened = st["open_visits"]
-        if not st["in_house"]: st["inside"] = {}; close_visits(now); return
-        old = st["inside"]; new = {}; budget = HOUSE_CHECKS
-        for v in out:
-            s = v["serial"]; e = old.get(s)
-            if e is None or e[0] != v["x"] or e[1] != v["y"]:
-                if budget > 0: budget -= 1; e = (v["x"], v["y"], multi_at(v["x"], v["y"]))
-                elif e is None: continue
-            new[s] = e; inside = e[2]; v["inside"] = inside
-            if inside:
-                if s not in opened: open_visit(v, now)
-            elif s in opened: close_visit(s, now)
-        st["inside"] = new
-        for s in [s for s in opened if s not in new]: close_visit(s, now)
-    def open_visit(v, now):
-        s = v["serial"]; e = next((r for r in reversed(visits) if r[2] == s), None)
-        if e is not None and e[1] and now - e[1] <= VISIT_MERGE: e[1] = 0.0; e[5] += 1
-        else: e = [now, 0.0, s, v["name"] or "someone", v["noto"], 1, 0]; visits.append(e); del visits[:-VISIT_KEEP]
-        st["open_visits"][s] = e; visits_changed()
-    def close_visit(s, now):
-        e = st["open_visits"].pop(s, None)
-        if e is not None: e[1] = now; visits_changed()
-    def close_visits(now):
-        for s in list(st["open_visits"]): close_visit(s, now)
-    def mark_visit(serial, flag):
-        e = next((r for r in reversed(visits) if r[2] == serial), None)
-        if e is not None: e[6] = flag; visits_changed()
-    def is_foe(serial, name, now):
-        fn = HOST.services.get(FOE_SERVICE)
-        if fn is None: return False
-        c = st["foe"].get(serial)
-        if c is not None and now < c[0]: return c[1]
-        try: r = bool(fn(serial, name))
-        except Exception: r = False
-        if len(st["foe"]) > NAME_CACHE_MAX: st["foe"].clear()
-        st["foe"][serial] = (now + NAME_CACHE_SECS, r); return r
-    def eject_on_sight(now):
-        if not settings["eject_foes"] or not st["in_house"]: return
-        eject_at = st["eject_at"]; mates = None
-        for v in st["visitors"]:
-            if not v["inside"] or v["hidden"]: continue
-            s = v["serial"]
-            if eject_at.get(s, 0.0) > now: continue
-            if v["noto"] != "murderer" and not is_foe(s, v["name"], now): continue
-            if mates is None:
-                mates = {int(x) for x in list(API.GetPartyMemberSerials() or []) + list(API.GetAllFriends() or [])}
-            if s in mates: continue
-            if len(eject_at) > NAME_CACHE_MAX:
-                for k in [k for k, t in eject_at.items() if t <= now]: del eject_at[k]
-            eject_at[s] = now + EJECT_FOE_EVERY; what = "red" if v["noto"] == "murderer" else "Foe"
-            if not HOST.alert(ALERT_FOE, "%s (%s) in your house: Eject from their row?"
-                              % (v["name"] or "Someone", what), "alarm", who=s):
-                add_log("%s (%s) stepped in" % (v["name"] or "someone", what), Kit.HUE_BAD)
-            return
-    def sweep_held(now):
-        fight = HOST.fight_hold(now)
-        if fight == "dead": return HOLD_TEXT["dead"]
-        g = HOST.guard_hold()
-        if g == "guard": return HOLD_TEXT["guard"]
-        if g is not None: return HELD_UNKNOWN
-        if fight: return HOLD_TEXT.get(fight, fight)
-        return HOLD_TEXT["alarm"] if HOST.alarm_up() else None
-    def wait_left(now):
-        rem = st["next_at"] - now; return rem if 0 < rem <= COOLDOWN_MAX else 0.0
-    def start_sweep(now, forced=False):
-        if st["house"] is not None:
-            if forced: note(RUNNING)
-            return False
-        if st["phase"] != "idle": return False
-        held = st["held"]
-        if held:
-            if forced: note(held if held == HELD_UNKNOWN else "The sweep waits: %s" % held)
-            return False
-        rem = wait_left(now)
-        if rem > 0:
-            if forced: note("Ready in %d s" % int(rem + 0.99))
-            return False
-        if not forced and settings["still"] and now - st["moved_at"] < STILL_SECS: return False
-        if not cursor_free():
-            if forced: note("A target cursor is up: the sweep waits")
-            return False
-        me = HOST.me()
-        if me is not None: st["scan_at"] = 0.0; scan_visitors(now, me)
-        st["seen"] = {v["serial"] for v in st["visitors"] if not v["hidden"]}; st["first_d"] = {}
-        st["reveal_line"] = False
-        API.UseSkill(DETECT_SKILL); HOST.claim_cursor(KEY, CURSOR_WAIT)
-        st["phase"], st["deadline"] = "cursor", now + CURSOR_WAIT; return True
-    def sweep_tick(now):
-        if st["phase"] == "cursor":
-            if now > st["deadline"]:
-                HOST.release_cursor(KEY); st["phase"], st["next_at"] = "idle", now + RETRY_SOON
-                note("No Detect Hidden cursor; retrying")
-            elif HOST.cursor_busy(KEY) is not None: return
-            elif HOST.cursor_ok(KEY, "neutral"):
-                API.TargetSelf(); HOST.release_cursor(KEY); st["phase"], st["cast_at"] = "cast", now
-                st["next_at"] = now + settings["cooldown"]; st["sweeps"] += 1
-            elif has_target():
-                HOST.release_cursor(KEY); st["phase"], st["next_at"] = "idle", now + RETRY_SOON
-                add_log("sweep dropped: a spell cursor came up", Kit.HUE_INFO)
-            return
-        if st["phase"] == "cast":
-            if now - st["cast_at"] <= REVEAL_WINDOW:
-                fd = st["first_d"]; edge = max(1, settings["range"] - 2)
-                for v in st["visitors"]:
-                    if v["serial"] not in st["seen"] and not v["hidden"]:
-                        if fd.setdefault(v["serial"], v["dist"]) > edge and not st["reveal_line"]: continue
-                        st["seen"].add(v["serial"]); st["revealed"] += 1
-                        API.HeadMsg("* revealed *", v["serial"], Kit.HUE_BAD)
-                        add_log("revealed %s" % (v["name"] or "someone"), Kit.HUE_BAD)
-                        if settings["sound"]:
-                            HOST.alert(ALERT_REVEAL, "Revealed %s" % (v["name"] or "someone"), "warn", who=v["serial"])
-            if now - st["cast_at"] > REPLY_WAIT: st["phase"] = "idle"
-    def on_journal(ln):
-        now = time.time(); sw = st["phase"] in ("cursor", "cast") or now - st["cast_at"] < REPLY_WAIT
-        if not sw and st["house"] is None and st["house_wait"] is None: return
-        low = ln.low
-        if sw:
-            if any(t in low for t in J_WAIT):
-                if st["phase"] == "cursor": HOST.release_cursor(KEY)
-                elif st["phase"] == "cast": st["sweeps"] = max(0, st["sweeps"] - 1)
-                st["phase"], st["next_at"] = "idle", time.time() + RETRY_SOON
-                note("Skill delay: retrying"); return
-            if any(t in low for t in J_NOTHING): return
-            if any(t in low for t in J_REVEAL):
-                st["reveal_line"] = True; note("Someone was revealed", 6.0)
-                if settings["sound"]: HOST.alert(ALERT_REVEAL, "Someone was revealed", "warn")
-                return
-        h = st["house"]
-        if h is None: return
-        if any(t in low for t in J_DONE[h["kind"]]):
-            add_log("%s %s" % (CMDS[h["kind"]][1], h["name"] or "the target"), Kit.HUE_GOOD)
-            if h["kind"] in ("eject", "ban"): mark_visit(h["serial"], 2 if h["kind"] == "ban" else 1)
-            finish_house(); return
-        if any(t in low for t in J_HOUSE_NO):
-            add_log("%s %s failed: %s" % (who(h) + (ln.text.strip(),)), Kit.HUE_BAD); finish_house(); return
-    def start_house(kind, serial, name, now, waited=False):
-        if st["house"] is not None or (st["house_wait"] is not None and not waited): note(RUNNING); return
-        if st["phase"] == "cursor":
-            st["house_wait"] = {"kind": kind, "serial": serial, "name": name, "until": now + CURSOR_WAIT}
-            st["confirm"] = None; return
-        if not settings[CMDS[kind][0]]: note("Type the words for %s on the settings page" % VERBS[kind]); return
-        if not cursor_free(): note(NO_CURSOR); return
-        if not name: name = str(safe(lambda: find_t(kind, serial).Name, "") or "")
-        API.Msg(settings[CMDS[kind][0]]); HOST.claim_cursor(KEY, CURSOR_WAIT)
-        st["house"] = {"kind": kind, "serial": serial, "name": name, "deadline": now + CURSOR_WAIT, "aimed": 0.0}
-        st["confirm"] = None
-    def finish_house(): st["house"] = None; HOST.release_cursor(KEY)
-    def house_wait_tick(now):
-        hw = st["house_wait"]
-        if hw is None: return
-        if st["phase"] != "cursor" and cursor_free():
-            st["house_wait"] = None; start_house(hw["kind"], hw["serial"], hw["name"], now, waited=True)
-        elif now > hw["until"]:
-            st["house_wait"] = None
-            if st["phase"] == "cursor": HOST.release_cursor(KEY); st["phase"], st["next_at"] = "idle", now + RETRY_SOON
-            if cursor_free(): start_house(hw["kind"], hw["serial"], hw["name"], now, waited=True)
-            else: note(NO_CURSOR)
-    def house_tick(now):
-        h = st["house"]
-        if h is None: return
-        if not h["aimed"]:
-            if now <= h["deadline"]:
-                if HOST.cursor_busy(KEY) is not None: return
-                if not HOST.cursor_ok(KEY, "neutral"):
-                    if has_target():
-                        add_log("%s %s: dropped, a spell cursor came up" % who(h), Kit.HUE_BAD); finish_house()
-                    return
-                if find_t(h["kind"], h["serial"]) is None:
-                    API.CancelTarget(); add_log("%s %s: out of sight" % who(h), Kit.HUE_BAD); finish_house(); return
-                API.Target(h["serial"]); HOST.release_cursor(KEY); h["aimed"] = now
-            else:
-                add_log("%s %s: no house cursor (in your house, with the right? Else use the house sign)" % who(h),
-                        Kit.HUE_BAD)
-                finish_house()
-            return
-        if now - h["aimed"] > REPLY_WAIT: add_log("%s aimed at %s (no reply seen)" % who(h)); finish_house()
-    def want_ban(serial, name, now):
-        if settings["confirm"]:
-            c = st["confirm"]
-            if not (c and c[0] == serial and now < c[1]):
-                st["confirm"] = (serial, now + CONFIRM_SECS, now)
-                note("Ban %s? Click Ban again to confirm" % (name or "them"), CONFIRM_SECS); return
-            if len(c) > 2 and now - c[2] < 0.3: return
-        start_house("ban", serial, name, now)
-    def act_sweep(action, now, me):
-        st["sweep"] = not st["sweep"]; Kit.put_var(VIEW_KEY, "1" if st["sweep"] else "0")
-        say("sweep %s." % ("on" if st["sweep"] else "off"), Kit.HUE_GOOD if st["sweep"] else Kit.HUE_INFO)
-    def act_now(action, now, me):
-        if me is not None and st["phase"] == "idle": st["held"] = sweep_held(now)
-        if me is not None and not start_sweep(now, forced=True) and st["phase"] != "idle":
-            note("A sweep is already running")
-    def act_show_log(action, now, me):
-        if Kit.is_open(logs["g"]): log_close()
-        else: build_logwin()
-    def act_log_view(action, now, me):
-        win["log_view"] = "log" if win["log_view"] == "visits" else "visits"; Kit.put_var(LOG_VIEW_KEY, win["log_view"])
-        if Kit.is_open(logs["g"]): build_logwin()
-    def act_clear(action, now, me):
-        if action == "log_clear" and win["log_view"] == "visits":
-            del visits[:]; st["open_visits"], st["inside"] = {}, {}; visits_changed()
-        else: del log[:]; st["log_dirty"] = True; refresh_log()
-    def picked(which):
-        def done(serial):
-            serial = int(serial or 0)
-            if not serial: note("Nothing picked"); return
-            queue.add((which, serial, None), dup=True)
-        return done
-    def act_pick(action, now, me):
-        which = action[5:]
-        if st["house"] is not None or st["house_wait"] is not None: note(RUNNING)
-        else:
-            note("Target the %s to %s (Esc cancels)" % (
-                "player" if CMDS[which][2] == "mobile" else "item", VERBS[which].lower()), PICK_WAIT)
-            HOST.pick_target(PICK_WAIT, picked(which))
-    def act_last(action, now, me): API.SetLastTarget(serial=action[1]); API.HeadMsg("* last target *", action[1], 0x35)
-    def act_house(action, now, me): start_house(action[0], action[1], action[2], now)
-    ACTIONS = {"sweep": act_sweep, "now": act_now, "show_log": act_show_log, "log_view": act_log_view,
-               "log_clear": act_clear, "clear_log": act_clear, "pick_eject": act_pick, "pick_ban": act_pick,
-               "pick_friend": act_pick, "pick_lock": act_pick, "pick_release": act_pick,
-               "follow": lambda action, now, me: Follow.toggle(action[1], TITLE), "last": act_last,
-               "ban": lambda action, now, me: want_ban(action[1], action[2], now), "eject": act_house,
-               "friend": act_house, "lock": act_house, "release": act_house}
-    EJECT_TIP = ("Foe: on Ultima Tracker's Foe list; once per player every %d s; Eject on their row ejects them"
-                 % int(EJECT_FOE_EVERY))
-    PAGE_OPTS = {"ldy": 4, "fh": 30, "ugap": 6}
-    def page_table(w):
-        col = (w - 24) // 2; lw1 = max(Kit.text_w(t) for t in ("Eject:", "Ban:", "Friend:"))
-        lw2 = max(Kit.text_w(t) for t in ("Lock down:", "Release:"))
-        left, right = {"lw": lw1, "tw": col - lw1 - 26}, {"dx": 12 + col, "lw": lw2, "tw": col - lw2 - 26}
-        return (("SWEEP  (Detect Hidden on your spot)", (
-                    ("num", "cooldown", "Seconds between uses:", "Wait after each use, the shard's skill delay", None,
-                     COOLDOWN_MIN, COOLDOWN_MAX, {"cast": float}),
-                    ("check", "still", "Sweep only when standing still", "Waits until you have stood still 1 s"),
-                    ("check", "sound", "Alert when a sweep reveals someone", "Sound: Settings > Alerts"))),
-                ("VISITORS", (("num", "range", "List players within:", "Players this close are listed", "tiles",
-                     RANGE_MIN, RANGE_MAX), ("check", "friends", "List guild and alliance members too",
-                     "Unticked, green players are left out"),
-                    ("check", "confirm", "Ban needs a second click within %d s" % int(CONFIRM_SECS),
-                     "So the wrong person isn't banned"),
-                    ("check", "eject_foes", "Alarm when a red or Foe enters the house", EJECT_TIP))),
-                ("HOUSE COMMANDS  (said out loud)", (
-                    ("text", "eject_cmd", "Eject:", "Ejects a player (owner, co-owner or friend)", left),
-                    ("text", "ban_cmd", "Ban:", "Bans a player (owner or co-owner)", left),
-                    ("text", "friend_cmd", "Friend:", "Makes a player a house friend (owner)", left), ("gap", -90),
-                    ("text", "lock_cmd", "Lock down:", "Locks an item down (owner, co-owner or friend)", right),
-                    ("text", "release_cmd", "Release:", "Releases a locked-down item (owner or co-owner)", right),
-                    ("gap", 30),
-                    ("note", Kit.wrap("Owner adds friends; owner and co-owners ban and release; friends eject "
-                                      "and lock down.", w - 28)[0], {"ndy": 4, "h": 24}))))
-    def on_change(old, new):
-        if new["eject_foes"] != old["eject_foes"]: st["eject_at"].clear()
-        if new["confirm"] != old["confirm"] and not st["minimized"]: queue("redraw")()
-    cfg = Kit.Page(settings, page_table, save_settings, on_change, PAGE_OPTS, strict=True); load_settings()
-    def on_mobile(*args):
-        if not st["shutting"] and st["phase"] != "idle": st["scan_poke"] = True
-    def _start():
-        st.update({"shutting": False, "docked": False, "queue": [], "phase": "idle",
-                   "house": None, "house_wait": None, "confirm": None, "visitors": [], "near": 0,
-                   "scan_at": 0.0, "ncache": {}, "log_dirty": False, "log_save_at": 0.0,
-                   "pos": None, "moved_at": 0.0, "note": "", "note_until": 0.0,
-                   "in_house": None, "house_pos": None, "house_at": 0.0, "inside": {},
-                   "open_visits": {}, "visits_dirty": False, "visits_save_at": 0.0, "visits_redraw": False,
-                   "eject_at": {}, "foe": {}, "held": None, "held_at": 0.0, "minimized": wnd.start_min()})
-        wnd.slot = None; fit.update({"k": 1.0, "full": None}); load_settings(); st["rd"] = Journal.reader()
-        HOST.alert_kind(ALERT_REVEAL, "Someone revealed", REVEAL_SOUND)
-        HOST.alert_kind(ALERT_FOE, "Red or Foe in your house", ALERT_FOE_SOUND); build_window()
-        Kit.hook_once(st, "hooked", ("ApiMobileCreated", on_mobile))
-        wnd.dock(fit=True, exact=True, verify=True, drawn_at=drawn_at); logs.update({"shutting": False, "queue": []})
-        logw.dock(fit=True, min=log_min)
-        say("on; sweep %s, visitors within %d tiles%s."
-            % ("on" if st["sweep"] else "off", settings["range"], ", red or Foe alarm on" if settings["eject_foes"]
-               else ""), Kit.HUE_GOOD)
-    def _tick():
-        if win["g"] is None: return
-        if Kit.closed(win): return
-        now = time.time(); me = HOST.me()
-        while st["queue"]:
-            action = st["queue"].pop(0); kind = action[0] if isinstance(action, tuple) else action
-            if not wnd.action(action) and kind in ACTIONS: ACTIONS[kind](action, now, me)
-        if st["log_dirty"] and now >= st["log_save_at"]: st["log_save_at"] = now + LOG_SAVE_EVERY; save_log()
-        if st["visits_dirty"] and now >= st["visits_save_at"]:
-            st["visits_save_at"] = now + VISIT_SAVE_EVERY; save_visits()
-        if st["visits_redraw"]: st["visits_redraw"] = False; refresh_logwin()
-        if logs["queue"]:
-            del logs["queue"][:]
-            if Kit.zone_up(LOG_DOCK) or logs["g"] is not None: build_logwin()
-        if me is None: return
-        for ln in st["rd"].new(): on_journal(ln)
-        if scan_visitors(now, me): eject_on_sight(now)
-        house_tick(now)
-        if st["house"] is None:
-            if st["sweep"] and st["phase"] == "idle" and (wait_left(now) <= HELD_EVERY or now >= st["held_at"]):
-                st["held_at"] = now + HELD_EVERY; held = sweep_held(now)
-                if held != st["held"]:
-                    was, st["held"] = st["held"], held
-                    if held and not was: add_log("sweep waits: %s" % (held[:1].lower() + held[1:]), Kit.HUE_INFO)
-                if st["house_wait"] is None and not st["held"]: start_sweep(now)
-            sweep_tick(now); house_wait_tick(now)
-        if st["confirm"] and now >= st["confirm"][1]: st["confirm"] = None
-        refresh_status()
-    def _stop():
-        st["shutting"] = logs["shutting"] = True; st["house_wait"] = None; HOST.release_cursor(KEY); save_settings()
-        if st["log_dirty"]: save_log()
-        if st["open_visits"]: close_visits(time.time())
-        if st["visits_dirty"]: save_visits()
-        cleanup.close()
-    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
-            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
-
-
-if "HOST" not in globals():
-    import API
-    exec(open(API.ScriptPath + "/../VirtueAssistantModules/_Alone.py").read())
-HOST.add("butler", "Property Butler", "House sweeps, visitors, eject and ban",
-         _module_butler, 0.1, category="Skills and home")
+	aq=HOST.alert;aV=HOST.alert_kind;aW=HOST.claim_cursor;ar=HOST.cursor_busy;aX=HOST.cursor_ok;A=HOST.release_cursor;H=Kit.ART_CLOSE;at=Kit.ART_OK;au=Kit.ART_PAGE;av=Kit.ART_PLAY;n=Kit.GAP;D=Kit.HUE_BAD;E=Kit.HUE_GOOD;f=Kit.HUE_INFO;Z=Kit.HUE_TEXT;aa=Kit.HUE_TITLE;l=Kit.MARGIN;u=Kit.add_label;N=Kit.add_section;F=Kit.art_button;aY=Kit.catcher;aw=Kit.fit;O=Kit.get_var;ax=Kit.is_open;I=Kit.put_var;ay=Kit.row_clicker;ab=Kit.row_set;j=Kit.set_text;m=Kit.text_w;ac=Kit.zone_up;g="butler";ad="Property Butler";aZ="PropertyButler_settings";bD="PropertyButler_pos";bE="PropertyButler_min";az="PropertyButler_view";a_="PropertyButler_log";bF="PropertyButler_log_pos";aA=520;aB,bG=300,46;bH=3026;P=8;Q=22;aC=3;G=30;aD=520;R=18;bI=1.;aE=2.5;ae=200;a0=15.;a1="PropertyButler_visits";a2="PropertyButler_log_view";S="butler.log";a3="Property Butler Log";bJ=4;aF=2*l+30+n+30+8;af=30;bK=60.;bL=5.;bM=2.;bN=6;a4=10.;bO="ultima.is_foe";bP="Detect Hidden";bQ=10.;a5,aG=3.,120.;bR=12;a6,a7=1,18;T=3.;aH=3.;bS=1.;ag=1.5;ah=3.;a8=1.;bT=.3;bU=.1;a9=.5;bV=497;aI="butler.revealed";ba="butler.foe";bW=824;ai=HOLD_TEXT["unknown"];bX=("must wait a few moments to use another skill","must wait to perform another action");bY=("you can see nothing hidden there",);bZ=("reveal one other person","reveal several people","you carefully check the house");b_={"eject":("has been ejected from this house",),"ban":("has been banned from this house",),"friend":("is now a friend of this house","made a friend of this house"),"lock":("locked down!",),"release":("no longer locked down",)};b0=("you are not around your house","not a co-owner of this house","only the house owner","this person is already banned","is already the house owner","already a house owner","cannot eject a friend","not in your house","already a friend","cannot be a friend of the house","can't be a friend of the house","is already locked down","isn't locked down","is not locked down","cannot lock","cannot be locked down","refuse to lock this down","did not lock this down","may not release this","locked down items would be exceeded","place it on the ground first","when the front door is open");U={"eject":("eject_cmd","ejected","mobile"),"ban":("ban_cmd","banned","mobile"),"friend":("friend_cmd","befriended","mobile"),"lock":("lock_cmd","locked down","item"),"release":("release_cmd","released","item")};aj={"eject":"Eject","ban":"Ban","friend":"Befriend","lock":"Lock down","release":"Release"};b1="No players in range.";bb="No actions yet.";b2="No visits yet.";b={"cooldown":bQ,"range":bR,"still":False,"sound":True,"friends":True,"confirm":True,"eject_cmd":"Remove thyself","ban_cmd":"I ban thee","friend_cmd":"I wish to make this a friend","lock_cmd":"I wish to lock this down","release_cmd":"I wish to release this","eject_foes":False};aJ=dict(b);bc=("still","sound","friends","confirm","eject_cmd","ban_cmd","friend_cmd","lock_cmd","release_cmd",None,"eject_foes");a={"minimized":False,"shutting":False,"docked":False,"queue":[],"sweep":False,"next_at":0.,"deadline":0.,"cast_at":0.,"seen":set(),"sweeps":0,"revealed":0,"eject_at":{},"first_d":{},"reveal_line":False,"hooked":False,"scan_poke":False};d={"g":None,"c":{},"store":({},{}),"rows":[],"log_view":"log"};k={"g":None,"c":{},"store":({},{}),"rows":[],"minimized":False,"shutting":False,"docked":False,"w":aD,"queue":[]};aK,p,aL=Kit.basics(a,ad);r=[];q=[];bd={"innocent":90,"ally":68,"gray":946,"criminal":946,"murderer":33,"enemy":43,"invulnerable":53}
+	def be():
+		p=O(aZ).split("|")
+		if len(p)>=8:
+			for i,k,f,g,h in((0,"cooldown",a5,aG,float),(1,"range",a6,a7,int)):
+				with Kit.quiet:b[k]=max(f,min(g,h(p[i])))
+			n=len(p);p=p+[""]*(13-len(p))
+			for i,k in enumerate(bc,2):
+				if k:b[k]=p[i]=="1"if isinstance(aJ[k],bool)else(p[i]if i<n else aJ[k])
+		a["sweep"]=O(az)=="1";del r[:]
+		for e in O(a_).split("\n"):
+			c=e.split("\t")
+			if len(c)>=3:
+				with Kit.quiet:r.append((float(c[0]),c[2],int(c[1])))
+		del r[:-G];del q[:]
+		for e in O(a1).split("\n"):
+			c=e.split("\t",6)
+			if len(c)>=7:
+				with Kit.quiet:q.append([float(c[0]),float(c[1]),int(c[2]),c[6],c[3]or "unknown",max(1,int(c[4])),int(c[5])])
+		del q[:-af];d["log_view"]="visits"if O(a2)=="visits"else "log"
+	def bf():I(aZ,"|".join(["%.1f"%b["cooldown"],str(b["range"])]+["0"if c is None else("1"if b[c]else "0")if isinstance(aJ[c],bool)else b[c].replace("|","/")for c in bc]));I(az,"1"if a["sweep"]else "0")
+	def bg():a["log_dirty"]=False;I(a_,"\n".join(["%d\t%d\t%s"%(c,h,e.replace("\t"," ").replace("\n"," "))for(c,e,h)in r[-G:]]))
+	def bh():a["visits_dirty"]=False;I(a1,"\n".join(["%d\t%d\t%d\t%s\t%d\t%d\t%s"%(c[0],c[1],c[2],str(c[4]).replace("\t"," "),c[5],c[6],str(c[3]).replace("\t"," ").replace("\n"," "))for c in q[-af:]]))
+	def ak():
+		a["visits_dirty"]=True
+		if d["log_view"]=="visits"and k["g"]is not None:a["visits_redraw"]=True
+	def t(text,hue=None):hue=f if hue is None else hue;r.append((time.time(),text,hue));del r[:-G];a["log_dirty"]=True;aL(text+(""if text.endswith((".","!","?"))else "."),hue);aR()
+	def i(text,secs=4.):a["note"],a["note_until"]=text,time.time()+secs
+	def aM():return bool(API.HasTarget("any"))
+	def al():return ar(g)is None and not aM()
+	def V(name,width):return aw(name or "(unknown)",width)
+	def bi(kind,serial):return(API.FindMobile if U[kind][2]=="mobile"else API.FindItem)(serial)
+	def W(h):return aj[h["kind"]].lower(),h["name"]or "the target"
+	aN=82;b3=150;J=20;b4=30+P*Q+8;b5=30+26+26+aC*J+8;b6=l+30+n+aN+n+b4+n+b5+l;b7=2;bj=60;aO="A house command is still running";bk="A target cursor is up: use it or press Esc";am=". Alt+click: auto-follow (again to stop)";bl="Set as last target"+am;B={"k":1.,"full":None}
+	def b8():return B["k"],B["full"]
+	def bm(ctrl,x,y):
+		k=B["k"]
+		if k!=1.:ctrl.SetPos(int(round(x*k)),int(round(y*k)))
+		else:Kit.ui_pos(ctrl,x,y)
+	def o(text):return 35+m(text)
+	bn=((("pick_ej",av,"Eject...","Pick a player to eject","pick_eject"),("pick_ban",H,"Ban...","Pick a player to ban","pick_ban"),("pick_fr",at,"Friend...","Pick a player to befriend","pick_friend")),(("pick_lock",at,"Lock down...","Pick a house item to lock down","pick_lock"),("pick_rel",H,"Release...","Pick a locked-down item to release","pick_release"),("clear",H,"Clear log","Forget the actions below (visits stay)","clear_log"),("showlog",au,"Show log","Open or close the log window (last %d actions and visits)"%G,"show_log")))
+	def b9(items,a,right):
+		c,x,b=[],a,0
+		for d in items:
+			w=o(d)
+			if x>a and x+w>right:x,b=a,b+1
+			c.append((x,b));x+=w+16
+		return c
+	def bo():return o("Friend")+12+o("Eject")+12+o("Ban")
+	def X():return 2*l+12+max(bo(),bj+6+m("18 tiles"))+10
+	def K(w,h):
+		M=l;b=w-2*M;d=M+30+n;x=max(o("Sweep: off"),o("Sweep: on"));p=10+x+16+o("Sweep now")<=b-4;q=aN if p else aN+26;y=min(m("999 sweeps, 999 revealed"),max(40,b-20-80));z=d+q+n;g=m("18 tiles");r=12+bj+6+g+10+bo()+10<=b;f=Q if r else 2*Q
+		if r:s=M+b-10-o("Ban");i=s-12-o("Eject");j=i-12-o("Friend");t=j-10-g
+		else:j=M+12;i=j+o("Friend")+12;s=i+o("Eject")+12;t=M+b-10-g
+		A,e=[],0
+		for F in bn:B=b9([cE[2]for cE in F],M+10,M+b-4);A.append([(cF,e+cG)for cF,cG in B]);e+=B[-1][1]+1
+		C=(M+30+n+q+n+30+8+n+30+26*e+8+M)
+		if h is None:c,a=P,aC
+		else:
+			u=h-C;a,c=aC,P
+			while a>1 and c*f+a*J>u:a-=1
+			while c>b7 and c*f+a*J>u:c-=1
+			while c==P and a<G and c*f+(a+1)*J<=u:a+=1
+		k=30+c*f+8;v=30+26*e+a*J+8;D=C-(30+8)-(30+26*e+8)+k+v
+		if h is not None and h>D:k+=h-D
+		E=z+k+n;return{"IW":b,"ys":d,"sweep_xy":(M+10,d+26),"sweep_h":q,"yv":z,"row_h":f,"now_xy":(M+10+x+16,d+26)if p else(M+10,d+52),"status_y":d+58 if p else d+84,"count_room":y,"status_room":max(40,b-20-y-10),"btn_dy":0 if r else Q,"x":(j,i,s,t),"dist_w":g,"name_w":max(20,min(b3,t-6-(M+12))),"empty":Kit.wrap(b1,max(60,b-24)),"act_rows":e,"groups":A,"rows_n":c,"log_n":a,"vis_h":k,"act_h":v,"ya":E,"h":E+v+M}
+	def aP(title,hint,room):a="%s  (%s)"%(title,hint);return a if m(a)<=room else title
+	def bp():
+		q=C.slot
+		if a["minimized"]:w,h=(max(aB,q[0])if q else aB),bG
+		elif q is None:w,h=aA,b6
+		else:w,h=q
+		g,r,e=C.begin(w,h);M=l;L=[];k=1.;B["k"],B["full"]=1.,None
+		if a["minimized"]:e["mini_w"]=w
+		else:
+			j,n,x=w,h,None
+			if q is None:c=K(j,None);n=c["h"]
+			elif w<X():
+				k=w/float(X());c=K(X(),int(h/k))
+				if c["h"]>int(h/k)+1:k=min(k,h/float(c["h"]))
+				j,n=int(round(w/k)),int(round(h/k));c=K(j,n)
+			else:
+				c=K(j,n)
+				if c["h"]>n+1:j=w-Kit.SCROLL_BAND;c=K(j,n);x=c["h"]
+			d["P"]=c;i=c["IW"];C.frame(g,j,n);R=c["ys"];N(g,M,R,i,c["sweep_h"],aP("SWEEP","Detect Hidden on your spot",i-12));e["sweep_lbl"]=F(g,r,"sweep",au,c["sweep_xy"][0],c["sweep_xy"][1],"Sweep: off","Switch the automatic sweep: Detect Hidden on your spot whenever ready",on_click=p("sweep"));F(g,r,"now",av,c["now_xy"][0],c["now_xy"][1],"Sweep now","Use Detect Hidden once, if ready",on_click=p("now"));e["status"]=u(g,"",M+10,c["status_y"],f);e["count"]=u(g,"",M+i-10,c["status_y"],f);e["count_y"]=c["status_y"];s=c["yv"];S=m("99 near (%d shown)"%P);N(g,M,s,i,c["vis_h"],aP("VISITORS","players near you",i-12-S-16));e["near"]=u(g,"",M+i-10,s+6,f);e["near_y"]=s+6;T,U,V,O=c["x"];e["name_w"],e["hidden_w"]=c["name_w"],m(" (hidden)");y="Say the %s command at them";W=(("fr",at,T,"Friend",y%"friend"+am,"friend"),("ej",av,U,"Eject",y%"eject"+am,"eject"),("ban",H,V,"Ban",y%"ban"+("; click again within %d s to confirm"%int(ah)if b["confirm"]else "")+am,"ban"));Y,aa=c["row_h"],c["btn_dy"]
+			for z in range(c["rows_n"]):
+				t=s+30+z*Y;o={"val":None,"prev":None,"changed":0.};o["name_lbl"]=u(g,"",M+12,t+3,Z);o["dist_lbl"]=u(g,"",O,t+3,f);o["catch"]=aY(g,M+10,t,O-M-10+c["dist_w"],Q,ay(o,p,"last"),bl)
+				for v,A,D,E,G,ab in W:o[v]=F(g,r,"%s%d"%(v,z),A,D,t+aa,E,G,on_click=ay(o,p,ab));o[v+"_btn"]=r[0]["%s%d"%(v,z)]
+				L.append(o)
+			e["empty"]=[u(g,cF,M+12,s+33+20*cE,f)for cE,cF in enumerate(c["empty"][:max(1,(c["vis_h"]-33)//20)])];I=c["ya"];N(g,M,I,i,c["act_h"],aP("ACTIONS","pick with a cursor",i-12))
+			for ac,ad in zip(bn,c["groups"]):
+				for(ae,A,E,G,af),(D,ag)in zip(ac,ad):F(g,r,ae,A,D,I+26+26*ag,E,G,on_click=p(af))
+			ly=I+30+26*c["act_rows"];e["log"]=[u(g,"",M+12,ly+cG*J,f)for cG in range(c["log_n"])];e["log_w"],e["log_full"]=i-70,i-24
+			if k!=1.:B["k"],B["full"]=k,(int(X()),int(round(K(X(),None)["h"])));Kit.scale_window(g,k)
+			elif x is not None:w,h=j,x
+			else:w,h=j,n
+		C.end(g,{"rows":L},w,h,q[1]if(q is not None and not a["minimized"])else None);ca()
+	C=Kit.Window(g,ad,a,d,bp,bD,bE,icon=bH,cleanup=aK,clear={"rows":[]})
+	def ca():aR();br();bv()
+	bq=("name_lbl","dist_lbl","catch","fr","fr_btn","ej","ej_btn","ban","ban_btn")
+	def aQ(ctrl,on,row,key):
+		if row.get(key+"_vis")!=on:row[key+"_vis"]=on;ctrl.IsVisible=on
+	def br():
+		f=d["rows"]
+		if not f or a["minimized"]:return
+		c=d["c"];e=a["visitors"];r=time.time();h,s=c["name_w"],c["hidden_w"]
+		for i,b in enumerate(f):
+			if i<len(e):
+				v=e[i];ab(b,(v["serial"],v["name"]),r);t=(v["serial"],v["name"],v["noto"],v["hidden"],v["dist"],h,s)
+				if b.get("sig")==t:continue
+				b["sig"]=t;n=bd.get(v["noto"],Z)
+				if v["hidden"]:n=aa;j(b["name_lbl"],V(v["name"],h-s)+" (hidden)",n)
+				else:j(b["name_lbl"],V(v["name"],h),n)
+				j(b["dist_lbl"],Kit.count(v["dist"],"tile"))
+				for k in bq:aQ(b[k],True,b,k)
+			else:
+				ab(b,None,r);b["sig"]=None
+				for k in bq:aQ(b[k],False,b,k)
+		g=d["P"]["empty"];o=c.get("empty_k")
+		if o is None or o[0]!=(not e)or o[1]is not g:
+			c["empty_k"]=(not e,g)
+			for i,x in enumerate(c["empty"]):j(x,g[i]if(not e and i<len(g))else "")
+		u=c["near"];w=(a["near"],len(e)>len(f),len(f))
+		if c.get("near_k")!=w:
+			c["near_k"]=w;p="%d near"%a["near"]if a["near"]else ""
+			if len(e)>len(f):p="%d near (%d shown)"%(a["near"],len(f))
+			j(u,p);q=m(p)
+			if c.get("near_w")!=q:c["near_w"]=q;y=d["P"]["IW"];bm(u,l+y-10-q,c["near_y"])
+	def bs(a,width):t,b,c=a;return "%s  %s"%(time.strftime("%H:%M",time.localtime(t)),V(b,width)),c
+	def aR():
+		c=d["c"];a=c.get("log")
+		if a:
+			b=r[-len(a):]
+			for i,e in enumerate(a):
+				if i<len(b):g,h=bs(b[len(b)-1-i],c["log_w"]);j(e,g,h)
+				else:j(e,aw(bb,c["log_full"])if i==0 else "",f)
+		aS()
+	def bt():return aD,aF+bJ*R
+	def cb():
+		if ac(S):L()
+		else:z.close()
+	def L():
+		M=l;a=d["log_view"]=="visits";b=ac(S);x,y=(q,af)if a else(r,G);A,B=bt();c=z.slot if b and z.slot is not None and z.slot[0]>=A and z.slot[1]>=B else None;j=z.rows(R,aF,0)if c else min(y,max(10,(len(x)+9)//10*10));w,h=c if c else(aD,aF+j*R);C=h-M-30-n-M;g,e,E=z.begin(w,h);Kit.add_window_frame(g,w,h);N(g,M,M,w-2*M,30);u(g,a3.upper(),M+30,M+7,aa)
+		if not b:F(g,e,"close",H,w-M-54,M+4,None,"Close the log",on_click=p("show_log"))
+		k=w-M-(10 if b else 66)-35-m("Clear");F(g,e,"clear",H,k,M+4,"Clear","Forget these visits"if a else "Forget these actions",on_click=p("log_clear"));o="Actions"if a else "Visitors";F(g,e,"view",au,k-12-35-m(o),M+4,o,"Show what the butler did"if a else "Show who came into the house",on_click=p("log_view"));s=M+30+n;N(g,M,s,w-2*M,C,"VISITORS  (while you were inside)"if a else "ACTIONS  (newest first, %d kept)"%G);t=[]
+		for D in range(j):
+			v=s+30+D*R;i={"lbl":u(g,"",M+12,v,f),"catch":None,"val":None,"prev":None,"changed":0.}
+			if a:i["catch"]=aY(g,M+10,v-1,w-2*M-20,R,ay(i,p,"last"),bl)
+			t.append(i)
+		z.end(g,{"rows":t,"w":w});aS()
+	z=Kit.Window(S,a3,k,k,L,bF,default=(240,240),cleanup=aK,lock=True,owner=False,clear={"rows":[]})
+	def cc(e,width,now):
+		j,d,k,l,f,g,h=e;i=time.localtime(j);b=time.strftime("%H:%M"if i[:3]==time.localtime(now)[:3]else "%b %d %H:%M",i)
+		if a["open_visits"].get(k)is e:b+=", inside"
+		elif d:b+="-"+time.strftime("%H:%M",time.localtime(d))
+		else:b+="-?"
+		c=" (%s)"%f
+		if g>1:c+="  %d times"%g
+		if h:c+="  banned"if h==2 else "  ejected"
+		m=max(60,width-Kit.text_px(b+"  "+c));return "%s  %s%s"%(b,V(l,m),c),bd.get(f,Z)
+	def aS():
+		t=k["g"]
+		if not ax(t):return
+		p=k["rows"];c=d["log_view"]=="visits";g=q if c else r
+		if len(g)>len(p)and not ac(S):L();return
+		n=len(g);h=time.time()
+		for i,b in enumerate(p):
+			if i<n:
+				e=g[n-1-i]
+				if c:
+					s=(e[0],e[2],e[1],e[5],e[6],a["open_visits"].get(e[2])is e)
+					if b.get("key")!=s:b["key"]=s;m,o=cc(e,k["w"]-2*l-28,h);j(b["lbl"],m,o)
+					ab(b,(e[2],e[3]),h)
+				else:m,o=bs(e,k["w"]-2*l-70);j(b["lbl"],m,o)
+			else:j(b["lbl"],(b2 if c else bb)if i==0 else "",f);b["key"]=None;ab(b,None,h)
+			if b["catch"]is not None:aQ(b["catch"],i<n,b,"catch")
+	def cd(now):
+		h=a["house"]or a["house_wait"]
+		if h is not None:return("%s %s: waiting for the %s cursor"%(aj[h["kind"]],h["name"]or "the target","house"if a["house"]is not None else "sweep"),aa)
+		if a["note"]and now<a["note_until"]:return a["note"],f
+		if a["phase"]=="cursor":return "Detect Hidden: waiting for cursor",aa
+		if a["phase"]=="cast":return "Detect Hidden: sweeping",E
+		c=aU(now)
+		if not a["sweep"]:return("Sweep off; ready in %d s"%int(c+.99)if c>0 else "Sweep off; ready"),f
+		if a["held"]==ai:return ai,f
+		if a["held"]:return "Sweep on, waiting: %s"%a["held"],f
+		if c>0:return "Sweep on: next in %d s"%int(c+.99),E
+		if b["still"]and now-a["moved_at"]<a8:return "Sweep on: stand still",f
+		return "Sweep on: ready",E
+	def ce():
+		if a["house"]is not None or a["house_wait"]is not None:s="house command"
+		elif a["phase"]!="idle":s="sweeping"
+		elif a["sweep"]:s="sweep on, waiting"if a["held"]else "sweep on"
+		else:s="sweep off"
+		if a["near"]:s+=", %d near"%a["near"]
+		return "%s: %s"%(ad,s)
+	def bu(c,key,text,room):
+		e=c.get(key)
+		if e is not None and e[0]==text and e[1]==room:return e[2]
+		a=V(text,room);c[key]=(text,room,a);return a
+	def bv():
+		c=d["c"]
+		if d["g"]is None or(a["minimized"]and a["docked"]):return
+		p=time.time();f,i=cd(p)
+		if a["minimized"]:
+			b=c.get("status")
+			if b is not None:j(b,bu(c,"mini_k",ce(),c.get("mini_w",aB)-90),i)
+			return
+		P=d.get("P")or{};b=c.get("status")
+		if b is not None:
+			k=bu(c,"status_k",f,P.get("status_room",aA-2*l-160))
+			if j(b,k,i):b.SetTooltip(f if k!=f else "")
+		n=c.get("sweep_lbl")
+		if n is not None:j(n,"Sweep: on"if a["sweep"]else "Sweep: off",E if a["sweep"]else Z)
+		g=c.get("count");o=(a["sweeps"],a["revealed"],P.get("count_room",400))
+		if g is not None and c.get("count_k")!=o:
+			c["count_k"]=o;e=("%s, %d revealed"%(Kit.count(a["sweeps"],"sweep"),a["revealed"]));e=aw(e,P.get("count_room",400))
+			if j(g,e)or c.get("count_w")is None:
+				h=m(e)
+				if c.get("count_w")!=h:c["count_w"]=h;q=P.get("IW",aA-2*l);bm(g,l+q-10-h,c["count_y"])
+	def bw(now,me):
+		if 0<=now-a["scan_at"]<(bU if a["scan_poke"]else bT):return False
+		a["scan_at"]=now;a["scan_poke"]=False;g,h=int(me.X),int(me.Y);p=me.Serial
+		if a["pos"]!=(g,h):a["pos"],a["moved_at"]=(g,h),now
+		k=b["range"];q=API.GetAllMobiles(distance=k,isHuman=True)or[];c=a["ncache"]
+		if len(c)>ae:
+			for r in[s for s,v in c.items()if now>=v[0]]:del c[r]
+			if len(c)>ae:c.clear()
+		d=[]
+		for m in q:
+			try:
+				e=m.Serial
+				if e==p:continue
+				i=c.get(e)
+				if i is not None and now<i[0]:j,f=i[1],i[2]
+				elif m.IsRenamable:c[e]=(now+aE,None,"pet");continue
+				else:f=Kit.noto_name(m);j=str(m.Name or "");c[e]=(now+aE,j,f)
+				if j is None or f=="invulnerable"or(f=="ally"and not b["friends"]):continue
+				l,n=int(m.X),int(m.Y);o=max(abs(l-g),abs(n-h))
+				if o>k:continue
+				d.append({"serial":e,"name":j,"noto":f,"dist":o,"hidden":bool(m.IsHidden),"x":l,"y":n,"inside":False})
+			except Exception:continue
+		d.sort(key=cf);a["near"]=len(d);a["visitors"]=d;cg(now,g,h,d);br();return True
+	def cf(v):return(v["dist"],v["name"].lower())
+	def bx(x,y):return len(API.GetMultisAt(x,y)or())>0
+	def cg(now,mx,b,out):
+		if a["house_pos"]!=(mx,b)or now>=a["house_at"]:a["house_pos"],a["house_at"]=(mx,b),now+bM;a["in_house"]=bx(mx,b)
+		c=a["open_visits"]
+		if not a["in_house"]:a["inside"]={};by(now);return
+		h=a["inside"];d={};f=bN
+		for v in out:
+			s=v["serial"];e=h.get(s)
+			if e is None or e[0]!=v["x"]or e[1]!=v["y"]:
+				if f>0:f-=1;e=(v["x"],v["y"],bx(v["x"],v["y"]))
+				elif e is None:continue
+			d[s]=e;g=e[2];v["inside"]=g
+			if g:
+				if s not in c:ch(v,now)
+			elif s in c:aT(s,now)
+		a["inside"]=d
+		for s in[w for w in c if w not in d]:aT(s,now)
+	def ch(v,now):
+		s=v["serial"];e=next((c for c in reversed(q)if c[2]==s),None)
+		if e is not None and e[1]and now-e[1]<=bK:e[1]=0.;e[5]+=1
+		else:e=[now,0.,s,v["name"]or "someone",v["noto"],1,0];q.append(e);del q[:-af]
+		a["open_visits"][s]=e;ak()
+	def aT(s,now):
+		e=a["open_visits"].pop(s,None)
+		if e is not None:e[1]=now;ak()
+	def by(now):
+		for s in list(a["open_visits"]):aT(s,now)
+	def ci(serial,flag):
+		e=next((c for c in reversed(q)if c[2]==serial),None)
+		if e is not None:e[6]=flag;ak()
+	def cj(serial,name,now):
+		b=HOST.services.get(bO)
+		if b is None:return False
+		c=a["foe"].get(serial)
+		if c is not None and now<c[0]:return c[1]
+		try:r=bool(b(serial,name))
+		except Exception:r=False
+		if len(a["foe"])>ae:a["foe"].clear()
+		a["foe"][serial]=(now+aE,r);return r
+	def ck(now):
+		if not b["eject_foes"]or not a["in_house"]:return
+		c=a["eject_at"];d=None
+		for v in a["visitors"]:
+			if not v["inside"]or v["hidden"]:continue
+			s=v["serial"]
+			if c.get(s,0.)>now:continue
+			if v["noto"]!="murderer"and not cj(s,v["name"],now):continue
+			if d is None:d={int(h)for h in list(API.GetPartyMemberSerials()or[])+list(API.GetAllFriends()or[])}
+			if s in d:continue
+			if len(c)>ae:
+				for k in[w for w,x in c.items()if x<=now]:del c[k]
+			c[s]=now+a4;e="red"if v["noto"]=="murderer"else "Foe"
+			if not aq(ba,"%s (%s) in your house: Eject from their row?"%(v["name"]or "Someone",e),"alarm",who=s):t("%s (%s) stepped in"%(v["name"]or "someone",e),D)
+			return
+	def bz(now):
+		a=HOST.fight_hold(now)
+		if a=="dead":return HOLD_TEXT["dead"]
+		g=HOST.guard_hold()
+		if g=="guard":return HOLD_TEXT["guard"]
+		if g is not None:return ai
+		if a:return HOLD_TEXT.get(a,a)
+		return HOLD_TEXT["alarm"]if HOST.alarm_up()else None
+	def aU(now):b=a["next_at"]-now;return b if 0<b<=aG else 0.
+	def bA(now,forced=False):
+		if a["house"]is not None:
+			if forced:i(aO)
+			return False
+		if a["phase"]!="idle":return False
+		c=a["held"]
+		if c:
+			if forced:i(c if c==ai else "The sweep waits: %s"%c)
+			return False
+		d=aU(now)
+		if d>0:
+			if forced:i("Ready in %d s"%int(d+.99))
+			return False
+		if not forced and b["still"]and now-a["moved_at"]<a8:return False
+		if not al():
+			if forced:i("A target cursor is up: the sweep waits")
+			return False
+		e=HOST.me()
+		if e is not None:a["scan_at"]=0.;bw(now,e)
+		a["seen"]={h["serial"]for h in a["visitors"]if not h["hidden"]};a["first_d"]={};a["reveal_line"]=False;API.UseSkill(bP);aW(g,T);a["phase"],a["deadline"]="cursor",now+T;return True
+	def cl(now):
+		if a["phase"]=="cursor":
+			if now>a["deadline"]:A(g);a["phase"],a["next_at"]="idle",now+ag;i("No Detect Hidden cursor; retrying")
+			elif ar(g)is not None:return
+			elif aX(g,"neutral"):API.TargetSelf();A(g);a["phase"],a["cast_at"]="cast",now;a["next_at"]=now+b["cooldown"];a["sweeps"]+=1
+			elif aM():A(g);a["phase"],a["next_at"]="idle",now+ag;t("sweep dropped: a spell cursor came up",f)
+			return
+		if a["phase"]=="cast":
+			if now-a["cast_at"]<=bS:
+				c=a["first_d"];d=max(1,b["range"]-2)
+				for v in a["visitors"]:
+					if v["serial"]not in a["seen"]and not v["hidden"]:
+						if c.setdefault(v["serial"],v["dist"])>d and not a["reveal_line"]:continue
+						a["seen"].add(v["serial"]);a["revealed"]+=1;API.HeadMsg("* revealed *",v["serial"],D);t("revealed %s"%(v["name"]or "someone"),D)
+						if b["sound"]:aq(aI,"Revealed %s"%(v["name"]or "someone"),"warn",who=v["serial"])
+			if now-a["cast_at"]>aH:a["phase"]="idle"
+	def cm(d):
+		f=time.time();e=a["phase"]in("cursor","cast")or f-a["cast_at"]<aH
+		if not e and a["house"]is None and a["house_wait"]is None:return
+		c=d.low
+		if e:
+			if any(s in c for s in bX):
+				if a["phase"]=="cursor":A(g)
+				elif a["phase"]=="cast":a["sweeps"]=max(0,a["sweeps"]-1)
+				a["phase"],a["next_at"]="idle",time.time()+ag;i("Skill delay: retrying");return
+			if any(v in c for v in bY):return
+			if any(w in c for w in bZ):
+				a["reveal_line"]=True;i("Someone was revealed",6.)
+				if b["sound"]:aq(aI,"Someone was revealed","warn")
+				return
+		h=a["house"]
+		if h is None:return
+		if any(x in c for x in b_[h["kind"]]):
+			t("%s %s"%(U[h["kind"]][1],h["name"]or "the target"),E)
+			if h["kind"]in("eject","ban"):ci(h["serial"],2 if h["kind"]=="ban"else 1)
+			M();return
+		if any(y in c for y in b0):t("%s %s failed: %s"%(W(h)+(d.text.strip(),)),D);M();return
+	def an(kind,serial,name,now,waited=False):
+		if a["house"]is not None or(a["house_wait"]is not None and not waited):i(aO);return
+		if a["phase"]=="cursor":a["house_wait"]={"kind":kind,"serial":serial,"name":name,"until":now+T};a["confirm"]=None;return
+		if not b[U[kind][0]]:i("Type the words for %s on the settings page"%aj[kind]);return
+		if not al():i(bk);return
+		if not name:name=str(safe(lambda:bi(kind,serial).Name,"")or "")
+		API.Msg(b[U[kind][0]]);aW(g,T);a["house"]={"kind":kind,"serial":serial,"name":name,"deadline":now+T,"aimed":0.};a["confirm"]=None
+	def M():a["house"]=None;A(g)
+	def cn(now):
+		b=a["house_wait"]
+		if b is None:return
+		if a["phase"]!="cursor"and al():a["house_wait"]=None;an(b["kind"],b["serial"],b["name"],now,waited=True)
+		elif now>b["until"]:
+			a["house_wait"]=None
+			if a["phase"]=="cursor":A(g);a["phase"],a["next_at"]="idle",now+ag
+			if al():an(b["kind"],b["serial"],b["name"],now,waited=True)
+			else:i(bk)
+	def co(now):
+		h=a["house"]
+		if h is None:return
+		if not h["aimed"]:
+			if now<=h["deadline"]:
+				if ar(g)is not None:return
+				if not aX(g,"neutral"):
+					if aM():t("%s %s: dropped, a spell cursor came up"%W(h),D);M()
+					return
+				if bi(h["kind"],h["serial"])is None:API.CancelTarget();t("%s %s: out of sight"%W(h),D);M();return
+				API.Target(h["serial"]);A(g);h["aimed"]=now
+			else:t("%s %s: no house cursor (in your house, with the right? Else use the house sign)"%W(h),D);M()
+			return
+		if now-h["aimed"]>aH:t("%s aimed at %s (no reply seen)"%W(h));M()
+	def cp(serial,name,now):
+		if b["confirm"]:
+			c=a["confirm"]
+			if not(c and c[0]==serial and now<c[1]):a["confirm"]=(serial,now+ah,now);i("Ban %s? Click Ban again to confirm"%(name or "them"),ah);return
+			if len(c)>2 and now-c[2]<.3:return
+		an("ban",serial,name,now)
+	def cq(action,now,me):a["sweep"]=not a["sweep"];I(az,"1"if a["sweep"]else "0");aL("sweep %s."%("on"if a["sweep"]else "off"),E if a["sweep"]else f)
+	def cr(action,now,me):
+		if me is not None and a["phase"]=="idle":a["held"]=bz(now)
+		if me is not None and not bA(now,forced=True)and a["phase"]!="idle":i("A sweep is already running")
+	def cs(action,now,me):
+		if ax(k["g"]):cb()
+		else:L()
+	def ct(action,now,me):
+		d["log_view"]="log"if d["log_view"]=="visits"else "visits";I(a2,d["log_view"])
+		if ax(k["g"]):L()
+	def bB(action,now,me):
+		if action=="log_clear"and d["log_view"]=="visits":del q[:];a["open_visits"],a["inside"]={},{};ak()
+		else:del r[:];a["log_dirty"]=True;aR()
+	def cu(a):
+		def b(serial):
+			serial=int(serial or 0)
+			if not serial:i("Nothing picked");return
+			p.add((a,serial,None),dup=True)
+		return b
+	def Y(action,now,me):
+		b=action[5:]
+		if a["house"]is not None or a["house_wait"]is not None:i(aO)
+		else:i("Target the %s to %s (Esc cancels)"%("player"if U[b][2]=="mobile"else "item",aj[b].lower()),a0);HOST.pick_target(a0,cu(b))
+	def cv(action,now,me):API.SetLastTarget(serial=action[1]);API.HeadMsg("* last target *",action[1],53)
+	def ao(action,now,me):an(action[0],action[1],action[2],now)
+	bC={"sweep":cq,"now":cr,"show_log":cs,"log_view":ct,"log_clear":bB,"clear_log":bB,"pick_eject":Y,"pick_ban":Y,"pick_friend":Y,"pick_lock":Y,"pick_release":Y,"follow":lambda action,now,me:Follow.toggle(action[1],ad),"last":cv,"ban":lambda action,now,me:cp(action[1],action[2],now),"eject":ao,"friend":ao,"lock":ao,"release":ao};cw=("Foe: on Ultima Tracker's Foe list; once per player every %d s; Eject on their row ejects them"%int(a4));cx={"ldy":4,"fh":30,"ugap":6}
+	def cy(w):a=(w-24)//2;c=max(m(h)for h in("Eject:","Ban:","Friend:"));d=max(m(s)for s in("Lock down:","Release:"));b,e={"lw":c,"tw":a-c-26},{"dx":12+a,"lw":d,"tw":a-d-26};return(("SWEEP  (Detect Hidden on your spot)",(("num","cooldown","Seconds between uses:","Wait after each use, the shard's skill delay",None,a5,aG,{"cast":float}),("check","still","Sweep only when standing still","Waits until you have stood still 1 s"),("check","sound","Alert when a sweep reveals someone","Sound: Settings > Alerts"))),("VISITORS",(("num","range","List players within:","Players this close are listed","tiles",a6,a7),("check","friends","List guild and alliance members too","Unticked, green players are left out"),("check","confirm","Ban needs a second click within %d s"%int(ah),"So the wrong person isn't banned"),("check","eject_foes","Alarm when a red or Foe enters the house",cw))),("HOUSE COMMANDS  (said out loud)",(("text","eject_cmd","Eject:","Ejects a player (owner, co-owner or friend)",b),("text","ban_cmd","Ban:","Bans a player (owner or co-owner)",b),("text","friend_cmd","Friend:","Makes a player a house friend (owner)",b),("gap",-90),("text","lock_cmd","Lock down:","Locks an item down (owner, co-owner or friend)",e),("text","release_cmd","Release:","Releases a locked-down item (owner or co-owner)",e),("gap",30),("note",Kit.wrap("Owner adds friends; owner and co-owners ban and release; friends eject and lock down.",w-28)[0],{"ndy":4,"h":24}))))
+	def cz(b,new):
+		if new["eject_foes"]!=b["eject_foes"]:a["eject_at"].clear()
+		if new["confirm"]!=b["confirm"]and not a["minimized"]:p("redraw")()
+	ap=Kit.Page(b,cy,bf,cz,cx,strict=True);be()
+	def cA(*b):
+		if not a["shutting"]and a["phase"]!="idle":a["scan_poke"]=True
+	def cB():a.update({"shutting":False,"docked":False,"queue":[],"phase":"idle","house":None,"house_wait":None,"confirm":None,"visitors":[],"near":0,"scan_at":0.,"ncache":{},"log_dirty":False,"log_save_at":0.,"pos":None,"moved_at":0.,"note":"","note_until":0.,"in_house":None,"house_pos":None,"house_at":0.,"inside":{},"open_visits":{},"visits_dirty":False,"visits_save_at":0.,"visits_redraw":False,"eject_at":{},"foe":{},"held":None,"held_at":0.,"minimized":C.start_min()});C.slot=None;B.update({"k":1.,"full":None});be();a["rd"]=Journal.reader();aV(aI,"Someone revealed",bV);aV(ba,"Red or Foe in your house",bW);bp();Kit.hook_once(a,"hooked",("ApiMobileCreated",cA));C.dock(fit=True,exact=True,verify=True,drawn_at=b8);k.update({"shutting":False,"queue":[]});z.dock(fit=True,min=bt);aL("on; sweep %s, visitors within %d tiles%s."%("on"if a["sweep"]else "off",b["range"],", red or Foe alarm on"if b["eject_foes"]else ""),E)
+	def cC():
+		if d["g"]is None:return
+		if Kit.closed(d):return
+		b=time.time();g=HOST.me()
+		while a["queue"]:
+			c=a["queue"].pop(0);h=c[0]if isinstance(c,tuple)else c
+			if not C.action(c)and h in bC:bC[h](c,b,g)
+		if a["log_dirty"]and b>=a["log_save_at"]:a["log_save_at"]=b+bI;bg()
+		if a["visits_dirty"]and b>=a["visits_save_at"]:a["visits_save_at"]=b+bL;bh()
+		if a["visits_redraw"]:a["visits_redraw"]=False;aS()
+		if k["queue"]:
+			del k["queue"][:]
+			if ac(S)or k["g"]is not None:L()
+		if g is None:return
+		for i in a["rd"].new():cm(i)
+		if bw(b,g):ck(b)
+		co(b)
+		if a["house"]is None:
+			if a["sweep"]and a["phase"]=="idle"and(aU(b)<=a9 or b>=a["held_at"]):
+				a["held_at"]=b+a9;e=bz(b)
+				if e!=a["held"]:
+					j,a["held"]=a["held"],e
+					if e and not j:t("sweep waits: %s"%(e[:1].lower()+e[1:]),f)
+				if a["house_wait"]is None and not a["held"]:bA(b)
+			cl(b);cn(b)
+		if a["confirm"]and b>=a["confirm"][1]:a["confirm"]=None
+		bv()
+	def cD():
+		a["shutting"]=k["shutting"]=True;a["house_wait"]=None;A(g);bf()
+		if a["log_dirty"]:bg()
+		if a["open_visits"]:by(time.time())
+		if a["visits_dirty"]:bh()
+		aK.close()
+	return{"start":cB,"tick":cC,"stop":cD,"client_tick":True,"config_height":ap.height,"build_config":ap.build,"poll_config":ap.poll,"config_closed":ap.closed}
+if "HOST"not in globals():
+	import API
+	exec(open(API.ScriptPath+"/../VirtueAssistantModules/_Alone.py").read())
+HOST.add("butler","Property Butler","House sweeps, visitors, eject and ban",_module_butler,.1,category="Skills and home")
