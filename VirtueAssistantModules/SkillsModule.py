@@ -1,5 +1,5 @@
 def _module_skills():
-	ai=Client._type;aj=HOST.claim_cursor;ak=HOST.cursor_busy;al=HOST.mobiles;D=HOST.refresh_settings;O=HOST.release_cursor;am=HOST.show_settings;X=Journal.reader;M=Kit.ART_CLOSE;J=Kit.ART_OK;U=Kit.ART_PAGE;P=Kit.ART_PLAY;F=Kit.GAP;u=Kit.HUE_BAD;o=Kit.HUE_GOOD;b=Kit.HUE_INFO;B=Kit.HUE_TEXT;Q=Kit.HUE_TITLE;E=Kit.MARGIN;an=Kit.add_box;Y=Kit.add_check;l=Kit.add_label;V=Kit.add_pic;H=Kit.add_section;N=Kit.add_textbox;ad=Kit.add_tiled;ae=Kit.add_window_frame;A=Kit.art_button;af=Kit.basics;K=Kit.catcher;ao=Kit.closed;aa=Kit.count;ap=Kit.data_path;ab=Kit.dispose;C=Kit.fit;R=Kit.get_var;ag=Kit.in_pack;T=Kit.is_open;W=Kit.on_click;I=Kit.pic_size;S=Kit.put_var;aq=Kit.scale_window;n=Kit.set_text;e=Kit.text_w;ar=Kit.title_bar;ah=Kit.ui_pos;at=Kit.was_clicked;z=Kit.with_tip;ac=Kit.zone_up;av="skills";aw="Skills"
+	ai=Client._type;aj=HOST.claim_cursor;ak=HOST.cursor_busy;al=HOST.mobiles;D=HOST.refresh_settings;O=HOST.release_cursor;am=HOST.show_settings;X=Journal.reader;M=Kit.ART_CLOSE;J=Kit.ART_OK;U=Kit.ART_PAGE;P=Kit.ART_PLAY;F=Kit.GAP;u=Kit.HUE_BAD;o=Kit.HUE_GOOD;b=Kit.HUE_INFO;B=Kit.HUE_TEXT;Q=Kit.HUE_TITLE;E=Kit.MARGIN;an=Kit.add_box;Y=Kit.add_check;l=Kit.add_label;V=Kit.add_pic;H=Kit.add_section;N=Kit.add_textbox;ac=Kit.add_tiled;ad=Kit.add_window_frame;A=Kit.art_button;ae=Kit.basics;K=Kit.catcher;ao=Kit.closed;aa=Kit.count;ap=Kit.data_path;ab=Kit.dispose;C=Kit.fit;R=Kit.get_var;af=Kit.in_pack;T=Kit.is_open;W=Kit.on_click;I=Kit.pic_size;S=Kit.put_var;aq=Kit.scale_window;n=Kit.set_text;e=Kit.text_w;ar=Kit.title_bar;ag=Kit.ui_pos;at=Kit.was_clicked;z=Kit.with_tip;ah=Kit.zone_up;av="skills";aw="Skills"
 	def au(q,title,what):
 		while q:
 			a,b=q.pop(0)
@@ -16,7 +16,7 @@ def _module_skills():
 				for a,g in f:c.append((a*10,"%g-%g"%(d/10.,a),g));d=a*10
 				b[e.lower()]=c
 			return b
-		cG=cF();ao={"pins":set(),"targets":{}};aA=[];aB=[0,0,0];j={"minimized":False,"shutting":False,"docked":False,"queue":[],"sel":None,"last_click":(None,0.),"arm":{},"search":"","pc":{},"save_at":0.,"to_write":[],"ver":0,"preview":False};t={"g":None,"c":{},"store":({},{}),"rows":[],"rowmap":{}};aN={"sync":False,"skip":False};cH,ak,ac=af(j,aE);aU={};aF={"world":None,"player":None,"how":""};q={"objs":[],"names":[],"click":[],"collide":[],"n":0,"cur":[],"low":[],"full":True,"rr":0};X={"cur":[0,0,0],"locks":[0,0,0],"cap":0,"prev":[0,0,0]};O={"list":[],"ok":False,"ver":0,"sig":None,"of":{}};VG={"gumps":None,"sig":None,"full_at":0.}
+		cG=cF();ao={"pins":set(),"targets":{}};aA=[];aB=[0,0,0];j={"minimized":False,"shutting":False,"docked":False,"queue":[],"sel":None,"last_click":(None,0.),"arm":{},"search":"","pc":{},"save_at":0.,"to_write":[],"ver":0,"preview":False};t={"g":None,"c":{},"store":({},{}),"rows":[],"rowmap":{}};aN={"sync":False,"skip":False};cH,ak,af=ae(j,aE);aU={};aF={"world":None,"player":None,"how":""};q={"objs":[],"names":[],"click":[],"collide":[],"n":0,"cur":[],"low":[],"full":True,"rr":0};X={"cur":[0,0,0],"locks":[0,0,0],"cap":0,"prev":[0,0,0]};O={"list":[],"ok":False,"ver":0,"sig":None,"of":{}};VG={"gumps":None,"sig":None,"full_at":0.}
 		def aK():j["ver"]+=1;j["dirty"]=True
 		cI=.5;cJ=1.;cK=5.
 		def cL():
@@ -29,7 +29,7 @@ def _module_skills():
 			if a==al["slot"]and not(mode=="again"and a is not None):return
 			al["slot"]=a;al["width"]=a[0]if a is not None else None;al["rows"]=None;j["m"]=None;j["rebuild"]="window";aK()
 		def cN():return al["k"],al["full"]
-		ag={"start":0.,"base":{},"stats":None,"seen":0.}
+		ah={"start":0.,"base":{},"stats":None,"seen":0.}
 		def bL():
 			Kit.kv_load(bs,";",p,aJ,("sort",))
 			if p["sort"]not in cB:p["sort"]="name"
@@ -57,7 +57,7 @@ def _module_skills():
 				try:aB[k]=max(0,min(bb,int(p[k])))
 				except(IndexError,ValueError):aB[k]=0
 		def cQ():
-			p=R(bw).split("|");a=time.time();ag.update({"start":a,"base":{},"stats":None,"seen":a})
+			p=R(bw).split("|");a=time.time();ah.update({"start":a,"base":{},"stats":None,"seen":a})
 			if len(p)<4:return
 			try:b,f=float(p[0]),float(p[3])
 			except ValueError:return
@@ -70,12 +70,12 @@ def _module_skills():
 			e=None
 			try:s=[int(g)for g in p[2].split(",")];e=s if len(s)==3 else None
 			except ValueError:pass
-			ag.update({"start":b,"base":c,"stats":e,"seen":a})
-		def aY():ag["seen"]=time.time();b=",".join("%d:%d"%(a,c)for a,c in sorted(ag["base"].items()));s=",".join(str(d)for d in ag["stats"])if ag["stats"]else "";S(bw,"%d|%s|%s|%d"%(ag["start"],b,s,ag["seen"]))
+			ah.update({"start":b,"base":c,"stats":e,"seen":a})
+		def aY():ah["seen"]=time.time();b=",".join("%d:%d"%(a,c)for a,c in sorted(ah["base"].items()));s=",".join(str(d)for d in ah["stats"])if ah["stats"]else "";S(bw,"%d|%s|%s|%d"%(ah["start"],b,s,ah["seen"]))
 		def cR():
-			ag.update({"start":time.time(),"base":{},"stats":None})
-			for i in range(q["n"]):ag["base"][i]=q["cur"][i][0]
-			if any(X["cur"]):ag["stats"]=list(X["cur"])
+			ah.update({"start":time.time(),"base":{},"stats":None})
+			for i in range(q["n"]):ah["base"][i]=q["cur"][i][0]
+			if any(X["cur"]):ah["stats"]=list(X["cur"])
 			j["gains"],j["log"]={},[];aY()
 		def bc():Kit.save_pos(bt,t["g"])
 		def aZ():return Typing._get(None,"Instance",ai("ClassicUO.Game.World"))
@@ -167,30 +167,30 @@ def _module_skills():
 			q["cur"][i][3]=v
 		def cU(i):
 			if i is None or i>=q["n"]:return
-			if not q["click"][i]:ac("%s can't be used directly."%q["names"][i],b);return
+			if not q["click"][i]:af("%s can't be used directly."%q["names"][i],b);return
 			if not q["collide"][i]:API.UseSkill(q["names"][i]);return
 			try:be("UseSkill",[i])
-			except Exception as a:ac("couldn't use %s (%s)."%(q["names"][i],Tz.why(a)),u)
+			except Exception as a:af("couldn't use %s (%s)."%(q["names"][i],Tz.why(a)),u)
 		def bV(i):
-			if i is None or i>=q["n"]or not q["click"][i]:ac("only a usable skill gets a button.",b);return
+			if i is None or i>=q["n"]or not q["click"][i]:af("only a usable skill gets a button.",b);return
 			try:
 				import System
 				for a in Tz.windows(["SkillButtonGump"]):
 					if int(Tz.get(a,"SkillID"))==i:a.Dispose()
-				c=Tz.T("ClassicUO.Game.UI.Gumps.SkillButtonGump");d=aF["world"]or aZ();g=t["g"];x,y=(g.GetX()+g.GetWidth()+10,g.GetY())if T(g)else(200,200);e=System.Activator.CreateInstance(c,System.Array[object]([d,q["objs"][i],x,y]));Tz.call(None,"Add",[e,True],Tz.T("ClassicUO.Game.Managers.UIManager"));ac("%s button placed beside the window."%q["names"][i],o)
-			except Exception as f:ac("couldn't make the button (%s)."%Tz.why(f),u)
+				c=Tz.T("ClassicUO.Game.UI.Gumps.SkillButtonGump");d=aF["world"]or aZ();g=t["g"];x,y=(g.GetX()+g.GetWidth()+10,g.GetY())if T(g)else(200,200);e=System.Activator.CreateInstance(c,System.Array[object]([d,q["objs"][i],x,y]));Tz.call(None,"Add",[e,True],Tz.T("ClassicUO.Game.Managers.UIManager"));af("%s button placed beside the window."%q["names"][i],o)
+			except Exception as f:af("couldn't make the button (%s)."%Tz.why(f),u)
 		def bW():
 			a=aF["world"]or aZ();j["swallow_until"]=time.time()+6.;j["asked"]=time.time()
 			try:be("OpenSkills",[a]);return True
 			except Exception:return False
 		def bf(k,v):API.SetStatLock(("str","dex","int")[k],aT[v]);X["locks"][k]=v;j["stat_pending"][k]=(v,time.time()+2.5)
 		def f1(a):return "%.1f"%(a/10.)
-		def aG(i):b=ag["base"].get(i);return 0 if b is None else q["cur"][i][0]-b
+		def aG(i):b=ah["base"].get(i);return 0 if b is None else q["cur"][i][0]-b
 		def bg():return sum(aG(a)for a in range(q["n"]))
 		bX=600.
-		def bh():return max(bX,time.time()-ag["start"])/3600.
+		def bh():return max(bX,time.time()-ah["start"])/3600.
 		def bY(i,now):a=p["rate_min"]*60;return sum(f for c,f in j["gains"].get(i,[])if now-c<=a)
-		def bZ(i,now):a=aG(i)/bh();b=max(bX,min(p["rate_min"]*60.,now-max(ag["start"],j["started"])));c=bY(i,now)/(b/3600.);return a,c
+		def bZ(i,now):a=aG(i)/bh();b=max(bX,min(p["rate_min"]*60.,now-max(ah["start"],j["started"])));c=bY(i,now)/(b/3600.);return a,c
 		def bi(secs):
 			secs=int(max(0,secs))
 			if secs>=3600:return "%dh %02dm"%(secs//3600,(secs%3600)//60)
@@ -208,19 +208,19 @@ def _module_skills():
 				a=q["cur"][i];d=a[0]-e[0]
 				if d==0:continue
 				g=True;b=q["names"][i]
-				if i not in ag["base"]:ag["base"][i]=e[0]
+				if i not in ah["base"]:ah["base"][i]=e[0]
 				if d>0:
 					j["gains"].setdefault(i,[]).append((now,d))
 					if len(j["gains"][i])>aS:j["gains"][i]=j["gains"][i][-aS:]
 					if p["hl_secs"]>0:j["hl"][i]=now+p["hl_secs"]
 				j["log"].append((now,b,d,a[0]))
 				if len(j["log"])>aS:j["log"]=j["log"][-aS:]
-				if p["journal"]:ac("%s %s%s (%s, session %+.1f)."%(b,"+"if d>0 else "-",f1(abs(d)),f1(a[0]),aG(i)/10.),o if d>0 else u)
+				if p["journal"]:af("%s %s%s (%s, session %+.1f)."%(b,"+"if d>0 else "-",f1(abs(d)),f1(a[0]),aG(i)/10.),o if d>0 else u)
 				for f,h,c in((a[2],"lock_at_cap","its cap (%s)"),(ao["targets"].get(i),"lock_at_target","its target %s")):
 					if d>0 and f is not None and e[0]<f<=a[0]:
 						c=c%f1(f)
-						if p[h]and a[3]==0:aW(i,2);ac("%s reached %s and was locked."%(b,c),o)
-						else:ac("%s reached %s."%(b,c),o)
+						if p[h]and a[3]==0:aW(i,2);af("%s reached %s and was locked."%(b,c),o)
+						else:af("%s reached %s."%(b,c),o)
 			if g and time.time()>=j["save_at"]:j["save_at"]=time.time()+15.;aY()
 		def bj():return sum(a[0]for a in q["cur"])
 		def cX():
@@ -229,9 +229,9 @@ def _module_skills():
 		def cY():
 			if not p["cap_warn"]:j["warned_cap"]=False;return
 			a=cX()
-			if a and not j["warned_cap"]:ac("at the total skill cap (%s) and no skill set to go down: nothing can rise."%f1(p["total_cap"]),u)
+			if a and not j["warned_cap"]:af("at the total skill cap (%s) and no skill set to go down: nothing can rise."%f1(p["total_cap"]),u)
 			j["warned_cap"]=a
-		def a_(k):a=ag["stats"];return X["cur"][k]-a[k]if a else 0
+		def a_(k):a=ah["stats"];return X["cur"][k]-a[k]if a else 0
 		def cZ():
 			a,b=X["prev"],X["cur"]
 			for k in range(3):
@@ -239,14 +239,14 @@ def _module_skills():
 				if not t or not a[k]or b[k]!=t:continue
 				c={1:0,-1:1}.get(b[k]-a[k])
 				if c is None:continue
-				if p["lock_stat_target"]and X["locks"][k]==c:bf(k,2);ac("%s reached its target %d and was locked."%(aP[k],t),o)
-				else:ac("%s reached its target %d."%(aP[k],t),o)
+				if p["lock_stat_target"]and X["locks"][k]==c:bf(k,2);af("%s reached its target %d and was locked."%(aP[k],t),o)
+				else:af("%s reached its target %d."%(aP[k],t),o)
 		def c_(k):
 			t,v=aB[k],X["cur"][k]
-			if t and v==t and p["lock_stat_target"]and X["locks"][k]!=2:bf(k,2);ac("%s is at its target %d and was locked."%(aP[k],t),o)
+			if t and v==t and p["lock_stat_target"]and X["locks"][k]!=2:bf(k,2);af("%s is at its target %d and was locked."%(aP[k],t),o)
 		def c0(k,b):
 			v=X["cur"][k];a=["%s %d"%(aP[k],v)]
-			if ag["stats"]:d=a_(k);a[0]+=": %+d this session (%.1f / hour)"%(d,d/b)
+			if ah["stats"]:d=a_(k);a[0]+=": %+d this session (%.1f / hour)"%(d,d/b)
 			t=aB[k]
 			if not t:a.append("No target (click: set one in settings)")
 			elif v==t:a.append("Target %d: reached"%t)
@@ -312,7 +312,7 @@ def _module_skills():
 				a=al["k"]
 				if b=="Width":Kit.ui_w(ctrl,value if a==1. else int(round(value*a)))
 				elif b=="Pos":
-					if a==1.:ah(ctrl,value[0],value[1])
+					if a==1.:ag(ctrl,value[0],value[1])
 					else:ctrl.SetPos(int(round(value[0]*a)),int(round(value[1]*a)))
 				else:setattr(ctrl,b,value)
 			except Exception:pass
@@ -500,12 +500,12 @@ def _module_skills():
 			b=LAYOUT.placed.get(aw)if HOST.layout_holds(aw)else None
 			if b is not None:x,y=int(b[0]),int(b[1])
 			if Z is not None:
-				g=G.CreateGump(True,True);ae(g,e,l);ar(g,a,e,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,Z,k)
+				g=G.CreateGump(True,True);ad(g,e,l);ar(g,a,e,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,Z,k)
 				if k!=1.:f=max(b3(),w);al["k"],al["full"]=k,(int(f),int(b4(f,0)["need"]));aq(g,k)
 			elif L is None:g=G.CreateGump(True,True);d["mini"]=Kit.mini_bar(g,a,w,h,aE,aw,ak("toggle_min"),close_tip=bl())
 			else:
 				if b is None:x,y=Kit.clamp(x,y,w,h)
-				g=G.CreateModernGump(x,y,w,h,True,L["min_w"],L["min_h"],da);g.SetAlpha(0);ae(g,w,h,mouse=False);ar(g,a,w,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,c8(L),1.,False)
+				g=G.CreateModernGump(x,y,w,h,True,L["min_w"],L["min_h"],da);g.SetAlpha(0);ad(g,w,h,mouse=False);ar(g,a,w,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,c8(L),1.,False)
 			i=Kit.show_window(g,x,y,w,h,aw,j["docked"],c4(g),bc,t,{"g":g,"c":d,"store":a,"rows":[],"rowmap":{},"w":e if Z is not None else w})
 			if b is not None and i is not None and tuple(i)!=(x,y):g.SetPos(x,y);Kit.note_rect(g,x,y);Kit.moved_by_code(g)
 			if b is not None:LAYOUT.fit_now(aw,g)
@@ -537,7 +537,7 @@ def _module_skills():
 			r["y"]=y;a=al["k"]
 			for b,x,c in r["parts"]:
 				try:
-					if a==1.:ah(b,x,y+c)
+					if a==1.:ag(b,x,y+c)
 					else:b.SetPos(int(round(x*a)),int(round((y+c)*a)))
 				except Exception:pass
 		def b7(r,on):
@@ -580,9 +580,9 @@ def _module_skills():
 			r={"kind":"s","i":i,"y":a,"hidden":False,"parts":[],"sig":None};r["name"]=az(r,l(tgt,b8(i,m),m["name_x"],a+3),m["name_x"],3);r["real"]=az(r,l(tgt,"",m["real_x"],a+3),m["real_x"],3)if m["real_x"]is not None else None;r["val"]=az(r,l(tgt,"",m["val_x"],a+3),m["val_x"],3);r["cap"]=az(r,l(tgt,"",m["cap_x"],a+3,b),m["cap_x"],3)if m["cap_x"]is not None else None;r["gain"]=az(r,l(tgt,"",m["gain_x"],a+3,o),m["gain_x"],3)if m["gain_x"]is not None else None;r["bar"]=None
 			if m["bar_x"]is not None:
 				d=(ax-m["bar_h"])//2;e=a+d
-				if I(Kit.LINE_RED)[0]>0:az(r,ad(tgt,Kit.LINE_RED,m["bar_x"],e,m["bar_w"],m["bar_h"],hue=ct),m["bar_x"],d)
-				else:az(r,ad(tgt,Kit.SECTION_TILE,m["bar_x"],e,m["bar_w"],m["bar_h"],1.),m["bar_x"],d)
-				r["bar"]=az(r,ad(tgt,Kit.LINE_BLUE,m["bar_x"],e,1,m["bar_h"]),m["bar_x"],d)
+				if I(Kit.LINE_RED)[0]>0:az(r,ac(tgt,Kit.LINE_RED,m["bar_x"],e,m["bar_w"],m["bar_h"],hue=ct),m["bar_x"],d)
+				else:az(r,ac(tgt,Kit.SECTION_TILE,m["bar_x"],e,m["bar_w"],m["bar_h"],1.),m["bar_x"],d)
+				r["bar"]=az(r,ac(tgt,Kit.LINE_BLUE,m["bar_x"],e,1,m["bar_h"]),m["bar_x"],d)
 			f="Click: pick it (details below); double-click: its floating button"if q["click"][i]else "Click: pick it (details below)";r["cat"]=az(r,K(tgt,m["name_x"]-2,a,m["lock_x"]-m["name_x"]-2,ax-1,c3(i),f),m["name_x"]-2,0);r["tip0"]=r["cat_tip"]=f;r["use"]=None
 			if q["click"][i]:c=G.CreateGumpButton("",B,aX[0],aX[1],aX[2]);c.SetPos(4,a+6);tgt.Add(c);W(c,ak(("use",i),dup=True));z(c,"Use "+q["names"][i]);r["use"]=az(r,c,4,6)
 			r["lock"]=az(r,V(tgt,ay[0],m["lock_x"],a+4),m["lock_x"],4);r["tip"]=None
@@ -680,15 +680,15 @@ def _module_skills():
 					D,F=C(h,w),C(i,w);n(c["total"],D,l);n(c["total2"],F,l);d=aR if(D,F)==(h,i)else "%s. %s"%(a,aR)
 					if d!=c.get("total_tip"):c["total_tip"]=d;z(c["total_cat"],d)
 				else:aC(c,"total",a,w,l,aR)
-			if c.get("session")is not None:e=bg();m=bh();a="Session %+.1f in %s   (%.1f / hour)"%(e/10.,bi(now-ag["start"]),e/10./m);aC(c,"session",a,c["session_w"],o if e>0 else b)
+			if c.get("session")is not None:e=bg();m=bh();a="Session %+.1f in %s   (%.1f / hour)"%(e/10.,bi(now-ah["start"]),e/10./m);aC(c,"session",a,c["session_w"],o if e>0 else b)
 			if c.get("stats"):
-				M=ag["stats"]or X["cur"];m=bh();G,H=c.get("stat_cats")or(),c.get("stat_tips")
+				M=ah["stats"]or X["cur"];m=bh();G,H=c.get("stat_cats")or(),c.get("stat_tips")
 				for k,(r,N)in enumerate(c["stats"]):
-					I=X["cur"][k];f=I-M[k]if ag["stats"]else 0;n(r,"%s %d%s"%(("Str","Dex","Int")[k],I,(" (%+d)"%f)if f else ""),o if f>0 else B);av(N,"Graphic",ay[X["locks"][k]])
+					I=X["cur"][k];f=I-M[k]if ah["stats"]else 0;n(r,"%s %d%s"%(("Str","Dex","Int")[k],I,(" (%+d)"%f)if f else ""),o if f>0 else B);av(N,"Graphic",ay[X["locks"][k]])
 					if k<len(G):
 						d=c0(k,m)
 						if d!=H[k]:H[k]=d;z(G[k],d)
-				x=sum(X["cur"]);s=X["cap"];a=("Stats %d / %d"%(x,s))if s else("Stats %d"%x);e=(a_(0)+a_(1)+a_(2))if ag["stats"]else 0
+				x=sum(X["cur"]);s=X["cap"];a=("Stats %d / %d"%(x,s))if s else("Stats %d"%x);e=(a_(0)+a_(1)+a_(2))if ah["stats"]else 0
 				if e:
 					J="%s   %+d (%.1f / hour)"%(a,e,e/m)
 					if Kit.text_px(J)<=c["stat_total_w"]:a=J
@@ -790,21 +790,21 @@ def _module_skills():
 		def b9(key,text):
 			a=time.time()
 			if a-j["arm"].get(key,0.)<=cy:j["arm"].pop(key,None);return True
-			j["arm"][key]=a;ac(text,b);return False
+			j["arm"][key]=a;af(text,b);return False
 		def a5(v,a=False):
 			n=0
 			for i in(range(q["n"])if a else[g[1]for g in(j["desc"]or[])if g[0]=="s"]):
 				d,f,c,e=q["cur"][i]
 				if a and not(c and d>=c):continue
 				if e!=v:aW(i,v);n+=1
-			ac("%s %s."%(aa(n,"skill"),("set to go up","set to go down","locked")[v]),o if n else b)
+			af("%s %s."%(aa(n,"skill"),("set to go up","set to go down","locked")[v]),o if n else b)
 		def do(k):
 			if k>=len(aA):return
 			a,b=aA[k];n=0
 			for i,c in enumerate(b[:q["n"]]):
 				v="udl".find(c)
 				if v>=0 and q["cur"][i][3]!=v:aW(i,v);n+=1
-			ac("lock set \"%s\" put on (%d change%s)."%(a,n,""if n==1 else "s"),o)
+			af("lock set \"%s\" put on (%d change%s)."%(a,n,""if n==1 else "s"),o)
 		def dp(name):
 			name=re.sub(r"[|=;]","",name or "").strip()[:24]
 			if not name:name="Set %d"%(len(aA)+1)
@@ -812,33 +812,33 @@ def _module_skills():
 			for k,(n,b)in enumerate(aA):
 				if n.lower()==name.lower():aA[k]=(name,a);break
 			else:
-				if len(aA)>=bE:ac("at most %d lock sets: delete one first."%bE,u);return
+				if len(aA)>=bE:af("at most %d lock sets: delete one first."%bE,u);return
 				aA.append((name,a))
-			bN();ac("lock set \"%s\" saved."%name,o)
+			bN();af("lock set \"%s\" saved."%name,o)
 		def dq(i):
 			aI(True)
-			if i is None or not O["list"]:ac("couldn't move the skill (the client's skill groups can't be read).",u);return
+			if i is None or not O["list"]:af("couldn't move the skill (the client's skill groups can't be read).",u);return
 			a=bd(i);b=0 if a is None else(a+1)%len(O["list"])
 			try:
 				import System
 				if a is not None:O["list"][a]["obj"].Remove(System.Byte(i))
-				O["list"][b]["obj"].Add(System.Byte(i));aO();ac("%s moved to %s."%(q["names"][i],O["list"][bd(i)or 0]["name"]),o)
-			except Exception as c:ac("couldn't move it (%s)."%Tz.why(c),u)
+				O["list"][b]["obj"].Add(System.Byte(i));aO();af("%s moved to %s."%(q["names"][i],O["list"][bd(i)or 0]["name"]),o)
+			except Exception as c:af("couldn't move it (%s)."%Tz.why(c),u)
 		def dr():
 			a=aV()
 			try:import System;g=System.Activator.CreateInstance(Tz.T("ClassicUO.Game.Managers.SkillsGroup"));g.Name="New group";g.IsMaximized=True;a.Add(g);aO()
-			except Exception as b:ac("couldn't add a group (%s)."%Tz.why(b),u)
+			except Exception as b:af("couldn't add a group (%s)."%Tz.why(b),u)
 		def ds(gi):
 			aI(True)
 			if gi<=0 or gi>=len(O["list"]):return
 			a=aV();b=O["list"][gi]["name"]
-			if safe(lambda:a.Remove(O["list"][gi]["obj"]),False):aO();ac("group \"%s\" deleted; its skills went to \"%s\"."%(b,O["list"][0]["name"]if O["list"]else "the first group"),o)
+			if safe(lambda:a.Remove(O["list"][gi]["obj"]),False):aO();af("group \"%s\" deleted; its skills went to \"%s\"."%(b,O["list"][0]["name"]if O["list"]else "the first group"),o)
 		def dt():
 			a=aV()
-			try:a.MakeDefault();aO();ac("skill groups reset to the default ones.",o)
-			except Exception as b:ac("couldn't reset the groups (%s)."%Tz.why(b),u)
+			try:a.MakeDefault();aO();af("skill groups reset to the default ones.",o)
+			except Exception as b:af("couldn't reset the groups (%s)."%Tz.why(b),u)
 		def du():
-			b=API.Player;f=ap("Skills_%08X.txt"%int(b.Serial));c=time.time();d=["Skill sheet - %s - %s"%(b.Name or "",time.strftime("%Y-%m-%d %H:%M",time.localtime(c))),"Total %s / %s   (with bonuses %s)"%(f1(bj()),f1(p["total_cap"]),f1(sum(m[1]for m in q["cur"]))),"Str %d  Dex %d  Int %d   (stat cap %d)"%(X["cur"][0],X["cur"][1],X["cur"][2],X["cap"]),"Session %+.1f in %s"%(bg()/10.,bi(c-ag["start"])),"","%-26s %7s %7s %7s %8s  %s"%("Skill","Real","Value","Cap","Session","Lock")]
+			b=API.Player;f=ap("Skills_%08X.txt"%int(b.Serial));c=time.time();d=["Skill sheet - %s - %s"%(b.Name or "",time.strftime("%Y-%m-%d %H:%M",time.localtime(c))),"Total %s / %s   (with bonuses %s)"%(f1(bj()),f1(p["total_cap"]),f1(sum(m[1]for m in q["cur"]))),"Str %d  Dex %d  Int %d   (stat cap %d)"%(X["cur"][0],X["cur"][1],X["cur"][2],X["cap"]),"Session %+.1f in %s"%(bg()/10.,bi(c-ah["start"])),"","%-26s %7s %7s %7s %8s  %s"%("Skill","Real","Value","Cap","Session","Lock")]
 			for a in sorted(range(q["n"]),key=lambda i:q["names"][i].lower()):g,v,h,k=q["cur"][a];e=aG(a);d.append("%-26s %7s %7s %7s %8s  %s"%(q["names"][a],f1(g),f1(v),f1(h),("%+.1f"%(e/10.))if e else "",aT[k]))
 			j["to_write"].append((f,"\n".join(d)+"\n"))
 		def ca():au(j["to_write"],aE,"skill sheet")
@@ -849,7 +849,7 @@ def _module_skills():
 				if p["sec_detail"]:aI(O["sig"]is None)
 			bn()
 		def a6(i):
-			if i is None:ac("pick a skill first.",b)
+			if i is None:af("pick a skill first.",b)
 			return i is not None
 		def cc(a):
 			if not isinstance(a,tuple):return a,None
@@ -872,14 +872,14 @@ def _module_skills():
 			a=j["sel"]
 			if a6(a):ao["pins"]^={a};bM()
 		def dD(a):
-			if bW():ac("asked the server for your skills.",b)
-			else:ac("couldn't ask the server (the client's skills call failed).",u)
+			if bW():af("asked the server for your skills.",b)
+			else:af("couldn't ask the server (the client's skills call failed).",u)
 		def dE(a):
-			if a<len(aA):n=aA.pop(a)[0];bN();ac("lock set \"%s\" deleted."%n,b)
+			if a<len(aA):n=aA.pop(a)[0];bN();af("lock set \"%s\" deleted."%n,b)
 			D(aw)
 		def dF(a):
 			if b9("grp_reset","click Reset groups again for the default groups."):dt();D(aw)
-		cd={"settings":lambda a:am(aw),"to_bar":lambda a:HOST.dock_to_bar(aw,aE),"pick":cb,"stat":lambda a:bf(a,(X["locks"][a]+1)%3),"all_up":lambda a:a5(0),"all_locked":lambda a:a5(2),"lock_capped":lambda a:a5(2,True),"export":lambda a:du(),"ls_save":lambda a:(dp(a),D(aw)),"ls_apply":do,"grp_new":lambda a:(dr(),D(aw)),"grp_del":lambda a:(ds(a),D(aw)),"grp_save":lambda a:aO(),"toggle_min":dw,"filter":dx,"sort":dz,"button":lambda a:(cb(a),bV(a)),"mkbutton":lambda a:a6(j["sel"])and bV(j["sel"]),"use":dA,"lock":lambda a:a is not None and a<q["n"]and aW(a,(q["cur"][a][3]+1)%3),"dlock":lambda a:j["sel"]is not None and aW(j["sel"],a),"fold":dB,"pin":dC,"nextgrp":lambda a:a6(j["sel"])and dq(j["sel"]),"all_down":lambda a:b9("all_down","click All down again to set every listed skill to go down.")and a5(1),"newsess":lambda a:(cR(),ac("new session; gains count from now.",o)),"ask":dD,"ls_del":dE,"grp_reset":dF};dG=[("replace","Replace the client's skills window","The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),("x_hides","Close only hides it","Off: Close turns Skills off"),("bars","Progress bar per skill (value / cap)","Filled to value / cap; green at the cap"),("col_cap","Cap column","Each skill's cap"),("col_gain","Session gain column","What each skill gained this session"),("journal","Journal line for each gain or loss","The client may print its own line too (its Options)"),("lock_at_cap","Lock a skill when it reaches its cap","A rising skill locks the moment it hits its cap"),("lock_at_target","Lock a skill when it reaches its target","Set targets in the window's details"),("cap_warn","Warn at the total cap when no skill is set to go down","Journal warning and a red total when nothing can rise"),("tips","Training tips in the details and row tooltips","Classic-era advice for the skill's range")];ce=[("rows","Rows in the list:",False,"Skills shown at once (or drag a window corner)"),("total_cap","Total skill cap:",True,"The shard's total skill cap (check it in game)"),("hl_secs","Green name after a gain (s):",False,"Seconds a name stays green after a gain (0 = never)"),("rate_min","Recent pace over (minutes):",False,"Minutes the recent rate and time to cap look back")];dH=[("sec_summary","Totals and session","Total skill points and the session line"),("sec_stats","Str / Dex / Int","Stats, lock arrows and the stat cap"),("sec_locks","Lock buttons","All up, All down, All locked and Lock capped"),("sec_detail","Picked skill details","Rates, target, pin and the Use button"),("sec_log","Recent gains","The last gains, newest first")];dI="Export writes a text file to the VirtueAssistantSettings folder.";dJ="Drag a window corner: height sets the rows, width spreads the columns.";dK=("A stat set to go up locks when it rises to its target, one set to go down when it falls to it. The window's stat tooltips show gains per hour.")
+		cd={"settings":lambda a:am(aw),"to_bar":lambda a:HOST.dock_to_bar(aw,aE),"pick":cb,"stat":lambda a:bf(a,(X["locks"][a]+1)%3),"all_up":lambda a:a5(0),"all_locked":lambda a:a5(2),"lock_capped":lambda a:a5(2,True),"export":lambda a:du(),"ls_save":lambda a:(dp(a),D(aw)),"ls_apply":do,"grp_new":lambda a:(dr(),D(aw)),"grp_del":lambda a:(ds(a),D(aw)),"grp_save":lambda a:aO(),"toggle_min":dw,"filter":dx,"sort":dz,"button":lambda a:(cb(a),bV(a)),"mkbutton":lambda a:a6(j["sel"])and bV(j["sel"]),"use":dA,"lock":lambda a:a is not None and a<q["n"]and aW(a,(q["cur"][a][3]+1)%3),"dlock":lambda a:j["sel"]is not None and aW(j["sel"],a),"fold":dB,"pin":dC,"nextgrp":lambda a:a6(j["sel"])and dq(j["sel"]),"all_down":lambda a:b9("all_down","click All down again to set every listed skill to go down.")and a5(1),"newsess":lambda a:(cR(),af("new session; gains count from now.",o)),"ask":dD,"ls_del":dE,"grp_reset":dF};dG=[("replace","Replace the client's skills window","The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),("x_hides","Close only hides it","Off: Close turns Skills off"),("bars","Progress bar per skill (value / cap)","Filled to value / cap; green at the cap"),("col_cap","Cap column","Each skill's cap"),("col_gain","Session gain column","What each skill gained this session"),("journal","Journal line for each gain or loss","The client may print its own line too (its Options)"),("lock_at_cap","Lock a skill when it reaches its cap","A rising skill locks the moment it hits its cap"),("lock_at_target","Lock a skill when it reaches its target","Set targets in the window's details"),("cap_warn","Warn at the total cap when no skill is set to go down","Journal warning and a red total when nothing can rise"),("tips","Training tips in the details and row tooltips","Classic-era advice for the skill's range")];ce=[("rows","Rows in the list:",False,"Skills shown at once (or drag a window corner)"),("total_cap","Total skill cap:",True,"The shard's total skill cap (check it in game)"),("hl_secs","Green name after a gain (s):",False,"Seconds a name stays green after a gain (0 = never)"),("rate_min","Recent pace over (minutes):",False,"Minutes the recent rate and time to cap look back")];dH=[("sec_summary","Totals and session","Total skill points and the session line"),("sec_stats","Str / Dex / Int","Stats, lock arrows and the stat cap"),("sec_locks","Lock buttons","All up, All down, All locked and Lock capped"),("sec_detail","Picked skill details","Rates, target, pin and the Use button"),("sec_log","Recent gains","The last gains, newest first")];dI="Export writes a text file to the VirtueAssistantSettings folder.";dJ="Drag a window corner: height sets the rows, width spreads the columns.";dK=("A stat set to go up locks when it rises to its target, one set to go down when it falls to it. The window's stat tooltips show gains per hour.")
 		def dL(w):
 			aI(O["sig"]is None);h=len(O["list"])if O["ok"]else 1;i=(w-24)//2
 			def c(text,dy):return[("note",f,{"ndy":dy,"h":18})for f in Kit.wrap(text,w-24)]
@@ -961,8 +961,8 @@ def _module_skills():
 			if j.get("grp_dirty_at"):j["grp_dirty_at"]=0.;ak.add(("grp_save",),dup=True)
 		def ch():
 			j["ready"]=True
-			for i in range(q["n"]):ag["base"].setdefault(i,q["cur"][i][0])
-			if ag["stats"]is None and any(X["cur"]):ag["stats"]=list(X["cur"])
+			for i in range(q["n"]):ah["base"].setdefault(i,q["cur"][i][0])
+			if ah["stats"]is None and any(X["cur"]):ah["stats"]=list(X["cur"])
 		def ci():g,t["g"]=t["g"],None;t.update({"c":{},"rows":[],"rowmap":{}});aU.clear();ab(g)
 		bL();bO()
 		def dS():
@@ -973,7 +973,7 @@ def _module_skills():
 		def dT():
 			a=time.time()
 			if t["g"]is not None and at(t["store"],"close"):
-				if p["x_hides"]:j["hidden"]=True;bc();ci();ac("hidden; %s brings it back."%("the client's or the Action Bar's Skills button"if p["replace"]else "the Action Bar's Skills button (or Skills off and on in the Modules tab)"),b)
+				if p["x_hides"]:j["hidden"]=True;bc();ci();af("hidden; %s brings it back."%("the client's or the Action Bar's Skills button"if p["replace"]else "the Action Bar's Skills button (or Skills off and on in the Modules tab)"),b)
 				else:ab(t["g"]);return
 			if j["resize_at"]and a-j["resize_at"]>=co and not safe(lambda:SNAP.pressed(),False):j["resize_at"]=0.;db()
 			if j["grp_dirty_at"]and a-j["grp_dirty_at"]>=cE:j["grp_dirty_at"]=0.;aO()
@@ -998,7 +998,7 @@ def _module_skills():
 				elif a-j["started"]>3. and not j["asked"]:bW()
 			elif d:cW(d,a)
 			if g and j["ready"]and(aB[0]or aB[1]or aB[2]):cZ()
-			if j["ready"]and ag["stats"]is None and any(X["cur"]):ag["stats"]=list(X["cur"])
+			if j["ready"]and ah["stats"]is None and any(X["cur"]):ah["stats"]=list(X["cur"])
 			aI();h=bool(j["queue"])
 			if h:aK()
 			while j["queue"]:
@@ -1023,7 +1023,7 @@ def _module_skills():
 			HOST.dock_remove(aw);ci();cH.close()
 		return{"start":dS,"tick":dT,"stop":dU,"client_tick":True,"config_height":aM.height,"build_config":aM.build,"poll_config":aM.poll,"config_closed":dR,"thread_tick":ca,"thread_wanted":dv}
 	def ay():
-		W="attention";m="Training Alarm";Y="Attention_settings";aB="Attention_pos";aC="Attention_min";Z=400;x,aa=300,46;aD=7186;ab=.25;ac=1.;y=18;aE=2.;ad=60.;ae=.25;z=1.5;aF=5.;aG=60.;aH=("GM, Counselor, Seer, Admin, Administrator, Developer, Staff, Game Master");aI="";ag=("whisper","8");aJ,G=5,120;aK,q=0,600;ah=8;aj=60;ak=.5;aL=500;am=60;aM=30;aN=5.;an=(("gump","attention.gump","Gump nobody asked for",775),("staff","attention.staff","Staff in view",775),("name","attention.name","Someone says your name",824),("whisper","attention.whisper","A whisper to you",824),("hit","attention.hit","Hit while not fighting",497),("test","attention.test","Training Alarm test",775));ap=dict((bg,bh)for bg,bh,bi,bi in an);aq=("gump","staff","name","words","whisper","hit");c={"gump":True,"staff":True,"name":True,"words":True,"whisper":True,"hit":False,"markers":aH,"ignore":aI,"repeat":aJ,"hold":aK,"anyalarm":True};bf=dict(c);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"open_ids":{},"last_gid":0,"me":0,"my_name":"","name_re":None,"words_re":None,"seq":0};h={"g":None,"c":{},"store":({},{})};I={"skip":False};aO={"done":False};L,r,N=af(a,m);s={"looked":False,"get":None};d={"markers":None,"text":None,"ignore":frozenset(),"ignore_text":None}
+		W="attention";m="Training Alarm";Y="Attention_settings";aB="Attention_pos";aC="Attention_min";Z=400;x,aa=300,46;aD=7186;ab=.25;ac=1.;y=18;aE=2.;ad=60.;af=.25;z=1.5;aF=5.;aG=60.;aH=("GM, Counselor, Seer, Admin, Administrator, Developer, Staff, Game Master");aI="";ag=("whisper","8");aJ,G=5,120;aK,q=0,600;ah=8;aj=60;ak=.5;aL=500;am=60;aM=30;aN=5.;an=(("gump","attention.gump","Gump nobody asked for",775),("staff","attention.staff","Staff in view",775),("name","attention.name","Someone says your name",824),("whisper","attention.whisper","A whisper to you",824),("hit","attention.hit","Hit while not fighting",497),("test","attention.test","Training Alarm test",775));ap=dict((bg,bh)for bg,bh,bi,bi in an);aq=("gump","staff","name","words","whisper","hit");c={"gump":True,"staff":True,"name":True,"words":True,"whisper":True,"hit":False,"markers":aH,"ignore":aI,"repeat":aJ,"hold":aK,"anyalarm":True};bf=dict(c);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"open_ids":{},"last_gid":0,"me":0,"my_name":"","name_re":None,"words_re":None,"seq":0};h={"g":None,"c":{},"store":({},{})};I={"skip":False};aO={"done":False};L,r,N=ae(a,m);s={"looked":False,"get":None};d={"markers":None,"text":None,"ignore":frozenset(),"ignore_text":None}
 		def t(text):return str(text or "").replace(";",",").replace("="," ").strip()
 		def ar():
 			for k,v in Kit.codec_load(R(Y)).items():
@@ -1306,7 +1306,7 @@ def _module_skills():
 			if not 0<a["next_gump"]-b<=ab:a["next_gump"]=b+ab;aX(b);a["primed"]=True
 			if c["staff"]and not 0<a["next_staff"]-b<=ac:a["next_staff"]=b+ac;aY(b)
 			aZ(b);a_()
-			if a.pop("hit_poke",False)or not 0<a["next_hit"]-b<=ae:a["next_hit"]=b+ae;a4(p)
+			if a.pop("hit_poke",False)or not 0<a["next_hit"]-b<=af:a["next_hit"]=b+af;a4(p)
 			aR(b)
 			if not a["alarm"]and a["resume_at"]:
 				if not av():a["resume_at"]=0.
@@ -1314,7 +1314,7 @@ def _module_skills():
 		def be():a["shutting"]=True;a["active"]=False;a["alarm"]=[];a["resume_at"]=0.;O();a["rd"]=None;a["gump_obj"]=None;L.close()
 		return{"start":bc,"tick":bd,"stop":be,"client_tick":True,"config_height":v.height,"build_config":v.build,"poll_config":v.poll,"config_closed":v.closed}
 	def az():
-		p="skillbags";Z="Skill Bags";aW="SkillBags_settings";bo="SkillBags_pos";bp="SkillBags_min";aX="SkillBags_rules";aY="SkillBags_done";bq=740;aZ,br=240,46;bs=3702;a_=42;aJ=8;ax=300;bt=6;bu=5.;bv=2.;aK=3.;bw=2.5;bx=6.;by=1.5;bz=4;bA=10.;bB={"item identification":3.,"arms lore":3.,"detect hidden":3.};ay,aL=.5,60.;a0=1;aM=.25;az=.5;bC=5372;bD=("must wait","too far away","cannot reach","can't reach","can't see that","cannot see that","already casting","you are busy");bE="Paused: guard zone";bF=HOLD_TEXT["unknown"];bG="SkillBags_results_pos";a1=200;a2=16;bH=680;aA=18;aB="skillbags.results";a3="Skill Bags Results";bI=500;aN=2*E+30+F+30+24+8;bJ="No results shown. Click a rule's Results.";bK=160;bL="SkillBags_%08X_rule%d.txt";bM=("durable","substantial","massive","fortified","indestructable","indestructible","defense","guarding","hardening","fortification","invulnerability","accurate","ruin","might","force","power","vanquishing","silver","slaying","slaughter","thrashing","repond","terathan","bane","reptilian death","dismissal","gargoyle's foe","damnation","exorcism","ophidian","spider's death","arachnid doom","dousing","dissipation","vacuum","elemental health","earth shatter","blood drinking","summer wind","elemental ban","slayer","magic");bN="unidentified";bO={"itemid":{2:"not certain"},"armslore":{2:"not certain",4:"read"},"tasteid":{2:"not certain",4:"read"},"removetrap":{1:"disarmed",2:"trap, not disarmed",3:"no trap"},"lockpick":{1:"unlocked",2:"still locked",3:"not locked"},"cartography":{1:"decoded",2:"not decoded",3:"can't decode"}};bP=re.compile(r"\b("+"|".join(bM)+r")\b");bQ=re.compile(r"\[[^\]]*:\s*\d+\s*\]");bR=re.compile(r"\bmagic\b");ab=[("itemid","Item Identification","skill","Item Identification",3.2,0,(),("not certain","no idea how much","tell much about it"),()),("armslore","Arms Lore","skill","Arms Lore",3.2,0,(),("not certain","tell much about it"),()),("tasteid","Taste Identification","skill","Taste Identification",10.2,0,(),("not certain","tell much about it","can't tell"),()),("removetrap","Remove Trap","skill","Remove Trap",10.2,1,("render the trap harmless","successfully"),("fail to disarm",),("doesn't appear to be trapped","isn't trapped","not trapped")),("lockpick","Lockpicking (uses lockpicks)","tool",bC,1.5,1,("lock quickly yields",),("unable to pick the lock",),("does not appear to be locked","cannot be picked by normal means","did not need to be unlocked")),("cartography","Cartography (decode maps)","use",None,1.,3,("successfully decode",),("fail to make anything of the map",),("too difficult to attempt to decode","not a map")),("use","Double-click each item","use",None,1.,0,(),(),()),("cskill","Custom skill (name in Custom)","cskill",None,10.2,0,(),(),()),("ctool","Custom tool (graphic in Custom)","ctool",None,1.5,0,(),(),()),];bS=[cz[1]for cz in ab];aq=[("all","Every item"),("containers","Containers only"),("graphics","Graphics in Text (hex)"),("name","Name contains Text")];bT=[cA[1]for cA in aq];bU={1:"OK",2:"failed",3:"skipped",4:"done"};q={"hidden":True,"war":True,"open":True,"retries":a0,"guard":True};cy=dict(q);h=[];c={"minimized":False,"shutting":False,"docked":False,"queue":[]};K={"g":None,"c":{},"store":({},{}),"rows":[]};aO,W,m=af(c,Z);L={"f":None,"rows":[],"next_read":0.};k={"g":None,"rule":None,"c":{},"rows":[],"page":0,"dirty":False,"minimized":False,"shutting":False,"docked":False,"queue":[]}
+		p="skillbags";Z="Skill Bags";aW="SkillBags_settings";bo="SkillBags_pos";bp="SkillBags_min";aX="SkillBags_rules";aY="SkillBags_done";bq=740;aZ,br=240,46;bs=3702;a_=42;aJ=8;ax=300;bt=6;bu=5.;bv=2.;aK=3.;bw=2.5;bx=6.;by=1.5;bz=4;bA=10.;bB={"item identification":3.,"arms lore":3.,"detect hidden":3.};ay,aL=.5,60.;a0=1;aM=.25;az=.5;bC=5372;bD=("must wait","too far away","cannot reach","can't reach","can't see that","cannot see that","already casting","you are busy");bE="Paused: guard zone";bF=HOLD_TEXT["unknown"];bG="SkillBags_results_pos";a1=200;a2=16;bH=680;aA=18;aB="skillbags.results";a3="Skill Bags Results";bI=500;aN=2*E+30+F+30+24+8;bJ="No results shown. Click a rule's Results.";bK=160;bL="SkillBags_%08X_rule%d.txt";bM=("durable","substantial","massive","fortified","indestructable","indestructible","defense","guarding","hardening","fortification","invulnerability","accurate","ruin","might","force","power","vanquishing","silver","slaying","slaughter","thrashing","repond","terathan","bane","reptilian death","dismissal","gargoyle's foe","damnation","exorcism","ophidian","spider's death","arachnid doom","dousing","dissipation","vacuum","elemental health","earth shatter","blood drinking","summer wind","elemental ban","slayer","magic");bN="unidentified";bO={"itemid":{2:"not certain"},"armslore":{2:"not certain",4:"read"},"tasteid":{2:"not certain",4:"read"},"removetrap":{1:"disarmed",2:"trap, not disarmed",3:"no trap"},"lockpick":{1:"unlocked",2:"still locked",3:"not locked"},"cartography":{1:"decoded",2:"not decoded",3:"can't decode"}};bP=re.compile(r"\b("+"|".join(bM)+r")\b");bQ=re.compile(r"\[[^\]]*:\s*\d+\s*\]");bR=re.compile(r"\bmagic\b");ab=[("itemid","Item Identification","skill","Item Identification",3.2,0,(),("not certain","no idea how much","tell much about it"),()),("armslore","Arms Lore","skill","Arms Lore",3.2,0,(),("not certain","tell much about it"),()),("tasteid","Taste Identification","skill","Taste Identification",10.2,0,(),("not certain","tell much about it","can't tell"),()),("removetrap","Remove Trap","skill","Remove Trap",10.2,1,("render the trap harmless","successfully"),("fail to disarm",),("doesn't appear to be trapped","isn't trapped","not trapped")),("lockpick","Lockpicking (uses lockpicks)","tool",bC,1.5,1,("lock quickly yields",),("unable to pick the lock",),("does not appear to be locked","cannot be picked by normal means","did not need to be unlocked")),("cartography","Cartography (decode maps)","use",None,1.,3,("successfully decode",),("fail to make anything of the map",),("too difficult to attempt to decode","not a map")),("use","Double-click each item","use",None,1.,0,(),(),()),("cskill","Custom skill (name in Custom)","cskill",None,10.2,0,(),(),()),("ctool","Custom tool (graphic in Custom)","ctool",None,1.5,0,(),(),()),];bS=[cz[1]for cz in ab];aq=[("all","Every item"),("containers","Containers only"),("graphics","Graphics in Text (hex)"),("name","Name contains Text")];bT=[cA[1]for cA in aq];bU={1:"OK",2:"failed",3:"skipped",4:"done"};q={"hidden":True,"war":True,"open":True,"retries":a0,"guard":True};cy=dict(q);h=[];c={"minimized":False,"shutting":False,"docked":False,"queue":[]};K={"g":None,"c":{},"store":({},{}),"rows":[]};aO,W,m=ae(c,Z);L={"f":None,"rows":[],"next_read":0.};k={"g":None,"rule":None,"c":{},"rows":[],"page":0,"dirty":False,"minimized":False,"shutting":False,"docked":False,"queue":[]}
 		def a4(s):return str(s or "").replace("|","/").replace("~","-")
 		def a5(v,default):
 			try:v=float(v)
@@ -1357,7 +1357,7 @@ def _module_skills():
 						try:s,c=int(s),int(c)
 						except Exception:continue
 						r["done"][s]=c;r["order"].append(s)
-		def ad():S(aW,"|".join(["1"if q["hidden"]else "0","1"if q["war"]else "0","1"if q["open"]else "0",str(q["retries"]),"0","1"if q["guard"]else "0"]));S(aX,"|".join("~".join([str(a["action"]),str(a["bag"]),str(a["filt"]),a4(a["text"]),a4(a["custom"]),"%.2f"%a["delay"],"1"if a["deep"]else "0","1"if a["auto"]else "0"])for a in h));aQ()
+		def ac():S(aW,"|".join(["1"if q["hidden"]else "0","1"if q["war"]else "0","1"if q["open"]else "0",str(q["retries"]),"0","1"if q["guard"]else "0"]));S(aX,"|".join("~".join([str(a["action"]),str(a["bag"]),str(a["filt"]),a4(a["text"]),a4(a["custom"]),"%.2f"%a["delay"],"1"if a["deep"]else "0","1"if a["auto"]else "0"])for a in h));aQ()
 		def aQ():S(aY,"|".join(",".join("%d:%d"%(d,a["done"][d])for d in a["order"]if d in a["done"])for a in h))
 		def aC(r,serial,code):
 			if serial not in r["done"]:r["order"].append(serial)
@@ -1497,7 +1497,7 @@ def _module_skills():
 		def at(t,now):return not 0<t-now<=aL
 		def bZ(r,now,b=True):
 			a=r["bag"]
-			if not a or not ag(a):return False
+			if not a or not af(a):return False
 			if bY(a):c["opening"].pop(a,None);r["_closed"]=False;return True
 			r["_closed"]=True
 			if not q["open"]or not b:return False
@@ -1529,7 +1529,7 @@ def _module_skills():
 				if V(r)[2]=="ctool"and i not in c["run"]:
 					if r["auto"]:aF(i,r);m("rule %d: a custom tool runs only on Run."%(i+1),u)
 					continue
-				if not ag(r["bag"]):
+				if not af(r["bag"]):
 					c["run"].discard(i);c["budget"].pop(i,None);m("rule %d: its bag isn't in your backpack."%(i+1),u)
 					if r["auto"]:aF(i,r)
 					continue
@@ -1550,7 +1550,7 @@ def _module_skills():
 				if i in c["run"]and not j and not l and k is not None:c["run"].discard(i);c["budget"].pop(i,None);m("%s on %s, %d of %d handled."%(V(r)[1],ai(r),r["_count"][0],r["_count"][1]),o)
 			return
 		def aF(i,r):
-			c["run"].discard(i);r["auto"]=False;ad()
+			c["run"].discard(i);r["auto"]=False;ac()
 			if i<len(K["rows"]):K["rows"][i]["auto"].IsChecked=False
 			if L["f"]is not None:D(p)
 		def b0(i,r,serial,it,now):
@@ -1677,21 +1677,21 @@ def _module_skills():
 			if not serial:m("cancelled.",b);return
 			a=ar(serial)
 			if a is None or not a.IsContainer:m("that isn't a container.",u);return
-			if not ag(serial):m("that bag isn't in your backpack.",u);return
+			if not af(serial):m("that bag isn't in your backpack.",u);return
 			r=h[i]
 			if r["bag"]!=serial:r["bag"]=serial;r["done"].clear();del r["order"][:];c["later"].clear();aE(r);aS(r)
-			ad();m("rule %d uses %s."%(i+1,ai(r,False)),o);c["redraw"]=True;D(p)
+			ac();m("rule %d uses %s."%(i+1,ai(r,False)),o);c["redraw"]=True;D(p)
 		def bd():return bq,2*E+30+F+40+F+30+max(1,len(h))*a_+8
 		def aw():
-			r,s=bd();k=al.slot if ac(p)and not c["minimized"]else None;w,t=k if k is not None and k[0]>=r and k[1]>=s else(r,s);g,n,m=al.begin(w,t);a=E;u=[]
+			p,q=bd();w,r=al.zone_slot(p,q)or(p,q);g,m,k=al.begin(w,r);a=E;s=[]
 			if not c["minimized"]:
-				i=w-2*a;al.frame(g);j=a+30+F;H(g,a,j,i,40);m["pause"]=A(g,n,"pause",P,a+12,j+9,"Resume"if c["paused"]else "Pause","Stop or restart every rule",on_click=W("pause"));v=a+12+35+e("Resume")+14;A(g,n,"add",J,v,j+9,"Add rule","Add a rule (set it up on the settings page)",on_click=W("add"));x=v+35+e("Add rule")+14;m["status"]=l(g,"",x,j+12,b);m["status_w"]=a+i-4-x;c["full_txt"]=None;o=j+40+F;H(g,a,o,i,t-o-a,"RULES  (a bag and an action each)");y=o+30;C=a+i-12-35-e("Reset");D=C-35-e("Run")-6;G=D-35-e("Bag...")-6;I=G-35-e("Results")-6;m["last_w"]=i-36-16
-				if not h:l(g,"No rules yet. Click Add rule, then set its bag and action.",a+12,y+5,b)
-				for q,K in enumerate(h):
-					f=y+q*a_;d={};d["auto"]=Y(g,"",a+10,f+2,K["auto"],"Handle every new item that lands in this bag");d["bag"]=l(g,"",a+36,f+3,B);d["act"]=l(g,"",a+172,f+3,Q);d["prog"]=l(g,"",a+298,f+3,b);d["last"]=z(l(g,"",a+36,f+22,b),"The shard's last answer to this rule and how it was read (ok, fail, skip or busy)")
-					for L,N,O,R,S,T in(("res",U,I,"Results","Show the shard's answer per item (again: close)","results"),("bag",P,G,"Bag...","Target the bag this rule works on","bag"),("run",P,D,"Run","One pass over the items not done yet","run"),("reset",M,C,"Reset","Forget what was done, so every item is handled again","reset")):A(g,n,"%s%d"%(L,q),N,O,f+1,R,S,on_click=W((T,q)))
-					d["text"]=(None,None,None,None);u.append(d)
-			al.end(g,{"rows":u});c["redraw"]=False;be()
+				i=w-2*a;al.frame(g);j=a+30+F;H(g,a,j,i,40);k["pause"]=A(g,m,"pause",P,a+12,j+9,"Resume"if c["paused"]else "Pause","Stop or restart every rule",on_click=W("pause"));t=a+12+35+e("Resume")+14;A(g,m,"add",J,t,j+9,"Add rule","Add a rule (set it up on the settings page)",on_click=W("add"));u=t+35+e("Add rule")+14;k["status"]=l(g,"",u,j+12,b);k["status_w"]=a+i-4-u;c["full_txt"]=None;n=j+40+F;H(g,a,n,i,r-n-a,"RULES  (a bag and an action each)");v=n+30;x=a+i-12-35-e("Reset");y=x-35-e("Run")-6;C=y-35-e("Bag...")-6;D=C-35-e("Results")-6;k["last_w"]=i-36-16
+				if not h:l(g,"No rules yet. Click Add rule, then set its bag and action.",a+12,v+5,b)
+				for o,G in enumerate(h):
+					f=v+o*a_;d={};d["auto"]=Y(g,"",a+10,f+2,G["auto"],"Handle every new item that lands in this bag");d["bag"]=l(g,"",a+36,f+3,B);d["act"]=l(g,"",a+172,f+3,Q);d["prog"]=l(g,"",a+298,f+3,b);d["last"]=z(l(g,"",a+36,f+22,b),"The shard's last answer to this rule and how it was read (ok, fail, skip or busy)")
+					for I,K,L,N,O,R in(("res",U,D,"Results","Show the shard's answer per item (again: close)","results"),("bag",P,C,"Bag...","Target the bag this rule works on","bag"),("run",P,y,"Run","One pass over the items not done yet","run"),("reset",M,x,"Reset","Forget what was done, so every item is handled again","reset")):A(g,m,"%s%d"%(I,o),K,L,f+1,N,O,on_click=W((R,o)))
+					d["text"]=(None,None,None,None);s.append(d)
+			al.end(g,{"rows":s});c["redraw"]=False;be()
 		al=Kit.Window(p,Z,c,K,aw,bo,bp,mini=(aZ,br),icon=bs,cleanup=aO,lock=True);I=C
 		def be():
 			if c["minimized"]and c["docked"]:return
@@ -1718,7 +1718,7 @@ def _module_skills():
 				try:v=bool(b["auto"].IsChecked)
 				except Exception:continue
 				if v!=h[i]["auto"]:h[i]["auto"]=v;a=True
-			if a:ad();D(p)
+			if a:ac();D(p)
 		aG,aU=230,120
 		def aV(r):return next((a for a in range(len(h))if h[a]is r),-1)
 		def ca(i):
@@ -1731,15 +1731,15 @@ def _module_skills():
 		def bf():return bI,aN+4*aA
 		def aH():
 			k["rule"]=None
-			if ac(aB):aI()
+			if ah(aB):aI()
 			else:an.close()
 		def cb():
-			if ac(aB)or k["rule"]is not None and k["g"]is not None:aI()
+			if ah(aB)or k["rule"]is not None and k["g"]is not None:aI()
 			elif k["g"]is not None:an.close()
 		def aI():
-			a=E;i=ac(aB);z=an.slot if i else None;s,t=bf()
+			a=E;i=ah(aB);z=an.slot if i else None;s,t=bf()
 			if z is not None and(z[0]<s or z[1]<t):z=None
-			w=z[0]if z is not None else bH;n=an.rows(aA,aN,a2)if z else a2;j=z[1]if z is not None else aN+n*aA;h=w-2*a;u=j-a-30-F-a;g,f,c=an.begin(w,j);ae(g,w,j);H(g,a,a,h,30)
+			w=z[0]if z is not None else bH;n=an.rows(aA,aN,a2)if z else a2;j=z[1]if z is not None else aN+n*aA;h=w-2*a;u=j-a-30-F-a;g,f,c=an.begin(w,j);ad(g,w,j);H(g,a,a,h,30)
 			if not i:A(g,f,"close",M,w-a-54,a+4,None,"Close the results",on_click=W("res_close"))
 			o=w-a-(10 if i else 66)-35-e("Export");A(g,f,"export",J,o,a+4,"Export","Write the results to a file in the VirtueAssistantSettings folder",on_click=W("res_export"));p=o-12-35-e("Clear");A(g,f,"clear",M,p,a+4,"Clear","Forget these results (items stay done; Reset handles them again)",on_click=W("res_clear"));c["title"]=l(g,"",a+30,a+7,Q);c["title_w"]=p-(a+30)-8;d=a+30+F;H(g,a,d,h,u,"RESULTS  (newest first)");q=a+h-12-35-e("Next");A(g,f,"older",U,q,d+24,"Next","Older results",on_click=W("res_older"));k=q-10-35-e("Prev");A(g,f,"newer",U,k,d+24,"Prev","Newer results",on_click=W("res_newer"));c["page_x"],c["page_y"]=k-8,d+28;c["page"]=l(g,"",c["page_x"],d+28,b);c["counts"]=l(g,"",a+12,d+28,B);c["counts_w"]=k-(a+12)-16-e("page 99 of 99");c["ans_w"]=h-12-aG-aU-8;r=[];v=d+30+24
 			for x in range(n):m=v+x*aA;r.append({"name":l(g,"",a+12,m,B),"tag":l(g,"",a+12+aG,m,b),"ans":l(g,"",a+12+aG+aU,m,b),"tip":None})
@@ -1752,7 +1752,7 @@ def _module_skills():
 			j=aV(r)
 			if j<0:aH();return
 			g=len(f);l=r.get("_res")or[];m=len(l);h=max(1,(m+g-1)//g);o=k["page"]=max(0,min(k["page"],h-1));n(c["title"],I("RULE %d RESULTS: %s"%(j+1,V(r)[1]),c["title_w"]));n(c["counts"],I(a9(r),c["counts_w"]));i="page %d of %d"%(o+1,h)if h>1 else ""
-			if n(c["page"],i)and i:ah(c["page"],c["page_x"]-e(i),c["page_y"])
+			if n(c["page"],i)and i:ag(c["page"],c["page_x"]-e(i),c["page_y"])
 			t=m-1-o*g;u=time.localtime()[:3]
 			for v,a in enumerate(f):
 				p=t-v
@@ -1779,7 +1779,7 @@ def _module_skills():
 			m("%s."%("paused"if c["paused"]else "resumed"),b)
 		def cg(action):
 			if len(h)>=aJ:m("at most %d rules."%aJ,b);return
-			h.append(a6());ad();aw();D(p)
+			h.append(a6());ac();aw();D(p)
 			if L["f"]is None:am(p)
 		def ch(action):
 			i=action[1]
@@ -1788,7 +1788,7 @@ def _module_skills():
 			a=h.pop(i)
 			if k["rule"]is a:aH()
 			elif k["rule"]is not None:k["dirty"]=True
-			c["rr"]=0;c["run"]=set(d-1 if d>i else d for d in c["run"]if d!=i);c["budget"].clear();c["later"].clear();c["busy_n"].clear();c["no_tool"].clear();ad();aw();D(p)
+			c["rr"]=0;c["run"]=set(d-1 if d>i else d for d in c["run"]if d!=i);c["budget"].clear();c["later"].clear();c["busy_n"].clear();c["no_tool"].clear();ac();aw();D(p)
 		def ci(action):
 			i=action[1]
 			if not h[i]["bag"]:m("set the bag for rule %d first (Bag button)."%(i+1),u);return
@@ -1835,7 +1835,7 @@ def _module_skills():
 						if v!=r[k]:r[k]=v;a=True;(d if k=="deep"else n).append(r)
 			except Exception as w:L["f"]=None;m("settings page error: %s (reopen the page)."%w,u);return
 			if a:
-				ad()
+				ac()
 				for r in d:aE(r)
 				for r in n:
 					i=aV(r)
@@ -1866,7 +1866,7 @@ def _module_skills():
 		def cx():
 			c["shutting"]=k["shutting"]=True
 			if c["job"]is not None:O(p);c["job"]=None
-			ad();aO.close()
+			ac();aO.close()
 			if c["writes"]:
 				if Client.on_client_thread():m("the export wasn't written (the module stopped); export again.",b);del c["writes"][:]
 				else:bh()

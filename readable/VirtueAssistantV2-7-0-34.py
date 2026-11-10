@@ -59,7 +59,7 @@ import time
 # The app name shown in titles and journal lines, and the version the patch notes and the
 # What's new window go by. The script file is named after the version.
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.7.0.25"
+APP_VERSION = "2.7.0.34"
 # The folder of module files, beside this script.
 MODULE_DIR = "VirtueAssistantModules"
 # The folder every saved file goes in, beside this script (Kit.data_dir).
@@ -69,8 +69,10 @@ SETTINGS_KEY = "VirtueAssistant_settings"
 # False. Code that only the full suite does (the shared alive flag, the zone bookkeeping) is
 # guarded by it.
 VA_ALONE = "VA_ALONE" in globals()
+START_AT = time.time()
 # Shared-variable key the suite keeps fresh once a second, so another script can tell it is running.
 ALIVE_KEY = "VirtueAssistant_alive"
+START_KEY = "VirtueAssistant_starting"
 # Per-character key (one per module) holding the parts a module had on when run alone.
 ALONE_PARTS = "VirtueAssistant_alone_parts_%s"
 # Seconds between passes of the main loop.
@@ -1909,6 +1911,14 @@ class Kit(object):
         return t
 
     @staticmethod
+    def inert(ctrl):
+        """Turn mouse input off on a drawn control (a label, box or picture) and return it, so the control
+        never takes a click meant for the window. Used while building windows.
+        """
+        ctrl.SetAcceptMouseInput(False)
+        return ctrl
+
+    @staticmethod
     def add_box(g, x, y, w, h, alpha=0.5, color="#FFFFFF"):
         """A flat translucent rectangle (grid lines, markers); never takes the mouse. None when w or h is not
         positive.
@@ -2389,8 +2399,9 @@ class Kit(object):
     def hook_once(holder, key, *pairs):
         """Hook client events once per holder key, remembering them for unhook.
 
-        Each pair is (event name, handler). holder[key] marks that they are hooked; the owner is the
-        current module, so unhook(owner) can undo them.
+        Each pair is (event name, handler). The client's API.Events methods are named On plus the event
+        name, so a bare name gets the On prefix here, the same rule unhook uses. holder[key] marks that
+        they are hooked; the owner is the current module, so unhook(owner) can undo them.
         """
         if holder[key]:
             return
@@ -2398,7 +2409,7 @@ class Kit(object):
         owner = HOST.owner_key()
         for event, fn in pairs:
             try:
-                getattr(API.Events, event)(fn)
+                getattr(API.Events, event if event.startswith("On") else "On" + event)(fn)
             except Exception:
                 continue
             Kit._hooks.setdefault(owner, []).append((event, fn, holder, key))
@@ -4385,6 +4396,15 @@ class Kit(object):
                 self.slot = new
                 self.queue("redraw")()
 
+        def zone_slot(self, mw, mh):
+            """The zone slot (width, height) this window should fill, or None to keep its own size.
+
+            None when its zone is not up, the window is minimised, or the slot is narrower than mw or shorter
+            than mh (a slot too small for the window is ignored). Client thread, while building the window.
+            """
+            z = self.slot if Kit.zone_up(self.key) and not self.st["minimized"] else None
+            return z if z is not None and z[0] >= mw and z[1] >= mh else None
+
         def rows(self, row_h, fixed_h, own_n, min_n=1):
             """How many rows of row_h pixels fit the window's zone slot under fixed_h pixels of other content,
             at least min_n; own_n when it is not in a zone.
@@ -5438,6 +5458,10 @@ class Guard(object):
     """
     KEY = "VirtueAssistant_guard"
     EVERY = 0.25
+    # The client's message numbers (Cliloc.enu) for the same four guard lines, mapped to the English text
+    # they stand for, so a line in other words still counts (Journal.said).
+    NUMS = {500112: GUARD_IN_TEXTS[0], 500114: GUARD_IN_TEXTS[0], 500113: GUARD_OUT_TEXTS[0],
+            500115: GUARD_OUT_TEXTS[1]}
 
     def __init__(self):
         """Start with no known state and an empty answer cache."""
@@ -5458,7 +5482,7 @@ class Guard(object):
             self.rd = Journal.reader()
             self.rd.last = 0
         for ln in self.rd.new():
-            low = ln.low
+            low = Journal.said(ln, self.NUMS)
             if "protection of the town guards" not in low:
                 continue
             # Only system lines count; a line spoken by a player carries a name.
@@ -6030,12 +6054,15 @@ class ModuleSlot(object):
     """One entry of the host's module table: a module's description, state and counters.
 
     The module's own api (its hooks) is put in api once its file is loaded. Fields cover the on/off
-    state, the run state, timing (next_due, worst_ms), the errors seen, the category and the parts
-    (optional sub-features) the player may switch on one by one.
+    state, the run state, timing (next_due, and the busy records load and part_load), the errors seen,
+    the category and the parts (optional sub-features) the player may switch on one by one.
     """
     def __init__(self, key, title, desc, factory, interval):
         """Create a slot for module key with its title, description, factory and default interval, off and
         not loaded.
+
+        load is the module's busy record and part_load maps each of its running parts to theirs: both are
+        lists [decayed ms sum, last time, slowest tick] kept by Host.busy_add.
         """
         self.key = key
         self.title = title
@@ -6046,9 +6073,11 @@ class ModuleSlot(object):
         self.enabled = self.default_on = self.running = self.busy = self.pending_stop = False
         self.thread_due = self.on_client = self.has_thread = False
         self.category = "Other"
-        self.next_due = self.worst_ms = 0.0
+        self.next_due = 0.0
         self.errors = set()
         self.error_times = {}
+        self.load = [0.0, 0.0, 0.0]
+        self.part_load = {}
         self.start_tok = None
         self.page_err_at = 0.0
         self.parts = self.aliases = ()
@@ -6168,15 +6197,15 @@ def _error_where():
 
 
 class JLine(object):
-    """One journal line, with its text, lower-case text, speaker name, hue, client time ticks, time seen
-    and text type.
+    """One journal line, with its text, lower-case text, speaker name, hue, client time ticks, time seen,
+    text type and the client message number (num, 0 until Journal.pair finds one).
     """
-    __slots__ = ("seq", "text", "low", "name", "hue", "ticks", "at", "kind")
+    __slots__ = ("seq", "text", "low", "name", "hue", "ticks", "at", "kind", "num")
 
     def __init__(self, seq, text, name, hue, ticks, at, kind):
         """Store the fields and the lower-case copy of the text used for matching."""
         self.seq, self.text, self.low, self.name = seq, text, text.lower(), name
-        self.hue, self.ticks, self.at, self.kind = hue, ticks, at, kind
+        self.hue, self.ticks, self.at, self.kind, self.num = hue, ticks, at, kind, 0
 
 
 class Journal(object):
@@ -6185,6 +6214,8 @@ class Journal(object):
 
     New entries are given a sequence number. Each module holds a Reader that remembers the last number
     it saw, so no module misses a line and none sees one twice. Lines are kept for KEEP seconds.
+    The client's message event (OnClilocMessageReceived) is hooked once; its records in clis (at most
+    CLI_CAP, kept CLI_AGE seconds) give journal lines their message number.
     """
     KEEP = 60.0
     MAX_BACK = 30.0
@@ -6194,6 +6225,10 @@ class Journal(object):
     read_at = 0.0
     pass_id = -1
     zero_seen = False
+    clis = []
+    CLI_CAP = 64
+    CLI_AGE = 5.0
+    hook = {"on": False}
     ATTACK_RE = re.compile(r"\*?\s*(.+?)\s+is attacking you", re.IGNORECASE)
 
     class Reader(object):
@@ -6235,13 +6270,17 @@ class Journal(object):
 
         Entries are matched by (time ticks, text, name). Entries with no time stamp (ticks 0) cannot be
         matched that way, so they are counted and only the surplus over what is already kept is added.
-        Lines older than KEEP seconds are dropped with their match keys. Client tick.
+        Lines older than KEEP seconds are dropped with their match keys. Client tick. The first read (and
+        the first after the hook's owner stops) hooks the message event and drops any stale records.
         """
         pid = HOST.pass_id
         if pid == Journal.pass_id and not force:
             return
         Journal.pass_id = pid
         now = time.time()
+        if not Journal.hook["on"]:
+            del Journal.clis[:]
+            Kit.hook_once(Journal.hook, "on", ("OnClilocMessageReceived", Journal.on_cliloc))
         # Look back as far as the last read (plus a second), never more than MAX_BACK seconds.
         back = min(Journal.MAX_BACK, max(1.0, now - Journal.read_at + 1.0)) if Journal.read_at else Journal.MAX_BACK
         Journal.read_at = now
@@ -6311,6 +6350,9 @@ class Journal(object):
                                            str(e.TextType or "")))
             except Exception:
                 continue
+        # Give the new lines their message numbers before any reader sees them.
+        if Journal.clis:
+            Journal.pair(now)
         cut = now - Journal.KEEP
         lines = Journal.lines
         if lines and lines[0].at < cut:
@@ -6320,6 +6362,52 @@ class Journal(object):
                 seen.pop((ln.ticks, ln.text, ln.name), None)
                 i += 1
             del lines[:i]
+
+    @staticmethod
+    def on_cliloc(e):
+        """Script event: a client message by number arrived. Only stores (number, text, time) in clis, capped
+        at CLI_CAP; the journal read pairs it with its line.
+        """
+        try:
+            Journal.clis.append((int(e.Cliloc), str(e.Text or ""), time.time()))
+        except Exception:
+            return
+        if len(Journal.clis) > Journal.CLI_CAP:
+            del Journal.clis[:-Journal.CLI_CAP]
+
+    @staticmethod
+    def pair(now):
+        """Give each stored message record's number to the newest numberless journal line with the same text
+        from the last CLI_AGE seconds.
+
+        A record whose line has not been read yet waits (the event can come before the line); one older
+        than CLI_AGE is dropped. A line takes at most one number, so it can never match twice.
+        """
+        recs, Journal.clis = Journal.clis, []
+        keep = []
+        for rec in recs:
+            num, text, t = rec
+            hit = False
+            for ln in reversed(Journal.lines):
+                if ln.at < t - Journal.CLI_AGE:
+                    break
+                if not ln.num and ln.text == text:
+                    ln.num = num
+                    hit = True
+                    break
+            if not hit and now - t < Journal.CLI_AGE:
+                keep.append(rec)
+        if keep:
+            Journal.clis[:0] = keep[-Journal.CLI_CAP:]
+
+    @staticmethod
+    def said(ln, nums):
+        """The text to match a journal line by: when its message number is in nums and the line's own words
+        lack that text (another language, the client's wording changed), the mapped English text;
+        otherwise the line's lower-case text, so English lines match exactly as before.
+        """
+        t = nums.get(ln.num) if ln.num else None
+        return ln.low if t is None or t in ln.low else t
 
     @staticmethod
     def since(t):
@@ -6542,13 +6630,31 @@ class Host(object):
     Modules are loaded into slots and driven from here. The client tick runs the pass that gives each
     running module its turn; script threads run modules that need them. The host also keeps the caches
     shared by every module (the player, mobiles, backpack), hotkeys, docks and layout, fight and
-    cursor guards, services and saved preferences. Modules reach it as HOST.
+    cursor guards, services and saved preferences, the start-up timing list, the start mark and the
+    safe-start window, and the check that warns about TazUO settings the shard rules forbid. Modules
+    reach it as HOST.
     """
     def __init__(self):
-        """Create the empty tables, caches and flags, and the built-in Alerts and Hotkeys settings pages."""
+        """Create the empty tables, caches and flags, and the built-in Alerts and Hotkeys settings pages.
+
+        boot starts the start-up timing list with the time spent before the host existed. held_on and
+        held_parts name the modules and parts that are switched off for this session only but stay saved as
+        on. marked says this run set the start mark; ask_g and ask_store belong to the safe-start window.
+        tz_at is when the TazUO settings check runs next, tz_off holds its key when a client name it reads
+        is missing, and tz_told the settings already warned about this session.
+        """
         self.slots = []
         self.by_key = _KeyMap(self)
         self.old_map = {}
+        # boot is a list of (phase, seconds). The first phase is everything the mother script did before the
+        # host was made, measured from START_AT, the mother's first lines. It is set to None once the
+        # start-up line has been dealt with, which stops further timing.
+        self.boot = [("code", time.time() - START_AT)]
+        # boot_at is the time the last phase ended.
+        self.boot_at = time.time()
+        # boot_load adds up the module compile times, which are taken out of the final first build phase so
+        # they are not counted twice.
+        self.boot_load = 0.0
         self.cur_part = self.cur_owner = self.config = self.hub = self.grid = self.profile_req = self.alone = None
         self.hurt_hp = self._me = self._want_raw = self.attack_rd = None
         self.stack = []
@@ -6596,6 +6702,13 @@ class Host(object):
         self.hotkey_list = []
         self.pages = []
         self.held_on = set()
+        self.held_parts = set()
+        self.marked = False
+        self.ask_g = None
+        self.ask_store = ({}, {})
+        self.tz_at = 0.0
+        self.tz_off = set()
+        self.tz_told = set()
         for key, title, page in ((ALERTS_PAGE, "Alerts", AlertsPage()), (KEYS_PAGE, "Hotkeys", KeysPage())):
             s = ModuleSlot(key, title, "", None, 1.0)
             s.api = page.api()
@@ -6860,9 +6973,12 @@ class Host(object):
         return cur.key
 
     def _parts_fill(self, s):
-        """When a module has parts but none is on, switch on its default parts (or its first)."""
+        """When a module has parts but none is on, switch on its default parts (or its first).
+
+        A part held off for this session (held_parts) is never chosen as a default.
+        """
         if s.parts and not s.parts_wanted():
-            for p in [p[0] for p in s.parts if p[3]] or [s.parts[0][0]]:
+            for p in [p[0] for p in s.parts if p[3] and (s.key, p[0]) not in self.held_parts] or [s.parts[0][0]]:
                 s.parts_on[p] = True
 
     def _part_notify(self, s):
@@ -6881,15 +6997,17 @@ class Host(object):
             s.busy = was
 
     def part_set(self, module, part, on):
-        """Switch a part of a module on or off.
+        """Switch a part of a module on or off, as the player's own choice.
 
-        Switching a part on also turns the module on; switching off the last one turns the module off.
-        Otherwise the preferences are saved and the module is told. The settings page is refreshed.
+        Any choice makes the part no longer held, so it is saved as the player set it. Switching a part on
+        also turns the module on; switching off the last one turns the module off. Otherwise the
+        preferences are saved and the module is told. The settings page is refreshed.
         """
         s = dict.get(self.by_key, module)
         if s is None or s.part(part) is None:
             return
         on = bool(on)
+        self.held_parts.discard((s.key, part))
         if s.parts_on.get(part) == on:
             if on and not s.enabled:
                 self.enable(module)
@@ -7312,13 +7430,14 @@ class Host(object):
         """Load a lazy module now: compile and run its file in this namespace.
 
         The file registers itself with the host. When it does not, or fails, the slot is marked broken
-        with
-        the message and line, and the player is told. Returns True when the module has an api.
+        with the message and line, and the player is told. While start-up timing runs, the time taken is
+        added to the boot list under the module's title. Returns True when the module has an api.
         """
         if s is None:
             return False
         if s.lazy is not None:
             path = s.lazy
+            t0 = time.time()
             try:
                 code = compile(_read_text(path), path, "exec")
                 exec(code, globals())
@@ -7330,7 +7449,37 @@ class Host(object):
                 where = (" (%s line %s)" % (os.path.basename(path), line)) if line else _error_where()
                 s.api, s.broken = None, "%s%s" % (getattr(ex, "msg", None) or ex, where)
                 Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
+            if self.boot is not None:
+                d = time.time() - t0
+                self.boot.append((s.title, d))
+                self.boot_load += d
         return s.api is not None
+
+    def boot_mark(self, name):
+        """Close a start-up phase called name: add it to the boot list with the time since the last phase.
+
+        Does nothing once start-up timing has finished.
+        """
+        if self.boot is not None:
+            t = time.time()
+            self.boot.append((name, t - self.boot_at))
+            self.boot_at = t
+
+    def boot_done(self):
+        """End start-up timing and, only when the main setting startup is 1 and the suite is not running
+        alone, print one journal line with the total and each phase.
+
+        Called by run_due once the module load jobs are done. The last phase, first build, is the time
+        since the final mark less the module compile times already listed.
+        """
+        # Setting boot to None above makes this a one-shot, whether or not the line is printed.
+        boot, self.boot = self.boot, None
+        t = time.time()
+        if self.alone is not None or self.pref_int("startup", 0) != 1:
+            return
+        boot.append(("first build", max(0.0, t - self.boot_at - self.boot_load)))
+        Kit.say("start-up took %.1f s (%s)." % (t - START_AT, ", ".join("%s %d ms" % (n, d * 1000)
+                                                                   for n, d in boot)), Kit.HUE_INFO)
 
     def current(self):
         """Return the slot of the module being run now, or None."""
@@ -7534,10 +7683,10 @@ class Host(object):
     def tick(self, s, hook="tick"):
         """Run one hook (tick by default, or thread_tick) of module s, timing it.
 
-        Errors are reported and counted, never raised. The worst time (decaying) is kept for the stats.
-        After
-        a tick the next due time and whether the thread hook is wanted are asked from the module. A stop
-        requested while the module was busy is carried out afterwards.
+        Errors are reported and counted, never raised. The time of each call is added to the module's
+        load record, which feeds the stats (busiest parts, slowest lately). After a tick the next due time
+        and whether the thread hook is wanted are asked from the module. A stop requested while the
+        module was busy is carried out afterwards.
         """
         s.busy = True
         stack = self.stack
@@ -7556,14 +7705,38 @@ class Host(object):
                 stack.remove(s)
             s.busy = False
             t1 = time.time()
-            ms = (t1 - t0) * 1000.0
-            decayed = s.worst_ms * 0.98
-            s.worst_ms = ms if ms > decayed else decayed
+            Host.busy_add(s.load, (t1 - t0) * 1000.0, t1)
         if hook == "tick":
             s.next_due = t1 + Host._ask(s.iv_fn, s.interval)
             s.thread_due = s.has_thread and Host._ask(s.thread_want, True, bool)
         if s.pending_stop:
             self._stop(s)
+
+    BUSY_T = 10.0
+
+    @staticmethod
+    def busy_add(ld, ms, t1):
+        """Add one tick of ms milliseconds, ending at time t1, to the load record ld.
+
+        ld is [decayed ms sum, last time, slowest tick]. The sum decays with a time constant of BUSY_T
+        (10 s), so sum / BUSY_T is the busy milliseconds per second. The slowest tick decays by 2% per
+        tick, so it shows the worst time lately. Runs on whichever thread ran the tick.
+        """
+        d = ld[1] - t1
+        # The sum only decays when time has passed; a clock that jumped back adds no decay.
+        ld[0] = (ld[0] * math.exp(d / Host.BUSY_T) if d < 0.0 else ld[0]) + ms
+        ld[1] = t1
+        w = ld[2] * 0.98
+        ld[2] = ms if ms > w else w
+
+    @staticmethod
+    def busy_share(ld, now):
+        """Return the busy milliseconds per second of load record ld, read at time now.
+
+        The stored sum is decayed to now first, so a module that has gone quiet fades away.
+        """
+        d = ld[1] - now
+        return (ld[0] * math.exp(d / Host.BUSY_T) if d < 0.0 else ld[0]) / Host.BUSY_T
 
     @staticmethod
     def _ask(fn, default, cast=None):
@@ -7651,8 +7824,11 @@ class Host(object):
         are due.
 
         Client-tick modules run inside the client pass. Script-thread modules are ticked here when poked,
-        named by a poke key, or due by their interval (also when the clock jumped back). Thread hooks run
-        when wanted. Blocking target requests and queued module loads are handled last.
+        named by a poke key, or due by their interval (also when the clock jumped back). The TazUO settings
+        check runs here when due, on the script thread and never inside a module tick. Thread hooks run
+        when wanted. Blocking target requests and queued module loads are handled last. When the load
+        jobs are all done, start-up timing is closed with boot_done, and the start mark is cleared once
+        every running module has ticked at least once.
         """
         if self.shut:
             return
@@ -7674,6 +7850,8 @@ class Host(object):
         now = time.time()
         if self.prefs_due:
             self.prefs_flush()
+        if now >= self.tz_at:
+            self.tz_warn()
         if poked or keys or self._client_due(now):
             self.pass_poked, self.pass_all = poked or user, poked
             try:
@@ -7712,6 +7890,13 @@ class Host(object):
             self.drain()
         if self.load_jobs and not self.stack:
             self._run_load_jobs()
+        elif self.boot is not None and not self.load_jobs and self.ask_g is None:
+            self.boot_done()
+        # The start mark stays set while the safe-start window waits, while modules are still loading and
+        # until each running module has ticked once (a tick sets next_due). A start that hangs or crashes
+        # before this point leaves the mark for the next start to find.
+        elif self.marked and self.ask_g is None and not self.load_jobs and all(s.next_due > 0.0 for s in self.active):
+            self.unmark()
         cfg = self.config
         if cfg is not None and cfg.prof_stale and not self.stack:
             cfg.refresh_profiles()
@@ -8185,8 +8370,8 @@ class Host(object):
             self.ui_busy = False
 
     def ui_tick(self):
-        """Per-pass window work: settings window, shared alive stamp, hub, docks, grid, alerts, guard and
-        what's new.
+        """Per-pass window work: settings window, shared alive stamp, hub, docks, grid, alerts, guard,
+        what's new and the safe-start window.
 
         Runs at UI_TICK; slows down to UI_IDLE after UI_IDLE_AFTER seconds without input, unless a mouse
         button is held or the layout is arranging. Errors are shown once, never raised.
@@ -8221,6 +8406,8 @@ class Host(object):
                     self._tell("%s: guard-zone error: %s%s" % (APP_NAME, ex, _error_where()))
                 if self.whats_new.g is not None:
                     self.whats_new.poll()
+                if self.ask_g is not None:
+                    self.ask_poll()
         except Exception as ex:
             msg = "%s: settings window error: %s%s" % (APP_NAME, ex, _error_where())
             if not self.stopping():
@@ -8232,7 +8419,8 @@ class Host(object):
         """Load the saved settings and set each module's state.
 
         A module that is on by default is switched on once (the seen list). Modules saved as on but not
-        loadable are kept in held_on so a missing file does not lose the choice. Dark mode is applied.
+        loadable are kept in held_on so a missing file does not lose the choice. Held parts from an
+        earlier load are forgotten here; tz_check holds them again when needed. Dark mode is applied.
         """
         prefs = self.prefs = Kit.codec_load(Kit.get_var(SETTINGS_KEY))
         on = [k for k in prefs.get("modules", "").split(",") if k]
@@ -8240,6 +8428,7 @@ class Host(object):
         was = prefs.get("seen", "")
         changed = self._migrate_parts(prefs, on, seen)
         held = self.held_on = set()
+        self.held_parts = set()
         for s in self.slots:
             if s.default_on and s.key not in seen:
                 on.append(s.key)
@@ -8330,8 +8519,9 @@ class Host(object):
         """Build the saved settings text from the module and part states and save it.
 
         Returns the text. Saves are spaced PREFS_EVERY seconds apart unless now is True; a skipped save
-        sets prefs_due for prefs_flush. Does nothing while prefs_frozen (profile load). The settings
-        windows are given the values to keep their own copies.
+        sets prefs_due for prefs_flush. Does nothing while prefs_frozen (profile load). A module or part
+        held off for this session (held_on, held_parts) is still saved as on, so the hold lasts only this
+        run. The settings windows are given the values to keep their own copies.
         """
         if self.config is not None:
             self.config.box_hit = True
@@ -8341,12 +8531,12 @@ class Host(object):
         for s in self.slots:
             if not s.enabled and s.key not in self.held_on:
                 for p in s.parts:
-                    if s.parts_on.get(p[0]):
+                    if s.parts_on.get(p[0]) or (s.key, p[0]) in self.held_parts:
                         off.append("%s.%s" % (s.key, p[0]))
                 continue
             mods.append(s.key)
             for p in s.parts:
-                if s.parts_on.get(p[0]):
+                if s.parts_on.get(p[0]) or (s.key, p[0]) in self.held_parts:
                     parts.append("%s.%s" % (s.key, p[0]))
                     for old in p[4]:
                         if old not in mods:
@@ -8421,8 +8611,9 @@ class Host(object):
         again.
 
         The settings window and hub are rebuilt, key binds, alerts, guard memory and layout are reloaded,
-        each module's api is built again, and every enabled module is started. Settings saving is
-        frozen meanwhile.
+        each module's api is built again, and every enabled module is started. The client check (tz_check)
+        runs again after the settings are loaded, so a module the client cannot support stays held.
+        Settings saving is frozen meanwhile.
         """
         if PROFILES.info(name) is None:
             raise Exception('there is no profile "%s"' % name)
@@ -8459,6 +8650,7 @@ class Host(object):
                         s.api, s.broken = None, str(ex) + _error_where()
                         Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
             self.load_prefs()
+            self.tz_check()
             LAYOUT.load()
         finally:
             self.prefs_frozen = False
@@ -8494,15 +8686,218 @@ class Host(object):
         Kit.say('"%s" is the favourite profile: characters that haven\'t loaded another get it at start.%s'
                    % (name, note), Kit.HUE_GOOD)
 
+    def hold(self, s, part=None):
+        """Hold a module, or one part of it, off for this session without changing what is saved.
+
+        With a part, the part is switched off and remembered in held_parts; the module itself is held only
+        when no other part is wanted. A held module is disabled, remembered in held_on and stopped on the
+        next pass (pending_stop). Does nothing for a part that is already off.
+        """
+        if part is not None:
+            # Only a part that is on can be held; one the player left off stays as it is.
+            if not s.parts_on.get(part):
+                return
+            s.parts_on[part] = False
+            self.held_parts.add((s.key, part))
+            # The module is held only when it has no other part wanted.
+            if s.parts_wanted():
+                return
+        if s.enabled:
+            s.enabled = False
+            self.held_on.add(s.key)
+            s.pending_stop = s.running
+
+    TZ_GONE = "TazUO changed %s; %s %s off until the next Virtue Assistant."
+
+    def tz_check(self):
+        """Check the client against the Tz.NEED table and hold what cannot work, at start and after a profile load.
+
+        Prints one journal line per missing client name, naming the modules or parts it affects, and holds
+        them off for this session through hold. A key with an underscore is not a module or part: it is
+        only a phrase for the journal line. Such keys are kept in tz_off, so code that has no fallback of
+        its own (the TazUO settings check) can stop itself. Also makes the settings check run on the next
+        pass. Runs on the script thread, after the settings are loaded.
+        """
+        self.tz_at = 0.0
+        self.tz_off = set()
+        for name, keys in safe(Tz.missing, ()):
+            titles = []
+            for key in keys:
+                s, part = self.resolve(key)
+                # Keys that name no module or part are skipped unless they hold an underscore.
+                if s is None and "_" not in key:
+                    continue
+                t = key.replace("_", " ") if s is None else s.part_title(part)
+                if t not in titles:
+                    titles.append(t)
+                if s is not None:
+                    self.hold(s, part)
+                else:
+                    self.tz_off.add(key)
+            if titles:
+                Kit.say(self.TZ_GONE % (name, ", ".join(titles), "are" if len(titles) > 1 else "is"), Kit.HUE_BAD)
+
+    TZ_KEY = "TazUO_settings_check"
+    TZ_EVERY = 60.0
+    TZ_LINE = "TazUO's \"%s\" is on; %s. Switch it off in %s."
+    TZ_RULE = "it %s by itself, which this shard's rules don't allow"
+    TZ_AL = "Legion Assistant > Agents > Auto Loot"
+    TZ_SOON = 5.0
+    # The four TazUO settings that act by themselves against the shard rules: auto loot (R2), auto loot of
+    # human corpses (R6, looting other players' corpses flags the looter criminal), the scavenger (R2) and
+    # automatic doors (R4, Auto Doors stays removed). Each row is the Profile property, the label TazUO's
+    # own window shows, the rule in plain words and where the switch is.
+    TZ_SETS = (("EnableAutoLoot", "Enable Auto Loot", TZ_RULE % "loots", TZ_AL),
+               ("AutoLootHumanCorpses", "Auto Loot Human Corpses",
+                "it loots players' corpses by itself, which can flag you criminal", TZ_AL),
+               ("EnableScavenger", "Enable Scavenger", TZ_RULE % "picks up items",
+                "Legion Assistant > Agents > Scavenger"),
+               ("AutoOpenDoors", "Automatically open doors", TZ_RULE % "opens doors", "Options > Gameplay > Movement"))
+
+    def tz_warn(self):
+        """Warn once per session about each TazUO setting that breaks the shard rules; never change one.
+
+        Runs from run_due on the script thread: at start, after a profile load and then every TZ_EVERY
+        seconds, so a setting switched on later still gets its one line. Silent while a module runs alone,
+        when the player ticked the tz_quiet main setting (System Stats page) or when tz_check found a client
+        name this check reads missing. With no TazUO profile yet it looks again after TZ_SOON seconds.
+        """
+        self.tz_at = time.time() + self.TZ_EVERY
+        if self.alone is not None or self.TZ_KEY in self.tz_off or self.pref_int("tz_quiet", 0) == 1:
+            return
+        on = safe(self.tz_on, ())
+        if on is None:
+            self.tz_at = time.time() + self.TZ_SOON
+            return
+        for name, label, why, where in self.TZ_SETS:
+            if name in on and name not in self.tz_told:
+                self.tz_told.add(name)
+                Kit.say(self.TZ_LINE % (label, why, where), Kit.HUE_BAD)
+
+    def tz_on(self):
+        """Read which of the TZ_SETS settings are on in TazUO's current profile, by reflection.
+
+        Returns a set of property names, or None while no profile is loaded. Human corpses count only while
+        auto loot itself is on. The scavenger counts only once its list has loaded and holds entries, since
+        TazUO ships it switched on with an empty list. A failed scavenger read leaves only that one out.
+        """
+        cur = Tz.get(None, "CurrentProfile", Tz.T("ClassicUO.Configuration.ProfileManager"))
+        if cur is None:
+            return None
+        on = set(sp[0] for sp in self.TZ_SETS if bool(Tz.get(cur, sp[0])))
+        if "EnableAutoLoot" not in on:
+            on.discard("AutoLootHumanCorpses")
+        if "EnableScavenger" in on:
+            on.discard("EnableScavenger")
+            with Kit.quiet:
+                sm = Tz.get(None, "Instance", Tz.T("ClassicUO.Game.Managers.ScavengerManager"))
+                if bool(Tz.get(sm, "IsLoaded")) and int(Tz.get(sm, "ScavengerEntries").Count) > 0:
+                    on.add("EnableScavenger")
+        return on
+
+    def mark_start(self):
+        """Set the per-character start mark and return whether it was already set.
+
+        A mark found set means the last start never finished. The key is kept out of profiles (OWN_VARS).
+        """
+        was = Kit.get_var(START_KEY) == "1"
+        Kit.put_var(START_KEY, "1")
+        self.marked = True
+        return was
+
+    def unmark(self, stop=False):
+        """Clear the start mark once start-up is judged finished.
+
+        With stop True (the script is ending) the mark is cleared only when the player asked for the stop
+        (API.StopRequested); a stop after a crash leaves it set. It is never cleared while the safe-start
+        window is waiting for an answer.
+        """
+        if self.marked and self.ask_g is None and (not stop or safe(lambda: bool(API.StopRequested), False)):
+            self.marked = False
+            Kit.put_var(START_KEY, "")
+
+    def start_on(self):
+        """Queue every enabled module to be loaded and started by the main loop."""
+        self.load_jobs.extend(s for s in self.slots if s.enabled and s not in self.load_jobs)
+
+    SAFE_ASK = "Virtue Assistant didn't finish starting last time. Start with every module off?"
+    SAFE_DONE = "every module is off for now; tick them on one at a time on the Modules tab (%s)."
+    SAFE_BUTTONS = (("normal", Kit.ART_PLAY, "Start normally", "Turn on the modules you had on"),
+                    ("safe", Kit.ART_PLAY, "Start safely", "Keep every module off for now"))
+
+    def ask_open(self):
+        """Open the safe-start window and return whether it is showing.
+
+        Returns False when the settings window does not exist yet. The window is built on the client tick
+        under its own key-bind scope.
+        """
+        if self.config is None:
+            return False
+        with Kit.quiet:
+            Kit.on_client(lambda: Binds.scoped("va.safe", self._ask_build))
+        return self.ask_g is not None
+
+    def _ask_build(self):
+        """Build the small SAFE START window: the question and the Start normally and Start safely buttons.
+
+        Runs on the client tick. The window is centred horizontally and sits a third of the way down the
+        screen.
+        """
+        M, W = Kit.MARGIN, 420
+        lines = Kit.wrap(self.SAFE_ASK, W - 2 * M - 24)
+        n = len(lines)
+        h = 48 + 20 * n
+        yb = M + 30 + Kit.GAP
+        H = yb + h + M
+        self.ask_store = ({}, {})
+        g = G.CreateGump(True, True)
+        Kit.add_window_frame(g, W, H)
+        Kit.add_section(g, M, M, W - 2 * M, 30)
+        Kit.add_label(g, "SAFE START", M + 30, M + 7, Kit.HUE_TITLE)
+        Kit.add_section(g, M, yb, W - 2 * M, h)
+        for i, line in enumerate(lines):
+            Kit.add_label(g, line, M + 12, yb + 8 + 20 * i, Kit.HUE_TEXT)
+        Kit.buttons(g, self.ask_store, M + 12, yb + 14 + 20 * n, self.SAFE_BUTTONS)
+        sw, sh = Kit.screen()
+        Kit.place(g, max(0, ((sw or 1024) - W) // 2), max(0, ((sh or 768) - H) // 3), W, H)
+        G.AddGump(g)
+        self.ask_g = g
+
+    def ask_poll(self):
+        """Poll the safe-start window and act on a click or on its being closed.
+
+        Start safely holds every module for this session, and the journal lists the ones that were on so
+        the player can tick them on again one at a time on the Modules tab. Start normally, or closing the
+        window, keeps the saved modules. Either way the enabled modules are then queued to load. Called
+        from ui_tick.
+        """
+        st = self.ask_store
+        safe_on = Kit.was_clicked(st, "safe")
+        if not (safe_on or Kit.was_clicked(st, "normal") or not Kit.is_open(self.ask_g)):
+            return
+        g, self.ask_g = self.ask_g, None
+        Kit.dispose(g)
+        if safe_on:
+            names = [s.title for s in self.slots if s.enabled]
+            for s in self.slots:
+                self.hold(s)
+            Kit.say(self.SAFE_DONE % (", ".join(names) or "none"), Kit.HUE_INFO)
+        self.start_on()
+        self.poke()
+
     def run(self):
         """Start the full suite: find the client, load settings, build the windows, then run the main loop.
 
-        Shows a start line naming the modules that are on. Window build errors are shown, not fatal.
+        Sets the start mark first and checks the client for missing members (tz_check). Shows a start line
+        naming the modules that are on. Modules are queued to load at once, unless the last start left its
+        mark set, in which case the safe-start window decides. Window build errors are shown, not fatal.
         """
+        ask = self.mark_start()
         Client.find()
         if Client.mouse is None:
             Kit.say("no client mouse timer; double-clicks use the client's own event.", Kit.HUE_INFO)
         self.load_prefs()
+        self.tz_check()
         Kit.read_screen()
         LAYOUT.load()
         SNAP.on_drop(LAYOUT.dropped)
@@ -8528,12 +8923,16 @@ class Host(object):
                    "Tick a module on the Modules tab."), Kit.HUE_GOOD)
         API.SetSharedVar(ALIVE_KEY, str(time.time()))
         Binds.load()
-        self.load_jobs.extend(s for s in self.slots if s.enabled and s not in self.load_jobs)
+        if not ask or not self.ask_open():
+            # Without the safe-start window the saved modules start at once.
+            self.start_on()
         Kit.note_screen()
         try:
             self.whats_new.open()
         except Exception as ex:
             self._tell("%s: couldn't make the What's new window: %s" % (APP_NAME, ex))
+        # Last start-up phase before the loop; the time after it is reported as the first build.
+        self.boot_mark("main window")
         self.loop()
 
     def run_alone(self, s):
@@ -8583,12 +8982,14 @@ class Host(object):
     def shutdown(self):
         """Stop everything in order: modules, windows, layout, saved settings, then print the stopped line.
 
-        Safe to call twice (it runs once); also registered with the client's stop hook.
+        Safe to call twice (it runs once); also registered with the client's stop hook. The start mark is
+        cleared first, and only for a stop the player asked for.
         """
         if self.shut:
             return
         self.shut = self.quitting = True
         safe(Picker.drop)
+        self.unmark(True)
         if self.off_q:
             self._drop_offs()
         if not VA_ALONE:
@@ -8610,7 +9011,9 @@ class Host(object):
         self._refresh_active()
         if self.hub is not None:
             safe(self.hub.close)
-        for fn in (ALERTS.close, self.whats_new.close, GUARD.store, Kit.note_screen):
+        for fn in (ALERTS.close, self.whats_new.close, GUARD.store, Kit.note_screen, lambda: Kit.dispose(self.ask_g),
+                   # Remove the script's own event hooks (the journal's message hook among them).
+                   lambda: Kit.unhook(None)):
             safe(fn)
         if self.grid is not None:
             safe(self.grid.hide)
@@ -8645,6 +9048,7 @@ class PartSet(object):
         self.want = self._slot = None
         self.busy = 0
         self.stopping = False
+        self.load = {}
         self.shared = shared or {}
 
     def slot(self):
@@ -8714,7 +9118,9 @@ class PartSet(object):
 
     def start_part(self, pk):
         """Starts part pk: builds its hooks, marks it running, makes it due now and calls its start hook.
-        Does nothing if it already runs or the set is stopping; a part with no hooks is dropped.
+
+        Does nothing if it already runs or the set is stopping; a part with no hooks is dropped. Gives the
+        part a load record and shares the set's records with the slot as part_load.
         """
         if pk in self.running or self.stopping:
             return
@@ -8722,6 +9128,8 @@ class PartSet(object):
         if not api:
             self.api.pop(pk, None)
             return
+        if pk not in self.load:
+            self.load[pk] = [0.0, 0.0, 0.0]
         self.running.append(pk)
         self._sync_slot()
         self.due[pk] = 0.0
@@ -8729,6 +9137,7 @@ class PartSet(object):
         s = self.slot()
         if s is not None:
             s.next_due = 0.0
+            s.part_load = self.load
         self._call(pk, "start")
 
     def stop_part(self, pk):
@@ -8779,12 +9188,14 @@ class PartSet(object):
         """Client tick: runs the tick hook of every part that is due, then applies any waiting part change.
 
         A part is due on its schedule, when the pass was poked, when a pass key names it, when the clock
-        ran back, or slightly early (Host.EARLY) so ticks do not slip a whole pass.
+        ran back, or slightly early (Host.EARLY) so ticks do not slip a whole pass. Each call is timed
+        and added to the part's load record.
         """
         now = time.time()
         poked = HOST.pass_poked
         running = self.running
         due = self.due
+        load = self.load
         keys = HOST.pass_keys if self.key in HOST.pass_keys else None
         for pk in list(running):
             if pk not in running:
@@ -8792,9 +9203,13 @@ class PartSet(object):
             d = due.get(pk, 0.0)
             if poked or now + Host.EARLY >= d or d - now > Host.CLOCK_BACK or (
                     keys is not None and self.key + "." + pk in keys):
+                # One pair of time.time() calls times the part; the end time also anchors the next due time.
+                t0 = time.time()
                 self._call(pk, "tick")
+                t1 = time.time()
+                Host.busy_add(load[pk], (t1 - t0) * 1000.0, t1)
                 nxt, has_thread, want = self._fns.get(pk, self._NOFN)
-                due[pk] = time.time() + Host._ask(nxt, self._iv.get(pk, 0.1))
+                due[pk] = t1 + Host._ask(nxt, self._iv.get(pk, 0.1))
                 self.thread_due[pk] = has_thread and Host._ask(want, True, bool)
         if self.want is not None and not self.busy:
             self.reconcile(self.want)
@@ -8810,11 +9225,16 @@ class PartSet(object):
         return False
 
     def _thread_tick(self):
-        """Script thread: runs thread_tick for each part that asked for it, then applies a waiting part change."""
+        """Script thread: runs thread_tick for each part that asked for it, timing each call into the part's
+        load record, then applies a waiting part change.
+        """
         for pk in list(self.running):
             if self.thread_due.get(pk) and pk in self.running:
                 self.thread_due[pk] = False
+                t0 = time.time()
                 self._call(pk, "thread_tick")
+                t1 = time.time()
+                Host.busy_add(self.load[pk], (t1 - t0) * 1000.0, t1)
         if self.want is not None and not self.busy:
             self.reconcile(self.want)
 
@@ -8930,10 +9350,106 @@ class PartSet(object):
 
 class Tz(object):
     """Reflection helpers for reading and writing TazUO internals that Legion's API does not expose.
-    Lookups are cached in _found so repeated calls cost one dictionary hit.
+
+    Lookups are cached in _found so repeated calls cost one dictionary hit. NEED lists what Virtue
+    Assistant reads this way, so a client that lacks one of them can be found at start.
     """
     _types = {}
     _MISS = object()
+    # Each row is (client type, member names separated by spaces, modules or parts that need it). An
+    # empty member list asks only for the type. A part is written module.part; a key with an
+    # underscore is only text for the journal line. A client member read by reflection needs a row.
+    NEED = (("LegionScripting.LegionAPI", "_onStopScheduled", "early_event_handling"),
+        ("LegionScripting.LegionAPI", "World", "actionbar meters social"),
+        ("Game.GameActions", "", "actionbar social skills.window"), ("Game.GameActions", "DropItem", "inventory.bags"),
+        ("Game.GameActions", "Equip QueueEquipSwap", "inventory.paperdoll"),
+        ("Game.Managers.UIManager", "Gumps", "actionbar grimoire interface hud inventory.bags skills.window social"),
+        ("Game.Managers.UIManager", "ContainerScale", "inventory.bags"),
+        ("Game.Managers.UIManager", "KeyboardFocusControl _gumpsStructureVersion SystemChat", "interface"),
+        ("Game.Managers.UIManager", "MakeTopMostGump", "hud skills.window"),
+        ("Game.Managers.UIManager", "Add", "skills.window"),
+        ("Game.Managers.UIManager", "IsMouseOverWorld", "worldmap.pings"),
+        ("Game.Managers.MacroManager", "GetAllMacros SetMacroToExecute Update FindMacro", "actionbar"),
+        ("Game.Managers.MacroObject", "Items", "actionbar"), ("Game.Managers.MacroObject", "", "social"),
+        ("Common.Enums.MacroType", "", "actionbar social"), ("Common.Enums.MacroSubType", "", "actionbar social"),
+        ("LegionScripting.LegionScripting", "LoadedScripts", "actionbar"),
+        ("Input.Keyboard", "KeyDownEvent KeyUpEvent", "actionbar"),
+        ("Input.Mouse", "CancelDoubleClick", "inventory.bags"),
+        ("Input.Mouse", "Position MClickPosition MButtonPressed", "worldmap.pings"),
+        ("Game.World", "Macros", "actionbar social"), ("Game.World", "Instance Get TargetManager", "hud.frames"),
+        ("Game.World", "TargetManager", "meters"),
+        ("Game.World", "Instance Player SkillsGroupManager", "skills.window"), ("Game.World", "Party Player", "social"),
+        ("Game.Managers.TargetManager", "LastAttack", "hud.frames meters"),
+        ("Client", "Game", "hud.frames inventory.bags inventory.paperdoll social"),
+        ("GameController", "UO", "hud.frames inventory.bags inventory.paperdoll social"),
+        ("UltimaOnline", "Animations FileManager", "hud.frames"),
+        ("UltimaOnline", "GameCursor", "inventory.bags inventory.paperdoll"), ("UltimaOnline", "World", "social"),
+        ("Game.GameCursor", "ItemHold", "inventory.bags"),
+        ("Game.ItemHold", "Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic",
+         "inventory.bags"), ("Configuration.ProfileManager", "CurrentProfile",
+         "hud.frames inventory.bags inventory.storage TazUO_settings_check"),
+        ("Configuration.Profile", "EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors",
+         "TazUO_settings_check"),
+        ("Game.Managers.ScavengerManager", "Instance IsLoaded ScavengerEntries", "TazUO_settings_check"),
+        ("Configuration.Profile", "OpenHealthBarForLastAttack", "hud.frames"),
+        ("Configuration.Profile", "Username ServerName", "inventory.storage"),
+        ("Game.UI.Gumps.BaseHealthBarGump", "LastAttackBar", "hud.frames"),
+        ("Game.GameObjects.Mobile", "GetGroupForAnimation", "hud.frames"),
+        ("Game.GameObjects.Mobile", "IsCovered", "inventory.paperdoll"), ("Renderer.SpriteInfo", "", "hud.frames"),
+        ("Time", "Ticks", "hud.timers"),
+        ("Game.UI.Controls.Control", "SetHitTestOffset _bounds Location", "inventory.bags"),
+        ("Game.UI.Controls.Control", "_bounds Location", "interface inventory.paperdoll"),
+        ("Game.UI.Gumps.ContainerGump", "_data _gumpPicContainer _hitBox", "inventory.bags"),
+        ("Assets.TileDataLoader", "_staticData", "inventory.bags"), ("Game.Data.Layer", "", "inventory.paperdoll"),
+        ("Game.UI.Controls.PaperDollInteractable", "GetAnimID", "inventory.paperdoll"),
+        ("Game.Managers.EventSink", "OnEntityDamage", "meters"), ("Game.GameObjects.Entity", "", "meters"),
+        ("Game.Data.Lock", "", "skills.window"), ("Game.Data.Skill", "Lock", "skills.window"),
+        ("Game.GameObjects.PlayerMobile", "Skills", "skills.window"),
+        ("Game.GameObjects.PlayerMobile", "Serial", "social"),
+        ("Game.Managers.SkillsGroupManager", "Groups", "skills.window"),
+        ("Game.Managers.SkillsGroup", "", "skills.window"),
+        ("Game.UI.Gumps.SkillButtonGump", "SkillID", "skills.window"),
+        ("Game.Managers.FriendsListManager", "Instance", "social"),
+        ("Game.Managers.PartyManager", "Leader Inviter CanLoot Members", "social"),
+        ("Game.UI.Gumps.IgnoreManagerGump", "", "social"), ("Network.AsyncNetClient", "Socket", "social sysstats"),
+        ("Network.AsyncNetClient", "Statistics", "sysstats"), ("Network.NetClientExt", "Send_PartyDecline", "social"),
+        ("CUOEnviroment", "CurrentRefreshRate", "sysstats"), ("CUOEnviroment", "ExecutablePath", "worldmap"),
+        ("Game.Managers.EnhancedMap.EnhancedMapManager", "Instance IsConnected Config Reconnect _client",
+         "worldmap.pings"), ("Game.SelectedObject", "Object", "worldmap.pings"),
+        ("Game.UI.Gumps.WorldViewportGump", "Instance ResizeGameWindow SetGameWindowPosition", "interface"),
+        ("Game.UI.Gumps.SystemChatControl", "IsDisposed ParentX ParentY TextBoxControl", "interface"),)
+
+    @staticmethod
+    def missing():
+        """Return the client types and members that are missing, with the keys each one affects.
+
+        The result is a sorted list of (name, keys), or an empty tuple when the client types cannot be
+        reached at all, so a script that is not inside the client holds nothing. Each row is looked up
+        once; no API calls are made. Runs on the script thread at start.
+        """
+        if Client._type("ClassicUO.Client") is None:
+            return ()
+        # Static and instance members declared on a type are both searched; has also walks the base types.
+        fl = Tz._flags(True) | Tz._flags(False)
+        out = {}
+        for tn, names, keys in Tz.NEED:
+            t = Client._type("ClassicUO." + tn)
+            short = tn.split(".")[-1]
+            for gone in [short] if t is None else [short + "." + n for n in names.split() if not Tz.has(t, n, fl)]:
+                out.setdefault(gone, []).extend(keys.split())
+        return sorted(out.items())
+
+    @staticmethod
+    def has(t, name, fl):
+        """Return True when type t, or one of its base types, declares a member called name.
+
+        fl are the binding flags from _flags.
+        """
+        while t is not None:
+            if t.GetMember(name, fl).Length:
+                return True
+            t = t.BaseType
+        return False
 
     @staticmethod
     def T(name):
@@ -9092,7 +9608,7 @@ class Profiles(object):
     A profile is a folder under the profile directory holding profile.txt (name, saved stamp, character,
     version), va_vars.txt (tab separated settings, escaped), unified_bag.cfg and a tazuo folder of
     client files. Saving writes to a .saving folder first and swaps it in, so a failed save keeps the
-    old copy.
+    old copy. The start mark is never carried.
     """
     # Client option names that belong to the character or session and are never copied between characters.
     PROFILE_SKIP = ("Username", "ServerName", "CharacterName", "Serial", "LastLoaded", "FollowingTarget")
@@ -9108,7 +9624,8 @@ class Profiles(object):
                "UnifiedBag_", "UnitFrames_", "VirtueAssistant_", "WorldMap_")
     # Settings that hold this character's own lists and history; they stay out of profiles.
     OWN_VARS = ("CorpseRun_corpse", "SkillBags_rules", "SkillBags_done", "UnitFrames_tracked", "Social_names",
-                "TreasureHunter_maps", "Restock_settings", "PropertyButler_visits", "SpellTimers_active")
+                "TreasureHunter_maps", "Restock_settings", "PropertyButler_visits", "SpellTimers_active",
+                "VirtueAssistant_starting")
     # A value no real setting holds, used to tell a missing setting from an empty one.
     MISSING = "\x01VA-missing"
 
@@ -10752,8 +11269,8 @@ class ConfigWindow(object):
             self.lag_next = time.time() + 1.0
             running = self.host.active
             if running:
-                worst = max(running, key=lambda s: s.worst_ms)
-                text = "%d modules on; slowest lately: %s, %d ms" % (len(running), worst.title, worst.worst_ms)
+                worst = max(running, key=lambda s: s.load[2])
+                text = "%d modules on; slowest lately: %s, %d ms" % (len(running), worst.title, worst.load[2])
             else:
                 text = "No modules on"
             Kit.set_text(self.lag_lbl, text)
@@ -15967,19 +16484,24 @@ def load_modules():
 Kit.data_setup()
 PROFILES = Profiles()
 if not VA_ALONE:
+    HOST.boot_mark("data setup")
     try:
         PROFILES.startup()
     except Exception as _ex:
         Kit.say("couldn't put the favourite profile on this character (%s%s)."
                    % (Tz.why(_ex), _error_where()), Kit.HUE_BAD)
+    HOST.boot_mark("profiles")
 
 
 def _module_sysstats():
     """The System Stats module, built in the mother script: a small button and window showing ping,
-    frames per second, frame time, memory, and network traffic and packets.
+    frames per second, frame time, memory, network traffic and packets, and the five busiest parts of
+    Virtue Assistant.
 
-    Returns the start, tick and stop hooks the host runs; ticks on the client thread. Saves its
-    positions, minimised state and open state under the SystemStats keys.
+    Returns the start, tick and stop hooks the host runs, plus a settings page (Show start-up times and
+    Don't warn me about TazUO settings); ticks on the client thread. Saves its positions, minimised
+    state and open state under the SystemStats keys, and its two tick boxes as the main settings
+    startup and tz_quiet.
     """
     KEY = "sysstats"
     TITLE = "System Stats"
@@ -15988,11 +16510,44 @@ def _module_sysstats():
     EVERY = 0.3
     TRAY_ICON = 0x1F2D
     ROWS = ("Ping", "FPS", "Frame", "Memory", "In", "Out", "Packets")
+    TOP, TOP_EVERY, NAME_W, TOP_TITLE = 5, 1.0, 100, "VIRTUE ASSISTANT  (busy, slowest)"
+    TOP_KEYS = tuple(("top_name%d" % i, "top_val%d" % i) for i in range(TOP))
+    settings = {"startup": False, "tz_quiet": False}
     st = {"shutting": False, "minimized": False, "docked": False, "open": False, "queue": [],
-          "next": 0.0, "vals": {}, "tip": None}
+          "next": 0.0, "vals": {}, "tip": None, "top_next": 0.0, "top": ()}
     win = {"g": None, "c": {}, "store": ({}, {})}
     btn = {"g": None, "b": None, "store": ({}, {})}
     queue = Kit.queuer(st)
+
+    def load_settings():
+        """Read the main settings startup and tz_quiet into the settings dict."""
+        settings.update([(k, HOST.pref_int(k, 0) == 1) for k in list(settings)])
+
+    def save_settings():
+        """Write both tick boxes to the main settings (1 or 0) and save them."""
+        HOST.prefs.update([(k, "1" if v else "0") for k, v in settings.items()])
+        HOST.save_prefs()
+
+    def busiest(now):
+        """Return the five busiest running parts as ((fitted name, text), ...), busiest first.
+
+        Each text reads percent of a second spent, then the slowest tick in ms. A module with parts is
+        listed by its running parts, one without by itself. now is the time of the reading.
+        """
+        rows = []
+        for s in HOST.slots:
+            if not s.running:
+                continue
+            if s.parts:
+                pl = s.part_load
+                # busy_share is milliseconds per second; dividing by 10 when printing makes it a percentage.
+                rows.extend((Host.busy_share(pl[p[0]], now), pl[p[0]][2], p[1]) for p in s.parts
+                            if p[0] in s.parts_running and p[0] in pl)
+            else:
+                rows.append((Host.busy_share(s.load, now), s.load[2], s.title))
+        rows.sort(key=lambda r: -r[0])
+        # The slowest tick is capped so the text fits the label.
+        return tuple((Kit.fit(t, NAME_W), "%.1f%%, %d ms" % (b / 10.0, min(w, 99999))) for b, w, t in rows[:TOP])
 
     def read():
         """Read ping, frame rate, network rates, packet counts and memory from the client. Returns {row
@@ -16031,19 +16586,28 @@ def _module_sysstats():
                         {"g": g, "b": b, "store": store})
 
     def build_window():
-        """Build the window with one row per figure, or just its title when minimised; then fill the
-        values.
+        """Build the window with one row per figure and the busiest-parts section, or just its title when
+        minimised; then fill the values.
         """
         M = Kit.MARGIN
-        h = M + 30 + Kit.GAP + len(ROWS) * 20 + M - 12
+        yb = M + 30 + Kit.GAP
+        hb = len(ROWS) * 20 - 12
+        y2 = yb + hb + Kit.GAP
+        h = y2 + 26 + TOP * 20 + M
         g, store, c = wnd.begin(W, h)
         if not st["minimized"]:
             wnd.frame(g, settings=False)
-            yb = M + 30 + Kit.GAP
-            Kit.add_section(g, M, yb, W - 2 * M, h - yb - M)
+            Kit.add_section(g, M, yb, W - 2 * M, hb)
+            # Resetting the timer makes the busiest list be gathered at the next tick instead of waiting up to
+            # a second.
+            st["top_next"] = 0.0
             for i, name in enumerate(ROWS):
                 Kit.add_label(g, name + ":", M + 10, yb + 6 + i * 20, Kit.HUE_INFO)
                 c[name] = Kit.add_label(g, "", M + 90, yb + 6 + i * 20, Kit.HUE_TEXT)
+            Kit.add_section(g, M, y2, W - 2 * M, h - y2 - M, Kit.fit(TOP_TITLE, W - 2 * M - 16))
+            for i, (kn, kv) in enumerate(TOP_KEYS):
+                c[kn] = Kit.add_label(g, "", M + 10, y2 + 26 + i * 20, Kit.HUE_INFO)
+                c[kv] = Kit.add_label(g, "", M + 116, y2 + 26 + i * 20, Kit.HUE_TEXT)
         wnd.end(g)
         refresh()
 
@@ -16051,7 +16615,9 @@ def _module_sysstats():
                      icon=TRAY_ICON)
 
     def refresh():
-        """Write the latest values into the window's labels (one status line when minimised)."""
+        """Write the latest values into the window's labels (one status line when minimised), then the
+        busiest-parts rows, blank where there are fewer than five.
+        """
         v = st["vals"]
         c = win["c"]
         if st["minimized"]:
@@ -16063,6 +16629,27 @@ def _module_sysstats():
             lbl = c.get(name)
             if lbl is not None:
                 Kit.set_text(lbl, v.get(name, "-"))
+        top = st["top"]
+        for i, (kn, kv) in enumerate(TOP_KEYS):
+            if kn not in c:
+                continue
+            row = top[i] if i < len(top) else ("", "")
+            Kit.set_text(c[kn], row[0])
+            Kit.set_text(c[kv], row[1])
+
+    def page_table(w):
+        """Return the settings page table: START-UP (Show start-up times) and SHARD RULES (the TazUO warning switch).
+
+        Reads the main settings first, so the page shows the saved choice even while the module is off and
+        its start never ran. w is the page width, which this table does not need.
+        """
+        load_settings()
+        return (("START-UP", (("check", "startup", "Show start-up times",
+                               "After loading, list in the journal how long each step took"),)),
+                ("SHARD RULES", (("check", "tz_quiet", "Don't warn me about TazUO settings",
+                                  "No journal line when a TazUO setting breaks this shard's rules"),)))
+
+    cfg = Kit.Page(settings, page_table, save_settings)
 
     def open_window():
         """Open the window and dock it."""
@@ -16071,17 +16658,20 @@ def _module_sysstats():
         wnd.dock()
 
     def close_window():
-        """Close the window, take it off the dock and save that it is closed."""
+        """Close the window, take it off the dock, forget the busiest list and save that it is closed."""
         st["open"] = False
+        st["top"] = ()
         HOST.dock_remove(KEY)
         wnd.close()
         Kit.put_var(OPEN_KEY, "0")
 
     def _start():
-        """Module start: load saved state, build the button and open the window when it was open or a zone
-        holds it.
+        """Module start: load saved settings and state, build the button and open the window when it was open
+        or a zone holds it.
         """
-        st.update({"shutting": False, "docked": False, "queue": [], "next": 0.0, "minimized": Kit.load_min(MIN_KEY)
+        load_settings()
+        st.update({"shutting": False, "docked": False, "queue": [], "next": 0.0, "top_next": 0.0,
+                   "minimized": Kit.load_min(MIN_KEY)
                    or HOST.dock_wanted(KEY), "open": Kit.get_var(OPEN_KEY, "0") == "1"})
         build_button()
         if st["open"] or HOST.layout_holds(KEY):
@@ -16091,7 +16681,8 @@ def _module_sysstats():
         """Module tick: run queued clicks, then read and show the figures about three times a second.
 
         The figures are refreshed only when the window is shown; the button tip is rewritten when it
-        changed.
+        changed. The busiest parts are collected once a second, only while the window is open and not
+        minimised.
         """
         now = time.time()
         while st["queue"]:
@@ -16120,6 +16711,10 @@ def _module_sysstats():
             if tip != st["tip"] and btn["b"] is not None:
                 st["tip"] = tip
                 Kit.with_tip(btn["b"], tip)
+            # The busiest list costs a pass over every module, so it is only gathered while someone can see it.
+            if st["open"] and not st["minimized"] and not 0 <= st["top_next"] - now <= TOP_EVERY:
+                st["top_next"] = now + TOP_EVERY
+                st["top"] = busiest(now)
             if st["open"] and win["g"] is not None and not (st["minimized"] and st["docked"]):
                 refresh()
 
@@ -16134,11 +16729,13 @@ def _module_sysstats():
         Kit.save_pos(BTN_KEY, b)
         Kit.dispose(b)
 
-    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True}
+    return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
 
 
 # Without the modules (running alone) the mother script does nothing further.
 if not VA_ALONE:
     load_modules()
+    HOST.boot_mark("module files")
     HOST.add("sysstats", "System Stats", "Ping, FPS and memory button", _module_sysstats, 0.1, category="On screen")
     HOST.run()

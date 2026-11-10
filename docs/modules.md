@@ -28,6 +28,8 @@ Key "hud", On screen. Frames, timers and bars for you and pets.
 
 Bandages never bandages by itself: one press, one bandage (shard rules).
 
+Buffs & Timers: since 2.7.0.32 its settings page has **Also show Polymorph as a TazUO cooldown bar** (off by default, saved with the part's settings). Ticked, each Polymorph cast on you that Buffs & Timers times also makes one of TazUO's own cooldown bars with the same time left (at TazUO's cooldown bar spot). The bar goes when the row goes: the timer runs out, your body changes back early, the cast failed, you die, you untick the setting, or the part or script stops (a timer still running comes back as a new bar at the next start). The window's own row stays as it is.
+
 ## Grimoire (GrimoireModule.py)
 
 Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, charge or scroll, star favourite destinations and search every runebook.
@@ -142,3 +144,9 @@ Key "worldmap", The world. Pings, corpse, dig and dry spots, traps, also shown o
 ```
 
 The other parts send their pings through Map Pings. Corpse uses only a corpse named "corpse of <your name>" (or "remains of"); a nameless one waits until you click it once, and Get my things refuses a corpse that isn't yours.
+
+## System Stats (in the main script)
+
+Key "sysstats", On screen. A small button that opens a window of ping, FPS, frame time, memory and network traffic. Since 2.7.0.27 the window also lists the five busiest Virtue Assistant parts (a module without parts counts as one): the share of time each spent working over about the last 10 s, and its slowest recent tick in ms. The list is worked out once a second, only while the window is open and not minimised. Its settings page has **Show start-up times** (off by default, saved in the main settings): after start-up, one journal line lists how long each step took (code, data setup, profiles, module files, main window, each module's load, first build). Since 2.7.0.29 it also has **Don't warn me about TazUO settings** (off by default, saved in the main settings). Unticked, Virtue Assistant reads TazUO's own settings at start, after a profile load and once a minute, and prints one journal line per setting per session when one would break the shard's rules: Enable Auto Loot (R2), Auto Loot Human Corpses while auto loot is on (R6), Enable Scavenger with items in its list (R2), Automatically open doors (R4). It never changes a TazUO setting.
+
+TazUO has its own profiler (the top bar: More + > Developer > Profiler) and an equipment durability tracker (the modern paperdoll's menu: Durability Tracker); System Stats doesn't copy them.

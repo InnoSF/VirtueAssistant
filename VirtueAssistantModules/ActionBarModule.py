@@ -1,7 +1,7 @@
 def _module_actionbar():
-	a5=Client._type;aO=Client.on_client_thread;cp=HOST.aborting;cq=HOST.cursor_busy;cr=HOST.dock_forget;cs=HOST.dock_to_bar;bB=HOST.enable;bC=HOST.layout_arranging;ct=HOST.layout_in_use;cu=HOST.layout_locked;cv=HOST.layout_need;cw=HOST.pack_ver;aA=HOST.refresh_settings;a6=HOST.show_settings;cx=HOST.typing;cy=Kit.ART_CLOSE;aP=Kit.ART_MIN;cz=Kit.ART_OK;a7=Kit.ART_PAGE;cA=Kit.ART_PLAY;bD=Kit.ART_RESTORE;r=Kit.HUE_BAD;Q=Kit.HUE_GOOD;D=Kit.HUE_INFO;S=Kit.HUE_TEXT;aa=Kit.HUE_TITLE;cB=Kit.STONE_TILE;E=Kit.add_label;cC=Kit.add_section;bE=Kit.add_textbox;V=Kit.add_tiled;bF=Kit.add_window_frame;cD=Kit.anchor_pos;ab=Kit.art_button;aB=Kit.catcher;bG=Kit.dd_index;T=Kit.dispose;bH=Kit.find_item;bI=Kit.fit;a8=Kit.get_var;aQ=Kit.gold_box;H=Kit.is_open;cE=Kit.load_pos;cF=Kit.mouse_pos;cG=Kit.moved_by_code;cH=Kit.on_client;aC=Kit.pic_size;aR=Kit.pos;bJ=Kit.put_var;cI=Kit.save_min;bK=Kit.screen;aD=Kit.set_text;bL=Kit.spell_info;cJ=Kit.text_px;I=Kit.text_w;bM=Kit.ui_pos;a9=Kit.was_clicked;am=Kit.with_tip;bN=Kit.wrap;ac=Kit.zone_up;q="actionbar";aS="Action Bar";cK="ActionBar_settings";bO="ActionBar_pos";bP="ActionBar_min";u=24;W=12;F=11;J=5;X=u+W;ad=12;d4=22;ba,bb=36,64;an,aE=50,150;d5=8;d6=44;cL=.65;d7=4;d8=3;d9=30;ai=4;ao=2624;ap=.92;bQ=.75;cM=2.;cN=5;ea=.1;cO=set(("clumsy|feeblemind|magic arrow|weaken|harm|fireball|poison|curse|lightning|mana drain|mind blast|paralyze|dispel|energy bolt|explosion|mass curse|chain lightning|flamestrike|mana vampire|meteor swarm|earthquake|mass dispel|paralyze field").split("|"));eb=[("recall","Recall (spell)"),("gate","Gate Travel (spell)"),("charge","Recall (a book charge)"),("recall_scroll","Recall scroll"),("gate_scroll","Gate Travel scroll"),("sacred","Sacred Journey (spell)")];ec={"recall":"Recall","gate":"Gate","charge":"Recall (charge)","recall_scroll":"Recall scroll","gate_scroll":"Gate scroll","sacred":"Sacred Journey"};bc={"recall_scroll":8012,"gate_scroll":8032};cP={"charge":8901,"recall_scroll":8012,"gate_scroll":8032};cQ={"recall":"Recall","gate":"Gate Travel","sacred":"Sacred Journey"};aF="bag";cR="ActionBar_alive";cS="grimoire";ed="Grimoire_cmd";ee="VirtueAssistant_cmd";cT="ActionBar_cells";cU="ActionBar_pages";cV="ActionBar_extra";bd=4;bR=bd*u;cW,cX=240,46;bS=[("paperdoll","Paperdoll",7939,"paperdoll"),("status","Status",3852,"ga:OpenStatusBar"),("journal","Journal",4080,"ga:OpenJournal:ResizableJournal"),("skills","Skills",5091,"ga:OpenSkills"),("spellbook","Grimoire",3834,"grimoire"),("worldmap","World map",5355,"ga:OpenWorldMap"),("minimap","Mini map",5365,"ga:OpenMiniMap"),("quests","Quest log",3636,"quests"),("guild","Guild",7030,"ga:OpenGuildGump"),("party","Party",7956,"macro:PartyManifest"),("chat","Chat",3639,"ga:OpenChat"),("options","Options",7864,"ga:OpenSettings"),("help","Help",4079,"help"),("war","War / peace",5119,"war"),("barsettings","Bar settings",4031,"barsettings"),("virtue","Virtue Assistant",4179,"virtue"),("lock","Lock / unlock bar",4111,"lock"),("minimize","Minimize bar",0,"minimize"),];cY=(3834,8787,8786,9100,9120,11600,11677);ef={"paperdoll":"Open your paperdoll","status":"Open the status bar","journal":"Open the journal","skills":"Open the skills window","worldmap":"Open TazUO's World Map","minimap":"Open the mini map","quests":"Open the quest log","guild":"Open the guild window","party":"Open the party window","chat":"Open the chat window","options":"Open the client's options","help":"Open the help menu","war":"Switch war and peace mode","barsettings":"Open the Action Bar settings page","lock":"Lock or unlock the bar","minimize":"Minimize the bar"};bT="paperdoll status skills spellbook guild chat minimap worldmap options barsettings virtue".split();eg=["paperdoll","status","journal","skills","spellbook","worldmap","minimap","quests","options","barsettings","virtue"];be=16;M=2;eh=("Anatomy|Animal Lore|Animal Taming|Arms Lore|Begging|Cartography|Detect Hidden|Discordance|Evaluate Intelligence|Forensic Evaluation|Hiding|Inscription|Item Identification|Meditation|Peacemaking|Poisoning|Provocation|Remove Trap|Spirit Speak|Stealing|Stealth|Taste Identification|Tracking").split("|");ei=["Magery","Necromancy","Chivalry","Bushido","Ninjitsu","Spellweaving","Mysticism"];bf=16;bU=4;bg=20;bV=[("","Empty"),("item","Item + counter"),("spell","Spell"),("skill","Skill"),("macro","TazUO macro"),("ability","Weapon ability"),("script","Legion script"),("dress","Dress outfit"),("undress","Undress outfit"),("say","Say text"),("ui","Client window"),("travel","Travel (runebook)")];bW=("rb","ri","rm");cZ=[("","None"),("self","Self"),("last","Last target")];bh=["Bags' slots","Bags I pick","Backpack + sub-bags"];c_=((2240,"|".join(fV for fV,fW in Kit.MAGERY)),(20480,"Animate Dead|Blood Oath|Corpse Skin|Curse Weapon|Evil Omen|Horrific Beast|Lich Form|Mind Rot|Pain Spike|Poison Strike|Strangle|Summon Familiar|Vampiric Embrace|Vengeful Spirit|Wither|Wraith Form|Exorcism"),(20736,"Cleanse by Fire|Close Wounds|Consecrate Weapon|Dispel Evil|Divine Fury|Enemy of One|Holy Light|Noble Sacrifice|Remove Curse|Sacred Journey"),(21536,"Honorable Execution|Confidence|Evasion|Counter Attack|Lightning Strike|Momentum Strike"),(21280,"Focus Attack|Death Strike|Animal Form|Ki Attack|Surprise Attack|Backstab|Shadowjump|Mirror Image"),(23000,"Arcane Circle|Gift of Renewal|Immolating Weapon|Attune Weapon|Thunderstorm|Nature's Fury|Summon Fey|Summon Fiend|Reaper Form|Wildfire|Essence of Wind|Dryad Allure|Ethereal Voyage|Word of Death|Gift of Life|Arcane Empowerment"),(24000,"Nether Bolt|Healing Stone|Purge Magic|Enchant|Sleep|Eagle Strike|Animated Weapon|Stone Form|Spell Trigger|Mass Sleep|Cleansing Winds|Bombard|Spell Plague|Hail Storm|Nether Cyclone|Rising Colossus"),);ej=["Click a cell to use it; right-click it (Shift+click when right-clicks don't reach the bar) to choose what it holds: an item (counted in your pack), spell, skill, weapon ability, TazUO macro, Legion script, outfit, text to say, window or runebook destination, plus its hotkey and target.","Click an empty cell to target an item for it.","The 12 bottom-left cells have 12 pages, each with its own cells and hotkeys: the tiny arrows and the number switch pages.","Keys (far right) starts keybind mode: hover a cell, window button or bag slot and press a key; Esc ends it, Backspace clears a key. Lock locks the bar (with zones, toggles Arrange mode); Grid shows the snap grid.","Drag the bar by its stone edge; drop it near a corner, edge middle or the centre to anchor it there (upright on the left or right edge).","Bag slots show the bags of Inventory > Bags: click to show the Bags window, again to fold it into the bar; right-click for its settings. With Bags I pick, click an empty slot to target a bag.","The Grimoire and Virtue Assistant buttons show their window (turning Grimoire on); click again to fold it into the bar.","A Module windows button (page 2 of the Client window list) turns that module on and shows its window; click again to fold it into the tray beside the bar. The bar's numbered button hides or shows the tray.","A Travel (runebook) cell goes to a runebook destination by Recall, Gate Travel, a book charge, a scroll or Sacred Journey, through Grimoire (must be on); its counter shows charges or scrolls.","A used skill or spell darkens the cells of that kind while they count down; a spell cell greys out while a reagent it needs is at 0. Red at: when an item's counter turns red."];b={"slot":44,"top":True,"keys":True,"lock":False,"short":True,"hue":False,"bagmode":0,"bags":"","page":0,"scale":100,"tray_open":True,"bagkeys":"","extra":0,"anchor":"","vertical":False};fT=dict(b);C={"a":[],"u":[],"x":[],"pages":[]}
+	a5=Client._type;aO=Client.on_client_thread;cp=HOST.aborting;cq=HOST.cursor_busy;cr=HOST.dock_forget;cs=HOST.dock_to_bar;bB=HOST.enable;bC=HOST.layout_arranging;ct=HOST.layout_in_use;cu=HOST.layout_locked;cv=HOST.layout_need;cw=HOST.pack_ver;aA=HOST.refresh_settings;a6=HOST.show_settings;cx=HOST.typing;cy=Kit.ART_CLOSE;aP=Kit.ART_MIN;cz=Kit.ART_OK;a7=Kit.ART_PAGE;cA=Kit.ART_PLAY;bD=Kit.ART_RESTORE;r=Kit.HUE_BAD;Q=Kit.HUE_GOOD;D=Kit.HUE_INFO;S=Kit.HUE_TEXT;aa=Kit.HUE_TITLE;cB=Kit.STONE_TILE;E=Kit.add_label;cC=Kit.add_section;bE=Kit.add_textbox;V=Kit.add_tiled;bF=Kit.add_window_frame;cD=Kit.anchor_pos;ab=Kit.art_button;aB=Kit.catcher;bG=Kit.dd_index;T=Kit.dispose;bH=Kit.find_item;bI=Kit.fit;a8=Kit.get_var;aQ=Kit.gold_box;H=Kit.is_open;cE=Kit.load_pos;cF=Kit.mouse_pos;cG=Kit.moved_by_code;cH=Kit.on_client;aC=Kit.pic_size;aR=Kit.pos;bJ=Kit.put_var;cI=Kit.save_min;bK=Kit.screen;aD=Kit.set_text;bL=Kit.spell_info;cJ=Kit.text_px;I=Kit.text_w;bM=Kit.ui_pos;a9=Kit.was_clicked;am=Kit.with_tip;bN=Kit.wrap;ac=Kit.zone_up;q="actionbar";aS="Action Bar";cK="ActionBar_settings";bO="ActionBar_pos";bP="ActionBar_min";u=24;W=12;F=11;J=5;X=u+W;ad=12;d4=22;ba,bb=36,64;an,aE=50,150;d5=8;d6=44;cL=.65;d7=4;d8=3;d9=30;aj=4;ao=2624;ap=.92;bQ=.75;cM=2.;cN=5;ea=.1;cO=set(("clumsy|feeblemind|magic arrow|weaken|harm|fireball|poison|curse|lightning|mana drain|mind blast|paralyze|dispel|energy bolt|explosion|mass curse|chain lightning|flamestrike|mana vampire|meteor swarm|earthquake|mass dispel|paralyze field").split("|"));eb=[("recall","Recall (spell)"),("gate","Gate Travel (spell)"),("charge","Recall (a book charge)"),("recall_scroll","Recall scroll"),("gate_scroll","Gate Travel scroll"),("sacred","Sacred Journey (spell)")];ec={"recall":"Recall","gate":"Gate","charge":"Recall (charge)","recall_scroll":"Recall scroll","gate_scroll":"Gate scroll","sacred":"Sacred Journey"};bc={"recall_scroll":8012,"gate_scroll":8032};cP={"charge":8901,"recall_scroll":8012,"gate_scroll":8032};cQ={"recall":"Recall","gate":"Gate Travel","sacred":"Sacred Journey"};aF="bag";cR="ActionBar_alive";cS="grimoire";ed="Grimoire_cmd";ee="VirtueAssistant_cmd";cT="ActionBar_cells";cU="ActionBar_pages";cV="ActionBar_extra";bd=4;bR=bd*u;cW,cX=240,46;bS=[("paperdoll","Paperdoll",7939,"paperdoll"),("status","Status",3852,"ga:OpenStatusBar"),("journal","Journal",4080,"ga:OpenJournal:ResizableJournal"),("skills","Skills",5091,"ga:OpenSkills"),("spellbook","Grimoire",3834,"grimoire"),("worldmap","World map",5355,"ga:OpenWorldMap"),("minimap","Mini map",5365,"ga:OpenMiniMap"),("quests","Quest log",3636,"quests"),("guild","Guild",7030,"ga:OpenGuildGump"),("party","Party",7956,"macro:PartyManifest"),("chat","Chat",3639,"ga:OpenChat"),("options","Options",7864,"ga:OpenSettings"),("help","Help",4079,"help"),("war","War / peace",5119,"war"),("barsettings","Bar settings",4031,"barsettings"),("virtue","Virtue Assistant",4179,"virtue"),("lock","Lock / unlock bar",4111,"lock"),("minimize","Minimize bar",0,"minimize"),];cY=(3834,8787,8786,9100,9120,11600,11677);ef={"paperdoll":"Open your paperdoll","status":"Open the status bar","journal":"Open the journal","skills":"Open the skills window","worldmap":"Open TazUO's World Map","minimap":"Open the mini map","quests":"Open the quest log","guild":"Open the guild window","party":"Open the party window","chat":"Open the chat window","options":"Open the client's options","help":"Open the help menu","war":"Switch war and peace mode","barsettings":"Open the Action Bar settings page","lock":"Lock or unlock the bar","minimize":"Minimize the bar"};bT="paperdoll status skills spellbook guild chat minimap worldmap options barsettings virtue".split();eg=["paperdoll","status","journal","skills","spellbook","worldmap","minimap","quests","options","barsettings","virtue"];be=16;M=2;eh=("Anatomy|Animal Lore|Animal Taming|Arms Lore|Begging|Cartography|Detect Hidden|Discordance|Evaluate Intelligence|Forensic Evaluation|Hiding|Inscription|Item Identification|Meditation|Peacemaking|Poisoning|Provocation|Remove Trap|Spirit Speak|Stealing|Stealth|Taste Identification|Tracking").split("|");ei=["Magery","Necromancy","Chivalry","Bushido","Ninjitsu","Spellweaving","Mysticism"];bf=16;bU=4;bg=20;bV=[("","Empty"),("item","Item + counter"),("spell","Spell"),("skill","Skill"),("macro","TazUO macro"),("ability","Weapon ability"),("script","Legion script"),("dress","Dress outfit"),("undress","Undress outfit"),("say","Say text"),("ui","Client window"),("travel","Travel (runebook)")];bW=("rb","ri","rm");cZ=[("","None"),("self","Self"),("last","Last target")];bh=["Bags' slots","Bags I pick","Backpack + sub-bags"];c_=((2240,"|".join(f4 for f4,f5 in Kit.MAGERY)),(20480,"Animate Dead|Blood Oath|Corpse Skin|Curse Weapon|Evil Omen|Horrific Beast|Lich Form|Mind Rot|Pain Spike|Poison Strike|Strangle|Summon Familiar|Vampiric Embrace|Vengeful Spirit|Wither|Wraith Form|Exorcism"),(20736,"Cleanse by Fire|Close Wounds|Consecrate Weapon|Dispel Evil|Divine Fury|Enemy of One|Holy Light|Noble Sacrifice|Remove Curse|Sacred Journey"),(21536,"Honorable Execution|Confidence|Evasion|Counter Attack|Lightning Strike|Momentum Strike"),(21280,"Focus Attack|Death Strike|Animal Form|Ki Attack|Surprise Attack|Backstab|Shadowjump|Mirror Image"),(23000,"Arcane Circle|Gift of Renewal|Immolating Weapon|Attune Weapon|Thunderstorm|Nature's Fury|Summon Fey|Summon Fiend|Reaper Form|Wildfire|Essence of Wind|Dryad Allure|Ethereal Voyage|Word of Death|Gift of Life|Arcane Empowerment"),(24000,"Nether Bolt|Healing Stone|Purge Magic|Enchant|Sleep|Eagle Strike|Animated Weapon|Stone Form|Spell Trigger|Mass Sleep|Cleansing Winds|Bombard|Spell Plague|Hail Storm|Nether Cyclone|Rising Colossus"),);ej=["Click a cell to use it; right-click it (Shift+click when right-clicks don't reach the bar) to choose what it holds: an item (counted in your pack), spell, skill, weapon ability, TazUO macro, Legion script, outfit, text to say, window or runebook destination, plus its hotkey and target.","Click an empty cell to target an item for it.","The 12 bottom-left cells have 12 pages, each with its own cells and hotkeys: the tiny arrows and the number switch pages.","Keys (far right) starts keybind mode: hover a cell, window button or bag slot and press a key; Esc ends it, Backspace clears a key. Lock locks the bar (with zones, toggles Arrange mode); Grid shows the snap grid.","Drag the bar by its stone edge; drop it near a corner, edge middle or the centre to anchor it there (upright on the left or right edge).","Bag slots show the bags of Inventory > Bags: click to show the Bags window, again to fold it into the bar; right-click for its settings. With Bags I pick, click an empty slot to target a bag.","The Grimoire and Virtue Assistant buttons show their window (turning Grimoire on); click again to fold it into the bar.","A Module windows button (page 2 of the Client window list) turns that module on and shows its window; click again to fold it into the tray beside the bar. The bar's numbered button hides or shows the tray.","A Travel (runebook) cell goes to a runebook destination by Recall, Gate Travel, a book charge, a scroll or Sacred Journey, through Grimoire (must be on); its counter shows charges or scrolls.","A used skill or spell darkens the cells of that kind while they count down; a spell cell greys out while a reagent it needs is at 0. Red at: when an item's counter turns red."];b={"slot":44,"top":True,"keys":True,"lock":False,"short":True,"hue":False,"bagmode":0,"bags":"","page":0,"scale":100,"tray_open":True,"bagkeys":"","extra":0,"anchor":"","vertical":False};f2=dict(b);C={"a":[],"u":[],"x":[],"pages":[]}
 	def c0():return{"shutting":False,"queue":[],"want_target":None,"next_count":0.,"next_scan":0.,"rebuild_at":0.,"bag_sig":None,"ability_sig":None,"bind":None,"jobs":[],"redraw":set(),"ub_job":False,"cool":{"skill":0.,"spell":0.},"cool_next":0.}
-	a={"minimized":False,"shutting":False,"docked":False,"queue":[],"em":False,"ub_pending":False,"cnt":{},"cnt_g":{},"first":{},"first_g":{},"bags":[None]*J,"ub_found":None,"ub_cache":None,"ub_state":None,"grim_state":None,"va_state":None,"pending_on":None,"right_ok":None,"dock_sig":None,"watch_next":0.,"script_check":None,"ub_last":None};a.update(c0());e={"g":None,"c":{},"store":({},{}),"cells":{},"bags":{}};bi,B,l=Kit.basics(a,aS);Y={"g":None,"at":None};j={"g":None,"ref":None,"level":"cats","cat":None,"page":0,"c":{},"bag":None,"items":[],"anchor":None,"moved":None,"placed":None};K={"sel":X-W,"dds":[]};bX=dict((f_.lower(),fX+fZ)for fX,fY in c_ for fZ,f_ in enumerate(fY.split("|")))
+	a={"minimized":False,"shutting":False,"docked":False,"queue":[],"em":False,"ub_pending":False,"cnt":{},"cnt_g":{},"first":{},"first_g":{},"bags":[None]*J,"ub_found":None,"ub_cache":None,"ub_state":None,"grim_state":None,"va_state":None,"pending_on":None,"right_ok":None,"dock_sig":None,"watch_next":0.,"script_check":None,"ub_last":None};a.update(c0());e={"g":None,"c":{},"store":({},{}),"cells":{},"bags":{}};bi,B,l=Kit.basics(a,aS);Y={"g":None,"at":None};j={"g":None,"ref":None,"level":"cats","cat":None,"page":0,"c":{},"bag":None,"items":[],"anchor":None,"moved":None,"placed":None};K={"sel":X-W,"dds":[]};bX=dict((f9.lower(),f6+f8)for f6,f7 in c_ for f8,f9 in enumerate(f7.split("|")))
 	def ae(fn):a["jobs"].append(fn)
 	def c1(name):
 		n=(name or "").strip().lower()
@@ -57,7 +57,7 @@ def _module_actionbar():
 		return True
 	def aq(k):return HOST.hotkeys_owned.get(_norm_key(k))
 	def en():return set(_norm_key(d["k"])for f,d in ar()if d["k"]and d["t"])|set(c for c in af()if c)
-	def aj(text,width):return bI(str(text),width,".")
+	def ak(text,width):return bI(str(text),width,".")
 	def c5(k):return(k.upper().replace("CTRL+","C").replace("SHIFT+","S").replace("ALT+","A").replace("NUMPAD","N").replace("KP_","N"))
 	def c6(n):
 		if b["short"]:
@@ -253,7 +253,7 @@ def _module_actionbar():
 		def open_macro(b):
 			ClientUI.find();a=ClientUI.world
 			if a is None:return False
-			def c():import System;c=ClientUI._get(a,"Macros");d,e,f=[c.GetType().Assembly.GetType("ClassicUO.Game.Managers."+h)for h in("MacroObject","MacroType","MacroSubType")];g=System.Activator.CreateInstance(d,System.Array[object]([System.Enum.Parse(e,"Open",True),System.Enum.Parse(f,b,True)]));ClientUI._run_macro_object(c,g);return True
+			def c():import System;c=ClientUI._get(a,"Macros");d,e,f=[c.GetType().Assembly.GetType("ClassicUO."+h)for h in("Game.Managers.MacroObject","Common.Enums.MacroType","Common.Enums.MacroSubType")];g=System.Activator.CreateInstance(d,System.Array[object]([System.Enum.Parse(e,"Open",True),System.Enum.Parse(f,b,True)]));ClientUI._run_macro_object(c,g);return True
 			return bool(ClientUI.on_main(c))
 		@staticmethod
 		def macro_names():
@@ -525,11 +525,11 @@ def _module_actionbar():
 		a=aV(ref).split("\n")[0];return a.replace("  [%s]"%c["k"],"")if c["k"]else a
 	def eL():a=[(_norm_key(f["k"]),"%s: %s"%(N(d),eK(d)))for d,f in ar()if _norm_key(f["k"])and f["t"]and c7(d)];a+=[(c,"bag slot %d"%(g+1))for g,c in enumerate(af())if c];return[(h,i+((" (left to %s)"%aq(h))if aq(h)else ""))for h,i in a]
 	eM=Kit.disposer(q,a,e)
-	def ak(delay=0.):a["rebuild_at"]=time.time()+delay
+	def al(delay=0.):a["rebuild_at"]=time.time()+delay
 	def aw(recount=False,refresh=True,refs=None):
 		aW();az()
 		if recount:a["next_count"]=0.
-		if refs is None:ak()
+		if refs is None:al()
 		else:aM(refs)
 		if refresh:aA(q)
 	def dp(ref):C[ref[0]][ref[1]]=Z();aw(refs=[ref])
@@ -565,7 +565,7 @@ def _module_actionbar():
 			try:c=(b6(int(f),int(g)),b)
 			finally:P["vtmp"]=None
 		i=(bp(),aI(),z["slot"]);z["scale"],z["vertical"]=c;z["slot"],z["sig"]=d,e
-		if(bp(),aI(),z["slot"])!=i and not a["shutting"]:ak()
+		if(bp(),aI(),z["slot"])!=i and not a["shutting"]:al()
 	def eO():
 		a=b5();b=dq()
 		if a is None or b==z["sig"]:return
@@ -620,7 +620,7 @@ def _module_actionbar():
 			z=d+int(round(d*t));A=L["ug"]+int(round(L["ug"]*t));B=L["bg"]+int(round(L["bg"]*t));C,Q=L["pw"],L["tray_w"];l=C+x+v;D=k[W];E=l-C-D-3*z-Q;m=int(E*cL);G=E-m;L.update({"colx":tuple(k),"colw":tuple(s),"top_w":x,"sgx":z,"sgc":d+q,"ug":A,"bg":B,"inner":l,"left_w":D,"ui_w":m,"bag_w":G,"bw":(m-2*e-(F-1)*A)//F,"bgw":(G-2*e-(J-1)*B)//J});L["W"]=L["m"]+l+L["sgc"]+L["cw"]+L["m"]
 		a=P-L["H"]
 		if a>0:
-			b=min(a,(c-1)*d);R=[d+fV for fV in aK(b,c-1)];f=min(a-b,c*p);g=[S+fW for fW in aK(f,c)];H=aK(a-b-f,c);I,K,M,y=[],[],[],0
+			b=min(a,(c-1)*d);R=[d+f4 for f4 in aK(b,c-1)];f=min(a-b,c*p);g=[S+f5 for f5 in aK(f,c)];H=aK(a-b-f,c);I,K,M,y=[],[],[],0
 			for r in range(c):I.append(y);N=g[r]+2*e+H[r];K.append(N);M.append(e+H[r]//2);y+=N+(R[r]if r<c-1 else 0)
 			L.update({"rowy":tuple(I),"rowh":tuple(K),"celly":tuple(M),"cellh":tuple(g),"bh":g[-1]-e,"bgh":g[-1]});L["H"]=L["m"]+y+L["m"]
 		return L
@@ -678,7 +678,7 @@ def _module_actionbar():
 				if a:p=br(g,a,x,y,w,h)
 			elif m in cP:p=a2(g,cP[m],0,*b9(ref,x,y,w,h,3))
 			if p is not None:p.SetAlpha(.5)
-			i=aj(c["v"]or "?",w-4);f.append(E(g,i,x+(w-I(i))//2,y+d+(h-d-14)//2-1));j=True
+			i=ak(c["v"]or "?",w-4);f.append(E(g,i,x+(w-I(i))//2,y+d+(h-d-14)//2-1));j=True
 		elif t=="ability":
 			a,i=ek(c["v"])
 			if a:p=br(g,a,x,y,w,h)
@@ -695,7 +695,7 @@ def _module_actionbar():
 	def dw(g,info,parts,counted,k,tip,click):
 		x,y,w,h=info["x"],info["y"],info["w"],info["h"]
 		if counted:info["count"]=E(g,"",x+w-6,y+h-16);info["txt"],info["hue"]="",S;parts.append(info["count"])
-		if k:a=aj(c5(k),w-4);info["key"]=E(g,a,x+w-2-I(a),y+1,D);parts.append(info["key"])
+		if k:a=ak(c5(k),w-4);info["key"]=E(g,a,x+w-2-I(a),y+1,D);parts.append(info["key"])
 		info["tip"]=tip;info["catcher"]=aB(g,x,y,w,h,eV(*click),tip);parts.append(info["catcher"]);eW(info["catcher"],B(click[1:]));info["parts"]=parts;return info
 	def ca(i):
 		c,e=aH(i),b["bagmode"];f=(e==0 and a["ub_state"])and("Show the Bags window"if a["ub_state"]!="open"else "Fold the Bags window into the bar")
@@ -711,7 +711,7 @@ def _module_actionbar():
 	def eY(ref):
 		g=e["g"];f=ref[0]=="b";a,k=(e["bags"].get(ref[1]),af()[ref[1]])if f else(e["cells"].get(ref),A(ref)["k"])
 		if a is None or not H(g):return
-		d=aj(c5(k),a["w"]-4)if(b["keys"]and k and(f or A(ref)["t"]))else "";c=a.get("key")
+		d=ak(c5(k),a["w"]-4)if(b["keys"]and k and(f or A(ref)["t"]))else "";c=a.get("key")
 		if d and c is None:c=E(g,d,a["x"]+a["w"]-2-I(d),a["y"]+1,D);c.SetAcceptMouseInput(False);a["key"]=c;a.setdefault("parts",[]).append(c)
 		elif c is not None:c.Text=d
 		bt(a,ca(ref[1])if f else aV(ref))
@@ -757,9 +757,9 @@ def _module_actionbar():
 	def e2(g,store,L):
 		c,h=L["m"],L["cw"];x=c+L["inner"]+L["sgc"];l=L["rowy"][-1]+L["rowh"][-1];d,f=aC(aP[0]);d,f=d or 16,f or 16;m=c+2+f+4;n=c+l-m;j=ds();z=(("Keys",B(("bind",)),dB()),("Lock",B(("lockbar",)),cb()),("Grid",B(("grid",)),dD()))
 		if aL()and n>=66 and h-4>=j:p,r=R(x+(h-d)//2,c+2,d,f)[:2];A,s=h-4,min(28,(n-8)//3);t=[R(x+2,m+at*(s+4),A,s)for at in range(3)]
-		else:C,D,u,v=R(x,c,h,l);w=[(by,)+eS(by,u,v)for by in dt(not aL())];i,y,a,b=(next((dd for dd in w if dd[2]>=j and dd[3]>=be),None)or max(w,key=lambda o:min(o[2]-j,o[3]-be)));a,b=max(1,a),max(1,b);E=i*a+(i-1)*M;F=y*b+(y-1)*M;G=C+max(M,(u-E)//2);H=D+max(M,(v-F)//2);k=[(G+(fV%i)*(a+M),H+(fV//i)*(b+M),a,b)for fV in range(4)];p,r=k[0][0]+(a-d)//2,k[0][1]+(b-f)//2;t=k[1:]
+		else:C,D,u,v=R(x,c,h,l);w=[(by,)+eS(by,u,v)for by in dt(not aL())];i,y,a,b=(next((dd for dd in w if dd[2]>=j and dd[3]>=be),None)or max(w,key=lambda o:min(o[2]-j,o[3]-be)));a,b=max(1,a),max(1,b);E=i*a+(i-1)*M;F=y*b+(y-1)*M;G=C+max(M,(u-E)//2);H=D+max(M,(v-F)//2);k=[(G+(f4%i)*(a+M),H+(f4//i)*(b+M),a,b)for f4 in range(4)];p,r=k[0][0]+(a-d)//2,k[0][1]+(b-f)//2;t=k[1:]
 		if not ac(q):ab(g,store,"min",aP,p,r,None,"Minimize the bar",on_click=B(("toggle_min",)))
-		e["keybtn"],e["lockbtn"],e["gridbtn"]=[e1(g,fZ,fW,fX,*fY)for(fW,fX,fY),fZ in zip(z,t)]
+		e["keybtn"],e["lockbtn"],e["gridbtn"]=[e1(g,f8,f5,f6,*f7)for(f5,f6,f7),f8 in zip(z,t)]
 	def dD():
 		if HOST.grid_shown():return aa,"Hide the screen grid windows snap to"
 		return D,"Show the screen grid; windows you let go snap to it, the corners, edge middles and centre"
@@ -807,7 +807,7 @@ def _module_actionbar():
 			for i in range(F):b8(g,("u",i),*R(n+i*(L["bw"]+v),c+(f-L["bh"])//2,L["bw"],L["bh"]))
 			bs(g,[n+fn*(L["bw"]+v)for fn in range(F)],(L["bw"],)*F,c+(f-L["bh"])//2,L["bh"]);E=t+L["ui_w"]+C;aQ(g,*R(E,c,L["bag_w"],f));D=J*L["bgw"]+(J-1)*A;n=E+(L["bag_w"]-D)//2
 			for i in range(J):eX(g,i,*R(n+i*(L["bgw"]+A),d,L["bgw"],L["bgh"]))
-			bs(g,[n+fV*(L["bgw"]+A)for fV in range(J)],(L["bgw"],)*J,d,L["bgh"]);Q=E+L["bag_w"]+C;aQ(g,*R(Q,c,L["tray_w"],f));e5(g,*R(Q+l,d,X,L["bgh"]));e2(g,store,L)
+			bs(g,[n+f4*(L["bgw"]+A)for f4 in range(J)],(L["bgw"],)*J,d,L["bgh"]);Q=E+L["bag_w"]+C;aQ(g,*R(Q,c,L["tray_w"],f));e5(g,*R(Q+l,d,X,L["bgh"]));e2(g,store,L)
 		if b["anchor"]and not ac(q):
 			S,ay=cD(b["anchor"],w,h)
 			if S is not None:x,y=S,ay
@@ -826,22 +826,22 @@ def _module_actionbar():
 			if at is None:at=aR(g)or(0,0)
 		a,b=at;f,d=(rect[2],rect[3])if rect is not None and rect[2]>0 else bq();W,c=bK()
 		if aL():
-			x,y=a+f+ai,b+d-h
+			x,y=a+f+aj,b+d-h
 			if W and x+w>W:
-				x=a-ai-w
+				x=a-aj-w
 				if x<0:
-					x,y=a,b+d+ai
-					if c and y+h>c:y=b-ai-h
+					x,y=a,b+d+aj
+					if c and y+h>c:y=b-aj-h
 		else:
-			x,y=a,b+d+ai
+			x,y=a,b+d+aj
 			if c and y+h>c:
-				y=b-ai-h
+				y=b-aj-h
 				if y<0:
-					x,y=a+f+ai,b
-					if W and x+w>W:x=a-ai-w
+					x,y=a+f+aj,b
+					if W and x+w>W:x=a-aj-w
 		return x,y
 	def e6():return e["g"]
-	fU=None
+	f3=None
 	def e7():
 		d,a["redraw"]=a["redraw"],set();g=e["g"]
 		if not d or a["em"]or not H(g):return
@@ -864,7 +864,7 @@ def _module_actionbar():
 		w,h=bq();c=Kit.anchor_at(x,y,w,h,SNAP_ANCHOR);d=True if c in("L","R")else False if c in("T","B")else None;e=d is not None and d!=b["vertical"]
 		if c!=b["anchor"]or e:
 			b["anchor"]=c
-			if e:b["vertical"]=d;ag();ak();l("standing %s along the %s edge."%("upright"if d else "flat",{"L":"left","R":"right","T":"top","B":"bottom"}[c]));return
+			if e:b["vertical"]=d;ag();al();l("standing %s along the %s edge."%("upright"if d else "flat",{"L":"left","R":"right","T":"top","B":"bottom"}[c]));return
 			ag()
 		dI();aX()
 	def e9(now):
@@ -897,7 +897,7 @@ def _module_actionbar():
 	def dL():
 		if ct():HOST.layout_arrange();dE();return
 		b["lock"]=not b["lock"];ag()
-		if not dE():ak()
+		if not dE():al()
 		if U.f is not None:U.f.c["lock"].IsChecked=b["lock"]
 		else:aA(q)
 		l("%s."%("locked"if b["lock"]else "unlocked"),Q)
@@ -1132,7 +1132,7 @@ def _module_actionbar():
 			else:e=c["s"]if c else None;bn(aF,"Bags",(lambda:API.UseObject(e))if e else None)
 		elif c is None:l("no bag in that slot (see Bag slots on the Action Bar settings page).")
 		else:API.UseObject(c["s"])
-	dV=[("item","Item...")]+[(f0,dict(bV)[f0])for f0 in "spell skill ability ui macro script dress undress say travel".split()];fm=dict(dV+[("hotkey","Hotkey"),("lo","Red at")]);bz={"macro":"TazUO macros","script":"Legion scripts","dress":"Dress outfits","undress":"Dress outfits"}
+	dV=[("item","Item...")]+[(ga,dict(bV)[ga])for ga in "spell skill ability ui macro script dress undress say travel".split()];fm=dict(dV+[("hotkey","Hotkey"),("lo","Red at")]);bz={"macro":"TazUO macros","script":"Legion scripts","dress":"Dress outfits","undress":"Dress outfits"}
 	def dW():a=Kit.script_dir().replace("\\","/").rstrip("/");b=os.path.dirname(a);return b if b and b!=a else a
 	ck=("iplib","lib","libs","library","site-packages","dlls","stubs","__pycache__","api","docs","examples","virtueassistantmodules")
 	def fo():
@@ -1200,10 +1200,10 @@ def _module_actionbar():
 			elif d=="travel":
 				if HOST.services.get("grimoire.destinations")is None:a=[("Grimoire is off: click to turn it on",("grimon",None))]
 				elif not j["items"]:a=[("No runebook read yet: open Grimoire's runebook tabs",("none",None))]
-				else:a=[(aj("%s  (%s)"%(L["name"],L["book_name"]),260),("tdest",at))for at,L in enumerate(j["items"])]
+				else:a=[(ak("%s  (%s)"%(L["name"],L["book_name"]),260),("tdest",at))for at,L in enumerate(j["items"])]
 				c=dY(a);e=["Runebook destinations"]*len(c)
 			elif d in bz:
-				a=[(aj(by,220),("set",(d,by)))for by in j["items"]]
+				a=[(ak(by,220),("set",(d,by)))for by in j["items"]]
 				if not a:a=[("Nothing saved in TazUO yet",("none",None))]
 				a.append(("Type a name",("typed",d)));c=dY(a);e=[bz[d]]*len(c)
 			else:
@@ -1251,68 +1251,71 @@ def _module_actionbar():
 		if not d:return False
 		try:return(int(c.get("rb")or "0",16)==int(d["book"])and c.get("ri")==str(int(d["index"])))
 		except(ValueError,TypeError,KeyError):return False
-	def al(**a):j.update(a);cn()
-	def fv(what,b):
-		c=j["ref"]
-		if what in("close","bindsel","bagbind","set","settings","pickbag","clearbag","ub","bag","bagmode","tset","grimon")or(what,b)==("cat","item"):ay()
-		if what in d_:d_[what](c,b)
-		elif what=="back":
-			if j["level"]=="method":al(level="list",cat="travel")
-			else:al(level="cats",cat=None,page=0)
-		elif what=="cat"and b=="travel":d=HOST.services.get("grimoire.destinations");al(items=list(safe(d,[])or[])if d is not None else[],level="list",cat="travel",page=0)
-		elif what=="tdest"and j["level"]=="list"and j["cat"]=="travel"and 0<=b<len(j["items"]):al(level="method",dest=j["items"][b])
-		elif what=="tset"and j.get("dest")and c is not None:eG(c,j["dest"],b)
-		elif what=="cat"and b=="item":ci(c)
-		elif what=="cat"and b in bz and aO():
-			def g():
-				a=dX(b)
-				if j["ref"]==c and j["level"]=="cats"and H(j["g"]):al(items=a,level="list",cat=b,page=0)
-			ae(g)
-		elif what=="cat"and b in("spell","skill","ability","ui","macro","script","dress","undress"):al(items=dX(b)if b in bz else[],level="list",cat=b,page=0)
-		elif what in("cat","typed"):al(level="text",cat=b)
-		elif what=="text":
-			v=str(j["c"]["text"].Text or "").strip()
-			if j["cat"]=="hotkey":
-				k=_norm_key(v);e=aq(k)
-				if e:aD(j["c"]["status"],"%s belongs to %s"%(k,e),r);return
-				if k:cd(c,k)
-				else:A(c)["k"]="";aw(refs=[c])
-				ay()
-			elif j["cat"]=="lo":
-				try:h=int(v)
-				except ValueError:aD(j["c"]["status"],"Type a number",r);return
-				A(c)["lo"]=max(0,h);aw(refs=[c]);ay()
-			elif not v:aD(j["c"]["status"],"Type a value first",r)
-			else:ay();dZ(c,j["cat"],v)
-		elif what=="target":f=A(c);f["tg"]={"":"self","self":"last","last":""}.get(f["tg"],"");aW();aM([c]);aA(q);cn()
-		elif what=="clear":dp(c);ay()
-		elif what=="settings":K["sel"]=ep(c);a6(q);aA(q)
-		elif what=="clearbag":df(b,0);a["next_scan"]=0.
-		elif what=="ub":
-			if b=="settings":
-				if aF in HOST.by_key:a6(aF)
-			elif b=="on":bn(aF,"Bags")
-			else:ah();b1(b)
-	d_={"bindsel":lambda ref,a:cc(ref),"bagbind":lambda ref,a:cc(("b",a)),"set":lambda ref,a:dZ(ref,a[0],a[1]),"pickbag":lambda ref,a:dU(a),"bag":lambda ref,a:cj(a),"bagmode":lambda ref,a:a6(q),"grimon":lambda ref,a:bn(cS,"Grimoire"),"page":lambda ref,a:al(page=j["page"]+a)}
+	def ai(**a):j.update(a);cn()
+	def fv(what,a):
+		b=j["ref"]
+		if what in("close","bindsel","bagbind","set","settings","pickbag","clearbag","ub","bag","bagmode","tset","grimon")or(what,a)==("cat","item"):ay()
+		if what in d_:d_[what](b,a)
+	def fw(ref,a):
+		if j["level"]=="method":ai(level="list",cat="travel")
+		else:ai(level="cats",cat=None,page=0)
+	def fx(ref,a):
+		if a=="travel":b=HOST.services.get("grimoire.destinations");ai(items=list(safe(b,[])or[])if b is not None else[],level="list",cat="travel",page=0);return
+		if a=="item":ci(ref);return
+		if a in bz and aO():
+			def c():
+				b=dX(a)
+				if j["ref"]==ref and j["level"]=="cats"and H(j["g"]):ai(items=b,level="list",cat=a,page=0)
+			ae(c);return
+		if a in("spell","skill","ability","ui","macro","script","dress","undress"):ai(items=dX(a)if a in bz else[],level="list",cat=a,page=0);return
+		ai(level="text",cat=a)
+	def fy(ref,a):
+		if j["level"]=="list"and j["cat"]=="travel"and 0<=a<len(j["items"]):ai(level="method",dest=j["items"][a])
+	def fz(ref,a):
+		if j.get("dest")and ref is not None:eG(ref,j["dest"],a)
+	def fA(ref,c):
+		v=str(j["c"]["text"].Text or "").strip()
+		if j["cat"]=="hotkey":
+			k=_norm_key(v);a=aq(k)
+			if a:aD(j["c"]["status"],"%s belongs to %s"%(k,a),r);return
+			if k:cd(ref,k)
+			else:A(ref)["k"]="";aw(refs=[ref])
+			ay();return
+		if j["cat"]=="lo":
+			try:b=int(v)
+			except ValueError:aD(j["c"]["status"],"Type a number",r);return
+			A(ref)["lo"]=max(0,b);aw(refs=[ref]);ay();return
+		if not v:aD(j["c"]["status"],"Type a value first",r)
+		else:ay();dZ(ref,j["cat"],v)
+	def fB(ref,a):c=A(ref);c["tg"]={"":"self","self":"last","last":""}.get(c["tg"],"");aW();aM([ref]);aA(q);cn()
+	def fC(ref,a):dp(ref);ay()
+	def fD(ref,a):K["sel"]=ep(ref);a6(q);aA(q)
+	def fE(ref,b):df(b,0);a["next_scan"]=0.
+	def fF(ref,a):
+		if a=="settings":
+			if aF in HOST.by_key:a6(aF)
+		elif a=="on":bn(aF,"Bags")
+		else:ah();b1(a)
+	d_={"bindsel":lambda ref,a:cc(ref),"bagbind":lambda ref,a:cc(("b",a)),"set":lambda ref,a:dZ(ref,a[0],a[1]),"pickbag":lambda ref,a:dU(a),"bag":lambda ref,a:cj(a),"bagmode":lambda ref,a:a6(q),"grimon":lambda ref,a:bn(cS,"Grimoire"),"page":lambda ref,a:ai(page=j["page"]+a),"back":fw,"cat":fx,"tdest":fy,"tset":fz,"typed":lambda ref,a:ai(level="text",cat=a),"text":fA,"target":fB,"clear":fC,"settings":fD,"clearbag":fE,"ub":fF}
 	def d0(ref):
 		if ref[0]=="b":cj(ref[1])
 		else:dS(ref)
-	def fw(ref):
+	def fG(ref):
 		try:d0(ref)
 		except Exception as a:l("couldn't use %s (%s)."%(N(ref),a),r)
 	O={"ok":None,"held":{},"map":{},"hooks":None}
-	def fx(k):
+	def fH(k):
 		b,a=_norm_key(k).split("+"),None
 		for p in b:
 			if p and p not in("CTRL","SHIFT","ALT"):a=p if p.startswith("SDLK_")else "SDLK_"+p
 		c=[d for d in("CTRL","SHIFT","ALT")if d in b];return "+".join(c+([a]if a else[]))
-	def fy(a):return "+".join(c[5:]if c.startswith("SDLK_")else c for c in str(a).upper().split("+"))
-	def fz(ref):
+	def fI(a):return "+".join(c[5:]if c.startswith("SDLK_")else c for c in str(a).upper().split("+"))
+	def fJ(ref):
 		if ref[0]=="b":return(a["bind"]is None and aH(ref[1])is not None and(b["bagmode"]!=0 or a["ub_state"]is not None))
 		c=A(ref)
 		if c["t"]=="ui":d=aT(c["v"]);e=d[3]if d else "";return(e in("war","help","quests","paperdoll","lock","minimize")or e.startswith(("ga:","macro:")))
 		return c["t"]in("item","spell","skill","ability","macro","say","dress","undress","travel")
-	def fA(b):
+	def fK(b):
 		try:
 			if not O["ok"]:return
 			b=str(b);g=b.rsplit("+",1)[-1];f,c=time.time(),O["held"];h=c.get(g);c[g]=f
@@ -1321,26 +1324,26 @@ def _module_actionbar():
 				for k in[i for i,m in c.items()if f-m>=cM]:del c[k]
 			if a["shutting"]or e["g"]is None:return
 			if a["bind"]is not None:
-				if not cx():B.add(("bindkey",fy(b)),dup=True);HOST.poke()
+				if not cx():B.add(("bindkey",fI(b)),dup=True);HOST.poke()
 				return
 			d=O["map"].get(b)
 			if d is None or cx():return
-			if fz(d):fw(d)
+			if fJ(d):fG(d)
 			else:B.add(("use",d),dup=True);HOST.poke()
 		except Exception:pass
-	def fB(a):
+	def fL(a):
 		try:O["held"].pop(str(a).rsplit("+",1)[-1],None)
 		except Exception:pass
-	def fC():
+	def fM():
 		if O["ok"]is not None:return
 		O["ok"]=False
 		try:
-			import clr;import System;from System.Reflection import BindingFlags;d=BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic;e=a5("ClassicUO.Input.Keyboard");a,b=e.GetEvent("KeyDownEvent",d),e.GetEvent("KeyUpEvent",d);c=clr.GetPythonType(a.EventHandlerType)(fA);f=clr.GetPythonType(b.EventHandlerType)(fB);a.GetAddMethod(True).Invoke(None,System.Array[object]([c]))
+			import clr;import System;from System.Reflection import BindingFlags;d=BindingFlags.Static|BindingFlags.Public|BindingFlags.NonPublic;e=a5("ClassicUO.Input.Keyboard");a,b=e.GetEvent("KeyDownEvent",d),e.GetEvent("KeyUpEvent",d);c=clr.GetPythonType(a.EventHandlerType)(fK);f=clr.GetPythonType(b.EventHandlerType)(fL);a.GetAddMethod(True).Invoke(None,System.Array[object]([c]))
 			try:b.GetAddMethod(True).Invoke(None,System.Array[object]([f]))
 			except Exception:a.GetRemoveMethod(True).Invoke(None,System.Array[object]([c]));raise
 			O.update({"hooks":(a,c,b,f),"ok":True,"held":{}})
 		except Exception as g:l("couldn't read the keyboard, so cell hotkeys are off (%s)."%g,r)
-	def fD():
+	def fN():
 		a,O["hooks"]=O["hooks"],None;O["ok"]=None if a else O["ok"];O["map"]={}
 		if not a:return
 		import System;b,c,d,e=a;safe(lambda:b.GetRemoveMethod(True).Invoke(None,System.Array[object]([c])));safe(lambda:d.GetRemoveMethod(True).Invoke(None,System.Array[object]([e])))
@@ -1358,16 +1361,16 @@ def _module_actionbar():
 			a[k]=r
 		for i,k in enumerate(af()):
 			if k and not aq(k):a[k]=("b",i)
-		O["map"]=dict((fx(d),f)for d,f in a.items())if O["ok"]else{}
+		O["map"]=dict((fH(d),f)for d,f in a.items())if O["ok"]else{}
 	d2={"click":fl,"use":d0,"bag":cj,"ui":ce,"pick":ci,"menu":cm,"mpick":fv,"picked_item":fj,"picked_bag":fk,"bindkey":fc,"lockbar":dL,"grid":e3,"bagmenu":lambda i:cm(None,i),"page":lambda step:ev(b["page"]+step),"bind":lambda:cc()if a["bind"]is None else dM()}
-	def fE(w):a=(w-24)//3;b=bN("Value: a spell, skill, macro or outfit name, primary or secondary, a script file, text to say, or an item graphic (0x0E21, or 0x0E21,1153 with a hue).",w-24)[:3];return(("BAR",(("check","lock","Lock in place","Keep the bar where it is (unlocked: drag its stone edge)",{"stay":True}),("check","top","Show the top row","Show the 24-cell row above the bottom row",{"stay":True,"dx":12+a}),("check","keys","Show hotkeys","Show each cell's hotkey in its corner",{"dx":12+2*a}),("check","short","Short counts","Show 1200 as 1.2k on the counters",{"stay":True}),("check","hue","Count same hue only","Count only items of the cell's hue",{"stay":True,"dx":12+a}),("custom",28,fF),("slider","slot","Cell size:","Cell side in pixels (%d-%d)"%(ba,bb),ba,bb,{"sw":120,"vfmt":"%d px","stay":True}),("custom",26,fG),("custom",26,fH),("slider","scale","Scale:","Size of the whole bar (%d-%d%%); text keeps its size"%(an,aE),an,aE,{"sw":160,"vfmt":"%d%%"}),("slider","extra","Extra rows:","Rows of %d cells above the top row (0-%d); hidden rows' hotkeys are off"%(u,bd),0,bd,{"sw":100,"vfmt":"%d","stay":True}),("custom",26,fI)),{"ldy":2,"sdy":6,"lgap":8,"ugap":10,"fh":26,"pad":6}),("EDIT A CELL",[("custom",128,fJ)]+[("note",c)for c in b]),("HOW TO USE",[("note",f)for d in ej for f in bN(d,w-24)]))
+	def fO(w):a=(w-24)//3;b=bN("Value: a spell, skill, macro or outfit name, primary or secondary, a script file, text to say, or an item graphic (0x0E21, or 0x0E21,1153 with a hue).",w-24)[:3];return(("BAR",(("check","lock","Lock in place","Keep the bar where it is (unlocked: drag its stone edge)",{"stay":True}),("check","top","Show the top row","Show the 24-cell row above the bottom row",{"stay":True,"dx":12+a}),("check","keys","Show hotkeys","Show each cell's hotkey in its corner",{"dx":12+2*a}),("check","short","Short counts","Show 1200 as 1.2k on the counters",{"stay":True}),("check","hue","Count same hue only","Count only items of the cell's hue",{"stay":True,"dx":12+a}),("custom",28,fP),("slider","slot","Cell size:","Cell side in pixels (%d-%d)"%(ba,bb),ba,bb,{"sw":120,"vfmt":"%d px","stay":True}),("custom",26,fQ),("custom",26,fR),("slider","scale","Scale:","Size of the whole bar (%d-%d%%); text keeps its size"%(an,aE),an,aE,{"sw":160,"vfmt":"%d%%"}),("slider","extra","Extra rows:","Rows of %d cells above the top row (0-%d); hidden rows' hotkeys are off"%(u,bd),0,bd,{"sw":100,"vfmt":"%d","stay":True}),("custom",26,fS)),{"ldy":2,"sdy":6,"lgap":8,"ugap":10,"fh":26,"pad":6}),("EDIT A CELL",[("custom",128,fT)]+[("note",c)for c in b]),("HOW TO USE",[("note",f)for d in ej for f in bN(d,w-24)]))
 	def d3(f,by,a):return Kit.buttons(f.g,f.store,f.x+12,by,a,16)
 	def bA(f,lx,a,label,key,b,c,value,tooltip):E(f.g,label,lx,a+2);d=[g[0]for g in c];K["dds"].append((key,lx+I(label)+8,a,b,[h[1]for h in c],d.index(value)if value in d else 0,tooltip));return lx+I(label)+8+b+16
-	def fF(f,x,y):b=a["ub_found"];c=aG();e=({"open":"Bags: shown","collapsed":"Bags: folded","docked":"Bags: in the bar"}.get(c)if c else "Bags: off"if b else "Bags: not found"if b is False else "Bags: not in use");b=b or c is not None;d=(f.w-24)//3;E(f.g,aj(e,d-6),x+12+2*d,y+2,Q if b else D)
-	def fG(f,x,y):bA(f,x+f.w-12-170-8-I("Bag slots:"),y,"Bag slots:","bagmode",170,list(enumerate(bh)),b["bagmode"],"Where the bag slots get bags: Inventory > Bags, bags you target, or your backpack and its bags")
-	def fH(f,x,y):a=d3(f,y,(("pgprev",a7,"Prev","Show the previous bottom-left page"),("pgnext",a7,"Next","Show the next bottom-left page"),("bind",cA,"Keybind mode","Start keybind mode: hover a cell and press a key")));E(f.g,aj("Bar page %d of %d"%(b["page"]+1,ad),x+f.w-16-a),a,y+3,D)
-	def fI(f,x,y):c=x+12+I("Extra rows:")+8;a=b["anchor"];d={"":"none (drop near a corner or edge middle)","L":"left edge, upright","R":"right edge, upright","T":"top edge","B":"bottom edge","C":"screen centre"}.get(a,{"TL":"top-left","TR":"top-right","BL":"bottom-left","BR":"bottom-right"}.get(a,a)+" corner");E(f.g,aj("Anchor: %s"%d,x+f.w-16-(c+130)),c+130,y+2,D)
-	def fJ(f,x,y):
+	def fP(f,x,y):b=a["ub_found"];c=aG();e=({"open":"Bags: shown","collapsed":"Bags: folded","docked":"Bags: in the bar"}.get(c)if c else "Bags: off"if b else "Bags: not found"if b is False else "Bags: not in use");b=b or c is not None;d=(f.w-24)//3;E(f.g,ak(e,d-6),x+12+2*d,y+2,Q if b else D)
+	def fQ(f,x,y):bA(f,x+f.w-12-170-8-I("Bag slots:"),y,"Bag slots:","bagmode",170,list(enumerate(bh)),b["bagmode"],"Where the bag slots get bags: Inventory > Bags, bags you target, or your backpack and its bags")
+	def fR(f,x,y):a=d3(f,y,(("pgprev",a7,"Prev","Show the previous bottom-left page"),("pgnext",a7,"Next","Show the next bottom-left page"),("bind",cA,"Keybind mode","Start keybind mode: hover a cell and press a key")));E(f.g,ak("Bar page %d of %d"%(b["page"]+1,ad),x+f.w-16-a),a,y+3,D)
+	def fS(f,x,y):c=x+12+I("Extra rows:")+8;a=b["anchor"];d={"":"none (drop near a corner or edge middle)","L":"left edge, upright","R":"right edge, upright","T":"top edge","B":"bottom edge","C":"screen centre"}.get(a,{"TL":"top-left","TR":"top-right","BL":"bottom-left","BR":"bottom-right"}.get(a,a)+" corner");E(f.g,ak("Anchor: %s"%d,x+f.w-16-(c+130)),c+130,y+2,D)
+	def fT(f,x,y):
 		g,e,w=f.g,f.c,f.w;i=K["sel"];a=A(aU(i));b=bA(f,x+12,y,"Cell:","sel",120,list(enumerate(eq())),i,"The cell to edit (right-clicking a cell on the bar does the same)");b=bA(f,b,y,"Does:","does",150,bV,a["t"],"What a click or the hotkey does");bA(f,b,y,"Target:","target",100,cZ,a["tg"],"Answer the cell's target cursor with yourself or your last target (when no other module holds it)");E(g,"Value:",x+12,y+34)
 		if a["t"]=="item":c=("0x%04X"%a["g"])+((",%d"%a["h"])if a["h"]else "")
 		elif a["t"]=="ui":c=""
@@ -1376,14 +1379,14 @@ def _module_actionbar():
 		d=x+12+max(I("Value:"),I("Window:"))+8;e["value"]=am(bE(g,c,d,y+32,x+w-16-d,numbers=False),"The cell's value (see below; a Client window cell uses Window)");E(g,"Window:",x+12,y+66);j=c4();k=[s[0]for s in j];K["dds"].append(("window",d,y+64,140,[t[1]for t in j],k.index(a["v"])if a["t"]=="ui"and a["v"]in k else 0,"The client or module window a Client window cell opens"));b=d+140+16
 		for m,h,n,l,o,p in(("key","Hotkey:",a["k"],100,False,cl["hotkey"]+"; or use Keybind mode"),("lo","Red at:",str(a["lo"]),40,True,cl["lo"])):E(g,h,b,y+66);e[m]=am(bE(g,n,b+I(h)+8,y+64,l,numbers=o),p);b+=I(h)+8+l+16
 		q=d3(f,y+96,(("apply",cz,"Apply","Save this cell"),("pick",cA,"Pick item...","Target an item for this cell"),("clear",cy,"Clear","Empty this cell")));e["status"]=E(g,"",q,y+99,D)
-	def fK(g,x,y,w):
+	def fU(g,x,y,w):
 		if not C["a"]:db()
 		K["dds"]=[];f=U.build(g,x,y,w)
 		for c,e,h,i,j,k,l in sorted(K["dds"],key=lambda d:-d[2]):a=G.CreateDropDown(i,j,k);a.SetPos(e,h);g.Add(a);f.c[c]=am(a,l)
 		K.update({"seen_sel":K["sel"],"seen_bag":b["bagmode"]})
 	def aN(text,hue=None):
 		if U.f is not None:aD(U.f.c["status"],text,D if hue is None else hue)
-	def fL():
+	def fV():
 		d=U.f.c;e=aU(K["sel"]);a=A(e)
 		def f(a,dd):return a[max(0,min(len(a)-1,bG(dd,0)))][0]
 		t=f(bV,d["does"]);v=str(d["value"].Text or "").strip();i=f(cZ,d["target"]);k=_norm_key(d["key"].Text);g=aq(k)
@@ -1408,27 +1411,27 @@ def _module_actionbar():
 		C[e[0]][e[1]]=b
 		if b["k"]and b["k"]!=_norm_key(a["k"]):cd(e,b["k"])
 		aw(recount=True,refresh=False,refs=[e]);aN("Saved %s"%N(e),Q)
-	def fM(f):
+	def fW(f):
 		for a,b in(("pgprev",("page",-1)),("pgnext",("page",1)),("bind",("bind",))):
 			if a9(f.store,a):B(b)()
-		if a9(f.store,"apply"):fL()
+		if a9(f.store,"apply"):fV()
 		if a9(f.store,"pick"):B(("pick",aU(K["sel"])))();aN("Target the item")
 		if a9(f.store,"clear"):dp(aU(K["sel"]))
-	def fN(f,new):
+	def fX(f,new):
 		a=bG(f.c["bagmode"],b["bagmode"])
 		if a!=K["seen_bag"]and 0<=a<len(bh):K["seen_bag"]=new["bagmode"]=a
 		c=bG(f.c["sel"],K["sel"])
 		if c!=K["seen_sel"]and 0<=c<X+F+bR:K["sel"]=c;aA(q)
-	def fO(b,new):
+	def fY(b,new):
 		if new["bagmode"]!=b["bagmode"]:a["bag_sig"],a["next_scan"]=None,0.
-		az();ak(.4)
-	U=Kit.Page(b,fE,ag,fO,adjust=fN,clicks=fM,every=.2);da()
-	def fP():a.update(c0(),minimized=Kit.load_min(bP),em=False,ub_last=None,ub_pending=True,counted_at=0.);co.clear();O["held"]={};z.update(scale=None,vertical=None,slot=None,sig=None);da();db();dl();a["ub_state"],a["grim_state"],a["va_state"]=aG(),bl(),b0();ah();HOST.layout_add(q,e6,aS,eR);bi.add(HOST.layout_remove,q);a.update(dock_sig=di(),tray_sig=dj(),watch_next=0.,owned_sig=frozenset(HOST.hotkeys_owned));dG();a.update(rebuild_at=0.,redraw=set());fC();az();bi.service("actionbar.hotkeys",eL);bi.service("look.actionbar",ak)
-	def fQ():
+		az();al(.4)
+	U=Kit.Page(b,fO,ag,fY,adjust=fX,clicks=fW,every=.2);da()
+	def fZ():a.update(c0(),minimized=Kit.load_min(bP),em=False,ub_last=None,ub_pending=True,counted_at=0.);co.clear();O["held"]={};z.update(scale=None,vertical=None,slot=None,sig=None);da();db();dl();a["ub_state"],a["grim_state"],a["va_state"]=aG(),bl(),b0();ah();HOST.layout_add(q,e6,aS,eR);bi.add(HOST.layout_remove,q);a.update(dock_sig=di(),tray_sig=dj(),watch_next=0.,owned_sig=frozenset(HOST.hotkeys_owned));dG();a.update(rebuild_at=0.,redraw=set());fM();az();bi.service("actionbar.hotkeys",eL);bi.service("look.actionbar",al)
+	def f_():
 		if a["shutting"]or e["g"]is None:return
 		if Kit.closed(e):return
 		c=time.time();fi(c);fe(c);ex()
-		if a["minimized"]and a["em"]==ac(q)and not a["rebuild_at"]:ak()
+		if a["minimized"]and a["em"]==ac(q)and not a["rebuild_at"]:al()
 		h=bC()
 		if h!=e.get("arranging",False):
 			e["arranging"]=h
@@ -1449,7 +1452,7 @@ def _module_actionbar():
 			elif f=="traywin":b["tray_open"]=not b["tray_open"];ag();dA()
 			elif f=="toggle_min":
 				if ac(q)and not a["minimized"]:continue
-				aX();a["minimized"]=not a["minimized"];cI(bP,a["minimized"]);ah();ak()
+				aX();a["minimized"]=not a["minimized"];cI(bP,a["minimized"]);ah();al()
 			if a["shutting"]or e["g"]is None:return
 		c=time.time()
 		if c>=a["next_scan"]:
@@ -1460,14 +1463,14 @@ def _module_actionbar():
 		if c>=a["next_count"]or(a.get("pack_v")is not None and c-a.get("counted_at",0.)>=ea and cw()!=a["pack_v"]):a["next_count"]=c+bQ;eB()
 		eJ(c)
 		if c>=a.get("tray_next",0.):a["tray_next"]=c+.1;e9(c)
-	def fR():
+	def f0():
 		while a["jobs"]and not a["shutting"]:a["jobs"].pop(0)()
-	def fS():
-		a["shutting"]=True;bi.close();a4();g,Y["g"]=Y["g"],None;T(g);a["bind"]=None;ay();ah(False);fD()
+	def f1():
+		a["shutting"]=True;bi.close();a4();g,Y["g"]=Y["g"],None;T(g);a["bind"]=None;ay();ah(False);fN()
 		with Kit.quiet:cH(aX)
 		cI(bP,a["minimized"]);ag();aW();g,e["g"]=e["g"],None;T(g)
 		for s in e.pop("stale",[]):T(s)
-	return{"start":fP,"tick":fQ,"stop":fS,"client_tick":True,"config_height":U.height,"build_config":fK,"poll_config":U.poll,"config_closed":U.closed,"thread_tick":fR,"thread_wanted":lambda:bool(a["jobs"])}
+	return{"start":fZ,"tick":f_,"stop":f1,"client_tick":True,"config_height":U.height,"build_config":fU,"poll_config":U.poll,"config_closed":U.closed,"thread_tick":f0,"thread_wanted":lambda:bool(a["jobs"])}
 if "HOST"not in globals():
 	import API
 	exec(open(API.ScriptPath+"/../VirtueAssistantModules/_Alone.py").read())

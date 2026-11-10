@@ -5040,9 +5040,7 @@ def _module_skills():
             Results, Bag, Run and Reset.
             """
             mw, mh = bags_min()
-            # The layout's slot for the window when it lives in a zone.
-            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
-            w, h = z if z is not None and z[0] >= mw and z[1] >= mh else (mw, mh)
+            w, h = wnd.zone_slot(mw, mh) or (mw, mh)
             g, store, c = wnd.begin(w, h)
             M = Kit.MARGIN
             rows = []

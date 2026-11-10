@@ -924,6 +924,18 @@ def _module_meters():
             except Exception:
                 continue
 
+    def on_died(*args):
+        """Script event: you died. Only sets a flag and asks the host for a Meters tick (a game event, not input).
+
+        The death is counted and the recap built on that tick, by own_death.
+        """
+        if not st["active"]:
+            return
+        st["died"] = True
+        if not st["poked"]:
+            st["poked"] = True
+            HOST.poke(KEY, False)
+
     def on_buff(*args):
         """Script event: a buff or debuff was added. Keeps the newest titles for the Buffs display."""
         if not st["active"]:
@@ -1580,6 +1592,8 @@ def _module_meters():
     def make_recap(now):
         """You died: collect the hits on you and your HP line of the last RECAP_SECS into st["recap"]
         and ask for it to be shown on this tick.
+
+        The HP line ends at 0, since you are dead.
         """
         t0 = now - RECAP_SECS
         hits = [e for e in st["taken"] if e[0] >= t0]
@@ -1593,8 +1607,10 @@ def _module_meters():
             hp.insert(0, (t0, before[1], before[2]))
         me = st["me"]
         # The latest reading, which is logged only after this.
+        # Taken as 0 hit points, since you are dead: the death event can come before the client's own
+        # hit points reach 0.
         if me is not None:
-            hp.append((now, me["hits"], me["hmax"]))
+            hp.append((now, 0, me["hmax"]))
         # Names of casters to serials, so the row can be Alt+clicked; one look at the mobiles, only
         # when you die.
         want = set(e[3] for e in hits if e[3] and not e[4])
@@ -1613,6 +1629,20 @@ def _module_meters():
         rows = [(e[0], e[1], e[2], e[4] or sers.get(e[3], 0), e[5], e[6]) for e in hits]
         st["recap"] = {"t": now, "rows": rows, "hp": hp, "total": sum(e[1] for e in hits)}
         st["recap_show"] = True
+
+    def own_death(now):
+        """Count your death and build the death recap, unless this death was already counted.
+
+        Called on the tick after the death event. The dead-body check in process uses the same 10 s
+        dead_seen window, so whichever sees the death first counts it and the other skips it.
+        """
+        me = st["me"]
+        if me is None or now - st["dead_seen"].get(me["ser"], 0) <= 10:
+            return
+        record("deaths", mob_name(me["ser"]), 1, me["ser"])
+        st["dead_seen"][me["ser"]] = now
+        if settings["recap"]:
+            make_recap(now)
 
     def export(w):
         """Make the text of an export of window w's segment and queue it for writing.
@@ -2680,7 +2710,7 @@ def _module_meters():
                    "amtq": [], "poked": False, "place": None, "next_place": 0.0, "taken": [], "hp_log": [],
                    "casts": [], "recap": None, "recap_show": False, "to_write": [],
                    "redraw_wait": set(), "present": [], "pscan": None, "pack_cand": None, "my_ser": None,
-                   "my_name": "", "next_name": 0.0, "fnames": None})
+                   "my_name": "", "next_name": 0.0, "fnames": None, "died": False})
         # Only lines from now on, each once.
         st["jr"] = Journal.reader()
         load_settings()
@@ -2694,7 +2724,7 @@ def _module_meters():
                 w["minimized"] = True
         # Script events: items used, buffs added and the fallback damage amounts.
         Kit.hook_once(st, "hooked", ("ObjectUsed", on_used), ("OnBuffAdded", on_buff),
-                      ("OnEntityDamage", on_damage_amount))
+                      ("OnEntityDamage", on_damage_amount), ("OnPlayerDeath", on_died))
         # The hook hands its queue over through feed; the build is queued unless it already exists.
         if feed["handler"] is None:
             del jobs[:]
@@ -2705,7 +2735,7 @@ def _module_meters():
 
     def _tick():
         """Module tick (client thread): actions, drag settle, zone check, then sample, read the journal,
-        count, close an idle fight and redraw the numbers.
+        count (your death from the death event too), close an idle fight and redraw the numbers.
         """
         st["poked"] = False
         if not wins or wins[0]["g"] is None:
@@ -2755,6 +2785,10 @@ def _module_meters():
         read_journal(now)
         if s:
             process(s, now)
+        # The death event came: count it now, after this tick's damage was counted.
+        if st["died"]:
+            st["died"] = False
+            own_death(now)
         track_place(now, dt)
         if st["recap_show"]:
             st["recap_show"] = False

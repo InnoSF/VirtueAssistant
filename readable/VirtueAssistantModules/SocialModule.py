@@ -2384,12 +2384,16 @@ def _module_social():
             return
 
         def run():
-            """Client-thread body of party_window: build the macro object and hand it to the macro manager."""
+            """Client-thread body of party_window: build the macro object and hand it to the macro manager.
+
+            MacroObject lives in ClassicUO.Game.Managers; its MacroType and MacroSubType enums live in
+            ClassicUO.Common.Enums.
+            """
             import System
             mgr = Typing._get(world, "Macros")
             asm = mgr.GetType().Assembly
-            mo_t, mt_t, ms_t = [asm.GetType("ClassicUO.Game.Managers." + n)
-                                for n in ("MacroObject", "MacroType", "MacroSubType")]
+            mo_t, mt_t, ms_t = [asm.GetType("ClassicUO." + n) for n in
+                                ("Game.Managers.MacroObject", "Common.Enums.MacroType", "Common.Enums.MacroSubType")]
             mo = System.Activator.CreateInstance(mo_t, System.Array[object]([System.Enum.Parse(mt_t, "Open", True),
                  System.Enum.Parse(ms_t, "PartyManifest", True)]))
             CL.call(mgr, "SetMacroToExecute", [mo])
@@ -2532,14 +2536,105 @@ def _module_social():
         else:
             say("already reading the guild window.")
 
+    def to_tab(tab):
+        """Switch the window to another tab, keeping what was typed on the old one and asking for a rebuild."""
+        if tab != settings["tab"]:
+            st["msg"][settings["tab"]] = read_msg()
+            settings["tab"] = tab
+            save_settings()
+            st["rebuild"] = True
+
+    def to_page(step):
+        """Step the list on the current tab by step pages (never below the first) and ask for a list pass."""
+        st["page"][settings["tab"]] = max(0, st["page"].get(settings["tab"], 0) + step)
+        st["next_list"] = 0.0
+
+    def note_row(name):
+        """A row was shift-clicked: open that player's note, unless the name is not known yet."""
+        if str(name).startswith("0x"):
+            say("name not known yet.")
+        else:
+            open_note(name)
+
+    def add_pick():
+        """Add button: ask for a target and queue the picked serial for the friends list."""
+        say("target the friend to add.")
+        HOST.pick_target(PICK_TIMEOUT, lambda serial: queue.add(("picked", int(serial or 0)), dup=True))
+
+    def invite_answer(action):
+        """Answer the party invite with action (accept or decline), if one is waiting."""
+        if st["party"] and st["party"][1]:
+            answer_invite(action)
+
+    def note_done(keep):
+        """Save or delete the note being edited. keep True saves the typed text; the editor closes when the
+        note was stored.
+        """
+        if ed["g"] is None:
+            return
+        name, text = note_fields()
+        if set_note(name, text if keep else ""):
+            notew.close()
+
+    def want_mini(wanted, now, folded):
+        """Tab reader for the folded-down mini view: only reads the party when the window is not folded into
+        the bar.
+
+        The want_* functions take the set of serials to read in full, the time and whether the window is
+        folded into the bar, and add what their tab shows to the set.
+        """
+        if not folded:
+            read_party()
+
+    def want_friends(wanted, now, folded):
+        """Tab reader for Friends: the friends on the shown page."""
+        shown, _pg = page_of(st["friends"])
+        wanted.update(s for s, _ in shown)
+
+    def want_party(wanted, now, folded):
+        """Tab reader for Party: the shown page of members (not yourself), plus the leader and the inviter."""
+        read_party()
+        party = st["party"]
+        if not party:
+            return
+        me = player_serial()
+        shown, _pg = page_of([s for s in party[3] if s != me])
+        wanted.update(shown)
+        wanted.add(party[0])
+        wanted.add(party[1])
+
+    def want_guild(wanted, now, folded):
+        """Tab reader for Guild: the allies and the guild members in view, and starts a timed re-read of the
+        guild window when it is due.
+        """
+        scan_view()
+        for s, _n in st["allies"]:
+            wanted.add(s)
+        gd = st["guild"] or empty_guild()
+        view = st["view"]
+        for m in gd["members"]:
+            s = view.get(mkey(m), 0)
+            if s:
+                wanted.add(s)
+        if (settings["gevery"] and not st["guild_busy"] and now >= st["guild_next"]
+                and now - gd["at"] >= settings["gevery"] * 60):
+            start_guild_read()
+
+    # Both name the handlers by the action name the queue holds: TAB_WANT by tab, WITH_ARG for actions
+    # queued as (name, argument) and ACTIONS for plain names.
+    TAB_WANT = {"mini": want_mini, "friends": want_friends, "party": want_party, "guild": want_guild}
     # Actions that carry an argument (a serial or name) and plain actions, by the name the queue
     # holds.
     WITH_ARG = {"click": click_mobile, "rm": row_remove, "follow": lambda serial: Follow.toggle(serial, TITLE),
                 "noview": lambda name: say("%s isn't in view." % name),
-                "picked": lambda serial: serial and add_friend(serial)}
+                "picked": lambda serial: serial and add_friend(serial), "tab": to_tab, "page": to_page,
+                "note": note_row}
     ACTIONS = {"pwin": party_window, "note_close": notew.close, "gsort": next_sort, "grefresh": guild_refresh,
                "leave": lambda: party_action("leave"), "loot": lambda: party_action("loot"),
-               "add_last": lambda: add_friend(int(API.LastTargetSerial or 0))}
+               "add_last": lambda: add_friend(int(API.LastTargetSerial or 0)), "add": add_pick,
+               "accept": lambda: invite_answer("accept"), "decline": lambda: invite_answer("decline"),
+               "diplo": lambda: jobs.append(diplomacy_job), "war": lambda: API.SetWarMode(not API.Player.InWarMode),
+               "note_save": lambda: note_done(True), "note_delete": lambda: note_done(False)}
     # Layout of this module's page in the mother's Settings tab.
     PAGE_OPTS = {"ldy": 4, "fw": 40, "ltip": True, "clamp": False}
 
@@ -2628,50 +2723,20 @@ def _module_social():
                 st["msg"][settings["tab"]] = read_msg()
             if action == "redraw":
                 st["rebuild"] = True
-            # The window's own actions (fold, minimize, close, settings) come first.
-            elif wnd.action(action):
                 continue
-            elif kind in WITH_ARG:
+            if wnd.action(action):
+                continue
+            if kind in WITH_ARG:
                 WITH_ARG[kind](action[1])
-            elif action in ACTIONS:
+                continue
+            if action in ACTIONS:
                 ACTIONS[action]()
-            elif kind == "tab":
-                if action[1] != settings["tab"]:
-                    st["msg"][settings["tab"]] = read_msg()
-                    settings["tab"] = action[1]
-                    save_settings()
-                    st["rebuild"] = True
-            elif kind == "page":
-                st["page"][settings["tab"]] = max(0, st["page"].get(settings["tab"], 0) + action[1])
-                st["next_list"] = 0.0
-            elif action == "add":
-                say("target the friend to add.")
-                # The pick answers from the shared target helper, not from this module's tick; the answer is
-                # queued back to it.
-                HOST.pick_target(PICK_TIMEOUT, lambda serial: queue.add(("picked", int(serial or 0)), dup=True))
-            elif action in WINS:
-                if open_window(action) and action == "invite":
-                    say("target who to invite.")
-            elif action in ("accept", "decline") and st["party"] and st["party"][1]:
-                answer_invite(action)
-            elif action in SAY:
+                continue
+            if action in SAY:
                 send_chat(SAY[action], read_msg())
-            elif action == "diplo":
-                # Waits for the server: never on this tick.
-                jobs.append(diplomacy_job)
-            elif action == "war":
-                # Toggle war and peace.
-                API.SetWarMode(not API.Player.InWarMode)
-            elif kind == "note":
-                if str(action[1]).startswith("0x"):
-                    say("name not known yet.")
-                else:
-                    open_note(action[1])
-            elif action in ("note_save", "note_delete"):
-                if ed["g"] is not None:
-                    name, text = note_fields()
-                    if set_note(name, text if action == "note_save" else ""):
-                        notew.close()
+                continue
+            if action in WINS and open_window(action) and action == "invite":
+                say("target who to invite.")
         if st["rebuild"]:
             if not st["minimized"]:
                 st["msg"][settings["tab"]] = read_msg()
@@ -2699,35 +2764,8 @@ def _module_social():
         # and the announcements.
         wanted = set()
         st["view_serials"] = None
-        if tab == "mini":
-            if not folded:
-                read_party()
-        elif tab == "friends":
-            shown, _pg = page_of(st["friends"])
-            wanted.update(s for s, _ in shown)
-        elif tab == "party":
-            read_party()
-            party = st["party"]
-            if party:
-                me = player_serial()
-                shown, _pg = page_of([s for s in party[3] if s != me])
-                wanted.update(shown)
-                wanted.add(party[0])
-                wanted.add(party[1])
-        elif tab == "guild":
-            scan_view()
-            for s, _n in st["allies"]:
-                wanted.add(s)
-            gd = st["guild"] or empty_guild()
-            view = st["view"]
-            for m in gd["members"]:
-                s = view.get(mkey(m), 0)
-                if s:
-                    wanted.add(s)
-            # The automatic guild re-read, only while the Guild tab shows.
-            if (settings["gevery"] and not st["guild_busy"] and now >= st["guild_next"]
-                    and now - gd["at"] >= settings["gevery"] * 60):
-                start_guild_read()
+        if tab in TAB_WANT:
+            TAB_WANT[tab](wanted, now, folded)
         if tab in ("guild", "profile"):
             read_profile(tab == "profile")
         mobs = {}
@@ -2736,14 +2774,15 @@ def _module_social():
         # data's last slot is None until then).
         kept = st["kept"] if tab == "guild" else None
         for s in wanted:
-            if s:
-                e = kept.get(s) if kept else None
-                if e is not None:
-                    mobs[s] = (e[0], 0, 0, e[1], False, None)
-                    continue
-                d = read_mobile(s)
-                if d is not None:
-                    mobs[s] = d
+            if not s:
+                continue
+            e = kept.get(s) if kept else None
+            if e is not None:
+                mobs[s] = (e[0], 0, 0, e[1], False, None)
+                continue
+            d = read_mobile(s)
+            if d is not None:
+                mobs[s] = d
         st["mobs"] = mobs
         inview = set()
         rest = []

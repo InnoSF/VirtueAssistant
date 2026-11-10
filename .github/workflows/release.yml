@@ -8,43 +8,63 @@ on:
       - "VirtueAssistantV*.py"
       - "VirtueAssistantModules/**"
       - "PATCHLOG-*.md"
+      - "readable/**"
+      - ".github/**"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      mother: ${{ steps.checks.outputs.mother }}
+      ver: ${{ steps.checks.outputs.ver }}
+    env:
+      IPY_URL: https://github.com/IronLanguages/ironpython3/releases/download/v3.4.2/IronPython.3.4.2.zip
+      IPY_SHA256: b12b9d336819f08132338747c53ad4741010044fa56262399a279544be50d285
     steps:
       - uses: actions/checkout@v4
 
-      - name: Find the version
-        id: find
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax, ASCII, name, file names, mother and patch log
+        id: checks
+        env:
+          BLOCKED_NAME: ${{ vars.BLOCKED_NAME || secrets.BLOCKED_NAME }}
+        run: python -I .github/scripts/ci_check.py checks .
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download IronPython 3.4.2
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          mothers=(VirtueAssistantV*.py)
-          if [ "${#mothers[@]}" -ne 1 ]; then
-            echo "expected exactly one VirtueAssistantV*.py at the top, found ${#mothers[@]}"
-            exit 1
-          fi
-          mother="${mothers[0]}"
-          ver="${mother#VirtueAssistantV}"
-          ver="${ver%.py}"
-          ver="${ver//-/.}"
-          test -f "PATCHLOG-${ver}.md" || { echo "missing PATCHLOG-${ver}.md"; exit 1; }
-          test -d VirtueAssistantModules || { echo "missing VirtueAssistantModules"; exit 1; }
-          echo "mother=$mother" >> "$GITHUB_OUTPUT"
-          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/ipy"
+          curl -sSfL -o "$RUNNER_TEMP/ipy/ipy.zip" "$IPY_URL"
+          echo "$IPY_SHA256  $RUNNER_TEMP/ipy/ipy.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/ipy/ipy.zip" -d "$RUNNER_TEMP/ipy/x"
+
+      - name: Compile with IronPython 3.4
+        run: dotnet "$RUNNER_TEMP/ipy/x/net8.0/ipy.dll" .github/scripts/ci_check.py ipy .
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Skip a version that already has a release
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "v${{ steps.find.outputs.ver }}" > /dev/null 2>&1; then
-            echo "v${{ steps.find.outputs.ver }} is already released; nothing to do"
+          if gh release view "v${{ needs.check.outputs.ver }}" > /dev/null 2>&1; then
+            echo "v${{ needs.check.outputs.ver }} is already released; nothing to do"
             echo "skip=1" >> "$GITHUB_OUTPUT"
           else
             echo "skip=0" >> "$GITHUB_OUTPUT"
@@ -54,8 +74,8 @@ jobs:
         if: steps.check.outputs.skip == '0'
         env:
           GH_TOKEN: ${{ github.token }}
-          MOTHER: ${{ steps.find.outputs.mother }}
-          VER: ${{ steps.find.outputs.ver }}
+          MOTHER: ${{ needs.check.outputs.mother }}
+          VER: ${{ needs.check.outputs.ver }}
         run: |
           set -euo pipefail
           mkdir -p dist

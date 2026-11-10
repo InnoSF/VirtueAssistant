@@ -4222,9 +4222,177 @@ def _module_mongotchi():
         for dx in (-14, 14):
             particle("*", hue, x + dx, y, dx * 1.6, -8.0, 0.9)
 
+    def aim(t, dt, px, py, gr, gone, eating, speed, rate):
+        """Decide where the pet is heading and how fast it flaps for this frame (client thread).
+
+        Sets the target st tx / ty from the pet's state in this order of priority: away, wild, asleep, on its
+        way to guard the pantry, eating, playing with a toy, then wandering. Takes the time, the step, the
+        pet's position, the gremlin, whether the pet has left, whether it is eating, and the current speed
+        and wing rate. Returns (speed, rate, prop, landed): prop is (picture, x, y, hue, scale) of what is
+        held in view or None, landed is True while the pet is at its food.
+        """
+        if pet["away"]:
+            if not gone:
+                st["tx"], st["ty"], speed, rate = XMAX + 30.0, float(YMIN), 140.0, 10.0
+            return speed, rate, None, False
+        if pet["feral"]:
+            return speed, rate, None, False
+        if pet["asleep"]:
+            st["tx"], st["ty"] = float(PX0 + PW // 2 - PB_W // 2), float(YMAX)
+            return 30.0, rate, None, False
+        if gr is not None and gr["phase"] == "walk" and gr["guard_at"] and t >= gr["guard_at"]:
+            st["tx"], st["ty"], speed, rate = gr["x"] - 6, float(YMAX), 170.0, 11.0
+            return speed, rate, None, False
+        if eating:
+            fx = float(st["eat_x"] - 6)
+            st["tx"], st["ty"], speed, rate = fx, float(YMAX - 4), 110.0, 7.0
+            landed = abs(px - fx) < 6 and abs(py - (YMAX - 4)) < 6
+            bites = 1.0
+            if landed:
+                st.setdefault("eat_t0", t)
+                bites = max(0.0, 1.0 - int((t - st["eat_t0"]) / 0.45) * 0.25)
+                if bites < st.get("eat_bites", 1.0):
+                    pet_particle(".", HUE_CRUMB, random.uniform(-10, 10), 34, random.uniform(-15, 15), 10.0, 0.8)
+                st["eat_bites"] = bites
+            return speed, rate, (st["eat_food"][0], st["eat_x"] + 16, FLOOR_Y + 17, 0, max(0.05, bites)), landed
+        if t < st["play_until"] and st["play_toy"] is not None:
+            toy = st["play_toy"]
+            st["tx"], st["ty"] = toy_motion(t, dt, toy)
+            speed, rate = 95.0 * pers("speed", 1.0), 8.0
+            prop = (toy["gfx"], st["toy"][0] + 22, st["toy"][1] + 17, toy["hue"], 1.0)
+            if toy.get("motion") == "music" and random.random() < dt * 1.5:
+                pet_particle(random.choice(["~", "*", "+"]), random.choice(RAINBOW), random.uniform(-20, 20), 6,
+                             random.uniform(-10, 10), -18.0, 1.4)
+            elif abs(st["toy"][0] + 22 - (px + PB_W / 2.0)) < 14 and random.random() < dt * 2:
+                pet_particle("!", Kit.HUE_GOOD, 0, -4, 0.0, -24.0, 0.8)
+            return speed, rate, prop, False
+        # Hungry or tired pets move and flap slowly.
+        if pet["food"] < 25 or pet["energy"] < 15:
+            rate = 2.6
+            speed *= 0.6
+        if (abs(st["tx"] - px) < 2 and abs(st["ty"] - py) < 2 or st["tx"] == 0) and t >= st["hover_until"]:
+            # Reached the target (or has none yet) and the pause is over: pick a new one, lower in the pen when
+            # food or joy is low, and sometimes start a small animation that matches the mood.
+            low = YMIN + 30 if (pet["food"] < 25 or pet["joy"] < 25) else YMIN
+            st["tx"] = float(random.randint(XMIN, XMAX))
+            st["ty"] = float(random.randint(min(low, YMAX), YMAX))
+            st["hover_until"] = t + random.uniform(0.5, 2.5) / pers("speed", 1.0)
+            r = random.random()
+            if mood() >= 80 and r < 0.12:
+                anim("loop", 1.0)
+            elif pet["food"] < 25 and r < 0.25:
+                anim("rumble", 0.5)
+            elif pet["energy"] < 20 and r < 0.25:
+                anim("yawn", 1.4)
+        return speed, rate, None, False
+
+    def carry_at(t, cr, cx, cy, hidden, gr):
+        """Where the carried item is drawn: (centre x, centre y, size) or None when nothing shows.
+
+        cr is the carry record. The pet carries it at its feet, the gremlin at its hands, and a dropped item
+        arcs to the pantry; when the arc ends the carry is cleared.
+        """
+        if cr["who"] == "pet" and not hidden:
+            return cx, cy + 20, 1.0
+        if cr["who"] == "grem" and gr is not None:
+            return gr["x"] + GR_W / 2.0 + 14, GR_Y + 34 + 2 * math.sin(t * 10), 1.0
+        if cr["who"] != "drop":
+            return None
+        p = (t - cr["t0"]) / 0.8
+        if p >= 1.0:
+            st["carry"] = None
+            anim("pantry_pop", 0.4)
+            return None
+        return (cr["x"] + (PX0 + 34 - cr["x"]) * p,
+                cr["y"] + (PY0 + PH - 20 - cr["y"]) * p - 30 * math.sin(p * math.pi), 1.0 - 0.5 * p)
+
+    def pose_loop(t, p, pose):
+        """Pose effect of the loop animation: swing round in a circle.
+
+        Every pose_* function takes the time t, the animation's progress p (0 to 1) and the pose dict, and
+        adds to its offsets (ox, oy), scales (sx, sy), hue or size (k).
+        """
+        pose["ox"] += 12 * math.sin(p * 2 * math.pi)
+        pose["oy"] += -12 * (1 - math.cos(p * 2 * math.pi)) / 2.0
+
+    def pose_rumble(t, p, pose):
+        """Pose effect of the rumble animation: shake sideways quickly."""
+        pose["ox"] += 2 * math.sin(t * 60)
+
+    def pose_yawn(t, p, pose):
+        """Pose effect of the yawn animation: stretch tall, then settle."""
+        pose["sy"] *= 1.0 - 0.12 * math.sin(p * math.pi)
+        pose["oy"] += 3 * math.sin(p * math.pi)
+
+    def pose_hop(t, p, pose):
+        """Pose effect of the hop animation: squash down, then jump."""
+        if p < 0.3:
+            pose["sy"] *= 1.0 - 0.22 * math.sin(p / 0.3 * math.pi)
+        else:
+            pose["oy"] -= 9 * math.sin((p - 0.3) / 0.7 * math.pi)
+
+    def pose_shake(t, p, pose):
+        """Pose effect of the shake animation: shake sideways, fading out."""
+        pose["ox"] += 3 * math.sin(t * 40) * (1 - p)
+
+    def pose_stretch(t, p, pose):
+        """Pose effect of the stretch animation: grow from squashed to full height with a small lift."""
+        pose["sy"] *= 0.75 + 0.25 * p
+        pose["oy"] -= 6 * math.sin(p * math.pi)
+
+    def pose_cough(t, p, pose):
+        """Pose effect of the cough animation: a small squash and bob."""
+        pose["sy"] *= 1.0 - 0.15 * math.sin(p * math.pi)
+        pose["oy"] += 2 * math.sin(p * math.pi)
+
+    def pose_flash(t, p, pose):
+        """Pose effect of the flash animation: flicker the sick hue on and off."""
+        pose["hue"] = HUE_SICK if int(t * 10) % 2 == 0 else 0
+
+    def pose_spooky(t, p, pose):
+        """Pose effect of the spooky animation: flicker between white and the sleeping hue."""
+        pose["hue"] = HUE_WHITE if int(t * 8) % 2 == 0 else HUE_SLEEP
+
+    def pose_grow(t, p, pose):
+        """Pose effect of the grow animation: flicker white while pulsing in size."""
+        pose["hue"] = HUE_WHITE if int(t * 8) % 2 == 0 else None
+        pose["k"] = 0.8 + 0.2 * abs(math.sin(t * 10))
+
+    def pose_arrive(t, p, pose):
+        """Pose effect of the arrive animation: drop in from above, squashing on landing."""
+        pose["oy"] -= 70 * (1 - p) ** 2
+        if p > 0.8:
+            pose["sy"] *= 1.0 - 0.25 * math.sin((p - 0.8) / 0.2 * math.pi)
+
     # Poses are applied in this order, so a later hue or size wins.
     POSE_ORDER = ("loop", "rumble", "yawn", "hop", "shake", "stretch", "cough", "flash", "spooky", "grow", "arrive")
     POSE_RANK = dict((_k, _i) for _i, _k in enumerate(POSE_ORDER))
+    POSE_FX = (pose_loop, pose_rumble, pose_yawn, pose_hop, pose_shake, pose_stretch, pose_cough, pose_flash,
+               pose_spooky, pose_grow, pose_arrive)
+
+    def pose_anims(t, anims, pose):
+        """Apply every live animation to the pose in POSE_ORDER (client thread).
+
+        anims is the st anims table (kind -> start time and duration). One pass collects the live kinds of
+        the table that are poses, sorts them only when there are several, and calls their POSE_FX entry
+        with its progress. Nothing is made when none is live.
+        """
+        live = None
+        for kind, a in anims.items():
+            o = POSE_RANK.get(kind)
+            if o is None:
+                continue
+            el = t - a["t0"]
+            if el < a["dur"]:
+                if live is None:
+                    live = []
+                live.append((o, el / a["dur"]))
+        if live is None:
+            return
+        if len(live) > 1:
+            live.sort()
+        for o, p in live:
+            POSE_FX[o](t, p, pose)
 
     def animate(t, c, v):
         """Move and pose the pet and everything around it in the main pen for time t (client thread).
@@ -4240,8 +4408,6 @@ def _module_mongotchi():
         speed = 35.0 * pers("speed", 1.0)
         # Wing beats per second.
         rate = 4.0
-        # The prop is (graphic, centre x, centre y, hue, size k), or None.
-        prop = None
         gr = st["grem"]
         gone = pet["away"] and t >= st["leave_until"]
         a_zoom, _ = anim_at("zoom", t)
@@ -4249,58 +4415,7 @@ def _module_mongotchi():
             speed *= 2.5
             rate *= 2.0
         eating = t < st["eat_until"] and st["eat_food"] is not None
-        landed = False
-        if pet["away"]:
-            if not gone:
-                st["tx"], st["ty"], speed, rate = XMAX + 30.0, float(YMIN), 140.0, 10.0
-        elif pet["feral"]:
-            pass
-        elif pet["asleep"]:
-            st["tx"], st["ty"], speed = float(PX0 + PW // 2 - PB_W // 2), float(YMAX), 30.0
-        elif gr is not None and gr["phase"] == "walk" and gr["guard_at"] and t >= gr["guard_at"]:
-            st["tx"], st["ty"], speed, rate = gr["x"] - 6, float(YMAX), 170.0, 11.0
-        elif eating:
-            fx = float(st["eat_x"] - 6)
-            st["tx"], st["ty"], speed, rate = fx, float(YMAX - 4), 110.0, 7.0
-            landed = abs(px - fx) < 6 and abs(py - (YMAX - 4)) < 6
-            # The food shrinks bite by bite once the pet is at it.
-            bites = 1.0
-            if landed:
-                st.setdefault("eat_t0", t)
-                bites = max(0.0, 1.0 - int((t - st["eat_t0"]) / 0.45) * 0.25)
-                if bites < st.get("eat_bites", 1.0):
-                    pet_particle(".", HUE_CRUMB, random.uniform(-10, 10), 34, random.uniform(-15, 15), 10.0, 0.8)
-                st["eat_bites"] = bites
-            prop = (st["eat_food"][0], st["eat_x"] + 16, FLOOR_Y + 17, 0, max(0.05, bites))
-        elif t < st["play_until"] and st["play_toy"] is not None:
-            toy = st["play_toy"]
-            st["tx"], st["ty"] = toy_motion(t, dt, toy)
-            speed, rate = 95.0 * pers("speed", 1.0), 8.0
-            prop = (toy["gfx"], st["toy"][0] + 22, st["toy"][1] + 17, toy["hue"], 1.0)
-            if toy.get("motion") == "music" and random.random() < dt * 1.5:
-                pet_particle(random.choice(["~", "*", "+"]), random.choice(RAINBOW), random.uniform(-20, 20), 6,
-                             random.uniform(-10, 10), -18.0, 1.4)
-            elif abs(st["toy"][0] + 22 - (px + PB_W / 2.0)) < 14 and random.random() < dt * 2:
-                pet_particle("!", Kit.HUE_GOOD, 0, -4, 0.0, -24.0, 0.8)
-        else:
-            # Hungry or worn out: slower, drooping beats.
-            if pet["food"] < 25 or pet["energy"] < 15:
-                rate = 2.6
-                speed *= 0.6
-            if abs(st["tx"] - px) < 2 and abs(st["ty"] - py) < 2 or st["tx"] == 0:
-                if t >= st["hover_until"]:
-                    low = YMIN + 30 if (pet["food"] < 25 or pet["joy"] < 25) else YMIN
-                    st["tx"] = float(random.randint(XMIN, XMAX))
-                    st["ty"] = float(random.randint(min(low, YMAX), YMAX))
-                    st["hover_until"] = t + random.uniform(0.5, 2.5) / pers("speed", 1.0)
-                    r = random.random()
-                    if mood() >= 80 and r < 0.12:
-                        # A happy loop-de-loop.
-                        anim("loop", 1.0)
-                    elif pet["food"] < 25 and r < 0.25:
-                        anim("rumble", 0.5)
-                    elif pet["energy"] < 20 and r < 0.25:
-                        anim("yawn", 1.4)
+        speed, rate, prop, landed = aim(t, dt, px, py, gr, gone, eating, speed, rate)
         if t < st["cure_until"]:
             p = 1.0 - (st["cure_until"] - t) / 1.5
             prop = (GFX_CURE, px + PB_W / 2.0 + 26 * (1 - p), py + 18 + 6 * (1 - p), 0, max(0.1, 1 - p))
@@ -4343,62 +4458,7 @@ def _module_mongotchi():
         # look-up per kind every frame.
         anims = st["anims"]
         if anims:
-            live = None
-            for kind, a in anims.items():
-                o = POSE_RANK.get(kind)
-                if o is not None:
-                    el = t - a["t0"]
-                    if el < a["dur"]:
-                        if live is None:
-                            live = []
-                        live.append((o, el / a["dur"]))
-            if live is not None:
-                if len(live) > 1:
-                    live.sort()
-                for o, p in live:
-                    # loop
-                    if o == 0:
-                        pose["ox"] += 12 * math.sin(p * 2 * math.pi)
-                        pose["oy"] += -12 * (1 - math.cos(p * 2 * math.pi)) / 2.0
-                    # rumble
-                    elif o == 1:
-                        pose["ox"] += 2 * math.sin(t * 60)
-                    # yawn
-                    elif o == 2:
-                        pose["sy"] *= 1.0 - 0.12 * math.sin(p * math.pi)
-                        pose["oy"] += 3 * math.sin(p * math.pi)
-                    # hop: petted, squish, then hop
-                    elif o == 3:
-                        if p < 0.3:
-                            pose["sy"] *= 1.0 - 0.22 * math.sin(p / 0.3 * math.pi)
-                        else:
-                            pose["oy"] -= 9 * math.sin((p - 0.3) / 0.7 * math.pi)
-                    # shake
-                    elif o == 4:
-                        pose["ox"] += 3 * math.sin(t * 40) * (1 - p)
-                    # stretch
-                    elif o == 5:
-                        pose["sy"] *= 0.75 + 0.25 * p
-                        pose["oy"] -= 6 * math.sin(p * math.pi)
-                    # cough
-                    elif o == 6:
-                        pose["sy"] *= 1.0 - 0.15 * math.sin(p * math.pi)
-                        pose["oy"] += 2 * math.sin(p * math.pi)
-                    # flash: Cure, sick and well flicker
-                    elif o == 7:
-                        pose["hue"] = HUE_SICK if int(t * 10) % 2 == 0 else 0
-                    # spooky
-                    elif o == 8:
-                        pose["hue"] = HUE_WHITE if int(t * 8) % 2 == 0 else HUE_SLEEP
-                    # grow: growing up
-                    elif o == 9:
-                        pose["hue"] = HUE_WHITE if int(t * 8) % 2 == 0 else None
-                        pose["k"] = 0.8 + 0.2 * abs(math.sin(t * 10))
-                    # arrive: a new pup drops in from above
-                    else:
-                        pose["oy"] -= 70 * (1 - p) ** 2
-                        if p > 0.8:
-                            pose["sy"] *= 1.0 - 0.25 * math.sin((p - 0.8) / 0.2 * math.pi)
+            pose_anims(t, anims, pose)
         # Flying off into the wild.
         if a_far:
             pose["oy"] -= 70 * p_far
@@ -4426,18 +4486,7 @@ def _module_mongotchi():
         # (centre x, centre y, size k) of the carried item, or None.
         at = None
         if cr is not None:
-            if cr["who"] == "pet" and not hidden:
-                at = (cx, cy + 20, 1.0)
-            elif cr["who"] == "grem" and gr is not None:
-                at = (gr["x"] + GR_W / 2.0 + 14, GR_Y + 34 + 2 * math.sin(t * 10), 1.0)
-            elif cr["who"] == "drop":
-                p = (t - cr["t0"]) / 0.8
-                if p >= 1.0:
-                    st["carry"] = None
-                    anim("pantry_pop", 0.4)
-                else:
-                    at = (cr["x"] + (PX0 + 34 - cr["x"]) * p,
-                          cr["y"] + (PY0 + PH - 20 - cr["y"]) * p - 30 * math.sin(p * math.pi), 1.0 - 0.5 * p)
+            at = carry_at(t, cr, cx, cy, hidden, gr)
             if at is not None:
                 v.look(c["prop2"], cr["gfx"], 0)
                 scaled_box(v, c["prop2"], cr["gfx"], at[0], at[1], at[2], (44, 34))

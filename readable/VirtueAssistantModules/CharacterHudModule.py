@@ -45,6 +45,54 @@ def _module_hud():
     # Height in pixels a piece takes inside its frame: its stone and black are hidden there, so only
     # its rows count, from Kit.MARGIN into its window down to its lowest row.
     PIECE_IN = 42
+    # Client message numbers (Cliloc.enu) for the cast failure, poison, paralysis and bandage lines the
+    # parts match, each mapped to the English text the parts look for; used through Journal.said, so a
+    # line in other words matches the same way. Only numbers whose English text matches exactly as the
+    # words do are listed.
+    J_NUMS = {500007: "you are no longer frozen", 500119: "you must wait to perform another action",
+              500231: "you feel cured of poison", 500295: "you are too far away to do that",
+              500641: "your concentration is disturbed", 500916: "you apply the bandages, but they do not seem",
+              500951: "you cannot heal that", 500954: "that creature may only be healed",
+              500955: "that being is not damaged", 500956: "you begin applying the bandages",
+              500957: "you begin applying the bandages", 500958: "you begin applying the bandages",
+              500959: "you begin applying the bandages", 500960: "you begin applying the bandages",
+              500962: "you were unable to finish your work", 500963: "you did not stay close enough to heal",
+              500964: "you did not stay close enough to heal", 500965: "you are able to resurrect",
+              500966: "you are unable to resurrect", 500967: "you heal what little damage",
+              500968: "you apply the bandages, but they barely help", 500969: "you finish applying the bandages",
+              500970: "bandages cannot be used on that", 501604: "incognito cannot be cast",
+              501775: "this spell is already in effect", 501816: "you are too far away to do that",
+              501857: "this spell won't work on that", 502136: "the poison seems to have worn off",
+              502349: "this target already has reactive armor", 502381: "you cannot move!", 502382: "you can move!",
+              502625: "insufficient mana", 502630: "more reagents are needed", 502632: "the spell fizzles",
+              503252: "you were unable to finish your work", 503253: "you did not stay close enough to heal",
+              503254: "you did not stay close enough to heal", 503255: "you are able to resurrect",
+              503258: "you heal what little damage", 503259: "you apply the bandages, but they barely help",
+              503260: "you finish applying the bandages", 503261: "bandages cannot be used on that",
+              1005382: "the spell will not adhere to you", 1005383: "the spell will not adhere to you",
+              1005384: "you currently have a reactive armor spell", 1005385: "the spell will not adhere to you",
+              1005416: "you currently have a reflect spell", 1005417: "this spell is already in effect",
+              1005545: "the spell will not adhere to you", 1005546: "you currently have a reflect spell",
+              1005547: "the spell will not adhere to you", 1005548: "you currently have a reactive armor spell",
+              1005549: "the spell will not adhere to you", 1005550: "your protection spell has been nullified",
+              1005552: "the spell will not adhere to you", 1005553: "you currently have a reflect spell",
+              1005554: "the spell will not adhere to you", 1005555: "the spell will not adhere to you",
+              1005556: "your reactive armor spell has been nullified", 1005557: "you currently have a reflect spell",
+              1005559: "this spell is already in effect", 1005603: "you can move again!",
+              1008072: "you have been cured of all poisons", 1010058: "you have cured the target of all poisons",
+              1010059: "you have been cured of all poisons", 1010398: "you cannot heal that",
+              1010406: "you cannot heal that", 1010445: "you cannot incognito",
+              1010648: "you have cured the target of all poisons", 1010649: "you have been cured of all poisons",
+              1042857: "you feel a bit nauseous", 1042858: "looks ill", 1042859: "you feel disoriented and nauseous",
+              1042860: "looks extremely ill", 1042861: "you begin to feel pain throughout your body",
+              1042862: "stumbles around in confusion and pain",
+              1042863: "you feel extremely weak and are in severe pain", 1042864: "is wracked with extreme pain",
+              1042865: "you are in extreme pain, and require immediate aid",
+              1042866: "begins to spasm uncontrollably", 1042867: "looks extremely ill",
+              1042868: "stumbles around in confusion and pain", 1042869: "is wracked with extreme pain",
+              1042870: "begins to spasm uncontrollably", 1045157: "you must wait to perform another action",
+              1061091: "you cannot cast that spell in this form", 1061654: "you cannot heal that",
+              3000201: "you must wait to perform another action"}
 
     def pieces_extent(fkey, below):
         """Pixels the pieces stacked outside frame `fkey` take under it (below True) or over it (False).
@@ -946,11 +994,6 @@ def _module_hud():
                 """
                 Tex.put(name, w, h, pixels)
                 st["textures"].add(name)
-
-        def mute(ctrl):
-            """Make a control ignore the mouse, so clicks go through it to the window beneath. Returns it."""
-            ctrl.SetAcceptMouseInput(False)
-            return ctrl
 
         def _cov(d, s):
             """Coverage 0..1 of a pixel that is signed distance `d` from an edge at scale `s`."""
@@ -1972,7 +2015,7 @@ def _module_hud():
                 for v in (("hits", "poison", "yellow") if row == "hits" else (row,)):
                     pb = G.CreateGumpSimpleProgressBar(rx1 - rx0, ry1 - ry0, BAR_BG, BAR_COLOR[v], 0, 100)
                     pb.SetPos(rx0, ry0)
-                    g.Add(mute(pb))
+                    g.Add(Kit.inert(pb))
                     c["bar_" + v] = pb
 
         def build_frame(key):
@@ -2058,15 +2101,13 @@ def _module_hud():
                         frame_clicked(key), tip, movable=free)
             add_close_x(g, key, ox, oy)
             for name in ("name", "hits", "mana", "stam", "status", "portrait_text"):
-                # Label controls the update writes into: name, the three values, the status text and the text over
-                # the portrait.
-                c["lbl_" + name] = mute(Kit.add_label(g, "", 0, 0))
+                c["lbl_" + name] = Kit.inert(Kit.add_label(g, "", 0, 0))
             guard_at = None
             if key == "player":
                 # The GUARDED tag (guard_tick): a dark strip over the panel's top right corner.
                 c["guard_bg"] = color_box(g, 0, 0, 1, 1, (0, 0, 0), 0.65)
                 c["guard_bg"].IsVisible = False
-                c["lbl_guard"] = mute(Kit.add_label(g, "", 0, 0))
+                c["lbl_guard"] = Kit.inert(Kit.add_label(g, "", 0, 0))
                 guard_at = (ox + sx(PANEL[2]) - 6, oy + max(1, sx(PANEL[1]) - LABEL_H - 3))
             # What each control shows is kept in "shown" and "bars", so update_frame touches only changes.
             # "box" is the art's place in the window, "win" the window's size and "slot" the zone slot.
@@ -2337,9 +2378,9 @@ def _module_hud():
             for k in ("cast", "done", "fail"):
                 pb = G.CreateGumpSimpleProgressBar(w - 12, h - 10, BAR_BG, CAST_COLOR[k], 0, 100)
                 pb.SetPos(6, 5)
-                g.Add(mute(pb))
+                g.Add(Kit.inert(pb))
                 c[k] = pb
-            c["lbl"] = mute(Kit.add_label(g, "", 6, 4))
+            c["lbl"] = Kit.inert(Kit.add_label(g, "", 6, 4))
             at = cast_spot(fr) or (0, 0)
             # Wholly on screen.
             Kit.place(g, at[0], at[1], w, h)
@@ -2391,7 +2432,8 @@ def _module_hud():
                     # No cast to fail, or too long ago.
                     if cast["spell"] is None or now - cast["start"] > cast["secs"] + CAST_FAIL_WINDOW:
                         continue
-                    low = ln.low
+                    # By message number first, then by the words.
+                    low = Journal.said(ln, J_NUMS)
                     for text, word in CAST_FAIL_TEXTS:
                         if low.startswith(text):
                             # Failing after the delay: the whole bar goes red.
@@ -3537,6 +3579,8 @@ def _module_hud():
         ALERT_KIND = "spelltimers.ending"
         WARN_MAX = 120
         WIN_W = 360
+        BAR_SIDS = frozenset(("polymorph",))
+        BAR_HUE = Kit.HUE_GOOD
         # SPELLS: spell -> (side, kind, duration, most, watch).
         # side is "self" (always on you) or "target" (whoever you target); kind is "buff" or "debuff".
         # duration is (base seconds, per Magery point, per Evaluating Intelligence point, at least, at
@@ -3608,7 +3652,7 @@ def _module_hud():
         # The buffs on you that are kept over a restart of the script (see save_active).
         KEEP_SIDS = frozenset(norm(n) for n, v in SPELLS.items() if v[1] == "buff")
         settings = {"me": True, "debuff": True, "others": True, "stats": True, "icons": True,
-                    "rows": ROWS_DEFAULT, "warn": 0}
+                    "rows": ROWS_DEFAULT, "warn": 0, "bars": False}
         DEFAULTS = dict(settings)
 
         def st_reset():
@@ -3642,7 +3686,8 @@ def _module_hud():
 
         def save_settings():
             """Save the settings of this character."""
-            Kit.kv_save(SETTINGS_KEY, ";", settings, ("me", "debuff", "others", "stats", "icons", "rows", "warn"), NUMS)
+            Kit.kv_save(SETTINGS_KEY, ";", settings, ("me", "debuff", "others", "stats", "icons", "rows", "warn",
+                                                      "bars"), NUMS)
 
         def raw_stats():
             """Your Strength, Dexterity and Intelligence as "str,dex,int" text, or "" when unreadable."""
@@ -3704,6 +3749,7 @@ def _module_hud():
                         r = new_row(0, b[0], b[1] if b[1] in SPELL_ORDER else "buff", start)
                         r["end"], r["most"] = end or None, most or None
                         r["srcs"].add("cast")
+                        bar_on(r, now)
                 except Exception:
                     continue
 
@@ -3717,7 +3763,7 @@ def _module_hud():
                 r = {"key": key, "who": who, "sid": sid, "kind": kind, "start": now, "end": None,
                      "most": None, "srcs": set(), "watch": None, "seen": False, "confirm": 0.0,
                      "base": None, "level": 0, "delta": 0, "name": name, "away": 0.0,
-                     "icon": ICONS.get(sid, SPELL_ICON_BASE), "end_src": None}
+                     "icon": ICONS.get(sid, SPELL_ICON_BASE), "end_src": None, "bar": None}
                 rows[key] = r
                 if len(rows) > TRACK_MAX:
                     trim_rows(key)
@@ -3729,10 +3775,40 @@ def _module_hud():
             return r
 
         def drop_row(key):
-            """Remove a row and its warning mark."""
-            if rows.pop(key, None) is not None:
-                st["ver"] += 1
-                st["warned"].pop(key, None)
+            """Remove a row and its warning mark, and the TazUO cooldown bar made for it."""
+            r = rows.pop(key, None)
+            if r is None:
+                return
+            st["ver"] += 1
+            st["warned"].pop(key, None)
+            if r["bar"]:
+                bar_off(r, time.time())
+
+        def bar_on(r, now):
+            """Show row r as a TazUO cooldown bar, when the setting is on and r is your own Polymorph with time left.
+
+            Any bar r already had is removed first, so a recast or a retimed row never leaves two. Called only
+            where a timer starts (land, restore_active) or the setting is ticked, never per tick. The bar's name
+            and end are kept in r["bar"].
+            """
+            if r["bar"]:
+                bar_off(r, now)
+            if r["sid"] not in BAR_SIDS or r["who"] or not settings["bars"] or r["end"] is None or r["end"] <= now:
+                return
+            name = SPELL_OF[r["sid"]]
+            API.CreateCooldownBar(r["end"] - now, name, BAR_HUE)
+            r["bar"] = (name, r["end"])
+
+        def bar_off(r, now):
+            """Remove the TazUO cooldown bar made for row r, if it hasn't run out yet.
+
+            A bar past its end has already gone by itself, so it isn't deleted again: TazUO deletes by name, and
+            that could hit another bar of the same name.
+            """
+            bar = r["bar"]
+            r["bar"] = None
+            if bar is not None and bar[1] > now:
+                API.DeleteCooldown(bar[0])
 
         def drop_src(key, src):
             """Take one source (cast, stat, icon, flag, line) from a row; the row goes when none is left."""
@@ -3752,7 +3828,7 @@ def _module_hud():
                 if len(rows) <= TRACK_MAX:
                     break
                 if r["key"] != keep:
-                    rows.pop(r["key"], None)
+                    bar_off(rows.pop(r["key"]), time.time())
 
         def text_key(r):
             """Every field that display_name and tip_of read; the texts are made again only when this changes."""
@@ -3871,7 +3947,7 @@ def _module_hud():
         def land(p, who, at, now):
             """Your spell p landed on who (a serial; 0 or your own serial means you) at time at.
             Stat spells on you are left to the stat watcher; the rest get a row with their end time and the
-            flag to watch for.
+            flag to watch for, and Polymorph on you its TazUO cooldown bar when that setting is on.
             """
             spell, sid = p["spell"], p["sid"]
             spec = SPELLS[spell]
@@ -3907,6 +3983,7 @@ def _module_hud():
                 r["base"] = p["name0"]
             st["last_land"] = (r["key"], now)
             st["warned"].pop(r["key"], None)
+            bar_on(r, now)
 
         def cast_failed(now, during=False):
             """A fail line arrived. It belongs to the spell pending when its delay is about over, or to a broken
@@ -4204,7 +4281,8 @@ def _module_hud():
             me_name = st["name"]
             prev, prev_at = st["prev_name"]
             for ln in lines:
-                low = ln.low
+                # By message number first, then by the words (Journal.said).
+                low = Journal.said(ln, J_NUMS)
                 if low.startswith(OWN_PREFIX):
                     continue
                 name = ln.name or ""
@@ -4421,15 +4499,9 @@ def _module_hud():
             """Smallest size the window can have."""
             return WIN_W, 2 * Kit.MARGIN + 30 + Kit.GAP + ROW_H + 12
 
-        def zone_size():
-            """The zone slot for the window, or None when it is not in a zone, is minimised or too small."""
-            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
-            mw, mh = min_size()
-            return z if z is not None and z[0] >= mw and z[1] >= mh else None
-
         def build_window():
             """Build the window: a section with the empty-state label and the rows (as many as the zone allows)."""
-            zs = zone_size()
+            zs = wnd.zone_slot(*min_size())
             top = 2 * Kit.MARGIN + 30 + Kit.GAP + 12
             w = zs[0] if zs else WIN_W
             slots = []
@@ -4846,7 +4918,7 @@ def _module_hud():
         ACTIONS = {"follow": lambda serial: Follow.toggle(serial, TITLE), "clear": clear_row}
 
         def page_table(w):
-            """The settings page layout: window lists, timer sources and the alert lead time."""
+            """The settings page layout: window lists, timer sources, TazUO's cooldown bars and the alert lead time."""
             return (("WINDOW  (what it lists)", (
                     ("check", "me", "Show the buffs on you", "Bless, Strength, Protection, Reactive Armor, Magic "
                      "Reflection, Night Sight and more"),
@@ -4860,13 +4932,17 @@ def _module_hud():
                      "A Str, Dex or Int step of %d or more is a spell on you (all three: Bless / Curse); potions show "
                      "too" % STAT_MIN_STEP),
                     ("check", "icons", "Use the shard's buff icons when it sends them", "Exact names and times when "
-                     "the shard sends icons (a classic shard sends none)")), {"sh": 90}),
+                     "the shard sends icons (a classic shard sends none)")), {"sh": 90}), ("TAZUO'S COOLDOWN BARS", (
+                    ("check", "bars", "Also show Polymorph as a TazUO cooldown bar",
+                     "Same time as its row here; goes when the timer ends or this is unticked"),), {"sh": 64}),
                 ("ALERTS  (sound: Settings > Alerts)", (
                     ("num", "warn", "Warn before a buff on you runs out:", "One alert this many seconds before it ends "
                      "(0-%d, 0 = never)" % WARN_MAX, "s", 0, WARN_MAX, {"clamp": False}),), {"sh": 64}))
 
         def on_change(old, new):
-            """Settings changed: redraw, re-sync icons, rebuild the rows or forget which warnings were given."""
+            """Settings changed: redraw, re-sync icons, rebuild the rows, forget which warnings were given, or make
+            or remove the TazUO cooldown bars for the running timers.
+            """
             st["redraw"] = True
             if new["icons"] and not old["icons"]:
                 st["next_icons"] = 0.0
@@ -4874,6 +4950,10 @@ def _module_hud():
                 st["rebuild"] = True
             if new["warn"] != old["warn"]:
                 st["warned"] = {}
+            if new["bars"] != old["bars"]:
+                now = time.time()
+                for r in list(rows.values()):
+                    (bar_on if new["bars"] else bar_off)(r, now)
 
         cfg = Kit.Page(settings, page_table, save_settings, on_change, {"ldy": 4, "lgap": 12, "fw": 40})
 
@@ -4901,13 +4981,16 @@ def _module_hud():
         load_settings()
 
         def _start():
-            """Module start: reset, load settings, restore saved timers, hook the buff events, register the
-            alert, choose rows or window and publish the service.
+            """Module start: remove any cooldown bar left by an earlier run, reset, load settings, restore saved
+            timers (with new bars), hook the buff events, register the alert, choose rows or window and publish
+            the service.
             """
             now = time.time()
             st_reset()
             st.update({"active": True, "redraw": True, "started": now,
                        "minimized": wnd.start_min()})
+            for r in rows.values():
+                bar_off(r, now)
             rows.clear()
             for stat in effects:
                 del effects[stat][:]
@@ -4972,12 +5055,17 @@ def _module_hud():
             return False
 
         def _stop():
-            """Module stop: remove the service, rows and window and save settings and active timers."""
+            """Module stop: remove the service, the TazUO cooldown bars, rows and window and save settings and active
+            timers. TazUO keeps a script's cooldown bars after it stops, so they are removed here.
+            """
             st["shutting"] = True
             st["active"] = False
             HOST.dock_remove(KEY)
             if HOST.services.get("spelltimers.list") is svc_list:
                 HOST.services.pop("spelltimers.list", None)
+            now = time.time()
+            for r in rows.values():
+                bar_off(r, now)
             drop_rows()
             wnd.close()
             save_settings()
@@ -5386,11 +5474,13 @@ def _module_hud():
                 return 0.0
 
         def sound_of(entry):
-            """(id, x, y, time text, ms it played) of a swing sound, else None. Makes no game calls, so it is
-            safe wherever the sound event arrives. The event fires for every sound the client plays, so the
-            id is checked first and nothing else is read for other sounds.
+            """(id, x, y, time text, ms it played) of a swing sound, else None.
+
+            Reads the sound event's Index, X, Y and Time fields. Makes no game calls, so it is safe wherever
+            the sound event arrives. The event fires for every sound the client plays, so the id is checked
+            first and nothing else is read for other sounds.
             """
-            sid = int(entry.ID)
+            sid = int(entry.Index)
             if sid not in SWING_SOUNDS:
                 return None
             return (sid, int(entry.X), int(entry.Y), str(entry.Time), now_ms() - _sound_age_ms(entry))
@@ -5409,9 +5499,11 @@ def _module_hud():
             mark_swing(when)
 
         def on_sound_event(*args):
-            """Sound event callback, on the script thread: the sound is only noted; the tick handles it inside
-            the client frame. A swing sound pokes the pass so a bar resting on Ready (slow ticks) restarts at
-            once.
+            """Sound event callback: the sound is only noted; the tick handles it inside the client frame.
+
+            Callbacks run when the host drains them, so this records and returns. A swing sound pokes only
+            the Swing Bar, as a game event rather than input, so a bar resting on Ready (slow ticks)
+            restarts at once without speeding up the whole host.
             """
             if not win.get("active"):
                 return
@@ -5426,7 +5518,7 @@ def _module_hud():
                         # Only a swing on your tile.
                         xy = loop.get("xy")
                         if xy is None or (snd[1], snd[2]) == xy:
-                            HOST.poke()
+                            HOST.poke("hud.swing", False)
                 return
 
         hooked = [False]
@@ -5913,10 +6005,6 @@ def _module_hud():
 
         cfg = Kit.Page(settings, page_table)
 
-        def config_height(w):
-            """Height of the settings page."""
-            return Kit.Form.height(page_table(w), w)
-
         def build_config(g, x, y, w):
             """Build the settings page form."""
             cfgui["f"] = Kit.Form(g, x, y, w, {"kite": kite["on"], "opacity": int(round(bg_opacity)),
@@ -6151,7 +6239,7 @@ def _module_hud():
             win["c"].clear()
             Kit.dispose(g)
 
-        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": config_height,
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
                 "thread_tick": _thread_tick, "thread_wanted": _thread_wanted, "interval": _interval}
 
@@ -6701,16 +6789,18 @@ def _module_hud():
                 if ln.name and str(ln.name).lower() != "system":
                     # Someone saying it is not the shard.
                     continue
-                if low.startswith("you begin applying the bandages"):
+                # Matched by message number or words; a refusal still quotes the line's own words.
+                said = Journal.said(ln, J_NUMS).strip()
+                if said.startswith("you begin applying the bandages"):
                     band_begun(p, now, ln.at)
                     continue
                 if st["phase"] == "idle":
                     continue
                 fresh = st["phase"] == "cursor" or (not st["begun"] and now - st["t0"] <= 2.0)
                 for x in BAND_REFUSED:
-                    if low.startswith(x) and (fresh or x in BAND_REFUSED_END):
+                    if said.startswith(x) and (fresh or x in BAND_REFUSED_END):
                         return low.rstrip(".!")
-                if st["phase"] == "heal" and low.startswith(BAND_FINISHED):
+                if st["phase"] == "heal" and said.startswith(BAND_FINISHED):
                     return "done"
             return None
 
@@ -7319,18 +7409,12 @@ def _module_hud():
             """Smallest size the window can have."""
             return W, 2 * Kit.MARGIN + 30 + 2 * Kit.GAP + all_height(W) + 30 + ROW_H + 2
 
-        def zone_size():
-            """The zone slot for the window, or None when it is not in a zone, is minimised or too small."""
-            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
-            mw, mh = min_size()
-            return z if z is not None and z[0] >= mw and z[1] >= mh else None
-
         def build_window():
             """Build the window: the ALL PETS buttons, then YOUR PETS with a row per pet (name, bars, info and
             the per-pet buttons) as many as the zone allows.
             """
             M = Kit.MARGIN
-            zs = zone_size()
+            zs = wnd.zone_slot(*min_size())
             w = zs[0] if zs else W
             IW = w - 2 * M
             items = all_items()
@@ -7626,8 +7710,10 @@ def _module_hud():
             failed = False
             what = j["what"][0].upper() + j["what"][1:]
             for ln in j["rd"].new():
+                # By message number first, then by the words.
+                low = Journal.said(ln, J_NUMS)
                 for x in HEAL_FAILED:
-                    if x in ln.low:
+                    if x in low:
                         failed = True
                         break
                 if failed:

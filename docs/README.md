@@ -43,6 +43,8 @@ Saved files (lists, layouts, exports, profiles) go in the VirtueAssistantSetting
 4. Drag a corner to resize: its sections flow into columns to fill the size, then the window shrinks to fit them. The scale buttons (- and +) scale it; click the percentage for 100%.
 5. A module's window closes only from its X (which turns the module off); right-click does nothing.
 6. The X on the Virtue Assistant window stops everything.
+7. At start it checks the TazUO parts it reads. If a TazUO update renamed one, a red journal line names it and the module or part that needs it stays off until the next Virtue Assistant (only for that session: your choice is kept).
+8. If Virtue Assistant didn't finish starting last time (the client closed or froze while modules were starting), it asks first: Start normally, or Start safely with every module off for that session. Then tick modules back on one at a time on the Modules tab to find the one that stops it.
 
 ## Two copies of the code
 

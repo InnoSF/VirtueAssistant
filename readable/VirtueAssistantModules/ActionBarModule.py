@@ -786,11 +786,15 @@ def _module_actionbar():
                 return False
 
             def run():
-                """Client thread body: build a MacroObject by reflection and run it."""
+                """Client thread body: build a MacroObject by reflection and run it.
+
+                MacroObject lives in ClassicUO.Game.Managers; its MacroType and MacroSubType enums live in
+                ClassicUO.Common.Enums.
+                """
                 import System
                 mgr = ClientUI._get(world, "Macros")
-                mo_t, mt_t, ms_t = [mgr.GetType().Assembly.GetType("ClassicUO.Game.Managers." + n)
-                                    for n in ("MacroObject", "MacroType", "MacroSubType")]
+                mo_t, mt_t, ms_t = [mgr.GetType().Assembly.GetType("ClassicUO." + n) for n in (
+                    "Game.Managers.MacroObject", "Common.Enums.MacroType", "Common.Enums.MacroSubType")]
                 mo = System.Activator.CreateInstance(mo_t, System.Array[object](
                     [System.Enum.Parse(mt_t, "Open", True), System.Enum.Parse(ms_t, sub, True)]))
                 ClientUI._run_macro_object(mgr, mo)
@@ -3409,33 +3413,42 @@ def _module_actionbar():
         build_menu()
 
     def menu_pick(what, arg):
-        """Act on a menu click.
+        """Act on a menu click (client tick).
 
-        what and arg come from the row's action. Closes the menu for actions that finish there, steps
-        between menu levels, applies typed text (hotkey, red-at value or a name) and sets the cell.
+        what and arg come from the clicked row's action. Actions that finish with the menu close it first;
+        then the handler for what in MENU_ACTS runs with the cell the menu is open on (ref) and arg.
         """
         ref = menu["ref"]
         # Actions that finish with the menu close it first.
         if what in ("close", "bindsel", "bagbind", "set", "settings", "pickbag", "clearbag",
                     "ub", "bag", "bagmode", "tset", "grimon") or (what, arg) == ("cat", "item"):
             close_menu()
+        # The state-free actions are lambdas in MENU_ACTS; the ones that read or change the menu state have
+        # their own menu_* function above it.
         if what in MENU_ACTS:
             MENU_ACTS[what](ref, arg)
-        elif what == "back":
-            if menu["level"] == "method":
-                menu_to(level="list", cat="travel")
-            else:
-                menu_to(level="cats", cat=None, page=0)
-        elif what == "cat" and arg == "travel":
+
+    def menu_back(ref, arg):
+        """Back one level: from the travel method choice to the destination list, otherwise to the categories."""
+        if menu["level"] == "method":
+            menu_to(level="list", cat="travel")
+        else:
+            menu_to(level="cats", cat=None, page=0)
+
+    def menu_cat(ref, arg):
+        """A category was picked: open its list, a typed-value page, or the item picker.
+
+        Lists kept in saved data are fetched on the script thread (when called from the client thread) so
+        the tick never waits for them.
+        """
+        if arg == "travel":
             fn = HOST.services.get("grimoire.destinations")
             menu_to(items=list(safe(fn, []) or []) if fn is not None else [], level="list", cat="travel", page=0)
-        elif what == "tdest" and menu["level"] == "list" and menu["cat"] == "travel" and 0 <= arg < len(menu["items"]):
-            menu_to(level="method", dest=menu["items"][arg])
-        elif what == "tset" and menu.get("dest") and ref is not None:
-            set_travel(ref, menu["dest"], arg)
-        elif what == "cat" and arg == "item":
+            return
+        if arg == "item":
             pick_item(ref)
-        elif what == "cat" and arg in LIST_TITLES and Client.on_client_thread():
+            return
+        if arg in LIST_TITLES and Client.on_client_thread():
             def job():
                 """Fetch the saved list on the script thread and then show it, if the menu is still wanted."""
                 items = saved_list(arg)
@@ -3443,71 +3456,104 @@ def _module_actionbar():
                     menu_to(items=items, level="list", cat=arg, page=0)
 
             later(job)
-        elif what == "cat" and arg in ("spell", "skill", "ability", "ui", "macro", "script", "dress", "undress"):
+            return
+        if arg in ("spell", "skill", "ability", "ui", "macro", "script", "dress", "undress"):
             menu_to(items=saved_list(arg) if arg in LIST_TITLES else [], level="list", cat=arg, page=0)
-        elif what in ("cat", "typed"):
-            menu_to(level="text", cat=arg)
-        elif what == "text":
-            v = str(menu["c"]["text"].Text or "").strip()
-            if menu["cat"] == "hotkey":
-                k = _norm_key(v)
-                owner = key_owner(k)
-                if owner:
-                    Kit.set_text(menu["c"]["status"], "%s belongs to %s" % (k, owner), Kit.HUE_BAD)
-                    return
-                if k:
-                    assign_key(ref, k)
-                else:
-                    cell(ref)["k"] = ""
-                    cells_changed(refs=[ref])
-                close_menu()
-            elif menu["cat"] == "lo":
-                try:
-                    lo = int(v)
-                except ValueError:
-                    Kit.set_text(menu["c"]["status"], "Type a number", Kit.HUE_BAD)
-                    return
-                cell(ref)["lo"] = max(0, lo)
+            return
+        menu_to(level="text", cat=arg)
+
+    def menu_tdest(ref, arg):
+        """A travel destination was picked from the list: go on to choosing how to travel there."""
+        if menu["level"] == "list" and menu["cat"] == "travel" and 0 <= arg < len(menu["items"]):
+            menu_to(level="method", dest=menu["items"][arg])
+
+    def menu_tset(ref, arg):
+        """A travel method was picked: save it, with the destination chosen before, on the cell."""
+        if menu.get("dest") and ref is not None:
+            set_travel(ref, menu["dest"], arg)
+
+    def menu_text(ref, arg):
+        """The Set button of a typed page: apply the text as a hotkey, a red-at value or the cell's value.
+
+        A bad entry (a key another cell owns, not a number, empty) says why in the menu's status line and
+        keeps the menu open.
+        """
+        v = str(menu["c"]["text"].Text or "").strip()
+        if menu["cat"] == "hotkey":
+            k = _norm_key(v)
+            owner = key_owner(k)
+            if owner:
+                Kit.set_text(menu["c"]["status"], "%s belongs to %s" % (k, owner), Kit.HUE_BAD)
+                return
+            if k:
+                assign_key(ref, k)
+            else:
+                cell(ref)["k"] = ""
                 cells_changed(refs=[ref])
-                close_menu()
-            elif not v:
-                Kit.set_text(menu["c"]["status"], "Type a value first", Kit.HUE_BAD)
-            else:
-                close_menu()
-                set_cell(ref, menu["cat"], v)
-        elif what == "target":
-            c = cell(ref)
-            c["tg"] = {"": "self", "self": "last", "last": ""}.get(c["tg"], "")
-            save_cells()
-            want_redraw([ref])
-            HOST.refresh_settings(KEY)
-            build_menu()
-        elif what == "clear":
-            clear_cell(ref)
             close_menu()
-        elif what == "settings":
-            page["sel"] = ref_sel(ref)
-            HOST.show_settings(KEY)
-            HOST.refresh_settings(KEY)
-        elif what == "clearbag":
-            set_picked_bag(arg, 0)
-            st["next_scan"] = 0.0
-        elif what == "ub":
-            if arg == "settings":
-                if UB_MODULE_KEY in HOST.by_key:
-                    HOST.show_settings(UB_MODULE_KEY)
-            elif arg == "on":
-                turn_on(UB_MODULE_KEY, "Bags")
-            else:
-                heartbeat()
-                ub_send(arg)
+            return
+        if menu["cat"] == "lo":
+            try:
+                lo = int(v)
+            except ValueError:
+                Kit.set_text(menu["c"]["status"], "Type a number", Kit.HUE_BAD)
+                return
+            cell(ref)["lo"] = max(0, lo)
+            cells_changed(refs=[ref])
+            close_menu()
+            return
+        if not v:
+            Kit.set_text(menu["c"]["status"], "Type a value first", Kit.HUE_BAD)
+        else:
+            close_menu()
+            set_cell(ref, menu["cat"], v)
+
+    def menu_target(ref, arg):
+        """Cycle who the cell's action is aimed at (nobody, self, last target) and redraw the menu."""
+        c = cell(ref)
+        c["tg"] = {"": "self", "self": "last", "last": ""}.get(c["tg"], "")
+        save_cells()
+        want_redraw([ref])
+        HOST.refresh_settings(KEY)
+        build_menu()
+
+    def menu_clear(ref, arg):
+        """Empty the cell and close the menu."""
+        clear_cell(ref)
+        close_menu()
+
+    def menu_settings(ref, arg):
+        """Show this module's settings page with the cell selected."""
+        page["sel"] = ref_sel(ref)
+        HOST.show_settings(KEY)
+        HOST.refresh_settings(KEY)
+
+    def menu_clearbag(ref, arg):
+        """Forget the bag picked for a slot and ask for a new bag scan at once."""
+        set_picked_bag(arg, 0)
+        st["next_scan"] = 0.0
+
+    def menu_ub(ref, arg):
+        """A Bags module button of the menu: open its settings, turn it on, or send it the command in arg."""
+        if arg == "settings":
+            if UB_MODULE_KEY in HOST.by_key:
+                HOST.show_settings(UB_MODULE_KEY)
+        elif arg == "on":
+            turn_on(UB_MODULE_KEY, "Bags")
+        else:
+            heartbeat()
+            ub_send(arg)
 
     # Menu actions that need no extra state.
+    # The table maps a menu action name to its handler, called as handler(ref, arg).
     MENU_ACTS = {"bindsel": lambda ref, arg: start_bind(ref), "bagbind": lambda ref, arg: start_bind(("b", arg)),
                  "set": lambda ref, arg: set_cell(ref, arg[0], arg[1]), "pickbag": lambda ref, arg: pick_bag(arg),
                  "bag": lambda ref, arg: on_bag_click(arg), "bagmode": lambda ref, arg: HOST.show_settings(KEY),
                  "grimon": lambda ref, arg: turn_on(GRIM_MODULE_KEY, "Grimoire"),
-                 "page": lambda ref, arg: menu_to(page=menu["page"] + arg)}
+                 "page": lambda ref, arg: menu_to(page=menu["page"] + arg), "back": menu_back, "cat": menu_cat,
+                 "tdest": menu_tdest, "tset": menu_tset, "typed": lambda ref, arg: menu_to(level="text", cat=arg),
+                 "text": menu_text, "target": menu_target, "clear": menu_clear, "settings": menu_settings,
+                 "clearbag": menu_clearbag, "ub": menu_ub}
 
     def use(ref):
         """Use a cell or a bag slot as if it was clicked."""

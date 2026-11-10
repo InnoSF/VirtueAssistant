@@ -5,12 +5,14 @@ import re
 import struct
 import time
 APP_NAME="Virtue Assistant"
-APP_VERSION="2.7.0.25"
+APP_VERSION="2.7.0.34"
 MODULE_DIR="VirtueAssistantModules"
 SETTINGS_DIR="VirtueAssistantSettings"
 SETTINGS_KEY="VirtueAssistant_settings"
 VA_ALONE="VA_ALONE"in globals()
+START_AT=time.time()
 ALIVE_KEY="VirtueAssistant_alive"
+START_KEY="VirtueAssistant_starting"
 ALONE_PARTS="VirtueAssistant_alone_parts_%s"
 HOST_TICK=.02
 UI_TICK=.05
@@ -718,6 +720,8 @@ class Kit(object):
 		if alpha is not None:t.SetAlpha(alpha)
 		t.SetAcceptMouseInput(False);g.Add(t);return t
 	@staticmethod
+	def inert(ctrl):ctrl.SetAcceptMouseInput(False);return ctrl
+	@staticmethod
 	def add_box(g,x,y,w,h,alpha=.5,color="#FFFFFF"):
 		if w<=0 or h<=0:return
 		b=G.CreateGumpColorBox(alpha,color);b.SetRect(x,y,w,h);b.SetAcceptMouseInput(False);g.Add(b);return b
@@ -908,13 +912,13 @@ class Kit(object):
 			except Exception:pass
 	_hooks={}
 	@staticmethod
-	def hook_once(a,key,*d):
-		if a[key]:return
-		a[key]=True;e=HOST.owner_key()
-		for b,c in d:
-			try:getattr(API.Events,b)(c)
+	def hook_once(b,key,*d):
+		if b[key]:return
+		b[key]=True;e=HOST.owner_key()
+		for a,c in d:
+			try:getattr(API.Events,a if a.startswith("On")else "On"+a)(c)
 			except Exception:continue
-			Kit._hooks.setdefault(e,[]).append((b,c,a,key))
+			Kit._hooks.setdefault(e,[]).append((a,c,b,key))
 	@staticmethod
 	def unhook(owner):
 		a=Kit._hooks.pop(owner,None)
@@ -1714,6 +1718,7 @@ class Kit(object):
 		def fit(self,w,h,mode):
 			a=(int(w),int(h))if(w is not None and h is not None)else None
 			if a!=self.slot or(mode=="again"and a is not None):self.slot=a;self.queue("redraw")()
+		def zone_slot(self,a,b):z=self.slot if Kit.zone_up(self.key)and not self.st["minimized"]else None;return z if z is not None and z[0]>=a and z[1]>=b else None
 		def rows(self,row_h,fixed_h,a,b=1):
 			if self.slot is None or not HOST.layout_holds(self.key):return a
 			return max(b,int(self.slot[1]-fixed_h)//max(1,int(row_h)))
@@ -2152,14 +2157,14 @@ class Alerts(object):
 		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
 		Kit.dispose(g);self.shown=False;self.pending,self.sounds,self.pings=[],[],[];self.busy=False
 class Guard(object):
-	KEY="VirtueAssistant_guard";EVERY=.25
+	KEY="VirtueAssistant_guard";EVERY=.25;NUMS={500112:GUARD_IN_TEXTS[0],500114:GUARD_IN_TEXTS[0],500113:GUARD_OUT_TEXTS[0],500115:GUARD_OUT_TEXTS[1]}
 	def __init__(self):self.state=self.rd=self.saved=None;self.next=0.;self.cache=(0.,None,None)
 	def tick(self,now):
 		if now<self.next and self.next-now<=self.EVERY:return
 		self.next=now+self.EVERY
 		if self.rd is None:self.rd=Journal.reader();self.rd.last=0
 		for b in self.rd.new():
-			c=b.low
+			c=Journal.said(b,self.NUMS)
 			if "protection of the town guards"not in c:continue
 			if b.name and b.name.lower()!="system":continue
 			a=False if c.startswith(GUARD_OUT_TEXTS)else True if c.startswith(GUARD_IN_TEXTS)else None
@@ -2373,7 +2378,7 @@ class WhatsNew(object):
 		g,self.g=self.g,None;Kit.dispose(g)
 		if seen:API.SavePersistentVar(WHATS_NEW_KEY,APP_VERSION,API.PersistentVar.Account)
 class ModuleSlot(object):
-	def __init__(self,key,title,desc,a,interval):self.key=key;self.title=title;self.desc=desc;self.factory=a;self.interval=interval;self.api=self.lazy=self.broken=self.iv_fn=self.thread_want=None;self.enabled=self.default_on=self.running=self.busy=self.pending_stop=False;self.thread_due=self.on_client=self.has_thread=False;self.category="Other";self.next_due=self.worst_ms=0.;self.errors=set();self.error_times={};self.start_tok=None;self.page_err_at=0.;self.parts=self.aliases=();self.parts_on={};self.parts_running=set();self.folded=True
+	def __init__(self,key,title,desc,a,interval):self.key=key;self.title=title;self.desc=desc;self.factory=a;self.interval=interval;self.api=self.lazy=self.broken=self.iv_fn=self.thread_want=None;self.enabled=self.default_on=self.running=self.busy=self.pending_stop=False;self.thread_due=self.on_client=self.has_thread=False;self.category="Other";self.next_due=0.;self.errors=set();self.error_times={};self.load=[0.,0.,0.];self.part_load={};self.start_tok=None;self.page_err_at=0.;self.parts=self.aliases=();self.parts_on={};self.parts_running=set();self.folded=True
 	def part(self,key):
 		for p in self.parts:
 			if p[0]==key:return p
@@ -2414,10 +2419,10 @@ def _error_where():
 		return " (line %d)"%a.tb_lineno
 	except Exception:return ""
 class JLine(object):
-	__slots__=("seq","text","low","name","hue","ticks","at","kind")
-	def __init__(self,seq,text,name,hue,ticks,at,kind):self.seq,self.text,self.low,self.name=seq,text,text.lower(),name;self.hue,self.ticks,self.at,self.kind=hue,ticks,at,kind
+	__slots__=("seq","text","low","name","hue","ticks","at","kind","num")
+	def __init__(self,seq,text,name,hue,ticks,at,kind):self.seq,self.text,self.low,self.name=seq,text,text.lower(),name;self.hue,self.ticks,self.at,self.kind,self.num=hue,ticks,at,kind,0
 class Journal(object):
-	KEEP=60.;MAX_BACK=30.;lines=[];seen={};seq=0;read_at=0.;pass_id=-1;zero_seen=False;ATTACK_RE=re.compile(r"\*?\s*(.+?)\s+is attacking you",re.IGNORECASE)
+	KEEP=60.;MAX_BACK=30.;lines=[];seen={};seq=0;read_at=0.;pass_id=-1;zero_seen=False;clis=[];CLI_CAP=64;CLI_AGE=5.;hook={"on":False};ATTACK_RE=re.compile(r"\*?\s*(.+?)\s+is attacking you",re.IGNORECASE)
 	class Reader(object):
 		__slots__=("last",)
 		def __init__(self):self.last=Journal.seq
@@ -2436,49 +2441,69 @@ class Journal(object):
 	def update(force=False):
 		o=HOST.pass_id
 		if o==Journal.pass_id and not force:return
-		Journal.pass_id=o;f=time.time();p=min(Journal.MAX_BACK,max(1.,f-Journal.read_at+1.))if Journal.read_at else Journal.MAX_BACK;Journal.read_at=f
+		Journal.pass_id=o;c=time.time()
+		if not Journal.hook["on"]:del Journal.clis[:];Kit.hook_once(Journal.hook,"on",("OnClilocMessageReceived",Journal.on_cliloc))
+		p=min(Journal.MAX_BACK,max(1.,c-Journal.read_at+1.))if Journal.read_at else Journal.MAX_BACK;Journal.read_at=c
 		try:j=list(API.GetJournalEntries(p)or[])
 		except Exception:j=[]
 		k,g,h,q,i=Journal.seen,[],[],False,len(j)-1
 		while i>=0:
-			e=j[i];i-=1;c=i
+			e=j[i];i-=1;d=i
 			try:
 				r=str(e.Text or "")
 				if not r:continue
 				try:l=int(e.Time.Ticks)
 				except Exception:l=0
 				a=(l,r,str(e.Name or ""))
-				if l==0:h.append((a,e,c));Journal.zero_seen=True;continue
+				if l==0:h.append((a,e,d));Journal.zero_seen=True;continue
 				if q or a in k:
 					if not Journal.zero_seen:break
 					q=True;continue
-				g.append((a,e,c))
+				g.append((a,e,d))
 			except Exception:continue
 		if h:
 			m={}
-			for a,e,c in h:m[a]=m.get(a,0)+1
-			n={};y=f-p
+			for a,e,d in h:m[a]=m.get(a,0)+1
+			n={};y=c-p
 			for b in reversed(Journal.lines):
 				if b.at<y:break
 				if b.ticks==0:s=(0,b.text,b.name);n[s]=n.get(s,0)+1
 			u={}
-			for a,e,c in h:
+			for a,e,d in h:
 				v=u.get(a,0);u[a]=v+1
-				if v<m[a]-n.get(a,0):g.append((a,e,c))
+				if v<m[a]-n.get(a,0):g.append((a,e,d))
 			g.sort(key=lambda t:t[2])
 		else:g.reverse()
 		w={}
-		for a,e,c in g:
+		for a,e,d in g:
 			if a[0]!=0:
 				if a in w:continue
 				w[a]=1
-			try:Journal.seq+=1;k[a]=Journal.seq;Journal.lines.append(JLine(Journal.seq,a[1],a[2],int(e.Hue or 0),a[0],f,str(e.TextType or "")))
+			try:Journal.seq+=1;k[a]=Journal.seq;Journal.lines.append(JLine(Journal.seq,a[1],a[2],int(e.Hue or 0),a[0],c,str(e.TextType or "")))
 			except Exception:continue
-		x=f-Journal.KEEP;d=Journal.lines
-		if d and d[0].at<x:
+		if Journal.clis:Journal.pair(c)
+		x=c-Journal.KEEP;f=Journal.lines
+		if f and f[0].at<x:
 			i=0
-			while i<len(d)and d[i].at<x:b=d[i];k.pop((b.ticks,b.text,b.name),None);i+=1
-			del d[:i]
+			while i<len(f)and f[i].at<x:b=f[i];k.pop((b.ticks,b.text,b.name),None);i+=1
+			del f[:i]
+	@staticmethod
+	def on_cliloc(e):
+		try:Journal.clis.append((int(e.Cliloc),str(e.Text or ""),time.time()))
+		except Exception:return
+		if len(Journal.clis)>Journal.CLI_CAP:del Journal.clis[:-Journal.CLI_CAP]
+	@staticmethod
+	def pair(now):
+		e,Journal.clis=Journal.clis,[];b=[]
+		for c in e:
+			f,g,t=c;d=False
+			for a in reversed(Journal.lines):
+				if a.at<t-Journal.CLI_AGE:break
+				if not a.num and a.text==g:a.num=f;d=True;break
+			if not d and now-t<Journal.CLI_AGE:b.append(c)
+		if b:Journal.clis[:0]=b[-Journal.CLI_CAP:]
+	@staticmethod
+	def said(a,b):t=b.get(a.num)if a.num else None;return a.low if t is None or t in a.low else t
 	@staticmethod
 	def since(t):
 		Journal.update();a=[]
@@ -2570,7 +2595,7 @@ class _Memo(object):
 	def __int__(self):return int(self.__dict__["raw"].Serial)
 class Host(object):
 	def __init__(self):
-		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import threading;self._drain_lk=threading.Lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set()
+		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.boot=[("code",time.time()-START_AT)];self.boot_at=time.time();self.boot_load=0.;self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import threading;self._drain_lk=threading.Lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set();self.held_parts=set();self.marked=False;self.ask_g=None;self.ask_store=({},{});self.tz_at=0.;self.tz_off=set();self.tz_told=set()
 		for a,b,c in((ALERTS_PAGE,"Alerts",AlertsPage()),(KEYS_PAGE,"Hotkeys",KeysPage())):s=ModuleSlot(a,b,"",None,1.);s.api=c.api();self.pages.append(s)
 		self.whats_new=WhatsNew()
 	def _tell(self,msg):
@@ -2671,7 +2696,7 @@ class Host(object):
 		return a.key
 	def _parts_fill(self,s):
 		if s.parts and not s.parts_wanted():
-			for p in[a[0]for a in s.parts if a[3]]or[s.parts[0][0]]:s.parts_on[p]=True
+			for p in[a[0]for a in s.parts if a[3]and(s.key,a[0])not in self.held_parts]or[s.parts[0][0]]:s.parts_on[p]=True
 	def _part_notify(self,s):
 		if not s.running or s.api is None or not s.api.get("parts"):return
 		a=s.busy;self._enter(s)
@@ -2681,7 +2706,7 @@ class Host(object):
 	def part_set(self,a,part,on):
 		s=dict.get(self.by_key,a)
 		if s is None or s.part(part)is None:return
-		on=bool(on)
+		on=bool(on);self.held_parts.discard((s.key,part))
 		if s.parts_on.get(part)==on:
 			if on and not s.enabled:self.enable(a)
 			return
@@ -2845,12 +2870,19 @@ class Host(object):
 	def load(self,s):
 		if s is None:return False
 		if s.lazy is not None:
-			a=s.lazy
+			a=s.lazy;e=time.time()
 			try:
-				d=compile(_read_text(a),a,"exec");exec(d,globals())
+				f=compile(_read_text(a),a,"exec");exec(f,globals())
 				if s.lazy is not None:raise Exception("the file's HOST.add line didn't run")
-			except Exception as b:s.lazy=None;c=getattr(b,"lineno",None);e=(" (%s line %s)"%(os.path.basename(a),c))if c else _error_where();s.api,s.broken=None,"%s%s"%(getattr(b,"msg",None)or b,e);Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
+			except Exception as b:s.lazy=None;c=getattr(b,"lineno",None);g=(" (%s line %s)"%(os.path.basename(a),c))if c else _error_where();s.api,s.broken=None,"%s%s"%(getattr(b,"msg",None)or b,g);Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
+			if self.boot is not None:d=time.time()-e;self.boot.append((s.title,d));self.boot_load+=d
 		return s.api is not None
+	def boot_mark(self,name):
+		if self.boot is not None:t=time.time();self.boot.append((name,t-self.boot_at));self.boot_at=t
+	def boot_done(self):
+		a,self.boot=self.boot,None;t=time.time()
+		if self.alone is not None or self.pref_int("startup",0)!=1:return
+		a.append(("first build",max(0.,t-self.boot_at-self.boot_load)));Kit.say("start-up took %.1f s (%s)."%(t-START_AT,", ".join("%s %d ms"%(b,c*1000)for b,c in a)),Kit.HUE_INFO)
 	def current(self):return self.stack[-1]if self.stack else None
 	def stopping(self):
 		if self.quitting:return True
@@ -2933,17 +2965,22 @@ class Host(object):
 		e=s.key+"."
 		for b in list(Kit._hooks):
 			if b in a or str(b).startswith(e):Kit.unhook(b)
-	def tick(self,s,b="tick"):
-		s.busy=True;a=self.stack;a.append(s);self.client_idles=0;f=time.time()
-		try:s.api[b]()
-		except Exception as g:
-			if not self.stopping():self.report(s,g)
+	def tick(self,s,c="tick"):
+		s.busy=True;a=self.stack;a.append(s);self.client_idles=0;d=time.time()
+		try:s.api[c]()
+		except Exception as e:
+			if not self.stopping():self.report(s,e)
 		finally:
 			if a and a[-1]is s:a.pop()
 			elif s in a:a.remove(s)
-			s.busy=False;c=time.time();d=(c-f)*1000.;e=s.worst_ms*.98;s.worst_ms=d if d>e else e
-		if b=="tick":s.next_due=c+Host._ask(s.iv_fn,s.interval);s.thread_due=s.has_thread and Host._ask(s.thread_want,True,bool)
+			s.busy=False;b=time.time();Host.busy_add(s.load,(b-d)*1000.,b)
+		if c=="tick":s.next_due=b+Host._ask(s.iv_fn,s.interval);s.thread_due=s.has_thread and Host._ask(s.thread_want,True,bool)
 		if s.pending_stop:self._stop(s)
+	BUSY_T=10.
+	@staticmethod
+	def busy_add(a,ms,b):d=a[1]-b;a[0]=(a[0]*math.exp(d/Host.BUSY_T)if d<0. else a[0])+ms;a[1]=b;w=a[2]*.98;a[2]=ms if ms>w else w
+	@staticmethod
+	def busy_share(a,now):d=a[1]-now;return(a[0]*math.exp(d/Host.BUSY_T)if d<0. else a[0])/Host.BUSY_T
 	@staticmethod
 	def _ask(fn,default,cast=None):
 		if fn is None:return default
@@ -2985,6 +3022,7 @@ class Host(object):
 		if a or e:self.ui_next=0.
 		c=time.time()
 		if self.prefs_due:self.prefs_flush()
+		if c>=self.tz_at:self.tz_warn()
 		if a or b or self._client_due(c):
 			self.pass_poked,self.pass_all=a or e,a
 			try:Kit.on_client(self._pass_fn)
@@ -3008,6 +3046,8 @@ class Host(object):
 			if self.stopping():return
 			self.drain()
 		if self.load_jobs and not self.stack:self._run_load_jobs()
+		elif self.boot is not None and not self.load_jobs and self.ask_g is None:self.boot_done()
+		elif self.marked and self.ask_g is None and not self.load_jobs and all(i.next_due>0. for i in self.active):self.unmark()
 		d=self.config
 		if d is not None and d.prof_stale and not self.stack:d.refresh_profiles()
 	LOOKAHEAD=HOST_TICK+.035;CLOCK_BACK=60.;EARLY=.008;MOB_AGE=.1;PACK_CAP=6000;PREFS_EVERY=1.
@@ -3235,12 +3275,13 @@ class Host(object):
 				try:GUARD.tick(a)
 				except Exception as b:self._tell("%s: guard-zone error: %s%s"%(APP_NAME,b,_error_where()))
 				if self.whats_new.g is not None:self.whats_new.poll()
+				if self.ask_g is not None:self.ask_poll()
 		except Exception as b:
 			c="%s: settings window error: %s%s"%(APP_NAME,b,_error_where())
 			if not self.stopping():self._tell(c)
 		finally:self.ui_busy=False
 	def load_prefs(self):
-		a=self.prefs=Kit.codec_load(Kit.get_var(SETTINGS_KEY));b=[g for g in a.get("modules","").split(",")if g];c=set(h for h in a.get("seen","").split(",")if h);d=a.get("seen","");e=self._migrate_parts(a,b,c);f=self.held_on=set()
+		a=self.prefs=Kit.codec_load(Kit.get_var(SETTINGS_KEY));b=[g for g in a.get("modules","").split(",")if g];c=set(h for h in a.get("seen","").split(",")if h);d=a.get("seen","");e=self._migrate_parts(a,b,c);f=self.held_on=set();self.held_parts=set()
 		for s in self.slots:
 			if s.default_on and s.key not in c:b.append(s.key);c.add(s.key);self._parts_fill(s)
 			s.enabled=s.key in b and(s.api is not None or s.lazy is not None)
@@ -3292,11 +3333,11 @@ class Host(object):
 		for s in self.slots:
 			if not s.enabled and s.key not in self.held_on:
 				for p in s.parts:
-					if s.parts_on.get(p[0]):b.append("%s.%s"%(s.key,p[0]))
+					if s.parts_on.get(p[0])or(s.key,p[0])in self.held_parts:b.append("%s.%s"%(s.key,p[0]))
 				continue
 			a.append(s.key)
 			for p in s.parts:
-				if s.parts_on.get(p[0]):
+				if s.parts_on.get(p[0])or(s.key,p[0])in self.held_parts:
 					d.append("%s.%s"%(s.key,p[0]))
 					for e in p[4]:
 						if e not in a:a.append(e)
@@ -3341,7 +3382,7 @@ class Host(object):
 				if s.api is not None and s.lazy is None and s.factory is not None:
 					try:s.api=s.factory();s.broken=None
 					except Exception as d:s.api,s.broken=None,str(d)+_error_where();Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
-			self.load_prefs();LAYOUT.load()
+			self.load_prefs();self.tz_check();LAYOUT.load()
 		finally:
 			self.prefs_frozen=False;self.config=ConfigWindow(self);self.config.prof_sel=name;self.config.open();self.hub=HubWindow(self)
 			if self.grid is not None:safe(self.grid.show if self.pref_int("grid_on",0)==1 else self.grid.hide)
@@ -3356,10 +3397,70 @@ class Host(object):
 		try:PROFILES.set_client_default(name)
 		except Exception as b:a=" (TazUO's default for new characters wasn't set: %s)"%Tz.why(b)
 		Kit.say('"%s" is the favourite profile: characters that haven\'t loaded another get it at start.%s'%(name,a),Kit.HUE_GOOD)
+	def hold(self,s,part=None):
+		if part is not None:
+			if not s.parts_on.get(part):return
+			s.parts_on[part]=False;self.held_parts.add((s.key,part))
+			if s.parts_wanted():return
+		if s.enabled:s.enabled=False;self.held_on.add(s.key);s.pending_stop=s.running
+	TZ_GONE="TazUO changed %s; %s %s off until the next Virtue Assistant."
+	def tz_check(self):
+		self.tz_at=0.;self.tz_off=set()
+		for d,e in safe(Tz.missing,()):
+			a=[]
+			for b in e:
+				s,c=self.resolve(b)
+				if s is None and "_"not in b:continue
+				t=b.replace("_"," ")if s is None else s.part_title(c)
+				if t not in a:a.append(t)
+				if s is not None:self.hold(s,c)
+				else:self.tz_off.add(b)
+			if a:Kit.say(self.TZ_GONE%(d,", ".join(a),"are"if len(a)>1 else "is"),Kit.HUE_BAD)
+	TZ_KEY="TazUO_settings_check";TZ_EVERY=60.;TZ_LINE="TazUO's \"%s\" is on; %s. Switch it off in %s.";TZ_RULE="it %s by itself, which this shard's rules don't allow";TZ_AL="Legion Assistant > Agents > Auto Loot";TZ_SOON=5.;TZ_SETS=(("EnableAutoLoot","Enable Auto Loot",TZ_RULE%"loots",TZ_AL),("AutoLootHumanCorpses","Auto Loot Human Corpses","it loots players' corpses by itself, which can flag you criminal",TZ_AL),("EnableScavenger","Enable Scavenger",TZ_RULE%"picks up items","Legion Assistant > Agents > Scavenger"),("AutoOpenDoors","Automatically open doors",TZ_RULE%"opens doors","Options > Gameplay > Movement"))
+	def tz_warn(self):
+		self.tz_at=time.time()+self.TZ_EVERY
+		if self.alone is not None or self.TZ_KEY in self.tz_off or self.pref_int("tz_quiet",0)==1:return
+		b=safe(self.tz_on,())
+		if b is None:self.tz_at=time.time()+self.TZ_SOON;return
+		for a,c,d,e in self.TZ_SETS:
+			if a in b and a not in self.tz_told:self.tz_told.add(a);Kit.say(self.TZ_LINE%(c,d,e),Kit.HUE_BAD)
+	def tz_on(self):
+		b=Tz.get(None,"CurrentProfile",Tz.T("ClassicUO.Configuration.ProfileManager"))
+		if b is None:return
+		a=set(d[0]for d in self.TZ_SETS if bool(Tz.get(b,d[0])))
+		if "EnableAutoLoot"not in a:a.discard("AutoLootHumanCorpses")
+		if "EnableScavenger"in a:
+			a.discard("EnableScavenger")
+			with Kit.quiet:
+				c=Tz.get(None,"Instance",Tz.T("ClassicUO.Game.Managers.ScavengerManager"))
+				if bool(Tz.get(c,"IsLoaded"))and int(Tz.get(c,"ScavengerEntries").Count)>0:a.add("EnableScavenger")
+		return a
+	def mark_start(self):a=Kit.get_var(START_KEY)=="1";Kit.put_var(START_KEY,"1");self.marked=True;return a
+	def unmark(self,stop=False):
+		if self.marked and self.ask_g is None and(not stop or safe(lambda:bool(API.StopRequested),False)):self.marked=False;Kit.put_var(START_KEY,"")
+	def start_on(self):self.load_jobs.extend(a for a in self.slots if a.enabled and a not in self.load_jobs)
+	SAFE_ASK="Virtue Assistant didn't finish starting last time. Start with every module off?";SAFE_DONE="every module is off for now; tick them on one at a time on the Modules tab (%s).";SAFE_BUTTONS=(("normal",Kit.ART_PLAY,"Start normally","Turn on the modules you had on"),("safe",Kit.ART_PLAY,"Start safely","Keep every module off for now"))
+	def ask_open(self):
+		if self.config is None:return False
+		with Kit.quiet:Kit.on_client(lambda:Binds.scoped("va.safe",self._ask_build))
+		return self.ask_g is not None
+	def _ask_build(self):
+		M,W=Kit.MARGIN,420;b=Kit.wrap(self.SAFE_ASK,W-2*M-24);n=len(b);h=48+20*n;a=M+30+Kit.GAP;H=a+h+M;self.ask_store=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,"SAFE START",M+30,M+7,Kit.HUE_TITLE);Kit.add_section(g,M,a,W-2*M,h)
+		for i,c in enumerate(b):Kit.add_label(g,c,M+12,a+8+20*i,Kit.HUE_TEXT)
+		Kit.buttons(g,self.ask_store,M+12,a+14+20*n,self.SAFE_BUTTONS);d,e=Kit.screen();Kit.place(g,max(0,((d or 1024)-W)//2),max(0,((e or 768)-H)//3),W,H);G.AddGump(g);self.ask_g=g
+	def ask_poll(self):
+		a=self.ask_store;b=Kit.was_clicked(a,"safe")
+		if not(b or Kit.was_clicked(a,"normal")or not Kit.is_open(self.ask_g)):return
+		g,self.ask_g=self.ask_g,None;Kit.dispose(g)
+		if b:
+			c=[d.title for d in self.slots if d.enabled]
+			for s in self.slots:self.hold(s)
+			Kit.say(self.SAFE_DONE%(", ".join(c)or "none"),Kit.HUE_INFO)
+		self.start_on();self.poke()
 	def run(self):
-		Client.find()
+		c=self.mark_start();Client.find()
 		if Client.mouse is None:Kit.say("no client mouse timer; double-clicks use the client's own event.",Kit.HUE_INFO)
-		self.load_prefs();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self)
+		self.load_prefs();self.tz_check();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self)
 		try:self.config=ConfigWindow(self);self.config.open()
 		except Exception as a:
 			self._tell("%s: couldn't build the window: %s%s"%(APP_NAME,a,_error_where()))
@@ -3368,10 +3469,12 @@ class Host(object):
 		try:self.hub=HubWindow(self)
 		except Exception as a:self._tell("%s: couldn't make the Ultima Tracker window: %s%s"%(APP_NAME,a,_error_where()))
 		if self.pref_int("grid_on",0)==1:safe(self.grid.show)
-		b=[c.title for c in self.slots if c.enabled];API.SysMsg("%s %s running. %s"%(APP_NAME,APP_VERSION,("On: "+", ".join(b))if b else "Tick a module on the Modules tab."),Kit.HUE_GOOD);API.SetSharedVar(ALIVE_KEY,str(time.time()));Binds.load();self.load_jobs.extend(d for d in self.slots if d.enabled and d not in self.load_jobs);Kit.note_screen()
+		b=[d.title for d in self.slots if d.enabled];API.SysMsg("%s %s running. %s"%(APP_NAME,APP_VERSION,("On: "+", ".join(b))if b else "Tick a module on the Modules tab."),Kit.HUE_GOOD);API.SetSharedVar(ALIVE_KEY,str(time.time()));Binds.load()
+		if not c or not self.ask_open():self.start_on()
+		Kit.note_screen()
 		try:self.whats_new.open()
 		except Exception as a:self._tell("%s: couldn't make the What's new window: %s"%(APP_NAME,a))
-		self.loop()
+		self.boot_mark("main window");self.loop()
 	def run_alone(self,s):
 		if self.suite_alive():API.SysMsg("%s: %s is running; use %s there."%(s.title,APP_NAME,s.title),Kit.HUE_BAD);return
 		self.alone,self.prefs_frozen=s,True;Client.find();self.load_prefs();Kit.read_screen();API.OnStop(self.shutdown);self.config=AlonePage(s);self.hub=safe(lambda:HubWindow(self));a=Kit.get_var(ALONE_PARTS%s.key,"")
@@ -3389,7 +3492,7 @@ class Host(object):
 		finally:self.shutdown()
 	def shutdown(self):
 		if self.shut:return
-		self.shut=self.quitting=True;safe(Picker.drop)
+		self.shut=self.quitting=True;safe(Picker.drop);self.unmark(True)
 		if self.off_q:self._drop_offs()
 		if not VA_ALONE:safe(lambda:Kit.on_client(LAYOUT.game_view_restore));safe(lambda:LAYOUT.set_arrange(False,tell=False));safe(lambda:Kit.on_client(lambda:[b.free()for b in list(ClientWin.found.values())+[LAYOUT.journal_held]if b is not None]))
 		if self.config is not None:safe(lambda:self.save_prefs(True));safe(self.config.close)
@@ -3400,12 +3503,12 @@ class Host(object):
 				except Exception:s.running=False
 		self._refresh_active()
 		if self.hub is not None:safe(self.hub.close)
-		for a in(ALERTS.close,self.whats_new.close,GUARD.store,Kit.note_screen):safe(a)
+		for a in(ALERTS.close,self.whats_new.close,GUARD.store,Kit.note_screen,lambda:Kit.dispose(self.ask_g),lambda:Kit.unhook(None)):safe(a)
 		if self.grid is not None:safe(self.grid.hide)
 		safe(lambda:API.SysMsg("%s stopped."%APP_NAME,Kit.HUE_INFO))
 class PartSet(object):
 	OFF_LINE="%s is off: tick it under PARTS to see its settings."
-	def __init__(self,key,title,parts,shared=None):self.key=key;self.specs=[[a[0],a[1],float(a[2]),a[3]if len(a)>3 else None]for a in parts];self._owner={b[0]:b[3]or("%s.%s"%(key,b[0]))for b in self.specs};self._iv={c[0]:c[2]for c in self.specs};self._fns={};self.api={};self.running=[];self.due={};self.thread_due={};self.want=self._slot=None;self.busy=0;self.stopping=False;self.shared=shared or{}
+	def __init__(self,key,title,parts,shared=None):self.key=key;self.specs=[[a[0],a[1],float(a[2]),a[3]if len(a)>3 else None]for a in parts];self._owner={b[0]:b[3]or("%s.%s"%(key,b[0]))for b in self.specs};self._iv={c[0]:c[2]for c in self.specs};self._fns={};self.api={};self.running=[];self.due={};self.thread_due={};self.want=self._slot=None;self.busy=0;self.stopping=False;self.load={};self.shared=shared or{}
 	def slot(self):
 		if self._slot is None:self._slot=dict.get(HOST.by_key,self.key)
 		return self._slot
@@ -3439,8 +3542,9 @@ class PartSet(object):
 		if a in self.running or self.stopping:return
 		b=self.part_api(a)
 		if not b:self.api.pop(a,None);return
+		if a not in self.load:self.load[a]=[0.,0.,0.]
 		self.running.append(a);self._sync_slot();self.due[a]=0.;self.thread_due[a]=False;s=self.slot()
-		if s is not None:s.next_due=0.
+		if s is not None:s.next_due=0.;s.part_load=self.load
 		self._call(a,"start")
 	def stop_part(self,a):
 		if a not in self.running:return
@@ -3458,11 +3562,11 @@ class PartSet(object):
 	def _start(self):self.stopping=False;self.reconcile()
 	_NOFN=(None,False,None)
 	def _tick(self):
-		b=time.time();g=HOST.pass_poked;c=self.running;d=self.due;e=HOST.pass_keys if self.key in HOST.pass_keys else None
-		for a in list(c):
-			if a not in c:continue
-			f=d.get(a,0.)
-			if g or b+Host.EARLY>=f or f-b>Host.CLOCK_BACK or(e is not None and self.key+"."+a in e):self._call(a,"tick");h,i,j=self._fns.get(a,self._NOFN);d[a]=time.time()+Host._ask(h,self._iv.get(a,.1));self.thread_due[a]=i and Host._ask(j,True,bool)
+		c=time.time();h=HOST.pass_poked;d=self.running;e=self.due;i=self.load;f=HOST.pass_keys if self.key in HOST.pass_keys else None
+		for a in list(d):
+			if a not in d:continue
+			g=e.get(a,0.)
+			if h or c+Host.EARLY>=g or g-c>Host.CLOCK_BACK or(f is not None and self.key+"."+a in f):j=time.time();self._call(a,"tick");b=time.time();Host.busy_add(i[a],(b-j)*1000.,b);k,l,m=self._fns.get(a,self._NOFN);e[a]=b+Host._ask(k,self._iv.get(a,.1));self.thread_due[a]=l and Host._ask(m,True,bool)
 		if self.want is not None and not self.busy:self.reconcile(self.want)
 	def _thread_wanted(self):
 		if self.want is not None:return True
@@ -3472,7 +3576,7 @@ class PartSet(object):
 		return False
 	def _thread_tick(self):
 		for a in list(self.running):
-			if self.thread_due.get(a)and a in self.running:self.thread_due[a]=False;self._call(a,"thread_tick")
+			if self.thread_due.get(a)and a in self.running:self.thread_due[a]=False;c=time.time();self._call(a,"thread_tick");b=time.time();Host.busy_add(self.load[a],(b-c)*1000.,b)
 		if self.want is not None and not self.busy:self.reconcile(self.want)
 	def _interval(self):
 		a=None;b=self.due
@@ -3519,7 +3623,21 @@ class PartSet(object):
 		def e():return bool(a["thread_wanted"]())or self._thread_wanted()
 		f={"tick":b,"stop":c,"thread_tick":d,"thread_wanted":e};h.update((g,f[g])for g in a);return h
 class Tz(object):
-	_types={};_MISS=object()
+	_types={};_MISS=object();NEED=(("LegionScripting.LegionAPI","_onStopScheduled","early_event_handling"),("LegionScripting.LegionAPI","World","actionbar meters social"),("Game.GameActions","","actionbar social skills.window"),("Game.GameActions","DropItem","inventory.bags"),("Game.GameActions","Equip QueueEquipSwap","inventory.paperdoll"),("Game.Managers.UIManager","Gumps","actionbar grimoire interface hud inventory.bags skills.window social"),("Game.Managers.UIManager","ContainerScale","inventory.bags"),("Game.Managers.UIManager","KeyboardFocusControl _gumpsStructureVersion SystemChat","interface"),("Game.Managers.UIManager","MakeTopMostGump","hud skills.window"),("Game.Managers.UIManager","Add","skills.window"),("Game.Managers.UIManager","IsMouseOverWorld","worldmap.pings"),("Game.Managers.MacroManager","GetAllMacros SetMacroToExecute Update FindMacro","actionbar"),("Game.Managers.MacroObject","Items","actionbar"),("Game.Managers.MacroObject","","social"),("Common.Enums.MacroType","","actionbar social"),("Common.Enums.MacroSubType","","actionbar social"),("LegionScripting.LegionScripting","LoadedScripts","actionbar"),("Input.Keyboard","KeyDownEvent KeyUpEvent","actionbar"),("Input.Mouse","CancelDoubleClick","inventory.bags"),("Input.Mouse","Position MClickPosition MButtonPressed","worldmap.pings"),("Game.World","Macros","actionbar social"),("Game.World","Instance Get TargetManager","hud.frames"),("Game.World","TargetManager","meters"),("Game.World","Instance Player SkillsGroupManager","skills.window"),("Game.World","Party Player","social"),("Game.Managers.TargetManager","LastAttack","hud.frames meters"),("Client","Game","hud.frames inventory.bags inventory.paperdoll social"),("GameController","UO","hud.frames inventory.bags inventory.paperdoll social"),("UltimaOnline","Animations FileManager","hud.frames"),("UltimaOnline","GameCursor","inventory.bags inventory.paperdoll"),("UltimaOnline","World","social"),("Game.GameCursor","ItemHold","inventory.bags"),("Game.ItemHold","Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic","inventory.bags"),("Configuration.ProfileManager","CurrentProfile","hud.frames inventory.bags inventory.storage TazUO_settings_check"),("Configuration.Profile","EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors","TazUO_settings_check"),("Game.Managers.ScavengerManager","Instance IsLoaded ScavengerEntries","TazUO_settings_check"),("Configuration.Profile","OpenHealthBarForLastAttack","hud.frames"),("Configuration.Profile","Username ServerName","inventory.storage"),("Game.UI.Gumps.BaseHealthBarGump","LastAttackBar","hud.frames"),("Game.GameObjects.Mobile","GetGroupForAnimation","hud.frames"),("Game.GameObjects.Mobile","IsCovered","inventory.paperdoll"),("Renderer.SpriteInfo","","hud.frames"),("Time","Ticks","hud.timers"),("Game.UI.Controls.Control","SetHitTestOffset _bounds Location","inventory.bags"),("Game.UI.Controls.Control","_bounds Location","interface inventory.paperdoll"),("Game.UI.Gumps.ContainerGump","_data _gumpPicContainer _hitBox","inventory.bags"),("Assets.TileDataLoader","_staticData","inventory.bags"),("Game.Data.Layer","","inventory.paperdoll"),("Game.UI.Controls.PaperDollInteractable","GetAnimID","inventory.paperdoll"),("Game.Managers.EventSink","OnEntityDamage","meters"),("Game.GameObjects.Entity","","meters"),("Game.Data.Lock","","skills.window"),("Game.Data.Skill","Lock","skills.window"),("Game.GameObjects.PlayerMobile","Skills","skills.window"),("Game.GameObjects.PlayerMobile","Serial","social"),("Game.Managers.SkillsGroupManager","Groups","skills.window"),("Game.Managers.SkillsGroup","","skills.window"),("Game.UI.Gumps.SkillButtonGump","SkillID","skills.window"),("Game.Managers.FriendsListManager","Instance","social"),("Game.Managers.PartyManager","Leader Inviter CanLoot Members","social"),("Game.UI.Gumps.IgnoreManagerGump","","social"),("Network.AsyncNetClient","Socket","social sysstats"),("Network.AsyncNetClient","Statistics","sysstats"),("Network.NetClientExt","Send_PartyDecline","social"),("CUOEnviroment","CurrentRefreshRate","sysstats"),("CUOEnviroment","ExecutablePath","worldmap"),("Game.Managers.EnhancedMap.EnhancedMapManager","Instance IsConnected Config Reconnect _client","worldmap.pings"),("Game.SelectedObject","Object","worldmap.pings"),("Game.UI.Gumps.WorldViewportGump","Instance ResizeGameWindow SetGameWindowPosition","interface"),("Game.UI.Gumps.SystemChatControl","IsDisposed ParentX ParentY TextBoxControl","interface"),)
+	@staticmethod
+	def missing():
+		if Client._type("ClassicUO.Client")is None:return()
+		d=Tz._flags(True)|Tz._flags(False);a={}
+		for b,e,f in Tz.NEED:
+			t=Client._type("ClassicUO."+b);c=b.split(".")[-1]
+			for g in[c]if t is None else[c+"."+h for h in e.split()if not Tz.has(t,h,d)]:a.setdefault(g,[]).extend(f.split())
+		return sorted(a.items())
+	@staticmethod
+	def has(t,name,a):
+		while t is not None:
+			if t.GetMember(name,a).Length:return True
+			t=t.BaseType
+		return False
 	@staticmethod
 	def T(name):
 		if name not in Tz._types:Tz._types[name]=Client._type(name)
@@ -3594,7 +3712,7 @@ class Tz(object):
 		while getattr(e,"InnerException",None)is not None:e=e.InnerException
 		return str(getattr(e,"Message",None)or e)
 class Profiles(object):
-	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active");MISSING="\x01VA-missing"
+	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active","VirtueAssistant_starting");MISSING="\x01VA-missing"
 	def __init__(self):self.base=os.path.join(Kit.data_dir(),PROFILE_DIR)
 	@staticmethod
 	def _read(path):return Kit.read_safe(path,None)if path else None
@@ -4205,7 +4323,7 @@ class ConfigWindow(object):
 		if self.search_tb is not None and self._fld_due and self._poll_search():return
 		if self.lag_lbl is not None and time.time()>=self.lag_next:
 			self.lag_next=time.time()+1.;c=self.host.active
-			if c:e=max(c,key=lambda s:s.worst_ms);f="%d modules on; slowest lately: %s, %d ms"%(len(c),e.title,e.worst_ms)
+			if c:e=max(c,key=lambda s:s.load[2]);f="%d modules on; slowest lately: %s, %d ms"%(len(c),e.title,e.load[2])
 			else:f="No modules on"
 			Kit.set_text(self.lag_lbl,f)
 		a=time.time()
@@ -6381,54 +6499,74 @@ def load_modules():
 Kit.data_setup()
 PROFILES=Profiles()
 if not VA_ALONE:
+	HOST.boot_mark("data setup")
 	try:PROFILES.startup()
 	except Exception as _ex:Kit.say("couldn't put the favourite profile on this character (%s%s)."%(Tz.why(_ex),_error_where()),Kit.HUE_BAD)
+	HOST.boot_mark("profiles")
 def _module_sysstats():
-	o=HOST.dock_remove;h=HOST.layout_holds;p=Kit.add_label;i=Kit.put_var;q=Kit.save_pos;r=Kit.set_text;b="sysstats";j="System Stats";v,k,l,e=("SystemStats_pos","SystemStats_min","SystemStats_btn","SystemStats_open");W,w,x=240,240,46;s=.3;y=7981;m=("Ping","FPS","Frame","Memory","In","Out","Packets");a={"shutting":False,"minimized":False,"docked":False,"open":False,"queue":[],"next":0.,"vals":{},"tip":None};f={"g":None,"c":{},"store":({},{})};d={"g":None,"b":None,"store":({},{})};z=Kit.queuer(a)
-	def A():
+	u=HOST.dock_remove;l=HOST.layout_holds;v=Kit.HUE_INFO;x=Kit.HUE_TEXT;e=Kit.add_label;y=Kit.add_section;m=Kit.put_var;z=Kit.save_pos;f=Kit.set_text;b="sysstats";n="System Stats";H,o,p,g=("SystemStats_pos","SystemStats_min","SystemStats_btn","SystemStats_open");W,I,J=240,240,46;A=.3;K=7981;q=("Ping","FPS","Frame","Memory","In","Out","Packets");s,B,L,M=5,1.,100,"VIRTUE ASSISTANT  (busy, slowest)";C=tuple(("top_name%d"%X,"top_val%d"%X)for X in range(s));h={"startup":False,"tz_quiet":False};a={"shutting":False,"minimized":False,"docked":False,"open":False,"queue":[],"next":0.,"vals":{},"tip":None,"top_next":0.,"top":()};i={"g":None,"c":{},"store":({},{})};d={"g":None,"b":None,"store":({},{})};N=Kit.queuer(a)
+	def D():h.update([(r,HOST.pref_int(r,0)==1)for r in list(h)])
+	def O():HOST.prefs.update([(r,"1"if w else "0")for r,w in h.items()]);HOST.save_prefs()
+	def P(now):
+		b=[]
+		for a in HOST.slots:
+			if not a.running:continue
+			if a.parts:c=a.part_load;b.extend((Host.busy_share(c[X[0]],now),c[X[0]][2],X[1])for X in a.parts if X[0]in a.parts_running and X[0]in c)
+			else:b.append((Host.busy_share(a.load,now),a.load[2],a.title))
+		b.sort(key=lambda r:-r[0]);return tuple((Kit.fit(aa,L),"%.1f%%, %d ms"%(Y/10.,min(Z,99999)))for Y,Z,aa in b[:s])
+	def Q():
 		v={}
 		with Kit.quiet:b=int(Tz.get(None,"CurrentRefreshRate",Tz.T("ClassicUO.CUOEnviroment")));v["FPS"]=str(b);v["Frame"]="%.1f ms"%(1000./b)if b>0 else "-"
 		with Kit.quiet:c=Tz.get(None,"Socket",Tz.T("ClassicUO.Network.AsyncNetClient"));a=Tz.get(c,"Statistics");d=str(Typing._get(a,"CurrentPingSource",default="")or "");v["Ping"]="off"if d.endswith("Disabled")else "%d ms"%int(Tz.get(a,"Ping"));v["In"]="%.1f KB/s"%(int(Tz.get(a,"DeltaBytesReceived"))/1024.);v["Out"]="%.1f KB/s"%(int(Tz.get(a,"DeltaBytesSent"))/1024.);v["Packets"]="%d in, %d out"%(int(Tz.get(a,"TotalPacketsReceived")),int(Tz.get(a,"TotalPacketsSent")))
 		with Kit.quiet:import System;v["Memory"]="%d MB"%(int(System.GC.GetTotalMemory(False))//(1024*1024))
 		return v
-	def B():x,y=Kit.load_pos(l,(8,200),(46,46));b=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,46,46,corners=False);a["tip"]=None;c=Kit.art_button(g,b,"stats",Kit.ART_CIRCLE,12,12,None,"System stats",on_click=z("toggle"));Kit.show_window(g,x,y,46,46,None,False,None,lambda:q(l,g),d,{"g":g,"b":c,"store":b})
-	def g():
-		M=Kit.MARGIN;h=M+30+Kit.GAP+len(m)*20+M-12;g,f,e=c.begin(W,h)
+	def R():x,y=Kit.load_pos(p,(8,200),(46,46));b=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,46,46,corners=False);a["tip"]=None;c=Kit.art_button(g,b,"stats",Kit.ART_CIRCLE,12,12,None,"System stats",on_click=N("toggle"));Kit.show_window(g,x,y,46,46,None,False,None,lambda:z(p,g),d,{"g":g,"b":c,"store":b})
+	def j():
+		b=Kit.MARGIN;f=b+30+Kit.GAP;j=len(q)*20-12;d=f+j+Kit.GAP;k=d+26+s*20+b;g,o,h=c.begin(W,k)
 		if not a["minimized"]:
-			c.frame(g,settings=False);b=M+30+Kit.GAP;Kit.add_section(g,M,b,W-2*M,h-b-M)
-			for i,d in enumerate(m):p(g,d+":",M+10,b+6+i*20,Kit.HUE_INFO);e[d]=p(g,"",M+90,b+6+i*20,Kit.HUE_TEXT)
-		c.end(g);t()
-	c=Kit.Window(b,j,a,f,g,v,default=(70,200),mini=(w,x),icon=y)
-	def t():
-		v=a["vals"];c=f["c"]
+			c.frame(g,settings=False);y(g,b,f,W-2*b,j);a["top_next"]=0.
+			for i,l in enumerate(q):e(g,l+":",b+10,f+6+i*20,v);h[l]=e(g,"",b+90,f+6+i*20,x)
+			y(g,b,d,W-2*b,k-d-b,Kit.fit(M,W-2*b-16))
+			for i,(m,n)in enumerate(C):h[m]=e(g,"",b+10,d+26+i*20,v);h[n]=e(g,"",b+116,d+26+i*20,x)
+		c.end(g);E()
+	c=Kit.Window(b,n,a,i,j,H,default=(70,200),mini=(I,J),icon=K)
+	def E():
+		v=a["vals"];c=i["c"]
 		if a["minimized"]:
 			b=c.get("status")
-			if b is not None:r(b,"%s: %s, %s FPS"%(j,v.get("Ping","-"),v.get("FPS","-")))
+			if b is not None:f(b,"%s: %s, %s FPS"%(n,v.get("Ping","-"),v.get("FPS","-")))
 			return
-		for d in m:
+		for d in q:
 			b=c.get(d)
-			if b is not None:r(b,v.get(d,"-"))
-	def n():a["open"]=True;g();c.dock()
-	def u():a["open"]=False;o(b);c.close();i(e,"0")
-	def C():
-		a.update({"shutting":False,"docked":False,"queue":[],"next":0.,"minimized":Kit.load_min(k)or HOST.dock_wanted(b),"open":Kit.get_var(e,"0")=="1"});B()
-		if a["open"]or h(b):n()
-	def D():
-		m=time.time()
+			if b is not None:f(b,v.get(d,"-"))
+		e=a["top"]
+		for g,(h,k)in enumerate(C):
+			if h not in c:continue
+			j=e[g]if g<len(e)else("","");f(c[h],j[0]);f(c[k],j[1])
+	def S(w):D();return(("START-UP",(("check","startup","Show start-up times","After loading, list in the journal how long each step took"),)),("SHARD RULES",(("check","tz_quiet","Don't warn me about TazUO settings","No journal line when a TazUO setting breaks this shard's rules"),)))
+	k=Kit.Page(h,S,O)
+	def t():a["open"]=True;j();c.dock()
+	def F():a["open"]=False;a["top"]=();u(b);c.close();m(g,"0")
+	def T():
+		D();a.update({"shutting":False,"docked":False,"queue":[],"next":0.,"top_next":0.,"minimized":Kit.load_min(o)or HOST.dock_wanted(b),"open":Kit.get_var(g,"0")=="1"});R()
+		if a["open"]or l(b):t()
+	def U():
+		c=time.time()
 		while a["queue"]:
-			c=a["queue"].pop(0)
-			if c=="toggle":
-				if a["open"]and not h(b):u()
-				elif not a["open"]:i(e,"1");a["minimized"]=a["docked"]=False;n()
-			elif c=="redraw":
-				if a["open"]:g()
-			else:Kit.win_action(c,a,b,j,g,k)
-		if a["open"]and Kit.was_clicked(f["store"],"close"):u()
-		if not 0<=a["next"]-m<=s:
-			if not a["open"]and h(b):n()
-			a["next"]=m+s;v=a["vals"]=A();l="Ping %s, %s FPS, memory %s; click to open or close the window"%(v.get("Ping","-"),v.get("FPS","-"),v.get("Memory","-"))
-			if l!=a["tip"]and d["b"]is not None:a["tip"]=l;Kit.with_tip(d["b"],l)
-			if a["open"]and f["g"]is not None and not(a["minimized"]and a["docked"]):t()
-	def E():a["shutting"]=True;o(b);Kit.save_min(k,a["minimized"]);i(e,"1"if a["open"]else "0");c.close();f,d["g"]=d["g"],None;q(l,f);Kit.dispose(f)
-	return{"start":C,"tick":D,"stop":E,"client_tick":True}
-if not VA_ALONE:load_modules();HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen");HOST.run()
+			e=a["queue"].pop(0)
+			if e=="toggle":
+				if a["open"]and not l(b):F()
+				elif not a["open"]:m(g,"1");a["minimized"]=a["docked"]=False;t()
+			elif e=="redraw":
+				if a["open"]:j()
+			else:Kit.win_action(e,a,b,n,j,o)
+		if a["open"]and Kit.was_clicked(i["store"],"close"):F()
+		if not 0<=a["next"]-c<=A:
+			if not a["open"]and l(b):t()
+			a["next"]=c+A;v=a["vals"]=Q();f="Ping %s, %s FPS, memory %s; click to open or close the window"%(v.get("Ping","-"),v.get("FPS","-"),v.get("Memory","-"))
+			if f!=a["tip"]and d["b"]is not None:a["tip"]=f;Kit.with_tip(d["b"],f)
+			if a["open"]and not a["minimized"]and not 0<=a["top_next"]-c<=B:a["top_next"]=c+B;a["top"]=P(c)
+			if a["open"]and i["g"]is not None and not(a["minimized"]and a["docked"]):E()
+	def V():a["shutting"]=True;u(b);Kit.save_min(o,a["minimized"]);m(g,"1"if a["open"]else "0");c.close();e,d["g"]=d["g"],None;z(p,e);Kit.dispose(e)
+	return{"start":T,"tick":U,"stop":V,"client_tick":True,"config_height":k.height,"build_config":k.build,"poll_config":k.poll,"config_closed":k.closed}
+if not VA_ALONE:load_modules();HOST.boot_mark("module files");HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen");HOST.run()

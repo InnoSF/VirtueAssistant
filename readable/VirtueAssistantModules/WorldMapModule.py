@@ -2914,6 +2914,7 @@ def _module_worldmap():
         REACH = 2
         # Least gap after the client reports a new corpse before the search runs again.
         POKE_GAP = 0.25
+        DIED_HOLD = 10.0
         # Seconds between two moves (the shard's drag delay).
         MOVE_GAP = 0.7
         # Extra looks at a move the server hasn't answered yet.
@@ -3253,13 +3254,13 @@ def _module_worldmap():
                 return 1
             return 2 if owner == me_name else 0
 
-        def scan_corpses(items, gr, cx, cy, lim, acc, me_name):
-            """Look through items for the best match to your corpse.
+        def scan_corpses(items, cx, cy, lim, acc, me_name):
+            """Look through (item, graphic) pairs for the best match to your corpse.
 
             acc[0] gets the nearest (distance, serial, x, y), the higher serial winning a tie; acc[1] is set
             when an unnamed possible corpse was seen. Only items within lim tiles of (cx, cy) count.
             """
-            for it in items or ():
+            for it, gr in items:
                 s, ix, iy = int(it.Serial), int(it.X), int(it.Y)
                 d = max(abs(ix - cx), abs(iy - cy))
                 if d > lim:
@@ -3277,17 +3278,26 @@ def _module_worldmap():
         def find_corpse(me):
             """Find your corpse. Returns ((serial, x, y) or None, whether an unnamed candidate was seen).
 
-            Searches round the death spot, or round you when the spot isn't known. Corpses first; bones
-            only when none were found.
+            Searches round the death spot, or round you when the spot isn't known. One read of the ground
+            items in SEEK_RANGE is split into corpses and bones by graphic; corpses first, bones only when
+            no corpse was found.
             """
             r = st["rec"]
             me_name = owner_name()
             cx, cy, lim = (r["x"], r["y"], 3) if r["spot"] else (int(me.X), int(me.Y), SEEK_RANGE)
             acc = [None, False]
-            scan_corpses(API.GetItemsOnGround(SEEK_RANGE, CORPSE_GRAPHIC), CORPSE_GRAPHIC, cx, cy, lim, acc, me_name)
+            corpses, bones = [], []
+            # One walk of the ground items instead of one per corpse and bones graphic: the client walks every
+            # item for each call.
+            for it in API.GetItemsOnGround(SEEK_RANGE) or ():
+                g = int(it.Graphic)
+                if g == CORPSE_GRAPHIC:
+                    corpses.append((it, g))
+                elif BONES_FIRST <= g <= BONES_LAST:
+                    bones.append((it, g))
+            scan_corpses(corpses, cx, cy, lim, acc, me_name)
             if acc[0] is None:
-                for gr in range(BONES_FIRST, BONES_LAST + 1):
-                    scan_corpses(API.GetItemsOnGround(SEEK_RANGE, gr), gr, cx, cy, lim, acc, me_name)
+                scan_corpses(bones, cx, cy, lim, acc, me_name)
             return (None if acc[0] is None else acc[0][1:]), acc[1]
 
         def forget(why=None):
@@ -3764,13 +3774,24 @@ def _module_worldmap():
             st["seek_at"] = min(st["seek_at"], soon)
             st["look_at"] = min(st["look_at"], soon)
 
+        def on_died(*args):
+            """Script event: you died. Only sets a flag and asks for a Corpse tick (a game event, not input).
+
+            The tick then records the death at once, before the client shows you as a ghost.
+            """
+            if st["shutting"]:
+                return
+            st["died"] = True
+            HOST.poke("worldmap.corpse", False)
+
         def rebase(d):
             """Shift every stored time by d after the computer's clock was set back.
 
             d is negative. Without it waits would last as long as the jump, and the decay countdown must keep
             the real time left, so the saved death time moves too and is written again.
             """
-            for k in ("body_at", "seek_until", "seek_at", "look_at", "item_at", "lbl_at", "note_until", "find_at"):
+            for k in ("body_at", "seek_until", "seek_at", "look_at", "item_at", "lbl_at", "note_until", "find_at",
+                      "died_at"):
                 st[k] = st[k] + d
             if st["gone_since"] is not None:
                 st["gone_since"] += d
@@ -3794,7 +3815,8 @@ def _module_worldmap():
             st.update({"shutting": False, "docked": False, "queue": [], "job": None, "arrow": None, "refused": set(),
                        "ping": None, "was_dead": None, "seek_until": 0.0, "seek_at": 0.0,
                        "look_at": 0.0, "gone_since": None, "item_at": 0.0, "lbl_at": 0.0, "note": "",
-                       "last_now": None, "atlas": False, "unnamed": False, "minimized": wnd.start_min()})
+                       "last_now": None, "atlas": False, "unnamed": False, "died": False, "died_at": 0.0,
+                       "minimized": wnd.start_min()})
             load_settings()
             st["rec"] = load_rec()
             st["warned"] = False
@@ -3808,8 +3830,7 @@ def _module_worldmap():
             HOST.alert_kind(ALERT_DECAY, "Corpse about to decay", 0x1EA)
             build_window()
             wnd.dock(fit=True, min=(W, H))
-            # Hooked once per run (Kit.hook_once); the handler ignores calls when shut down.
-            Kit.hook_once(st, "hooked", ("OnCorpseCreated", on_corpse))
+            Kit.hook_once(st, "hooked", ("OnCorpseCreated", on_corpse), ("OnPlayerDeath", on_died))
 
         def _tick():
             """Client tick of the Corpse part: death detection, queued buttons, the job, the ping, the arrow and
@@ -3838,13 +3859,21 @@ def _module_worldmap():
             dead = bool(me.IsDead)
             was = st["was_dead"]
             st["was_dead"] = dead
-            # First look since start: a player who is already dead gets the death handling, but only when no
-            # corpse is remembered yet.
-            if was is None:
+            died = st["died"]
+            st["died"] = False
+            # The death event starts the record at once. When you are not yet shown as dead, died_at holds
+            # the time, so the dead-body check below skips this same death when it sees it (within DIED_HOLD);
+            # without the event that check still records the death.
+            if died and not was:
+                on_death(me, now)
+                st["died_at"] = 0.0 if dead else now
+            elif was is None:
                 if dead and st["rec"] is None:
                     on_death(me, now, at_start=True)
             elif dead and not was:
-                on_death(me, now)
+                if not 0.0 <= now - st["died_at"] <= DIED_HOLD:
+                    on_death(me, now)
+                st["died_at"] = 0.0
             elif was and not dead and st["rec"] is not None:
                 r = st["rec"]
                 if r["spot"]:
@@ -5907,6 +5936,10 @@ def _module_worldmap():
         HUE_MAX = 3000
         # Shortest time between two scans when a ground item event asks for an early one.
         POKE_GAP = 0.15
+        SCAN_MOVE = 1.0
+        SCAN_IDLE = 3.0
+        HUE_EVERY = 3.0
+        NAME_RETRY = 5.0
         # Item graphics of ground traps: saw, spike, gas, stone face, mushroom, fire column, flame spurt and
         # giant spike, and a trap door. These are the classic server art ids and may differ on this shard, so
         # the list can be edited on the settings page; any hue of these graphics counts.
@@ -6067,25 +6100,26 @@ def _module_worldmap():
             return sig["wanted"]
 
         def scan():
-            """Scan the ground once (once a second) and recolour what it finds, on the client tick.
+            """Scan the ground once and recolour what it finds, on the client tick.
 
-            Reads every ground item in range with one call, gives each a verdict (cached by serial), and then:
-            newly seen traps get their original hue remembered and the green hue, joined to the ping queue and
-            the new trap alert; known ones are looked at again; traps that left have their hue put back. Fields
-            go through scan_fields.
+            Runs when you move (at most every SCAN_MOVE s), every SCAN_IDLE s while you stand still, and
+            soon after a trap or field graphic appears. Reads every ground item in range with one call, gives
+            each a verdict (cached by serial), and then: newly seen traps get their original hue remembered
+            and the green hue, joined to the ping queue and the new trap alert; known ones are looked at
+            again; traps that left have their hue put back. Fields go through scan_fields.
             """
             rng = int(settings["range"])
             # Our facet is read once, and only if a trap is new.
             st["atlas_map"] = None
             found = {}
             ffound = {}
-            st["scans"] += 1
-            scans = st["scans"]
-            # Every third scan the hues are read back: the pulse only sets a hue when it changes, so a hue the
-            # server or the client put back is painted over again here. One wrapper read per trap, which is why it
-            # is not done every scan; the pulse itself repaints within a cycle anyway.
-            check_hues = scans % 3 == 0
+            now = st["last_scan"]
+            # Timed in seconds, so the hue check (every HUE_EVERY s) and the name retry
+            # (NAME_RETRY s) keep their pace however often the scan runs.
+            check_hues = now >= st["hue_at"]
             field_gfx = FIELD_GFX if settings["fields"] else NO_FIELDS
+            if check_hues:
+                st["hue_at"] = now + HUE_EVERY
             wanted = verdict_sig()
             by_name = settings["by_name"]
             old = verdicts
@@ -6095,8 +6129,7 @@ def _module_worldmap():
                 serial = int(it.Serial)
                 g = int(it.Graphic)
                 v = old.get(serial)
-                # Known and unchanged: no name is read again, unless a retry is due.
-                if v is not None and v[0] == g and (not v[2] or scans < v[2]):
+                if v is not None and v[0] == g and (not v[2] or now < v[2]):
                     kind = v[1]
                     seen[serial] = v
                 else:
@@ -6106,8 +6139,7 @@ def _module_worldmap():
                     elif by_name and g not in field_gfx:
                         named = named_trap(it)
                         if named is None:
-                            # No name yet: ask again in a few scans.
-                            kind, retry = 0, scans + 5
+                            kind, retry = 0, now + NAME_RETRY
                         else:
                             kind = 1 if named else 0
                     else:
@@ -6503,7 +6535,7 @@ def _module_worldmap():
         LEFT = {"lw": 98, "fw": 60, "stay": True, "clamp": False}
         PAGE = (("STATUS  (the window has %s)" % PING_CAP, (("custom", 24, draw_status), ("custom", 26, draw_paused)),
                  {"pad": 4}), ("TRAPS  (hues are client hue numbers)", (
-                    ("slider", "range", "Scan range:", "Tiles round you scanned once a second (1-30)",
+                    ("slider", "range", "Scan range:", "Tiles round you scanned as you move (1-30)",
                      1, 30, {"lw": 98, "ldy": 4, "sw": 160, "ugap": 10, "vfmt": "%d tiles"}),
                     ("custom", 29, draw_cycle),
                     ("num", "green", "Green hue:", "Hue traps are held at (1-%d; default %d)" % (HUE_MAX, HUE_GREEN),
@@ -6592,13 +6624,13 @@ def _module_worldmap():
             page["gfx_typed"] = None
 
         def _start():
-            """Module start: reset state, load settings, fields and view, hook ground item events and build the
-            window.
+            """Module start: reset state, load settings, fields and view, hook the ground item and position
+            events and build the window.
 
             Runs on the client thread when the module is switched on.
             """
             st.update({"shutting": False, "docked": False, "queue": [], "last_scan": 0.0,
-                       "scans": 0, "tracked": {}, "pinged": set(), "pinged_spots": set(),
+                       "hue_at": 0.0, "moved": False, "tracked": {}, "pinged": set(), "pinged_spots": set(),
                        "ping_wait": [], "ping_sent": 0, "ping_noted": False,
                        "ping_svc": ping_service(), "ping_next": 0.0, "fields": {}, "field_said": [], "alerted": set(),
                        "atlas_traps": [], "atlas_ver": 0, "atlas_done": -1, "atlas_map": None, "pause_want": None})
@@ -6609,8 +6641,7 @@ def _module_worldmap():
             # Listed on Settings > Alerts.
             HOST.alert_kind(ALERT_TRAP, "New trap in range", 0x1EF)
             load_view()
-            # Hooked once per run (Kit.hook_once); on_ground_item ignores events when shut down.
-            Kit.hook_once(st, "hooked", ("OnItemCreated", on_ground_item))
+            Kit.hook_once(st, "hooked", ("OnItemCreated", on_ground_item), ("OnPositionChanged", on_moved))
             # Folded into the Action Bar when the module was left.
             if HOST.dock_wanted(KEY):
                 st["minimized"] = True
@@ -6648,10 +6679,12 @@ def _module_worldmap():
             if st["paused"]:
                 return
             now = time.time()
-            # One scan a second, or sooner (POKE_GAP) when a ground item event poked it.
-            if now - st["last_scan"] >= 1.0 or (st["poke"] and now - st["last_scan"] >= POKE_GAP):
+            gap = now - st["last_scan"]
+            # Scan when you moved, when the slow timer is due, or soon after a poke. A burst of steps only
+            # sets one flag, so it gives one scan.
+            if gap >= SCAN_IDLE or (st["moved"] and gap >= SCAN_MOVE) or (st["poke"] and gap >= POKE_GAP):
                 st["last_scan"] = now
-                st["poke"] = False
+                st["poke"] = st["moved"] = False
                 before = (len(st["tracked"]), len(st["fields"]))
                 scan()
                 svc = ping_service()
@@ -6684,6 +6717,10 @@ def _module_worldmap():
                 if g in VERDICT_SIG["wanted"] or (settings["fields"] and g in FIELD_GFX):
                     st["poke"] = True
                 return
+
+        def on_moved(*args):
+            """Script event: your position changed. Only sets a flag; the next tick scans."""
+            st["moved"] = True
 
         def _stop():
             """Module stop: put every hue back, save the settings and close the cleanup."""

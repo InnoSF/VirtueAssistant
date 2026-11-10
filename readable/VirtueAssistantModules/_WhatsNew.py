@@ -1,19 +1,26 @@
-# What's new text: the lines the mother script shows players the first time a new release starts.
-# This file is data, not code. The mother script loads it by name from the modules folder and
-# reads the WHATS_NEW tuple; if the file is missing or fails to load, nothing is shown.
-#
-# Each entry is one string: the newest release first, then older releases, then closing lines that
-# apply to every release. Entries are plain player-facing sentences, so keep them short and free
-# of code terms.
-WHATS_NEW = ("2.7.0.25: about a third smaller to download; same features.",
+WHATS_NEW = ("2.7.0.34: tidy-up only: the deepest code in four modules is laid out flatter; nothing you see changes.",
+    "2.7.0.33: tidy-up only: a few shared helpers replace copies in four modules; nothing you see changes.",
+    "2.7.0.32: Buffs & Timers can also show your Polymorph timer as a TazUO cooldown bar (a setting, off by default).",
+    "2.7.0.31: guard lines, cast failures, poison, paralysis and bandage results are read by the "
+    "client's message number as well as their words, so they still work if the wording changes.",
+    "2.7.0.30: the death recap and your corpse's arrow start the moment you die; "
+    "Traps & Fields scans as you move and less often while you stand still.",
+    "2.7.0.29: the journal warns once when a TazUO setting breaks this shard's rules "
+    "(auto loot, scavenger, automatic doors); a System Stats setting turns the warnings off.",
+    "2.7.0.28: when a TazUO update breaks a part, the journal says which and only that part "
+    "stays off; if Virtue Assistant didn't finish starting last time, it offers to start with every module off.",
+    "2.7.0.27: System Stats shows the five busiest Virtue Assistant parts; a System Stats setting "
+    "lists how long start-up took in the journal.",
+    "2.7.0.26: fixes for today's TazUO: the Swing Bar times your swings from their sounds; Meters counts "
+    "the potions you drink; the Training Alarm hears whispers; Treasure Maps marks a dug map done; "
+    "the Action Bar's Party cell and Social's Party window open.",
+    "2.7.0.25: the installed files are about a third smaller; same features.",
     "2.7.0.24: fixes from a code review: the profile list stays on top after a Settings page switch; "
     "Restock keeps a target typed just before its page closes; small speed fixes.",
     "2.7.0.23: fixes the TazUO 'unbounded while loop' warning at start-up.",
     "2.7.0.22: tidy-up only: shorter error guards in twelve modules; nothing you see changes.",
-    "2.7.0.21: Settings tab: clicking another page redraws only the page, so short pages switch "
-    "quicker.",
-    "2.7.0.20: Profiles: the favourite star is drawn more simply; it still turns gold for the "
-    "favourite.",
+    "2.7.0.21: Settings tab: clicking another page redraws only the page, so short pages switch quicker.",
+    "2.7.0.20: Profiles: the favourite star is drawn more simply; it still turns gold for the favourite.",
     "2.7.0.19: tidy-up only: shorter code in five more modules; nothing you see changes.",
     "2.7.0.18: tidy-up only: shorter code in five modules; nothing you see changes.",
     "2.7.0.17: tidy-up only: shorter shared code; nothing you see changes.",
@@ -22,8 +29,7 @@ WHATS_NEW = ("2.7.0.25: about a third smaller to download; same features.",
     "2.7.0.15: Action Bar: gold trim between cells; its gold slot frames stay gold in Dark mode. "
     "Dark mode moved to Settings > Interface.",
     "2.7.0.14: Dark mode: a switch on the Settings tab tints every window charcoal; off by default.",
-    "2.7.0.13: with the one-panel look, a window in a zone on the screen's edge no longer flickers "
-    "between two places.",
+    "2.7.0.13: with the one-panel look, a window in a zone on the screen's edge no longer flickers between two places.",
     "2.7.0.12: windows fill their zones: the Paperdoll and bags, Pets, Buffs & Timers and the lists; "
     "closed windows open in their zones; empty bags zones are cleared; Supplies, the killer window, Mongotchi's "
     "side windows, the Butler log and Skill Bags results can sit in zones.",

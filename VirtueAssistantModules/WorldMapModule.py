@@ -903,12 +903,12 @@ def _module_worldmap():
 			if a is not None:a.shutdown()
 		return{"start":bv,"tick":bw,"stop":bz,"client_tick":True,"config_height":bq.height,"build_config":br,"poll_config":a4,"config_closed":bt,"thread_tick":bx,"interval":by}
 	def aU():
-		Y="corpserun";t="Corpse";aq="CorpseRun_settings";aQ="CorpseRun_pos";ar="CorpseRun_min";aa="CorpseRun_corpse";v=0x434F5250;at=8198;au,av=3786,3794;aw=15;ax=45;L,M=1,120;ay=60;az=120.;aA="corpserun.decay";aB=20.;aR=(400,401,605,606,666,667);ac=24;aC=1.;ag=2;aS=.25;x=.7;aD=2;aE=250;aT=("must wait to perform another action",);aU,aV=8251,8269;aF=15.;P=420;aG,aW=280,46;aX=128;ah=F+30+C+aX+F;e={"arrow":True,"restore":True,"ping":False,"decay":aw,"bones":ax};bs=dict(e);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"body":0,"body_at":0.,"note_until":0.,"name":"","drawn":None,"drawn_c":None,"unnamed":False,"hooked":False,"find_at":0.};y={"g":None,"c":{},"store":({},{})};ai={};aH,aj,l=Q(a,t);aI={"decay":(L,M),"bones":(L,M)}
-		def aY():
-			al(aq,";",e,aI)
-			if(e["decay"],e["bones"])==(7,7):e["decay"],e["bones"]=aw,ax
-		def aJ():am(aq,";",e,("arrow","restore","ping","decay","bones"),aI)
+		Y="corpserun";t="Corpse";aq="CorpseRun_settings";aP="CorpseRun_pos";ar="CorpseRun_min";aa="CorpseRun_corpse";v=0x434F5250;aQ=8198;at,au=3786,3794;av=15;aw=45;L,M=1,120;ax=60;ay=120.;az="corpserun.decay";aA=20.;aR=(400,401,605,606,666,667);aB=24;aC=1.;ac=2;aS=.25;aT=10.;x=.7;aD=2;aE=250;aU=("must wait to perform another action",);aV,aW=8251,8269;aF=15.;P=420;aG,aX=280,46;aY=128;ag=F+30+C+aY+F;e={"arrow":True,"restore":True,"ping":False,"decay":av,"bones":aw};bu=dict(e);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"body":0,"body_at":0.,"note_until":0.,"name":"","drawn":None,"drawn_c":None,"unnamed":False,"hooked":False,"find_at":0.};y={"g":None,"c":{},"store":({},{})};ah={};aH,ai,l=Q(a,t);aI={"decay":(L,M),"bones":(L,M)}
 		def aZ():
+			al(aq,";",e,aI)
+			if(e["decay"],e["bones"])==(7,7):e["decay"],e["bones"]=av,aw
+		def aJ():am(aq,";",e,("arrow","restore","ping","decay","bones"),aI)
+		def a_():
 			p=J(aa).split("|")
 			if len(p)<8 or p[0]!="1":return
 			try:return{"serial":int(p[1]),"x":int(p[2]),"y":int(p[3]),"facet":int(p[4]),"died":float(p[5]),"body":int(p[6]),"spot":p[7]=="1","exact":len(p)<9 or p[8]!="0","name":p[9]if len(p)>9 else ""}
@@ -926,25 +926,25 @@ def _module_worldmap():
 		def V(secs):secs=max(0,int(secs));return "%d:%02d"%(secs//60,secs%60)
 		n=Kit.find_item;aK=Kit.held_item
 		def aL():return bool(HOST.cursor_busy(Y))or bool(API.HasTarget())
-		def a_(it):
-			if aU<=int(it.Graphic)<=aV:return True
-			d=it.GetItemData();return d is not None and int(d.Layer)in(11,16)
 		def a0(it):
+			if aV<=int(it.Graphic)<=aW:return True
+			d=it.GetItemData();return d is not None and int(d.Layer)in(11,16)
+		def a1(it):
 			d=it.GetItemData();w=int(d.Weight)if d is not None else 0;a=(0 if w>=255 else w)*max(1,int(it.Amount or 1))
 			if it.IsContainer:
 				for x in API.ItemsInContainer(int(it.Serial),True)or():
 					d=x.GetItemData();b=int(d.Weight)if d is not None else 0
 					if b<255:a+=b*max(1,int(x.Amount or 1))
 			return a
-		def an():
-			z=S(p,a,P,ah);w,j=z if z else(P,ah);g,h,f=p.begin(w,j)
-			if not a["minimized"]:p.frame(g);M=F;l=w-2*M;d=M+30+C;I(g,M,d,l,j-d-M,"YOUR CORPSE  (where, how long it lasts)");f["where"]=c(g,"",M+12,d+28,B);f["decay"]=c(g,"",M+12,d+48,b);f["info"]=c(g,"",M+12,d+68,b);i=d+92;e=M+10;f["go"]=k(g,h,"go",O,e,i,"Get my things","Move your things from your corpse to your backpack one by one (stand beside it; click again to stop)",on_click=aj("go"));e+=35+max(u("Get my things"),u("Stop"))+14;k(g,h,"help",O,e,i,"Ping for help","Send your guild a Need help ping on your corpse (needs World Map > Map Pings)",on_click=aj("help"));e+=35+u("Ping for help")+14;k(g,h,"forget",N,e,i,"Forget","Forget this corpse and take its arrow down",on_click=aj("forget"))
+		def aj():
+			z=S(p,a,P,ag);w,j=z if z else(P,ag);g,h,f=p.begin(w,j)
+			if not a["minimized"]:p.frame(g);M=F;l=w-2*M;d=M+30+C;I(g,M,d,l,j-d-M,"YOUR CORPSE  (where, how long it lasts)");f["where"]=c(g,"",M+12,d+28,B);f["decay"]=c(g,"",M+12,d+48,b);f["info"]=c(g,"",M+12,d+68,b);i=d+92;e=M+10;f["go"]=k(g,h,"go",O,e,i,"Get my things","Move your things from your corpse to your backpack one by one (stand beside it; click again to stop)",on_click=ai("go"));e+=35+max(u("Get my things"),u("Stop"))+14;k(g,h,"help",O,e,i,"Ping for help","Send your guild a Need help ping on your corpse (needs World Map > Map Pings)",on_click=ai("help"));e+=35+u("Ping for help")+14;k(g,h,"forget",N,e,i,"Forget","Forget this corpse and take its arrow down",on_click=ai("forget"))
 			p.end(g);a["lbl_at"]=0.
-		p=Kit.Window(Y,t,a,y,an,aQ,ar,(220,220),(aG,aW),3786,aH,lock=True,clear={"c":{}})
-		def a1():
+		p=Kit.Window(Y,t,a,y,aj,aP,ar,(220,220),(aG,aX),3786,aH,lock=True,clear={"c":{}})
+		def a2():
 			if not a["minimized"]and not a["docked"]:return
-			a["minimized"],a["docked"]=False,False;T(Y);X(ar,False);an()
-		def a2(me,now,n):
+			a["minimized"],a["docked"]=False,False;T(Y);X(ar,False);aj()
+		def a3(me,now,n):
 			r=a["rec"];j=a["job"]
 			if r is None:o=bool(a["was_dead"]);c=a["note"]if a["note"]and now<a["note_until"]else("Find a healer or a resurrection."if o else "When you die, this window shows the way back.");return("No corpse to find.",B,"",b,c,t+": none")
 			d=R(now);p,q=int(me.X),int(me.Y)
@@ -955,7 +955,7 @@ def _module_worldmap():
 			if d>m:k="Bones in %s%s, gone in %s%s"%(i,V(d-m),i,V(d))
 			elif d>0:k=("Bones %s; gone in %s%s"%("now"if r["exact"]else "soon",i,V(d)))
 			else:k="Should have decayed by now"
-			s=A if d<=ay else b
+			s=A if d<=ax else b
 			if a["note"]and now<a["note_until"]:c=a["note"]
 			elif j is not None:
 				if j["phase"]=="open":c="Opening your corpse"
@@ -967,12 +967,12 @@ def _module_worldmap():
 				elif r["serial"]and r["spot"]:c=l+" Stand by it and click Get my things."
 				else:c=l+" Not seen there yet."
 			f="%s  %s"%(f,V(d))if d>0 else f;return g,B,k,s,c,"%s: %s"%(t,f)
-		def a3(me,now,p,force=False):
+		def a4(me,now,p,force=False):
 			q=y["g"]
 			if q is None or(a["minimized"]and a["docked"]):return
 			if not force and now<a["lbl_at"]:return
-			a["lbl_at"]=now+.5;e,f,g,j,k,l=a2(me,now,p);c=y["c"]
-			if a["minimized"]:m=A if a["rec"]is not None and R(now)<=ay else b;d=(l,m)
+			a["lbl_at"]=now+.5;e,f,g,j,k,l=a3(me,now,p);c=y["c"]
+			if a["minimized"]:m=A if a["rec"]is not None and R(now)<=ax else b;d=(l,m)
 			else:d=(e,f,g,j,k,a["job"]is not None)
 			if d==a["drawn"]and c is a["drawn_c"]:return
 			a["drawn"],a["drawn_c"]=d,c
@@ -982,61 +982,65 @@ def _module_worldmap():
 				return
 			for r,s,t in(("where",e,f),("decay",g,j),("info",k,b)):h(c[r],o(s,P-2*F-24),t)
 			h(c["go"],"Stop"if a["job"]is not None else "Get my things",i if a["job"]is not None else B)
-		def a4(me,c):
+		def a5(me,c):
 			r=a["rec"];b=None
 			if e["arrow"]and r is not None and r["spot"]and c==r["facet"]:
-				if max(abs(int(me.X)-r["x"]),abs(int(me.Y)-r["y"]))>ag:b=(r["x"],r["y"])
+				if max(abs(int(me.X)-r["x"]),abs(int(me.Y)-r["y"]))>ac:b=(r["x"],r["y"])
 			if b==a["arrow"]:return
 			if b is None:W(a,v)
 			else:API.TrackingArrow(b[0],b[1],v);a["arrow"]=b
-		def aM(me,now,at_start=False):
+		def an(me,now,at_start=False):
 			if a["job"]is not None:m("you died")
-			x,y,b=int(me.X),int(me.Y),int(API.GetMap());a["name"]=str(me.Name or "");a["rec"]={"serial":0,"x":x,"y":y,"facet":b,"died":now,"body":a["body"],"spot":not at_start,"exact":not at_start,"name":a["name"]};a["seek_until"],a["seek_at"]=now+aB,now;a["gone_since"],a["warned"],a["unnamed"]=None,False,False;a["refused"]=set();r()
+			x,y,b=int(me.X),int(me.Y),int(API.GetMap());a["name"]=str(me.Name or "");a["rec"]={"serial":0,"x":x,"y":y,"facet":b,"died":now,"body":a["body"],"spot":not at_start,"exact":not at_start,"name":a["name"]};a["seek_until"],a["seek_at"]=now+aA,now;a["gone_since"],a["warned"],a["unnamed"]=None,False,False;a["refused"]=set();r()
 			if at_start:l("you are a ghost: looking for your corpse round you.")
 			else:
 				l("you died at %d, %d (%s). Bones in %s, gone %s later."%(x,y,E(b),z(e["decay"],"minute"),z(e["bones"],"minute")),A)
 				if e["ping"]:a["ping"]=(x,y,b,now+aF)
-			if e["restore"]:a1()
-		a5=("a corpse of ","corpse of ","the remains of ","remains of ")
+			if e["restore"]:a2()
+		a6=("a corpse of ","corpse of ","the remains of ","remains of ")
 		def ao():r=a["rec"];return((r["name"]if r is not None and r["name"]else a["name"])or "").strip().lower()
-		def aN(it,graphic,e):
+		def aM(it,graphic,e):
 			r=a["rec"];d=r["body"]if r is not None else 0;b=int(it.Amount or 0)
 			if d and b and b!=d:return 0
-			f=au<=graphic<=av
+			f=at<=graphic<=au
 			if f and(not b or(not d and b not in aR)):return 0
 			n=(str(it.Name or "")or str(it.NameAndProps(False)or "")).strip().lower();c=None
-			for p in a5:
+			for p in a6:
 				if n.startswith(p):c=n[len(p):].strip();break
 			if c is None:
 				if not n or n in("corpse","a corpse","bones","remains")or f:return 1
 				c=n
 			if not e:return 1
 			return 2 if c==e else 0
-		def aO(items,gr,g,h,lim,c,i):
-			for a in items or():
+		def aN(items,g,h,lim,c,i):
+			for a,j in items:
 				s,e,f=int(a.Serial),int(a.X),int(a.Y);d=max(abs(e-g),abs(f-h))
 				if d>lim:continue
-				m=aN(a,gr,i)
+				m=aM(a,j,i)
 				if m==1:c[1]=True
 				if m!=2:continue
-				j=(d,s,e,f);b=c[0]
-				if b is None or d<b[0]or(d==b[0]and s>b[1]):c[0]=j
-		def a6(me):
-			r=a["rec"];c=ao();d,e,f=(r["x"],r["y"],3)if r["spot"]else(int(me.X),int(me.Y),ac);b=[None,False];aO(API.GetItemsOnGround(ac,at),at,d,e,f,b,c)
-			if b[0]is None:
-				for g in range(au,av+1):aO(API.GetItemsOnGround(ac,g),g,d,e,f,b,c)
+				k=(d,s,e,f);b=c[0]
+				if b is None or d<b[0]or(d==b[0]and s>b[1]):c[0]=k
+		def a7(me):
+			r=a["rec"];d=ao();e,f,h=(r["x"],r["y"],3)if r["spot"]else(int(me.X),int(me.Y),aB);b=[None,False];i,j=[],[]
+			for c in API.GetItemsOnGround(aB)or():
+				g=int(c.Graphic)
+				if g==aQ:i.append((c,g))
+				elif at<=g<=au:j.append((c,g))
+			aN(i,e,f,h,b,d)
+			if b[0]is None:aN(j,e,f,h,b,d)
 			return(None if b[0]is None else b[0][1:]),b[1]
 		def s(why=None):
 			if a["job"]is not None:m(None)
 			a["rec"]=a["ping"]=a["gone_since"]=None;a["unnamed"]=False;a["refused"]=set();W(a,v);r()
 			if why:l(why)
 			a["lbl_at"]=0.
-		def a7(me,now,d):
+		def a8(me,now,d):
 			b=a["rec"];e=R(now);h=max(abs(int(me.X)-b["x"]),abs(int(me.Y)-b["y"]))
 			if not b["serial"]:
 				m=b["spot"]and d==b["facet"]and h<=12;o=not b["spot"]and a["unnamed"];i=now<a["seek_until"]
 				if(i and now>=a["seek_at"])or(not i and(m or o)and now>=a["look_at"]):
-					a["seek_at"]=now+.5;a["look_at"]=now+1.;a["find_at"]=now;j,k=a6(me)
+					a["seek_at"]=now+.5;a["look_at"]=now+1.;a["find_at"]=now;j,k=a7(me)
 					if j is not None:
 						b["serial"],b["x"],b["y"]=j;a["unnamed"]=False
 						if not b["name"]:b["name"]=ao()
@@ -1053,9 +1057,9 @@ def _module_worldmap():
 					if a["gone_since"]is None:a["gone_since"]=now
 					elif now-a["gone_since"]>=6.:s("your corpse isn't at %d, %d any more (decayed or looted)."%(b["x"],b["y"]));return
 				else:a["gone_since"]=None
-			if e<=60 and not a["warned"]and e>0:a["warned"]=True;p=K(b["x"]-int(me.X),b["y"]-int(me.Y))if d==b["facet"]else "on "+E(b["facet"]);ae(aA,"Corpse decays in under a minute (%s)"%p,"warn")
-			if e<=-az and n(b["serial"])is None:s("your corpse has decayed.")
-		def a8(now):
+			if e<=60 and not a["warned"]and e>0:a["warned"]=True;p=K(b["x"]-int(me.X),b["y"]-int(me.Y))if d==b["facet"]else "on "+E(b["facet"]);ae(az,"Corpse decays in under a minute (%s)"%p,"warn")
+			if e<=-ay and n(b["serial"])is None:s("your corpse has decayed.")
+		def a9(now):
 			p=a["ping"]
 			if p is None:return
 			x,y,m,c=p;b=HOST.services.get("pings.send")
@@ -1066,7 +1070,7 @@ def _module_worldmap():
 			try:
 				if b(x,y,m=m,kind="help"):a["ping"]=None;l("Need help ping sent on your corpse.")
 			except Exception:a["ping"]=None
-		def a9(me,now):
+		def ba(me,now):
 			r=a["rec"]
 			if a["job"]is not None:return
 			if r is None:g("No corpse remembered.");return
@@ -1074,11 +1078,11 @@ def _module_worldmap():
 			if not r["serial"]:g("Your corpse hasn't been seen yet: go to %d, %d."%(r["x"],r["y"]));return
 			b=n(r["serial"])
 			if b is None:g("Your corpse isn't in view yet (%d, %d)."%(r["x"],r["y"]));return
-			c=aN(b,int(b.Graphic),ao())
+			c=aM(b,int(b.Graphic),ao())
 			if c==1:g("Waiting for the corpse's name: click it once.");return
 			if c!=2:g("That corpse isn't yours.");return
 			d,e=int(b.X)-int(me.X),int(b.Y)-int(me.Y)
-			if max(abs(d),abs(e))>ag:g("Walk up to your corpse first (%s)."%K(d,e));return
+			if max(abs(d),abs(e))>ac:g("Walk up to your corpse first (%s)."%K(d,e));return
 			f=int(API.Backpack or 0)
 			if not f:g("No backpack to put things in.");return
 			if aL():g("A target cursor is up: finish or cancel it first.");return
@@ -1089,23 +1093,23 @@ def _module_worldmap():
 			for c in API.ItemsInContainer(j["corpse"],False)or():
 				if len(b)>=aE:break
 				s=int(c.Serial)
-				if s not in j["tried"]and s not in a["refused"]and not a_(c):b.append(s)
+				if s not in j["tried"]and s not in a["refused"]and not a0(c):b.append(s)
 			return b
-		def ba(me,now):
+		def bb(me,now):
 			j=a["job"]
 			if j["why"]:m(j["why"]);return
 			if j["move"]is not None:return
 			if a["was_dead"]:m("you died");return
 			d=n(j["corpse"])
 			if d is None:m("your corpse is gone from view");return
-			if max(abs(int(d.X)-int(me.X)),abs(int(d.Y)-int(me.Y)))>ag:m("you walked away from your corpse");return
-			if j["check"]is not None and(now<j["at"]or not bb(j,now)):return
+			if max(abs(int(d.X)-int(me.X)),abs(int(d.Y)-int(me.Y)))>ac:m("you walked away from your corpse");return
+			if j["check"]is not None and(now<j["at"]or not bc(j,now)):return
 			if j["phase"]=="open":
 				if now<j["at"]:return
 				b=ap(j)
 				if not b and now<j["until"]:return
 				j["plan"],j["i"],j["phase"]=b,0,"move"
-				if not b:aP();return
+				if not b:aO();return
 			if now<j["hold"]:return
 			if aL():m("a target cursor is up");return
 			h=aK()
@@ -1117,30 +1121,30 @@ def _module_worldmap():
 				x=n(s)
 				if x is None or int(x.Container or 0)!=j["corpse"]:continue
 				c,e=int(me.WeightMax or 0),int(me.Weight or 0)
-				if c>0 and(e>=c or e+a0(x)>c):m("the next item would put you over your weight limit (%d / %d stones)"%(e,c));return
+				if c>0 and(e>=c or e+a1(x)>c):m("the next item would put you over your weight limit (%d / %d stones)"%(e,c));return
 				j["tried"].add(s);j["move"]=s;return
 			if j["replans"]<2:
 				j["replans"]+=1;f=ap(j)
 				if f:j["plan"],j["i"]=f,0;return
-			aP()
-		def bb(j,now):
+			aO()
+		def bc(j,now):
 			s=j["check"];b=n(s);c=int(b.Container or 0)if b is not None else None
 			if c is None and j["rechecks"]<aD:j["rechecks"]+=1;j["at"]=now+x*.5;return False
 			if c!=j["corpse"]:j["moved"]+=1;j["streak"]=j["rechecks"]=0;j["check"]=None;return True
-			if(Journal.find(j["sent_at"],aT)is not None and j["waits"].get(s,0)<2):j["waits"][s]=j["waits"].get(s,0)+1;j["tried"].discard(s);j["i"]=max(0,j["i"]-1);j["check"]=None;j["rechecks"]=0;j["hold"]=now+x;return False
+			if(Journal.find(j["sent_at"],aU)is not None and j["waits"].get(s,0)<2):j["waits"][s]=j["waits"].get(s,0)+1;j["tried"].discard(s);j["i"]=max(0,j["i"]-1);j["check"]=None;j["rechecks"]=0;j["hold"]=now+x;return False
 			if j["rechecks"]<aD:j["rechecks"]+=1;j["at"]=now+x*.5;return False
 			j["check"]=None;j["rechecks"]=0;j["refused"]+=1;j["streak"]+=1
 			if len(a["refused"])<aE:a["refused"].add(s)
 			if j["streak"]>=3:m("%d moves in a row were refused"%j["streak"]);return False
 			return True
-		def bc():
+		def bd():
 			j=a["job"]
 			if j is None or j["move"]is None or a["shutting"]:return
 			b=j["move"];j["move"]=None
 			try:API.MoveItem(b,j["pack"])
 			except Exception as c:j["why"]="a move failed (%s)"%c;return
 			j["check"]=b;j["last"]=b;j["sent_at"]=time.time();j["at"]=j["sent_at"]+x
-		def aP():
+		def aO():
 			j,a["job"]=a["job"],None
 			if j is None:return
 			c=[]
@@ -1157,39 +1161,42 @@ def _module_worldmap():
 			if user:l("stopped (%d moved)."%j["moved"])
 			elif why:l("stopped: %s (%d moved)."%(why,j["moved"]),A)
 			a["lbl_at"]=0.
-		def bd(me,now):
-			if a["job"]is not None:m(None,user=True)
-			elif me is not None:a9(me,now)
 		def be(me,now):
+			if a["job"]is not None:m(None,user=True)
+			elif me is not None:ba(me,now)
+		def bf(me,now):
 			r=a["rec"]
 			if r is None or not r["spot"]:g("No corpse to ping.")
 			elif HOST.services.get("pings.send")is None:g("World Map > Map Pings is off: turn it on to send pings.")
 			else:a["ping"]=(r["x"],r["y"],r["facet"],now+aF)
-		def bf(me,now):
+		def bg(me,now):
 			if a["rec"]is None:g("No corpse remembered.")
 			else:s("forgot your corpse.")
-		bg={"go":bd,"help":be,"forget":bf};bh=("One item every %.1f s; stops on Stop, a target cursor, picking something up, walking away or going over your weight limit."%x)
-		def bi(w):a="Corpse to bones:";return(("WHEN YOU DIE",(("check","arrow","Point the tracking arrow at your corpse","Its own arrow (others are left alone); hidden when you stand beside it"),("check","restore","Open the Corpse window when you die, even minimized or folded","It comes back full size"),("check","ping","Send a Need help map ping on your corpse when you die","Your guild sees where you died (needs World Map > Map Pings); off at first, as it shows where you are")),{"pad":4}),("DECAY  (minutes; the shard's times)",(("num","decay",a,"Minutes from death until bones",None,L,M,{"stay":True}),("num","bones","Bones gone after:","Minutes the bones (with your things) last",None,L,M,{"dx":u(a)+86})),{"ldy":4,"fw":40,"pad":8}),("GET MY THINGS  (one item at a time)",[("note",d)for d in Kit.wrap(bh,w-28)]),ab("corpse"))
-		def bj(f,new):
+		bh={"go":be,"help":bf,"forget":bg};bi=("One item every %.1f s; stops on Stop, a target cursor, picking something up, walking away or going over your weight limit."%x)
+		def bj(w):a="Corpse to bones:";return(("WHEN YOU DIE",(("check","arrow","Point the tracking arrow at your corpse","Its own arrow (others are left alone); hidden when you stand beside it"),("check","restore","Open the Corpse window when you die, even minimized or folded","It comes back full size"),("check","ping","Send a Need help map ping on your corpse when you die","Your guild sees where you died (needs World Map > Map Pings); off at first, as it shows where you are")),{"pad":4}),("DECAY  (minutes; the shard's times)",(("num","decay",a,"Minutes from death until bones",None,L,M,{"stay":True}),("num","bones","Bones gone after:","Minutes the bones (with your things) last",None,L,M,{"dx":u(a)+86})),{"ldy":4,"fw":40,"pad":8}),("GET MY THINGS  (one item at a time)",[("note",d)for d in Kit.wrap(bi,w-28)]),ab("corpse"))
+		def bk(f,new):
 			b=time.time()
 			for k in("decay","bones"):
 				try:a=str(f.c[k].Text or "").strip()
 				except Exception:continue
-				t=ai.get(k)
-				if t is None or t[0]!=a:ai[k]=(a,b)
+				t=ah.get(k)
+				if t is None or t[0]!=a:ah[k]=(a,b)
 				if not G.force and(t is None or t[0]!=a or b-t[1]<1.):new[k]=e[k]
-		def bk(b,new):
+		def bl(b,new):
 			if(new["decay"],new["bones"])!=(b["decay"],b["bones"]):a["warned"]=False
 			a["lbl_at"]=0.
 			if not new["arrow"]:W(a,v)
-		G=Kit.Page(e,bi,aJ,bk,adjust=bj,final=True)
-		def bl():G.closed();ai.clear()
-		def bm(*c):
+		G=Kit.Page(e,bj,aJ,bl,adjust=bk,final=True)
+		def bm():G.closed();ah.clear()
+		def bn(*c):
 			r=a["rec"]
 			if r is None or r["serial"]or a["shutting"]:return
 			b=a["find_at"]+aS;a["seek_at"]=min(a["seek_at"],b);a["look_at"]=min(a["look_at"],b)
-		def bn(d):
-			for k in("body_at","seek_until","seek_at","look_at","item_at","lbl_at","note_until","find_at"):a[k]=a[k]+d
+		def bo(*b):
+			if a["shutting"]:return
+			a["died"]=True;HOST.poke("worldmap.corpse",False)
+		def bp(d):
+			for k in("body_at","seek_until","seek_at","look_at","item_at","lbl_at","note_until","find_at","died_at"):a[k]=a[k]+d
 			if a["gone_since"]is not None:a["gone_since"]+=d
 			p=a["ping"]
 			if p is not None:a["ping"]=(p[0],p[1],p[2],p[3]+d)
@@ -1198,42 +1205,45 @@ def _module_worldmap():
 				for k in("at","until","sent_at","hold"):j[k]+=d
 			b=a["rec"]
 			if b is not None:b["died"]+=d;r()
-		def bo():
-			a.update({"shutting":False,"docked":False,"queue":[],"job":None,"arrow":None,"refused":set(),"ping":None,"was_dead":None,"seek_until":0.,"seek_at":0.,"look_at":0.,"gone_since":None,"item_at":0.,"lbl_at":0.,"note":"","last_now":None,"atlas":False,"unnamed":False,"minimized":p.start_min()});aY();a["rec"]=aZ();a["warned"]=False
-			if a["rec"]is not None and R(time.time())<=-az:a["rec"]=None;r()
-			if a["rec"]is not None and not a["rec"]["spot"]:a["seek_until"]=time.time()+aB
-			af(aA,"Corpse about to decay",490);an();p.dock(fit=True,min=(P,ah));ak(a,"hooked",("OnCorpseCreated",bm))
-		def bp():
+		def bq():
+			a.update({"shutting":False,"docked":False,"queue":[],"job":None,"arrow":None,"refused":set(),"ping":None,"was_dead":None,"seek_until":0.,"seek_at":0.,"look_at":0.,"gone_since":None,"item_at":0.,"lbl_at":0.,"note":"","last_now":None,"atlas":False,"unnamed":False,"died":False,"died_at":0.,"minimized":p.start_min()});aZ();a["rec"]=a_();a["warned"]=False
+			if a["rec"]is not None and R(time.time())<=-ay:a["rec"]=None;r()
+			if a["rec"]is not None and not a["rec"]["spot"]:a["seek_until"]=time.time()+aA
+			af(az,"Corpse about to decay",490);aj();p.dock(fit=True,min=(P,ag));ak(a,"hooked",("OnCorpseCreated",bn),("OnPlayerDeath",bo))
+		def br():
 			if y["g"]is None:return
 			if U(y):return
-			c=time.time();f,a["last_now"]=a["last_now"],c
-			if f is not None and c<f-2.:bn(c-f)
-			b=HOST.me()
+			b=time.time();g,a["last_now"]=a["last_now"],b
+			if g is not None and b<g-2.:bp(b-g)
+			c=HOST.me()
 			while a["queue"]:
 				i=a["queue"].pop(0)
-				if not p.action(i):bg[i](b,c)
-			if b is None:return
-			e=bool(b.IsDead);g=a["was_dead"];a["was_dead"]=e
-			if g is None:
-				if e and a["rec"]is None:aM(b,c,at_start=True)
-			elif e and not g:aM(b,c)
-			elif g and not e and a["rec"]is not None:
+				if not p.action(i):bh[i](c,b)
+			if c is None:return
+			d=bool(c.IsDead);f=a["was_dead"];a["was_dead"]=d;j=a["died"];a["died"]=False
+			if j and not f:an(c,b);a["died_at"]=0. if d else b
+			elif f is None:
+				if d and a["rec"]is None:an(c,b,at_start=True)
+			elif d and not f:
+				if not 0.<=b-a["died_at"]<=aT:an(c,b)
+				a["died_at"]=0.
+			elif f and not d and a["rec"]is not None:
 				r=a["rec"]
-				if r["spot"]:l("you are alive. Your corpse is %s: click Get my things beside it."%K(r["x"]-int(b.X),r["y"]-int(b.Y)),D)
+				if r["spot"]:l("you are alive. Your corpse is %s: click Get my things beside it."%K(r["x"]-int(c.X),r["y"]-int(c.Y)),D)
 				a["lbl_at"]=0.
-			if not e and c>=a["body_at"]:a["body_at"]=c+2.;a["body"]=int(b.Graphic);a["name"]=str(b.Name or "")or a["name"]
-			if not a["name"]:a["name"]=str(b.Name or "")
+			if not d and b>=a["body_at"]:a["body_at"]=b+2.;a["body"]=int(c.Graphic);a["name"]=str(c.Name or "")or a["name"]
+			if not a["name"]:a["name"]=str(c.Name or "")
 			h=int(API.GetMap())if a["rec"]is not None or a["arrow"]is not None else None
-			if a["rec"]is not None:a7(b,c,h)
-			if a["job"]is not None:ba(b,c);bc()
-			if a["ping"]is not None:a8(c)
-			if a["rec"]is not None or a["arrow"]is not None:a4(b,h)
-			r=a["rec"];d=(r["x"],r["y"],r["facet"])if r is not None and r["spot"]else None
-			if d!=a["atlas"]:a["atlas"]=d;q.set("corpse",{}if d is None else{Z("Your corpse"):(d[0],d[1],d[2],"white")})
-			a3(b,c,h)
-		def bq():return.1 if a["job"]is not None else.25
-		def br():a["shutting"]=True;a["job"]=a["ping"]=None;W(a,v);aJ();aH.close()
-		return{"start":bo,"tick":bp,"stop":br,"client_tick":True,"config_height":G.height,"build_config":G.build,"poll_config":G.poll,"config_closed":bl,"interval":bq}
+			if a["rec"]is not None:a8(c,b,h)
+			if a["job"]is not None:bb(c,b);bd()
+			if a["ping"]is not None:a9(b)
+			if a["rec"]is not None or a["arrow"]is not None:a5(c,h)
+			r=a["rec"];e=(r["x"],r["y"],r["facet"])if r is not None and r["spot"]else None
+			if e!=a["atlas"]:a["atlas"]=e;q.set("corpse",{}if e is None else{Z("Your corpse"):(e[0],e[1],e[2],"white")})
+			a4(c,b,h)
+		def bs():return.1 if a["job"]is not None else.25
+		def bt():a["shutting"]=True;a["job"]=a["ping"]=None;W(a,v);aJ();aH.close()
+		return{"start":bq,"tick":br,"stop":bt,"client_tick":True,"config_height":G.height,"build_config":G.build,"poll_config":G.poll,"config_closed":bm,"interval":bs}
 	def aV():
 		aA="treasure";ac="Treasure Maps";aB="TreasureHunter_settings";a1="TreasureHunter_pos";a2="TreasureHunter_min";aC="TreasureHunter_maps";aD,a3=320,46;ao=8;v=24;aE=0x54524541;ap=(5355,5356);aF=("youthful","plainly","expertly","adeptly","cleverly","deviously","ingeniously");aG=["Youthful"]+[bM.capitalize()+" drawn"for bM in aF[1:]];a4=["somewhere in "+bN.lower()for bN in ah];a5="you successfully decode a treasure map";a6="the treasure is marked by the red pin";a7="this treasure hunt has already been completed";a8=re.compile(r"believe this is somewhere near (\d+) and (\d+)");ar=300.;aH=1.;X=6.;aI=.25;ae=8.;aJ=5.;aK=60;aL=6.;aM=.5;Y="Point the tracking arrow at this map's spot (again: back to the nearest map)";a9="Send the tracking arrow back to the nearest map's spot";ba="Point the tracking arrow at this map's spot (again: take it down)";bb="Send a Go here ping on this map's spot (needs World Map > Map Pings)";bc="No treasure maps in your pack: put one in and double-click it once.";aN="This treasure has been dug up";n={"auto":True,"undecoded":True,"done":False};bL=dict(n);d={"minimized":False,"shutting":False,"docked":False,"queue":[],"next_look":0.,"dirty":False,"next_save":0.,"list_ver":0,"me":(0,0,-1),"hooked":False,"tm_at":0.,"tm_serial":0,"hidden":0,"in_pack":frozenset()};j={};aa={};aO=5.;af=[False];ag=set();A={};G={"g":None,"c":{},"store":({},{}),"rows":[]};JR={"rd":None};aP,T,l=Q(d,ac);V={"at":0.,"items":[]}
 		def at(lvl):return aG[lvl]if 0<=lvl<len(aG)else "Treasure map"
@@ -1860,20 +1870,20 @@ def _module_worldmap():
 		def bE():a["shutting"]=True;p();a["ping"]=a["rd"]=None;del G[:];aL();H(ap,aM()if f["keep"]else "");a["save_due"]=False;aK.close()
 		return{"start":bA,"tick":bB,"stop":bE,"client_tick":True,"config_height":ag.height,"build_config":ag.build,"poll_config":ag.poll,"config_closed":ag.closed,"thread_tick":bC,"thread_wanted":bD}
 	def aX():
-		X="traphl";v="Traps & Fields";Y="TrapHL_settings";aB="TrapHL_pos";aa="TrapHL_view";B=F+30+C+40+F;ac,aC=320,46;ag=68;ah=33;l=3000;aD=.15;aE=[4355,4374,4524,4529,4512,4520,4536,4412,4423,4341,4348,4389,7025,7026,7027,7028,3696,];aj="TrapHL_fields";aF=(("fire",14732,14751),("poison",14612,14633),("paralyze",14695,14730),("energy",14662,14692));E=53;G=1153;aG={"fire":("Fire field",i),"poison":("Poison field",i),"energy":("Energy field",i),"paralyze":("Paralyze field!",A)};al=3;am="traphl.trap";M={bk:bh for bh,bi,bj in aF for bk in range(bi,bj+1)};aH={};d={"range":14,"cycle":2.,"pulse":True,"green":ag,"red":ah,"by_name":True,"graphics":list(aE),"ping":True,"fields":True,"field_hue":E,"para_hue":G,"field_say":False};bg=dict(d);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"hooked":False,"poke":False};s={"g":None,"c":{},"store":({},{})};j={"f":None,"gfx_typed":None,"gfx_since":0.};an,aI,ao=Q(a,v)
-		def aJ():
+		X="traphl";v="Traps & Fields";Y="TrapHL_settings";aB="TrapHL_pos";aa="TrapHL_view";B=F+30+C+40+F;ac,aC=320,46;ag=68;ah=33;l=3000;aD=.15;aE=1.;aF=3.;aG=3.;aH=5.;aI=[4355,4374,4524,4529,4512,4520,4536,4412,4423,4341,4348,4389,7025,7026,7027,7028,3696,];aj="TrapHL_fields";aJ=(("fire",14732,14751),("poison",14612,14633),("paralyze",14695,14730),("energy",14662,14692));E=53;G=1153;aK={"fire":("Fire field",i),"poison":("Poison field",i),"energy":("Energy field",i),"paralyze":("Paralyze field!",A)};al=3;am="traphl.trap";M={bp:bm for bm,bn,bo in aJ for bp in range(bn,bo+1)};aL={};d={"range":14,"cycle":2.,"pulse":True,"green":ag,"red":ah,"by_name":True,"graphics":list(aI),"ping":True,"fields":True,"field_hue":E,"para_hue":G,"field_say":False};bl=dict(d);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"hooked":False,"poke":False};s={"g":None,"c":{},"store":({},{})};j={"f":None,"gfx_typed":None,"gfx_since":0.};an,aM,ao=Q(a,v)
+		def aN():
 			p=J(Y).split("|")
 			if len(p)<7:return
 			with Kit.quiet:
 				d["range"]=max(1,min(30,int(p[0])));d["cycle"]=max(.5,min(10.,float(p[1])));d["pulse"]=p[2]=="1";d["green"]=int(p[3]);d["red"]=int(p[4]);d["by_name"]=p[5]=="1";a=ap(p[6])
 				if a or not p[6].strip():d["graphics"]=a
 				if len(p)>=8:d["ping"]=p[7]!="0"
-		def aK():
+		def aO():
 			v=V(J(aj));d["fields"]=v.get("on")!="0";d["field_say"]=v.get("say")=="1"
 			for k,a,b in(("hue","field_hue",E),("para","para_hue",G)):
 				try:d[a]=max(0,min(l,int(v[k])))
 				except(KeyError,ValueError):d[a]=b
-		def aL():H(aj,"on=%d;hue=%d;para=%d;say=%d"%(int(d["fields"]),d["field_hue"],d["para_hue"],int(d["field_say"])))
+		def aP():H(aj,"on=%d;hue=%d;para=%d;say=%d"%(int(d["fields"]),d["field_hue"],d["para_hue"],int(d["field_say"])))
 		def N():H(Y,"|".join([str(d["range"]),"%.2f"%d["cycle"],"1"if d["pulse"]else "0",str(d["green"]),str(d["red"]),"1"if d["by_name"]else "0",O(),"1"if d["ping"]else "0"]))
 		def ap(text):
 			b=[]
@@ -1885,7 +1895,7 @@ def _module_worldmap():
 				if 0<v<65536 and v not in b:b.append(v)
 			return b
 		def O():return ", ".join("0x%04X"%e for e in d["graphics"])
-		def aM():b=J(aa);v=V(b);a["minimized"]=v.get("min")=="1";a["paused"]=v.get("paused")=="1";a["view_saved"]=b
+		def aQ():b=J(aa);v=V(b);a["minimized"]=v.get("min")=="1";a["paused"]=v.get("paused")=="1";a["view_saved"]=b
 		def aq():
 			b="min=%d;paused=%d"%(int(bool(a["minimized"])),int(bool(a["paused"])))
 			if b!=a.get("view_saved"):a["view_saved"]=b;H(aa,b)
@@ -1893,48 +1903,50 @@ def _module_worldmap():
 		def t(item):return int(item.Hue or 0)
 		def P(item):return int(item.X),int(item.Y)
 		r={};at={"gfx":None,"wanted":frozenset(),"by_name":None,"fields":None}
-		def aN(it):
+		def aR(it):
 			a=str(it.Name or "").lower()
 			if not a:return
 			return "trap"in a and "scroll"not in a and "kit"not in a
-		def aO():
+		def aS():
 			a=at;b=d["graphics"]
 			if a["gfx"]is not b or a["by_name"]!=d["by_name"]or a["fields"]!=d["fields"]:a["gfx"],a["wanted"]=b,frozenset(b);a["by_name"],a["fields"]=d["by_name"],d["fields"];r.clear()
 			return a["wanted"]
-		def aP():
-			x=int(d["range"]);a["atlas_map"]=None;i={};j={};a["scans"]+=1;k=a["scans"];p=k%3==0;q=M if d["fields"]else aH;y=aO();z=d["by_name"];A=r;l={}
+		def aT():
+			x=int(d["range"]);a["atlas_map"]=None;j={};k={};h=a["last_scan"];l=h>=a["hue_at"];q=M if d["fields"]else aL
+			if l:a["hue_at"]=h+aG
+			y=aS();z=d["by_name"];A=r;n={}
 			for b in API.GetItemsOnGround(x)or():
 				c=int(b.Serial);g=int(b.Graphic);v=A.get(c)
-				if v is not None and v[0]==g and(not v[2]or k<v[2]):e=v[1];l[c]=v
+				if v is not None and v[0]==g and(not v[2]or h<v[2]):e=v[1];n[c]=v
 				else:
 					s=0
 					if g in y:e=1
 					elif z and g not in q:
-						u=aN(b)
-						if u is None:e,s=0,k+5
+						u=aR(b)
+						if u is None:e,s=0,h+aH
 						else:e=1 if u else 0
 					else:e=2 if g in q else 0
-					l[c]=(g,e,s)
-				if e==1:i[c]=b
-				elif e==2:j[c]=b
-			r.clear();r.update(l);f=a["tracked"];n=[]
-			for c,b in i.items():
-				h=f.get(c)
-				if h is None:
-					o=t(b)
-					if o in(d["green"],d["red"]):o=0
-					f[c]={"item":b,"orig":o,"set":d["green"]};m(b,d["green"]);aQ(b)
+					n[c]=(g,e,s)
+				if e==1:j[c]=b
+				elif e==2:k[c]=b
+			r.clear();r.update(n);f=a["tracked"];o=[]
+			for c,b in j.items():
+				i=f.get(c)
+				if i is None:
+					p=t(b)
+					if p in(d["green"],d["red"]):p=0
+					f[c]={"item":b,"orig":p,"set":d["green"]};m(b,d["green"]);aU(b)
 					if d["ping"]and c not in a["pinged"]:a["ping_wait"].append(c)
-					if c not in a["alerted"]:n.append(b)
+					if c not in a["alerted"]:o.append(b)
 				else:
-					h["item"]=b
-					if p and t(b)!=h["set"]:m(b,h["set"])
-			w=[bh for bh in f if bh not in i]
+					i["item"]=b
+					if l and t(b)!=i["set"]:m(b,i["set"])
+			w=[bm for bm in f if bm not in j]
 			for c in w:R(c,f.pop(c))
-			if w and a["ping_wait"]:a["ping_wait"]=[bi for bi in a["ping_wait"]if bi in f]
-			if n:aT(n)
-			if j or a["fields"]:aU(j,p)
-		def aQ(it):
+			if w and a["ping_wait"]:a["ping_wait"]=[bn for bn in a["ping_wait"]if bn in f]
+			if o:aX(o)
+			if k or a["fields"]:aY(k,l)
+		def aU(it):
 			x,y=P(it)
 			if x<=0 or y<=0:return
 			if a["atlas_map"]is None:a["atlas_map"]=int(API.GetMap())
@@ -1943,18 +1955,18 @@ def _module_worldmap():
 			b.append(c)
 			if len(b)>20:del b[0]
 			a["atlas_ver"]+=1
-		def aR():q.set("traps",{Z("Trap %d %d"%(e,f)):(e,f,g,"red")for e,f,g in a["atlas_traps"]})
-		aS=("east","south-east","south","south-west","west","north-west","north","north-east")
-		def aT(b):
+		def aV():q.set("traps",{Z("Trap %d %d"%(e,f)):(e,f,g,"red")for e,f,g in a["atlas_traps"]})
+		aW=("east","south-east","south","south-west","west","north-west","north","north-east")
+		def aX(b):
 			d=a["alerted"]
 			if len(d)+len(b)>5000:d.clear()
 			p=API.Player;l,m=int(p.X),int(p.Y);f,e,g,h=None,None,0,0
 			for c in b:
 				d.add(int(c.Serial));i,j=int(c.X)-l,int(c.Y)-m;k=max(abs(i),abs(j))
 				if e is None or k<e:f,e,g,h=c,k,i,j
-			w=K(g,h,names=aS);n="A trap %s"%w if len(b)==1 else "%d new traps in range (nearest %s)"%(len(b),w);ae(am,n,who=int(f.Serial))
+			w=K(g,h,names=aW);n="A trap %s"%w if len(b)==1 else "%d new traps in range (nearest %s)"%(len(b),w);ae(am,n,who=int(f.Serial))
 		def au(kind):return d["para_hue"]if kind=="paralyze"else d["field_hue"]
-		def aU(k,l):
+		def aY(k,l):
 			h=a["fields"];i=[]
 			for f,c in k.items():
 				e=h.get(f)
@@ -1971,18 +1983,18 @@ def _module_worldmap():
 				if b!=e["set"]:m(c,b if b else e["orig"]);e["set"]=b
 				elif b and l and t(c)!=b:m(c,b)
 			for f in[w for w in h if w not in k]:av(f)
-			if i:aV(i)
-		def aV(recs):
-			d=time.time();b=[w for w in a["field_said"]if d-w[3]<10.];f=sorted([P(bh["item"])+(bh["kind"],bh["item"])for bh in recs],key=aW)
+			if i:aZ(i)
+		def aZ(recs):
+			d=time.time();b=[w for w in a["field_said"]if d-w[3]<10.];f=sorted([P(bm["item"])+(bm["kind"],bm["item"])for bm in recs],key=a_)
 			for x,y,c,g in f:
 				e=False
 				for k,h,j,t in b:
 					if(k==c and abs(h-x)<=al and abs(j-y)<=al):e=True;break
 				b.append((c,x,y,d))
 				if e:continue
-				l,m=aG.get(c,("Field",i));API.HeadMsg(l,int(g.Serial),m)
+				l,m=aK.get(c,("Field",i));API.HeadMsg(l,int(g.Serial),m)
 			a["field_said"]=b[-20:]
-		def aW(e):return(e[0],e[1])
+		def a_(e):return(e[0],e[1])
 		def av(serial):
 			b=a["fields"].pop(serial,None)
 			if b is not None and b["set"]:R(serial,b)
@@ -1990,18 +2002,18 @@ def _module_worldmap():
 		def aw():
 			for b in list(a["tracked"]):R(b,a["tracked"].pop(b))
 			for b in list(a["fields"]):av(b)
-		def aX():
+		def a0():
 			if not a["tracked"]:return
 			e=d["pulse"]and(time.time()%max(.5,d["cycle"])<min(.35,d["cycle"]/2.));b=d["red"]if e else d["green"]
 			for c in a["tracked"].values():
 				if c["set"]!=b:m(c["item"],b);c["set"]=b
 		def u():return HOST.services.get("pings.send")
-		def aY():
+		def a1():
 			b=len(a["ping_wait"])
 			if b:
-				aZ()
+				a2()
 				if len(a["ping_wait"])!=b:n()
-		def aZ():
+		def a2():
 			b=a["ping_wait"];e=u()
 			if e is None:
 				if not a["ping_noted"]:a["ping_noted"]=True;ao("turn World Map > Map Pings on to ping traps (they wait until then).")
@@ -2024,23 +2036,23 @@ def _module_worldmap():
 			if len(a["pinged"])>=5000:a["pinged"].clear();a["pinged_spots"].clear()
 			a["pinged"].add(serial)
 			if spot is not None:a["pinged_spots"].add(spot)
-		def a_():
+		def a3():
 			a["pinged"].clear();a["pinged_spots"].clear();a["ping_sent"]=0;a["ping_wait"]=list(a["tracked"]);c=len(a["ping_wait"])
 			if a["paused"]:b="paused: untick Pause highlighting (World Map settings) to ping traps."
 			elif c==0:b="no traps in range; each is pinged when next found."
 			elif u()is None:b=("%s to ping once World Map > Map Pings is on."%z(c,"trap"))
 			else:b="pinging %s."%z(c,"trap")
 			ao(b);a["ping_noted"]=False;n()
-		def a0():
+		def a4():
 			n=len(a["ping_wait"])
 			if n and a["ping_svc"]is not None:return "sending %d"%n,b
 			if not d["ping"]:return "auto-ping off",b
 			if a["ping_svc"]is None:return "World Map > Map Pings is off",A
 			return "%d sent"%a["ping_sent"],D
-		a1="Ping danger on each highlighted trap, and again when next found (needs World Map > Map Pings)";W="Ping traps on screen"
+		a5="Ping danger on each highlighted trap, and again when next found (needs World Map > Map Pings)";W="Ping traps on screen"
 		def ax():
 			z=S(p,a,320,B);w,h=z if z else(320,B);g,c,d=p.begin(w,h)
-			if not a["minimized"]:p.frame(g);M=F;b=M+30+C;I(g,M,b,w-2*M,h-b-M);k(g,c,"ping",Kit.ART_CIRCLE,M+12,b+12,W,a1,on_click=aI("ping_again"))
+			if not a["minimized"]:p.frame(g);M=F;b=M+30+C;I(g,M,b,w-2*M,h-b-M);k(g,c,"ping",Kit.ART_CIRCLE,M+12,b+12,W,a5,on_click=aM("ping_again"))
 			p.end(g);n();aq()
 		p=Kit.Window(X,v,a,s,ax,aB,None,(200,200),(ac,aC),4412,an,lock=True)
 		def n():
@@ -2053,18 +2065,18 @@ def _module_worldmap():
 			if g.get("status")is not None:h(g["status"],o("%s: %s"%(v,ad(c)),ac-90),d)
 			f=j["f"]
 			if f is None:return
-			h(f.c["now"],c,d);i,k=a0();h(f.c["now_ping"],"Pings: "+i,k)
+			h(f.c["now"],c,d);i,k=a4();h(f.c["now_ping"],"Pings: "+i,k)
 			if a["pause_want"]is None and bool(f.c["paused"].IsChecked)!=bool(a["paused"]):f.c["paused"].SetIsChecked(bool(a["paused"]))
-		def a2(f,x,y):f.c["now"]=c(f.g,"",x+12,y,D);f.c["now_ping"]=c(f.g,"",x+12+f.w//2,y,b)
-		def a3(f,x,y):f.c["paused"]=aA(f.g,"Pause highlighting (the hues are put back)",x+12,y,a["paused"],"Stops the scan and puts every hue back")
-		a4={"ping_again":a_}
-		def a5(f,x,y):c(f.g,"Pulse cycle:",x+12,y+4);a=int(round(d["cycle"]*10));f.c["cycle"]=L(Kit.add_slider(f.g,x+120,y+2,160,5,100,a),"Seconds between red flashes (0.5-10)");f.c["cycle_v"]=c(f.g,"%.1f s"%d["cycle"],x+290,y+4,b)
-		def a6(f,x,y):f.c["graphics"]=L(ai(f.g,O(),x+12,y,f.w-28,numbers=False),"Trap item graphics in hex (0x1103 or 1103), comma separated; applied when you stop typing")
-		ay={"lw":98,"fw":60,"stay":True,"clamp":False};az=(("STATUS  (the window has %s)"%W,(("custom",24,a2),("custom",26,a3)),{"pad":4}),("TRAPS  (hues are client hue numbers)",(("slider","range","Scan range:","Tiles round you scanned once a second (1-30)",1,30,{"lw":98,"ldy":4,"sw":160,"ugap":10,"vfmt":"%d tiles"}),("custom",29,a5),("num","green","Green hue:","Hue traps are held at (1-%d; default %d)"%(l,ag),None,1,l,ay),("num","red","Red hue:","Hue of the pulse (1-%d; default %d)"%(l,ah),None,1,l,{"dx":200,"lw":70,"fw":60,"h":29,"clamp":False}),("check","pulse","Pulse red once per cycle (unticked: steady green)","Flashes each highlighted trap red for a beat")),{"top":32,"pad":2}),("TRAP GRAPHICS  (hex ids, comma separated)",(("custom",30,a6),("check","by_name","Also highlight ground items the client names 'trap'","For traps not in the list (the client knows a name only after a tooltip or click)")),{"top":32,"pad":8}),("TRAP PINGS  (needs World Map > Map Pings)",(("check","ping","Send a Danger! map ping on each new trap, once per trap","For you and your guildmates; \"%s\" on the window pings them all again"%W),),{"top":32,"pad":4}),("MAGIC FIELDS  (client hue numbers, 0 = leave as is)",(("check","fields","Highlight magic fields: fire, poison, energy, paralyze","Client-side recolour, like the traps; paralyze fields get their own hue",{"h":29}),("num","field_hue","Field hue:","Hue of fire, poison and energy fields (0-%d, 0 = as is; default %d)"%(l,E),None,0,l,ay),("num","para_hue","Paralyze hue:","Hue of paralyze fields (0-%d, 0 = as is; default %d)"%(l,G),None,0,l,{"dx":200,"lgap":12,"fw":60,"h":29,"clamp":False}),("check","field_say","Show an overhead text when a field appears","Names each new field above it once (\"Fire field\", \"Paralyze field!\")")),{"top":32,"pad":2}),ab("traps"))
-		def a7(w):return az
-		a8=Kit.Page(d,a7,N)
-		def a9(g,x,y,w):j["f"]=Kit.Form(g,x,y,w,d,az);j["gfx_typed"],j["gfx_applied"]=None,O();n()
-		def ba():
+		def a6(f,x,y):f.c["now"]=c(f.g,"",x+12,y,D);f.c["now_ping"]=c(f.g,"",x+12+f.w//2,y,b)
+		def a7(f,x,y):f.c["paused"]=aA(f.g,"Pause highlighting (the hues are put back)",x+12,y,a["paused"],"Stops the scan and puts every hue back")
+		a8={"ping_again":a3}
+		def a9(f,x,y):c(f.g,"Pulse cycle:",x+12,y+4);a=int(round(d["cycle"]*10));f.c["cycle"]=L(Kit.add_slider(f.g,x+120,y+2,160,5,100,a),"Seconds between red flashes (0.5-10)");f.c["cycle_v"]=c(f.g,"%.1f s"%d["cycle"],x+290,y+4,b)
+		def ba(f,x,y):f.c["graphics"]=L(ai(f.g,O(),x+12,y,f.w-28,numbers=False),"Trap item graphics in hex (0x1103 or 1103), comma separated; applied when you stop typing")
+		ay={"lw":98,"fw":60,"stay":True,"clamp":False};az=(("STATUS  (the window has %s)"%W,(("custom",24,a6),("custom",26,a7)),{"pad":4}),("TRAPS  (hues are client hue numbers)",(("slider","range","Scan range:","Tiles round you scanned as you move (1-30)",1,30,{"lw":98,"ldy":4,"sw":160,"ugap":10,"vfmt":"%d tiles"}),("custom",29,a9),("num","green","Green hue:","Hue traps are held at (1-%d; default %d)"%(l,ag),None,1,l,ay),("num","red","Red hue:","Hue of the pulse (1-%d; default %d)"%(l,ah),None,1,l,{"dx":200,"lw":70,"fw":60,"h":29,"clamp":False}),("check","pulse","Pulse red once per cycle (unticked: steady green)","Flashes each highlighted trap red for a beat")),{"top":32,"pad":2}),("TRAP GRAPHICS  (hex ids, comma separated)",(("custom",30,ba),("check","by_name","Also highlight ground items the client names 'trap'","For traps not in the list (the client knows a name only after a tooltip or click)")),{"top":32,"pad":8}),("TRAP PINGS  (needs World Map > Map Pings)",(("check","ping","Send a Danger! map ping on each new trap, once per trap","For you and your guildmates; \"%s\" on the window pings them all again"%W),),{"top":32,"pad":4}),("MAGIC FIELDS  (client hue numbers, 0 = leave as is)",(("check","fields","Highlight magic fields: fire, poison, energy, paralyze","Client-side recolour, like the traps; paralyze fields get their own hue",{"h":29}),("num","field_hue","Field hue:","Hue of fire, poison and energy fields (0-%d, 0 = as is; default %d)"%(l,E),None,0,l,ay),("num","para_hue","Paralyze hue:","Hue of paralyze fields (0-%d, 0 = as is; default %d)"%(l,G),None,0,l,{"dx":200,"lgap":12,"fw":60,"h":29,"clamp":False}),("check","field_say","Show an overhead text when a field appears","Names each new field above it once (\"Fire field\", \"Paralyze field!\")")),{"top":32,"pad":2}),ab("traps"))
+		def bb(w):return az
+		bc=Kit.Page(d,bb,N)
+		def bd(g,x,y,w):j["f"]=Kit.Form(g,x,y,w,d,az);j["gfx_typed"],j["gfx_applied"]=None,O();n()
+		def be():
 			g=j["f"]
 			if g is None:return
 			b=g.read();f=g.c;i=time.time()
@@ -2077,13 +2089,13 @@ def _module_worldmap():
 			if k!=(a["paused"]if a["pause_want"]is None else a["pause_want"]):a["pause_want"]=k
 			if b["ping"]!=d["ping"]:a["ping_wait"]=[w for w in a["tracked"]if w not in a["pinged"]]if b["ping"]else[]
 			if b==d:return
-			d.update(b);a["last_scan"]=0.;N();aL();n()
-		def bb():j["f"]=None;j["gfx_typed"]=None
-		def bc():
-			a.update({"shutting":False,"docked":False,"queue":[],"last_scan":0.,"scans":0,"tracked":{},"pinged":set(),"pinged_spots":set(),"ping_wait":[],"ping_sent":0,"ping_noted":False,"ping_svc":u(),"ping_next":0.,"fields":{},"field_said":[],"alerted":set(),"atlas_traps":[],"atlas_ver":0,"atlas_done":-1,"atlas_map":None,"pause_want":None});r.clear();aJ();aK();af(am,"New trap in range",495);aM();ak(a,"hooked",("OnItemCreated",be))
+			d.update(b);a["last_scan"]=0.;N();aP();n()
+		def bf():j["f"]=None;j["gfx_typed"]=None
+		def bg():
+			a.update({"shutting":False,"docked":False,"queue":[],"last_scan":0.,"hue_at":0.,"moved":False,"tracked":{},"pinged":set(),"pinged_spots":set(),"ping_wait":[],"ping_sent":0,"ping_noted":False,"ping_svc":u(),"ping_next":0.,"fields":{},"field_said":[],"alerted":set(),"atlas_traps":[],"atlas_ver":0,"atlas_done":-1,"atlas_map":None,"pause_want":None});r.clear();aN();aO();af(am,"New trap in range",495);aQ();ak(a,"hooked",("OnItemCreated",bi),("OnPositionChanged",bj))
 			if ar(X):a["minimized"]=True
 			ax();p.dock(fit=True,min=(320,B))
-		def bd():
+		def bh():
 			if s["g"]is None:return
 			if U(s):return
 			b=a["pause_want"]
@@ -2096,26 +2108,27 @@ def _module_worldmap():
 					aq();n()
 			while a["queue"]:
 				e=a["queue"].pop(0)
-				if not p.action(e):a4[e]()
+				if not p.action(e):a8[e]()
 			if a["paused"]:return
-			c=time.time()
-			if c-a["last_scan"]>=1. or(a["poke"]and c-a["last_scan"]>=aD):
-				a["last_scan"]=c;a["poke"]=False;f=(len(a["tracked"]),len(a["fields"]));aP();d=u()
-				if(len(a["tracked"]),len(a["fields"]))!=f or(d is None)!=(a["ping_svc"]is None):
+			f=time.time();c=f-a["last_scan"]
+			if c>=aF or(a["moved"]and c>=aE)or(a["poke"]and c>=aD):
+				a["last_scan"]=f;a["poke"]=a["moved"]=False;g=(len(a["tracked"]),len(a["fields"]));aT();d=u()
+				if(len(a["tracked"]),len(a["fields"]))!=g or(d is None)!=(a["ping_svc"]is None):
 					a["ping_svc"]=d
 					if d is not None:a["ping_noted"]=False
 					n()
-				if a["atlas_ver"]!=a["atlas_done"]:a["atlas_done"]=a["atlas_ver"];aR()
-			aY();aX()
-		def be(*b):
+				if a["atlas_ver"]!=a["atlas_done"]:a["atlas_done"]=a["atlas_ver"];aV()
+			a1();a0()
+		def bi(*b):
 			if a["poke"]or a["paused"]or a["shutting"]:return
 			for c in b:
 				try:g=int(c.Graphic)
 				except Exception:continue
 				if g in at["wanted"]or(d["fields"]and g in M):a["poke"]=True
 				return
-		def bf():a["shutting"]=True;aw();N();an.close()
-		return{"start":bc,"tick":bd,"stop":bf,"client_tick":True,"config_height":a8.height,"build_config":a9,"poll_config":ba,"config_closed":bb}
+		def bj(*b):a["moved"]=True
+		def bk():a["shutting"]=True;aw();N();an.close()
+		return{"start":bg,"tick":bh,"stop":bk,"client_tick":True,"config_height":bc.height,"build_config":bd,"poll_config":be,"config_closed":bf}
 	aY=(("pings",aT,.05,"pings"),("corpse",lambda:ac(aU(),"corpse"),.25,"corpserun"),("maps",lambda:ac(aV(),"maps"),.2,"treasure"),("dry",lambda:ac(aW(),"dry"),.2,"harvest"),("traps",lambda:ac(aX(),"traps"),.1,"traphl"),);return PartSet(aK,aD,aY,shared=aR).hooks()
 if "HOST"not in globals():
 	import API

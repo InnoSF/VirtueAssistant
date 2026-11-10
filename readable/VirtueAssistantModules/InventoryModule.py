@@ -271,11 +271,6 @@ def _module_inventory():
             Kit.dispose(win.get(key))
             win[key] = None
 
-        def no_mouse(ctrl):
-            """Make ctrl ignore the mouse and return it."""
-            ctrl.SetAcceptMouseInput(False)
-            return ctrl
-
         def box(x, y, w, h, color, alpha):
             """Make a coloured box of the given colour and alpha at (x, y), w by h."""
             b = G.CreateGumpColorBox(alpha, color)
@@ -284,7 +279,7 @@ def _module_inventory():
 
         def label(g, text, x, y, hue=None):
             """Add a label to g that ignores the mouse. Returns it."""
-            return no_mouse(Kit.add_label(g, text, x, y, hue))
+            return Kit.inert(Kit.add_label(g, text, x, y, hue))
 
         def framed_window(k, w, h, title, on_min, on_close):
             """Make a stone window with a title section and Minimize and Close buttons for a sub-window.
@@ -1414,7 +1409,7 @@ def _module_inventory():
             for ci, col in enumerate(cols):
                 cx = x0 + SIDE_RIM + ci * SIDE_COL_W
                 if ci:
-                    grid.Add(no_mouse(box(cx, y0 + SIDE_RIM + SIDE_PAD, 1,
+                    grid.Add(Kit.inert(box(cx, y0 + SIDE_RIM + SIDE_PAD, 1,
                                           ph - 2 * (SIDE_RIM + SIDE_PAD), C_SEAM, 0.8)))
                 bx = cx + (SIDE_COL_W - SIDE_BTN_W) // 2
                 y = y0 + (ph - reserve - heights[ci]) // 2
@@ -1445,7 +1440,7 @@ def _module_inventory():
                     elif kind == "tools":
                         build_tools(grid, bx, y)
                     elif kind == "break":
-                        grid.Add(no_mouse(box(bx, y + h // 2, SIDE_BTN_W, 1, C_SEAM, 0.8)))
+                        grid.Add(Kit.inert(box(bx, y + h // 2, SIDE_BTN_W, 1, C_SEAM, 0.8)))
                     y += h + SIDE_GAP
             # The gem: bags only. Combined with Paperdoll it hides this side panel.
             add_bare_button(grid, x0 + pw - SIDE_RIM - BARE_PAD - tw, y0 + ph - SIDE_RIM - BARE_PAD - th, False)
@@ -3179,7 +3174,7 @@ def _module_inventory():
             # In a Paperdoll fit the whole hole is one black section first, so an empty cell or a spare pixel
             # never shows the game world through.
             if area is not None:
-                no_mouse(Kit.add_tiled(grid, Kit.SECTION_TILE, 0, 0, area[0], area[1], Kit.SECTION_ALPHA))
+                Kit.inert(Kit.add_tiled(grid, Kit.SECTION_TILE, 0, 0, area[0], area[1], Kit.SECTION_ALPHA))
             for idx in range(st["slots"]):
                 r, c = divmod(idx, cols)
                 x, y = c * (cw + gap), r * (ch + gap)
@@ -3193,13 +3188,13 @@ def _module_inventory():
                 Kit.add_tiled(grid, Kit.SECTION_TILE, x, y, cw, ch, st["opacity"])
                 if trim:
                     if c < cols - 1:
-                        grid.Add(no_mouse(box(x + cw - 1, y, 1, ch, C_SEAM, 0.8)))
+                        grid.Add(Kit.inert(box(x + cw - 1, y, 1, ch, C_SEAM, 0.8)))
                     if idx + cols < st["slots"]:
-                        grid.Add(no_mouse(box(x, y + ch - 1, cw, 1, C_SEAM, 0.8)))
+                        grid.Add(Kit.inert(box(x, y + ch - 1, cw, 1, C_SEAM, 0.8)))
                 else:
                     for bx, by, bw, bh in ((x, y, cw, 1), (x, y + ch - 1, cw, 1),
                                            (x, y, 1, ch), (x + cw - 1, y, 1, ch)):
-                        grid.Add(no_mouse(box(bx, by, bw, bh, C_EDGE, 0.9)))
+                        grid.Add(Kit.inert(box(bx, by, bw, bh, C_EDGE, 0.9)))
                 labs = [label(grid, "#%d" % (idx + 1), x + 5, y + 3, Kit.HUE_TITLE)]
                 if idx in st["assign"]:
                     labs.append(label(grid, short(bag_name(st["assign"][idx], False), fit), x + 5, y + 21,
@@ -3218,18 +3213,18 @@ def _module_inventory():
             if area is not None:
                 for idx in range(st["slots"], cols * int(math.ceil(st["slots"] / float(cols)))):
                     r, c = divmod(idx, cols)
-                    no_mouse(Kit.add_tiled(grid, Kit.SECTION_TILE, c * (cw + gap), r * (ch + gap), cw, ch,
+                    Kit.inert(Kit.add_tiled(grid, Kit.SECTION_TILE, c * (cw + gap), r * (ch + gap), cw, ch,
                                            st["opacity"]))
             if trim:
                 for bx, by, bw, bh in ((0, 0, gw, 1), (0, gh - 1, gw, 1), (0, 0, 1, gh), (gw - 1, 0, 1, gh)):
-                    grid.Add(no_mouse(box(bx, by, bw, bh, C_EDGE, 0.9)))
+                    grid.Add(Kit.inert(box(bx, by, bw, bh, C_EDGE, 0.9)))
             # Bags only: a gilded corner knot takes the place of the title bar, with the flap beside it.
             if bare_on():
                 kw, kh = Kit.pic_size(Kit.CORNER_ART)
                 kw, kh = (kw or 30), (kh or 30)
                 tw, th = bare_btn_size()
                 kx, ky = gw - kw + GRIP_OUT, gh - kh + GRIP_OUT
-                no_mouse(Kit.add_pic(grid, Kit.CORNER_ART, kx, ky))
+                Kit.inert(Kit.add_pic(grid, Kit.CORNER_ART, kx, ky))
                 # The part of the knot outside the bags takes the drag; the bags sit on top of the rest.
                 Kit.catcher(grid, kx, ky, kw, kh, lambda *a: None, "Drag to move the bags", movable=True)
                 add_bare_button(grid, kx - tw - 3, gh + GEM_BELOW)
@@ -3974,10 +3969,6 @@ def _module_inventory():
             if st["canvas"] is not None:
                 return "In a zone the bags share it. Items always draw solid."
             return "Slots fit the open bags (%d x %d px). Items always draw solid." % (st["cell_w"], st["cell_h"])
-
-        def config_height(w):
-            """Height of the settings page at width w."""
-            return Kit.Form.height(page_table(w), w)
 
         def build_config(g, x, y, w):
             """Build the settings page into gump g at x, y with width w and remember its controls.
@@ -6176,7 +6167,7 @@ def _module_inventory():
             st.update(bar_raw=None, grid_raw=None, grid_info=(None, False), slot_raws=())
 
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True,
-                "config_height": config_height, "build_config": build_config, "poll_config": poll_config,
+                "config_height": cfg.height, "build_config": build_config, "poll_config": poll_config,
                 "config_closed": config_closed, "interval": _interval, "thread_tick": _thread_tick,
                 "thread_wanted": _thread_wanted}
 

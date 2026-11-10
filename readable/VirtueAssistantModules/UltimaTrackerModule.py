@@ -260,7 +260,7 @@ def _module_ultima():
             Returns the labels. They let clicks through to what is under them.
             """
             hue = hue_of(DIM_TEXT)
-            return [inert(Kit.add_label(parent, ln, x, y + i * EMPTY_PITCH, hue)) for i, ln in enumerate(lines)]
+            return [Kit.inert(Kit.add_label(parent, ln, x, y + i * EMPTY_PITCH, hue)) for i, ln in enumerate(lines)]
 
         # FIT holds the zone-fit state: whether a refit was requested and the sizes seen; FIT_TRIES limits
         # the refit attempts.
@@ -305,18 +305,13 @@ def _module_ultima():
             """Shorten text to n characters, ending in two dots when it was cut."""
             return text if len(text) <= n else text[:max(1, n - 2)] + ".."
 
-        def inert(c):
-            """Make a control let mouse clicks through to what is under it, and return it."""
-            c.SetAcceptMouseInput(False)
-            return c
-
         def ttf(text, size, color, **kw):
             """Create a smooth-font (TTF) label that lets clicks through."""
-            return inert(API.Gumps.CreateGumpTTFLabel(text, size, color, **kw))
+            return Kit.inert(API.Gumps.CreateGumpTTFLabel(text, size, color, **kw))
 
         def box(opacity, color):
             """Create a colour box that lets clicks through."""
-            return inert(API.Gumps.CreateGumpColorBox(opacity, color))
+            return Kit.inert(API.Gumps.CreateGumpColorBox(opacity, color))
 
         def set_box_alpha(b, a):
             """Set the transparency of a box, ignoring controls that cannot take it."""
@@ -438,11 +433,11 @@ def _module_ultima():
 
         def pic(graphic, x=0, y=0, hue=0):
             """Create a gump picture that lets clicks through, hued by Kit.look_hue."""
-            return inert(API.Gumps.CreateGumpPic(graphic, x, y, Kit.look_hue(graphic, hue)))
+            return Kit.inert(API.Gumps.CreateGumpPic(graphic, x, y, Kit.look_hue(graphic, hue)))
 
         def tiled(graphic, w, h, hue=0):
             """Create a tiled gump picture of w by h that lets clicks through."""
-            return inert(API.Gumps.CreateTiledGumpPic(graphic, max(0, w), max(0, h), Kit.look_hue(graphic, hue)))
+            return Kit.inert(API.Gumps.CreateTiledGumpPic(graphic, max(0, w), max(0, h), Kit.look_hue(graphic, hue)))
 
         def init_native_art():
             """Work out which pieces of the client's art can be used and measure the UO font.
@@ -525,7 +520,7 @@ def _module_ultima():
                         del LABELS[k]
                 LABELS_SWEEP[0] = max(LABELS_CAP, 2 * len(LABELS))
             text = fit_text(text, maxWidth)
-            lb = inert(API.Gumps.CreateGumpLabel(text, hue_of(color)))
+            lb = Kit.inert(API.Gumps.CreateGumpLabel(text, hue_of(color)))
             LABELS[id(lb)] = [lb, aligned, maxWidth, size, 0, 0, text]
             return lb
 
@@ -1229,7 +1224,7 @@ def _module_ultima():
                         self._add(catcher(x, y, sz, sz, fn, tip))
                         return
                 if kind == "close" and "char_w" in NATIVE:
-                    lb = inert(self._add(API.Gumps.CreateGumpLabel("x", HUE_TEXT)))
+                    lb = Kit.inert(self._add(API.Gumps.CreateGumpLabel("x", HUE_TEXT)))
                     lb.SetPos(x + max(0, (sz - int(NATIVE["char_w"])) // 2), y + (sz - NATIVE["font_h"]) // 2)
                     self._add(catcher(x, y, sz, sz, fn, tip))
                     return
@@ -1610,6 +1605,93 @@ def _module_ultima():
             else:
                 save_data(background=True)
 
+        def read_foe(line, links):
+            """Save-file section [foes]: one Foe name per line.
+
+            Every read_* function takes one line of its section and the list of links to settle after the whole
+            file is read. They run on the script thread while the save file loads.
+            """
+            FOES[name_key(line)] = line
+
+        def read_ignore(line, links):
+            """Save-file section [ignore]: one ignored name per line."""
+            IGNORE[line.lower()] = line
+
+        def read_player(line, links):
+            """Save-file section [players]: one known player name per line; bumps the version that tells the
+            windows the names changed.
+            """
+            PLAYER_NAMES[line.lower()] = line
+            PLAYER_VER[0] += 1
+
+        def read_setting(line, links):
+            """Save-file section [settings]: key=value, whole numbers clamped to their range and true / false flags."""
+            if "=" not in line:
+                return
+            key, val = [p.strip().lower() for p in line.split("=", 1)]
+            if key in INT_SETTINGS:
+                settings[key] = clamp(int(val), *INT_SETTINGS[key])
+            elif key in BOOL_SETTINGS:
+                settings[key] = val == "true"
+
+        def read_anchor(line, links):
+            """Save-file section [anchors]: group=a,b lists windows that move together; only known fixed windows
+            count and a group needs two.
+            """
+            if "=" not in line:
+                return
+            keys = [k.strip().lower() for k in line.split("=", 1)[1].split(",")]
+            keys = [k for k in keys if k in FIXED_WINDOWS]
+            if len(keys) > 1:
+                ANCHORS.add_group(keys)
+
+        def read_layout(line, links):
+            """Save-file section [layout]: key=x,y,w,h,locked,minimised,opacity of one window.
+
+            Needs at least five values; the last two are optional and the opacity falls back to the setting.
+            """
+            if "=" not in line:
+                return
+            key, val = line.split("=", 1)
+            key = key.strip().lower()
+            parts = [p.strip() for p in val.split(",")]
+            if key not in LAYOUT or len(parts) < 5:
+                return
+            LAYOUT[key] = [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), parts[4].lower() == "true",
+                           len(parts) > 5 and parts[5].lower() == "true",
+                           clamp(int(parts[6]), 0, 100) if len(parts) > 6 else settings["opacity"]]
+            if key == "combat":
+                st["combat_loaded"] = True
+
+        def read_sight(line, links):
+            """Save-file section [sightings]: one sighting line, added to the log and noted as seen."""
+            e = parse_sight(line)
+            if e is not None:
+                SIGHTS.append(e)
+                note_seen(e)
+
+        def read_link(line, links):
+            """Save-file section [links]: alt|main pairs, kept to be checked against the Foe list afterwards."""
+            if "|" in line:
+                alt, main = line.split("|", 1)
+                links.append((name_key(alt), name_key(main)))
+
+        def read_seen(line, links):
+            """Save-file section [foe_seen]: time|facet|x|y|guarded|name; keeps the newest entry for a name."""
+            if "|" not in line:
+                return
+            p = line.split("|", 5)
+            seen = (float(p[0]), int(p[1]), int(p[2]), int(p[3]), {"1": True, "0": False}.get(p[4]))
+            k = name_key(p[5])
+            old = LAST_SEEN.get(k)
+            if k and (old is None or old[0] < seen[0]):
+                LAST_SEEN[k] = seen
+
+        # The table maps a section name in the file to the function that reads its lines.
+        SAVE_SECTIONS = {"foes": read_foe, "ignore": read_ignore, "players": read_player, "settings": read_setting,
+                         "anchors": read_anchor, "layout": read_layout, "sightings": read_sight, "links": read_link,
+                         "foe_seen": read_seen}
+
         def parse_save_lines(path, lines):
             """Apply the lines of the save file at `path` (None: no file yet).
 
@@ -1634,51 +1716,8 @@ def _module_ultima():
                         if line.startswith("[") and line.endswith("]"):
                             section = line[1:-1].strip().lower()
                             continue
-                        if section == "foes":
-                            FOES[name_key(line)] = line
-                        elif section == "ignore":
-                            IGNORE[line.lower()] = line
-                        elif section == "players":
-                            PLAYER_NAMES[line.lower()] = line
-                            PLAYER_VER[0] += 1
-                        elif section == "settings" and "=" in line:
-                            key, val = [p.strip().lower() for p in line.split("=", 1)]
-                            if key in INT_SETTINGS:
-                                # Settings are clamped to their range so a hand-edited file cannot break the windows.
-                                settings[key] = clamp(int(val), *INT_SETTINGS[key])
-                            elif key in BOOL_SETTINGS:
-                                settings[key] = val == "true"
-                        elif section == "anchors" and "=" in line:
-                            keys = [k.strip().lower() for k in line.split("=", 1)[1].split(",")]
-                            keys = [k for k in keys if k in FIXED_WINDOWS]
-                            if len(keys) > 1:
-                                ANCHORS.add_group(keys)
-                        elif section == "layout" and "=" in line:
-                            key, val = line.split("=", 1)
-                            key = key.strip().lower()
-                            parts = [p.strip() for p in val.split(",")]
-                            if key in LAYOUT and len(parts) >= 5:
-                                LAYOUT[key] = [int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]),
-                                               parts[4].lower() == "true",
-                                               len(parts) > 5 and parts[5].lower() == "true",
-                                               clamp(int(parts[6]), 0, 100) if len(parts) > 6 else settings["opacity"]]
-                                if key == "combat":
-                                    st["combat_loaded"] = True
-                        elif section == "sightings":
-                            e = parse_sight(line)
-                            if e is not None:
-                                SIGHTS.append(e)
-                                note_seen(e)
-                        elif section == "links" and "|" in line:
-                            alt, main = line.split("|", 1)
-                            links.append((name_key(alt), name_key(main)))
-                        elif section == "foe_seen" and "|" in line:
-                            p = line.split("|", 5)
-                            seen = (float(p[0]), int(p[1]), int(p[2]), int(p[3]), {"1": True, "0": False}.get(p[4]))
-                            k = name_key(p[5])
-                            old = LAST_SEEN.get(k)
-                            if k and (old is None or old[0] < seen[0]):
-                                LAST_SEEN[k] = seen
+                        if section in SAVE_SECTIONS:
+                            SAVE_SECTIONS[section](line, links)
                     except Exception:
                         continue
                 trim_sights()
@@ -7066,10 +7105,7 @@ def _module_ultima():
 
         def build_window():
             """Build the window: status section, Clear button and the list rows, or the mini bar."""
-            # In a zone the slot's size is used when it is big enough.
-            z = wnd.slot if Kit.zone_up(KEY) and not st["minimized"] else None
-            if z is not None and (z[0] < W or z[1] < full_h(1)):
-                z = None
+            z = wnd.zone_slot(W, full_h(1))
             w, h = z if z else (W, full_h())
             n = wnd.rows(ROW_H, full_h(0), ROWS) if z else ROWS
             g, store, c = wnd.begin(w, h)
