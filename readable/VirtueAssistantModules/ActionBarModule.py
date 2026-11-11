@@ -45,6 +45,12 @@ def _module_actionbar():
     HELD_KEY_STALE = 2.0
     LOW_DEFAULT = 5
     COUNT_SOON = 0.1
+    RING_REF = ("r", 0)
+    RING_SECS = 10.0
+    RING_HOLE = 20
+    RING_MIN_R = 70
+    RING_STEP = 16
+    RING_GOLD = "#E8B830"
     # Spell names treated as harmful (they ask for a target on someone else).
     HARMFUL_SPELLS = set(("clumsy|feeblemind|magic arrow|weaken|harm|fireball|poison|curse|lightning|mana drain|"
                           "mind blast|paralyze|dispel|energy bolt|explosion|mass curse|chain lightning|flamestrike|"
@@ -83,7 +89,7 @@ def _module_actionbar():
         ("options",     "Options",           0x1EB8, "ga:OpenSettings"),
         ("help",        "Help",              0x0FEF, "help"), ("war",         "War / peace",       0x13FF, "war"),
         ("barsettings", "Bar settings",      0x0FBF, "barsettings"),
-        ("virtue",      "Virtue Assistant",  0x1053, "virtue"),
+        ("virtue",      "Virtue Assistant",  0x1053, "virtue"), ("launcher", "Launcher", 0x0E2E, "launcher"),
         ("lock",        "Lock / unlock bar", 0x100F, "lock"), ("minimize",    "Minimize bar",      0,      "minimize"),]
     SPELLBOOKS = (0x0EFA, 0x2253, 0x2252, 0x238C, 0x23A0, 0x2D50, 0x2D9D)
     UI_TIPS = {"paperdoll": "Open your paperdoll", "status": "Open the status bar", "journal": "Open the journal",
@@ -91,7 +97,7 @@ def _module_actionbar():
                "quests": "Open the quest log", "guild": "Open the guild window", "party": "Open the party window",
                "chat": "Open the chat window", "options": "Open the client's options", "help": "Open the help menu",
                "war": "Switch war and peace mode", "barsettings": "Open the Action Bar settings page",
-               "lock": "Lock or unlock the bar", "minimize": "Minimize the bar"}
+               "lock": "Lock or unlock the bar", "minimize": "Minimize the bar", "launcher": "Open the Quick Launcher"}
     DEFAULT_UI = "paperdoll status skills spellbook guild chat minimap worldmap options barsettings virtue".split()
     OLD_DEFAULT_UI = ["paperdoll", "status", "journal", "skills", "spellbook", "worldmap",
                       "minimap", "quests", "options", "barsettings", "virtue"]
@@ -148,11 +154,14 @@ def _module_actionbar():
             "A Travel (runebook) cell goes to a runebook destination by Recall, Gate Travel, a book charge, a scroll "
             "or Sacred Journey, through Grimoire (must be on); its counter shows charges or scrolls.",
             "A used skill or spell darkens the cells of that kind while they count down; a spell cell greys out while "
-            "a reagent it needs is at 0. Red at: when an item's counter turns red."]
+            "a reagent it needs is at 0. Red at: when an item's counter turns red.",
+            "Radial ring: hold its key to show one page's cells round the mouse, point at one and let go to use it; "
+            "the middle or outside uses nothing."]
     # Defaults of the saved settings; load_settings overwrites them from the saved var.
     settings = {"slot": 44, "top": True, "keys": True, "lock": False,
                 "short": True, "hue": False, "bagmode": 0, "bags": "", "page": 0,
-                "scale": 100, "tray_open": True, "bagkeys": "", "extra": 0, "anchor": "", "vertical": False}
+                "scale": 100, "tray_open": True, "bagkeys": "", "extra": 0, "anchor": "", "vertical": False,
+                "radial": "", "radial_page": 0}
     DEFAULTS = dict(settings)
     # Cell store: "a" action cells (top row plus bottom pages), "u" window buttons, "x" extra rows.
     cells = {"a": [], "u": [], "x": [], "pages": []}
@@ -293,8 +302,15 @@ def _module_actionbar():
         return True
 
     def key_owner(k):
-        """Return the owner the host recorded for a hotkey, or None when nobody holds it."""
-        return HOST.hotkeys_owned.get(_norm_key(k))
+        """Return what holds a hotkey: the module the host recorded for it, "the radial ring" when it is
+        the ring key, or None when nobody has it.
+        """
+        k = _norm_key(k)
+        return HOST.hotkeys_owned.get(k) or ("the radial ring" if k and k == ring_key() else None)
+
+    def ring_key():
+        """Return the normalised key that opens the radial ring, or an empty string when none is set."""
+        return _norm_key(settings["radial"])
 
     def bar_keys():
         """Return the set of normalised keys bound on the bar (cells and bag slots)."""
@@ -339,7 +355,10 @@ def _module_actionbar():
 
     def cell(ref):
         """Return the cell record a (kind, index) reference points to."""
-        return cells[ref[0]][ref[1]]
+        if ref[0] != "p":
+            return cells[ref[0]][ref[1]]
+        pg, i = divmod(ref[1], BOTTOM_SLOTS)
+        return cells["a"][TOP_SLOTS + i] if pg == settings["page"] else cells["pages"][pg][i]
 
     def bag_keys():
         """Return the five bag-slot hotkeys from the saved list, padded with empty strings."""
@@ -347,8 +366,16 @@ def _module_actionbar():
         return (ks + [""] * BAG_SLOTS)[:BAG_SLOTS]
 
     def set_key_of(ref, k):
-        """Store hotkey k on the cell or bag slot ref and save it."""
-        if ref[0] == "b":
+        """Store hotkey k on a cell, a bag slot or the radial ring (RING_REF) and save it.
+
+        The ring's key lives in the settings; a bag slot's in the bag key list; a cell's in the cell
+        itself. Binding the ring also refreshes the host's settings page for this module.
+        """
+        if ref == RING_REF:
+            settings["radial"] = _norm_key(k)
+            save_settings()
+            HOST.refresh_settings(KEY)
+        elif ref[0] == "b":
             ks = bag_keys()
             ks[ref[1]] = k
             settings["bagkeys"] = ",".join(ks)
@@ -362,6 +389,10 @@ def _module_actionbar():
         kind, i = ref
         if kind == "b":
             return "bag slot %d" % (i + 1)
+        if kind == "r":
+            return "the radial ring"
+        if kind == "p":
+            return "page %d cell %d" % (i // BOTTOM_SLOTS + 1, i % BOTTOM_SLOTS + 1)
         if kind == "u":
             return "button %d" % (i + 1)
         if kind == "x":
@@ -512,13 +543,14 @@ def _module_actionbar():
             if k in d:
                 settings[k] = d[k] == "1"
         for k, lo, hi in (("slot", SLOT_MIN, SLOT_MAX), ("bagmode", 0, len(BAG_MODES) - 1),
-                          ("page", 0, PAGES - 1), ("scale", SCALE_MIN, SCALE_MAX), ("extra", 0, EXTRA_ROWS)):
+                          ("page", 0, PAGES - 1), ("scale", SCALE_MIN, SCALE_MAX), ("extra", 0, EXTRA_ROWS),
+                          ("radial_page", 0, PAGES)):
             with Kit.quiet:
                 settings[k] = int(d[k])
             settings[k] = max(lo, min(hi, settings[k]))
         a = d.get("anchor", "")
         settings["anchor"] = a if a in Kit.ANCHORS else ""
-        for k in ("bags", "bagkeys"):
+        for k in ("bags", "bagkeys", "radial"):
             settings[k] = d.get(k, settings[k])
 
     def save_settings():
@@ -1435,12 +1467,18 @@ def _module_actionbar():
     def hotkeys_service():
         """Return the (key, description) pairs this module offers the host's hotkey list.
 
-        Notes keys another module already owns as "left to" that module.
+        Covers the filled cells on shown rows, the bag slots and the radial ring. A key another module
+        already owns is listed as left to that module.
         """
         out = [(_norm_key(c["k"]), "%s: %s" % (ref_name(r), short_what(r))) for r, c in all_cells()
                if _norm_key(c["k"]) and c["t"] and shown(r)]
         out += [(k, "bag slot %d" % (i + 1)) for i, k in enumerate(bag_keys()) if k]
-        return [(k, what + ((" (left to %s)" % key_owner(k)) if key_owner(k) else "")) for k, what in out]
+        out = [(k, what + ((" (left to %s)" % key_owner(k)) if key_owner(k) else "")) for k, what in out]
+        rk = ring_key()
+        if rk:
+            out.append((rk, "radial ring" + ((" (left to %s)" % HOST.hotkeys_owned[rk]) if rk in HOST.hotkeys_owned
+                                             else "")))
+        return out
 
     on_disposed = Kit.disposer(KEY, st, win)
 
@@ -1475,7 +1513,11 @@ def _module_actionbar():
     def eff_scale():
         """Return the scale in use: the zone fit if there is one, else the saved percentage."""
         v = fitst["scale"]
-        return int(settings["scale"]) if v is None else v
+        if v is not None:
+            return v
+        k = Kit.tscale * (0.85 if Kit.compact else 1.0)
+        s = int(settings["scale"])
+        return s if k == 1.0 else max(SCALE_MIN, min(SCALE_MAX, int(round(s * k))))
 
     def eff_vertical():
         """Return whether the bar stands upright: the zone's shape if there is one, else the setting."""
@@ -1888,11 +1930,22 @@ def _module_actionbar():
         c = cell(ref)
         t = c["t"]
         info = {"x": x, "y": y, "w": w, "h": h, "count": None}
+        parts = cell_art(g, ref, c, info, x, y, w, h, 14 if (settings["keys"] and c["k"] and t) else 0)[0]
+        win["cells"][ref] = finish_cell(g, info, parts, t in ("item", "spell", "ability", "script", "skill", "travel"),
+                                        c["k"] if settings["keys"] and t else "", describe(ref), ("click", "menu", ref))
+        # The counter list is rebuilt after a draw because the labels are new.
+        _counters[0] = None
+
+    def cell_art(g, ref, c, info, x, y, w, h, ky):
+        """Draw the picture part of a cell (item, spell, travel, ability, script or window icon and so on).
+
+        Used by the bar's cells and by the radial ring. Returns (parts, pic): the list of controls added
+        to gump g and the main picture control (None when the cell shows text only). ky is the height
+        reserved at the top of the cell for the hotkey label; info collects handles for later updates.
+        """
+        t = c["t"]
         parts = []
-        # Whether the cell already has something drawn on it; if not a caption is added below.
         shown = False
-        # Room for the hotkey line on top when the key is shown.
-        ky = 14 if (settings["keys"] and c["k"] and t) else 0
         p = None
         if t == "item" and c["g"]:
             p = add_item_pic(g, c["g"], c["h"], *pic_box(ref, x, y, w, h, 3))
@@ -1909,7 +1962,6 @@ def _module_actionbar():
             elif m in TRAVEL_ITEM:
                 p = add_item_pic(g, TRAVEL_ITEM[m], 0, *pic_box(ref, x, y, w, h, 3))
             if p is not None:
-                # A travel cell's picture is dimmed so its caption and counter read clearly.
                 p.SetAlpha(0.5)
             name = fit(c["v"] or "?", w - 4)
             parts.append(Kit.add_label(g, name, x + (w - Kit.text_w(name)) // 2, y + ky + (h - ky - 14) // 2 - 1))
@@ -1927,7 +1979,6 @@ def _module_actionbar():
                 p = add_item_pic(g, d[2], 0, *pic_box(ref, x, y, w, h, 2))
         elif t == "script":
             nm = caption_words(cell_text(c)).strip().lower()
-            # A script named like a spell shows that spell's icon.
             icon = SPELL_ICON.get(nm) if nm else None
             if icon and Kit.pic_size(icon)[0] > 0:
                 p = add_icon(g, icon, x, y, w, h)
@@ -1936,10 +1987,7 @@ def _module_actionbar():
             parts.append(p)
         if t and not shown:
             parts.extend(add_cell_text(g, cell_text(c), x, y + ky, w, h - ky))
-        win["cells"][ref] = finish_cell(g, info, parts, t in ("item", "spell", "ability", "script", "skill", "travel"),
-                                        c["k"] if settings["keys"] and t else "", describe(ref), ("click", "menu", ref))
-        # The counter list is rebuilt after a draw because the labels are new.
-        _counters[0] = None
+        return parts, p
 
     def finish_cell(g, info, parts, counted, k, tip, click):
         """Add a cell's counter, hotkey label and click catcher, and return the finished info dict.
@@ -2574,14 +2622,27 @@ def _module_actionbar():
         refresh_bind_button()
         say("keybind mode off.")
 
+    def ring_bind():
+        """Start keybind mode aimed at the radial ring, so the next key pressed becomes the ring's key."""
+        HOST.release_typing()
+        st["bind"] = {"sel": RING_REF}
+        refresh_bind_button()
+        say("press the key for the radial ring (Esc ends, Backspace clears it).")
+
     def assign_key(ref, k):
         """Bind hotkey k to a cell or bag slot, taking it off any other cell that held it.
 
         Refuses a key another module owns.
         """
-        owner = key_owner(k)
+        to_ring = ref == RING_REF
+        owner = HOST.hotkeys_owned.get(_norm_key(k)) if to_ring else key_owner(k)
         if owner:
             say("%s belongs to %s; pick another." % (k, owner), Kit.HUE_BAD)
+            return
+        nk = _norm_key(k)
+        if to_ring and (nk in bar_keys() or
+                        any(c["t"] and _norm_key(c["k"]) == nk for pg in cells["pages"] for c in pg)):
+            say("%s is on a cell; pick another." % k, Kit.HUE_BAD)
             return
         changed = [ref]
         for r, c in all_cells():
@@ -2599,8 +2660,10 @@ def _module_actionbar():
             save_cells()
         register_hotkeys()
         keys_changed(changed)
-        empty = ref[0] != "b" and not cell(ref)["t"]
+        empty = ref[0] in ("a", "u", "x") and not cell(ref)["t"]
         say("%s bound to %s%s." % (k, ref_name(ref), " (empty; fill it to use it)" if empty else ""), Kit.HUE_GOOD)
+        if to_ring:
+            end_bind()
 
     def on_bind_key(combo):
         """Handle a key pressed in keybind mode: Esc ends it, Backspace or Delete clears, else bind.
@@ -2615,7 +2678,7 @@ def _module_actionbar():
         if k == "ESCAPE":
             end_bind()
             return
-        ref = hovered_ref() or b["sel"]
+        ref = b["sel"] if b["sel"] == RING_REF else hovered_ref() or b["sel"]
         if ref is None:
             say("hover a cell on the bar (or click one) first.")
             return
@@ -2625,13 +2688,16 @@ def _module_actionbar():
             register_hotkeys()
             keys_changed([ref])
             say("%s has no hotkey now." % ref_name(ref), Kit.HUE_GOOD)
+            if ref == RING_REF:
+                end_bind()
             return
         assign_key(ref, combo)
 
     def keys_changed(refs):
         """Refresh the key labels of cells whose key changed and the settings page entry if shown."""
         for r in refs:
-            refresh_key(r)
+            if r != RING_REF:
+                refresh_key(r)
         shown = sel_ref(page["sel"])
         if cfg.f is not None and shown in refs:
             cfg.f.c["key"].SetText(cell(shown)["k"])
@@ -2659,6 +2725,8 @@ def _module_actionbar():
             return toggle_grimoire()
         elif how == "virtue":
             return toggle_va()
+        elif how == "launcher":
+            return open_launcher()
         elif how == "paperdoll":
             # Paperdoll is opened through the client's own action; the context menu is the fallback.
             import System
@@ -2677,6 +2745,22 @@ def _module_actionbar():
         if not ok:
             say("couldn't open %s (%s)." % (d[1], ClientUI.error or "unknown"), Kit.HUE_BAD)
         return ok
+
+    def open_launcher():
+        """Open the Quick Launcher through the host's service, saying why when it is not there or fails.
+
+        Returns True when it opened.
+        """
+        fn = HOST.services.get("launcher.open")
+        if fn is None:
+            say("the Quick Launcher needs the full Virtue Assistant.", Kit.HUE_BAD)
+            return False
+        try:
+            fn()
+        except Exception as ex:
+            say("couldn't open the Quick Launcher (%s)." % ex, Kit.HUE_BAD)
+            return False
+        return True
 
     _legion = {"looked": False, "type": None}
 
@@ -3569,8 +3653,186 @@ def _module_actionbar():
         except Exception as ex:
             say("couldn't use %s (%s)." % (ref_name(ref), ex), Kit.HUE_BAD)
 
-    # Direct hotkey state: whether the key event works, keys held, key map and hooks.
-    _hk = {"ok": None, "held": {}, "map": {}, "hooks": None}
+    # Radial ring: a circle of the filled cells of one page, opened while its key is held.
+    ring = {"g": None, "at": (0, 0), "cells": [], "until": 0.0, "hot": None, "box": [], "side": 0, "rad": 0, "half": 0,
+            "start": (0, 0)}
+
+    def ring_refs():
+        """Return the cell references the radial ring shows: the filled cells of its page.
+
+        The ring page is the bar's current page when "radial_page" is 0, else the page it names.
+        """
+        p = settings["radial_page"]
+        pg = settings["page"] if not p else p - 1
+        return [r for r in [("p", pg * BOTTOM_SLOTS + i) for i in range(BOTTOM_SLOTS)] if cell(r)["t"]]
+
+    def close_ring():
+        """Close the radial ring and forget its cells and highlight."""
+        g, ring["g"] = ring["g"], None
+        ring.update(cells=[], hot=None, box=[])
+        Kit.dispose(g)
+
+    def ring_open():
+        """Draw the radial ring around the mouse, one slot per filled cell of the ring page.
+
+        Does nothing but say so when the page has no filled cells. The ring is kept on screen
+        (clamped to the screen edges) and lives for RING_SECS at most; ring["cells"] keeps the offset of
+        each slot from the centre for hit testing.
+        """
+        close_ring()
+        refs = ring_refs()
+        if not refs:
+            say("the radial ring's page has no filled cells.")
+            return
+        W, H = Kit.screen()
+        pos = Kit.mouse_pos() or (W // 2, H // 2)
+        side = sc(settings["slot"], 20)
+        n = len(refs)
+        rad = int(max(RING_MIN_R, RING_STEP * n) * max(1.0, side / 44.0))
+        half = rad + side // 2 + 22
+        g = G.CreateGump(False, False)
+        parts = []
+        spots = []
+        for i, ref in enumerate(refs):
+            a = 2 * math.pi * i / n - math.pi / 2
+            ox, oy = int(round(rad * math.cos(a))), int(round(rad * math.sin(a)))
+            x, y = half + ox - side // 2, half + oy - side // 2
+            c = cell(ref)
+            parts.append(Kit.add_tiled(g, SLOT_TILE, x, y, side, side, SLOT_ALPHA))
+            art, pic = cell_art(g, ref, c, {}, x, y, side, side, 0)
+            parts.extend(art)
+            if pic is not None and c["t"] != "travel":
+                cap = fit(cell_text(c), side + 28)
+                parts.append(Kit.add_label(g, cap, half + ox - Kit.text_w(cap) // 2, y + side + 1))
+            spots.append((ox, oy, ref))
+        parts.append(Kit.add_box(g, half - 3, half - 3, 6, 6, 0.8, "#909090"))
+        box = [Kit.add_box(g, 0, 0, 2, 2, 0.95, RING_GOLD) for _ in range(4)]
+        for p in parts + box:
+            if p is not None:
+                Kit.inert(p)
+        for b in box:
+            b.SetAlpha(0.0)
+        x0, y0 = pos[0] - half, pos[1] - half
+        if W and H:
+            x0, y0 = max(0, min(x0, W - 2 * half)), max(0, min(y0, H - 2 * half))
+        x0, y0 = Kit.place(g, x0, y0, 2 * half, 2 * half)
+        G.AddGump(g)
+        SNAP.skip_gump(g)
+        ring.update(g=g, at=(x0 + half, y0 + half), cells=spots, until=time.time() + RING_SECS, hot=None, box=box,
+                    side=side, rad=rad, half=half, start=pos)
+
+    def ring_hit(pos):
+        """Return the ring slot (offset x, offset y, cell reference) under pos, or None.
+
+        Positions inside the centre hole, outside the ring, or still within the hole around where the
+        ring was opened pick nothing, so a quick tap does not use a cell by accident.
+        """
+        g = ring["g"]
+        at = Kit.pos(g) if g is not None else None
+        if pos is None or at is None or not ring["cells"]:
+            return None
+        hf = ring["half"]
+        dx, dy = pos[0] - at[0] - hf, pos[1] - at[1] - hf
+        d = math.hypot(dx, dy)
+        if d < RING_HOLE or d > ring["rad"] + ring["side"] // 2 + 12:
+            return None
+        if math.hypot(pos[0] - ring["start"][0], pos[1] - ring["start"][1]) < RING_HOLE:
+            return None
+        best, bd = None, None
+        for spot in ring["cells"]:
+            sd = (spot[0] - dx) ** 2 + (spot[1] - dy) ** 2
+            if bd is None or sd < bd:
+                best, bd = spot, sd
+        return best
+
+    def ring_tick(now):
+        """Per-tick upkeep of an open ring: close it on timeout and move the gold highlight to the hovered
+        slot. now is the current time in seconds.
+        """
+        if now >= ring["until"] or not Kit.is_open(ring["g"]):
+            close_ring()
+            return
+        hit = ring_hit(Kit.mouse_pos())
+        ref = hit[2] if hit else None
+        if ref == ring["hot"]:
+            return
+        ring["hot"] = ref
+        box = ring["box"]
+        if hit is None:
+            for b in box:
+                b.SetAlpha(0.0)
+            return
+        s, hf = ring["side"], ring["half"]
+        x, y = hf + hit[0] - s // 2 - 2, hf + hit[1] - s // 2 - 2
+        for b, r in zip(box, ((x, y, s + 4, 2), (x, y + s + 2, s + 4, 2), (x, y, 2, s + 4), (x + s + 2, y, 2, s + 4))):
+            b.SetRect(*r)
+            b.SetAlpha(0.95)
+
+    def ring_release():
+        """The ring key was let go: close the ring and queue the hovered cell for use, if any."""
+        if ring["g"] is None:
+            return
+        hit = ring_hit(Kit.mouse_pos())
+        close_ring()
+        if hit is not None:
+            queue.add(("use", hit[2]))
+
+    def ring_page():
+        """Step the ring page through "bar's current page" and each of the pages, and save."""
+        settings["radial_page"] = (settings["radial_page"] + 1) % (PAGES + 1)
+        save_settings()
+        HOST.refresh_settings(KEY)
+
+    REF_LIMIT = {"a": ACTION_SLOTS, "u": UI_SLOTS, "x": EXTRA_SLOTS, "p": PAGES * BOTTOM_SLOTS}
+    TYPE_NAMES = dict(TYPES)
+
+    def find_cells(q, n=8):
+        """Search the cells for the host's find service and return up to n matches.
+
+        q is the search text; every word has to appear in the cell's name or type. Empty cells, hidden
+        rows and the Quick Launcher button are skipped. Each match is (label with its place, cell
+        reference, kind name used by the caller).
+        """
+        words = str(q or "").lower().split()
+        out = []
+        n = int(n or 0)
+        refs = ([("a", i) for i in range(TOP_SLOTS)] + [("x", i) for i in range(EXTRA_SLOTS)] +
+                [("p", i) for i in range(PAGES * BOTTOM_SLOTS)] + [("u", i) for i in range(UI_SLOTS)])
+        for r in refs:
+            if len(out) >= n:
+                break
+            c = cell(r)
+            t = c["t"]
+            if not t or not shown(r) or (t == "ui" and c["v"] == "launcher"):
+                continue
+            name = travel_what(c) if t == "travel" else cell_text(c)
+            if not all(wd in ("%s %s" % (name, TYPE_NAMES.get(t, t))).lower() for wd in words):
+                continue
+            where = {"a": "top row", "u": "button %d" % (r[1] + 1), "x": "row %d" % (r[1] // TOP_SLOTS + 2),
+                     "p": "page %d" % (r[1] // BOTTOM_SLOTS + 1)}[r[0]]
+            out.append(("%s  (%s)" % (name, where), r, "outfit" if t in ("dress", "undress") else t))
+        return out
+
+    def use_cell(ref):
+        """Queue a cell for use by another module's request (the host's use service) and wake the module.
+
+        ref is a (kind, index) reference; returns False when it is out of range, hidden or empty and
+        True when it was queued. The use itself runs later, on the module's own tick.
+        """
+        try:
+            kind, i = ref
+            i = int(i)
+            if not 0 <= i < REF_LIMIT.get(kind, 0):
+                return False
+        except Exception:
+            return False
+        if not shown((kind, i)) or not cell((kind, i))["t"]:
+            return False
+        added = queue.add(("use", (kind, i)))
+        HOST.poke(KEY)
+        return added
+
+    _hk = {"ok": None, "held": {}, "map": {}, "hooks": None, "ring": None, "ring_down": None}
 
     def sdl_combo(k):
         """Turn a key name into the SDL key combination text the client's key event uses."""
@@ -3602,10 +3864,12 @@ def _module_actionbar():
         return c["t"] in ("item", "spell", "skill", "ability", "macro", "say", "dress", "undress", "travel")
 
     def _hk_down(combo):
-        """Client key event handler: act on the hotkey the moment it is pressed.
+        """Client key-down handler: act on the hotkey the moment it is pressed.
 
-        Ignores key repeat (a key held down is not pressed again for a while). In keybind mode the key
-        is queued for the binding; otherwise a bound cell is used directly when direct_ok allows.
+        Runs on the client thread from the keyboard event. Ignores key repeat (a held key is not pressed
+        again until it has been up for a while). In keybind mode the key is queued for the binding; the
+        ring key queues the ring to open; otherwise a bound cell is used directly when direct_ok allows,
+        else queued for the tick. Never raises.
         """
         try:
             if not _hk["ok"]:
@@ -3629,6 +3893,12 @@ def _module_actionbar():
                     queue.add(("bindkey", legion_combo(combo)), dup=True)
                     HOST.poke()
                 return
+            if combo == _hk["ring"]:
+                if not HOST.typing():
+                    _hk["ring_down"] = base
+                    queue.add(("ring", True), dup=True)
+                    HOST.poke(KEY)
+                return
             ref = _hk["map"].get(combo)
             if ref is None or HOST.typing():
                 return
@@ -3641,9 +3911,16 @@ def _module_actionbar():
             pass
 
     def _hk_up(combo):
-        """Client key-up handler: forget the key as held."""
+        """Client key-up handler: forget the key as held, and queue the radial ring to close when it was
+        the key that opened it. Never raises.
+        """
         try:
-            _hk["held"].pop(str(combo).rsplit("+", 1)[-1], None)
+            base = str(combo).rsplit("+", 1)[-1]
+            _hk["held"].pop(base, None)
+            if _hk["ring_down"] == base:
+                _hk["ring_down"] = None
+                queue.add(("ring", False), dup=True)
+                HOST.poke(KEY)
         except Exception:
             pass
 
@@ -3680,7 +3957,7 @@ def _module_actionbar():
         """Remove the key event hooks and clear the key map."""
         hooks, _hk["hooks"] = _hk["hooks"], None
         _hk["ok"] = None if hooks else _hk["ok"]
-        _hk["map"] = {}
+        _hk.update(map={}, ring=None, ring_down=None)
         if not hooks:
             return
         import System
@@ -3697,10 +3974,11 @@ def _module_actionbar():
             say(text, Kit.HUE_BAD)
 
     def register_hotkeys():
-        """Rebuild the key map from the cells and bag slots that have a hotkey.
+        """Rebuild the key map from the cells, bag slots and the radial ring that have a hotkey.
 
         Skips keys another module owns and empty or hidden cells; when two cells share a key the later
-        one gets it. The map is keyed by the client's own combination text.
+        one gets it. The map is keyed by the client's own combination text, and stays empty until the
+        key hook works. The ring's key is kept apart in _hk["ring"].
         """
         seen = {}
         for r, c in all_cells():
@@ -3719,6 +3997,11 @@ def _module_actionbar():
                 seen[k] = ("b", i)
         # The map holds nothing until the key hook works.
         _hk["map"] = dict((sdl_combo(k), ref) for k, ref in seen.items()) if _hk["ok"] else {}
+        rk = ring_key()
+        owner = HOST.hotkeys_owned.get(rk) if rk else None
+        if owner:
+            tell_once((rk, owner), "%s belongs to %s; the radial ring has no key." % (rk, owner))
+        _hk["ring"] = sdl_combo(rk) if rk and not owner and _hk["ok"] else None
 
     # Queued action kinds and their handlers.
     ACTIONS = {"click": on_cell_click, "use": use, "bag": on_bag_click, "ui": run_ui,
@@ -3726,7 +4009,9 @@ def _module_actionbar():
                "picked_item": picked_item, "picked_bag": picked_bag,
                "bindkey": on_bind_key, "lockbar": toggle_lock, "grid": toggle_grid,
                "bagmenu": lambda i: open_menu(None, i), "page": lambda step: set_page(settings["page"] + step),
-               "bind": lambda: start_bind() if st["bind"] is None else end_bind()}
+               "bind": lambda: start_bind() if st["bind"] is None else end_bind(),
+               "ring": lambda down: ring_open() if down else ring_release(), "ring_bind": ring_bind,
+               "ring_page": ring_page}
 
     def page_table(w):
         """Return the settings page layout for width w: the BAR options, EDIT A CELL and HOW TO USE."""
@@ -3749,6 +4034,14 @@ def _module_actionbar():
                      "hotkeys are off" % (TOP_SLOTS, EXTRA_ROWS), 0, EXTRA_ROWS,
                      {"sw": 100, "vfmt": "%d", "stay": True}), ("custom", 26, draw_anchor)),
                  {"ldy": 2, "sdy": 6, "lgap": 8, "ugap": 10, "fh": 26, "pad": 6}),
+                ("RADIAL RING", [("buttons", (
+                    ("radial", Kit.ART_PLAY, "Ring key: %s" % (settings["radial"] or "none"),
+                     "Pick the key to hold for a ring of one page's cells (Backspace clears it)",
+                     queue(("ring_bind",))),
+                    ("radial_page", Kit.ART_PAGE, "Ring page: %s" % (settings["radial_page"] or "shown"),
+                     "Choose the page the ring shows: the shown page or page 1-12", queue(("ring_page",)))))] +
+                 [("note", line) for line in Kit.wrap("Hold the key, point at a cell and let go to use it; the middle "
+                                                      "or outside uses nothing.", w - 24)]),
                 ("EDIT A CELL", [("custom", 128, draw_edit)] + [("note", line) for line in hint]),
                 ("HOW TO USE", [("note", line) for para in HELP for line in Kit.wrap(para, w - 24)]))
 
@@ -3960,7 +4253,7 @@ def _module_actionbar():
         """
         st.update(fresh(), minimized=Kit.load_min(MIN_KEY), em=False, ub_last=None, ub_pending=True, counted_at=0.0)
         _told.clear()
-        _hk["held"] = {}
+        _hk.update(held={}, ring_down=None)
         fitst.update(scale=None, vertical=None, slot=None, sig=None)
         load_settings()
         load_cells()
@@ -3976,6 +4269,9 @@ def _module_actionbar():
         register_hotkeys()
         cleanup.service("actionbar.hotkeys", hotkeys_service)
         cleanup.service("look.actionbar", want_rebuild)
+        cleanup.service("actionbar.find", find_cells)
+        cleanup.service("actionbar.use", use_cell)
+        cleanup.add(close_ring)
 
     def _tick():
         """Host tick on the client thread: watch the other windows, run queued actions, rebuild, count.
@@ -4034,6 +4330,8 @@ def _module_actionbar():
             if st["shutting"] or win["g"] is None:
                 return
         now = time.time()
+        if ring["g"] is not None:
+            ring_tick(now)
         # Bag, ability and heartbeat work is done every two seconds.
         if now >= st["next_scan"]:
             st["next_scan"] = now + 2.0

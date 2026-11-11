@@ -42,16 +42,22 @@ def _module_interface():
     # Every setting here mirrors a live value owned elsewhere (LAYOUT, SNAP, HOST, Kit);
     # load_settings copies them in, so these defaults only matter before the first load.
     settings = {"seam": False, "fit_view": True, "game": True, "snap": True, "grid_on": False, "grid": GRID_DEFAULT,
-                "dark": False}
+                "compact": False, "cblind": False, "streamer": False, "code": "", "situ_on": False, "fade": False,
+                "fade_to": 40, "fade_after": 6, "fade_all": False}
     DEFAULTS = dict(settings)
     st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "editor": None, "back_sig": None,
-          "back_at": 0.0}
+          "back_at": 0.0, "jobs": []}
     win = {"g": None, "c": {}, "store": ({}, {})}
     back = {"g": None}
     ring = {"g": None}
     preview = {"g": None}
     sinker = {"gumps": None, "ver": None, "same": None, "off": False, "seen": None, "raw": None}
-    page = {"zones": None, "windows": None, "zone_dd": [], "frame_names": [], "layout_names": []}
+    page = {"zones": None, "windows": None, "zone_dd": [], "frame_names": [], "layout_names": [], "situ_dd": [],
+            "situ_names": []}
+    SITU_ROWS = (("war", "War mode:", "The window layout while you are in war mode"),
+                 ("bank", "Bank:", "The window layout near your bank for 5 minutes after you open it"),
+                 ("dungeon", "Dungeon:", "The window layout in a dungeon"),
+                 ("town", "Town:", "The window layout in a guard zone"))
     setup = {"open": False, "step": 0, "preset": 0, "zs": None, "fname": LAYOUT_DEFAULT, "assign": {}, "look": {},
              "cards": {}}
     cleanup, queue, say = Kit.basics(st, TITLE)
@@ -60,7 +66,10 @@ def _module_interface():
         """Refresh the settings dict from the live layout, snap, grid and dark-mode values."""
         L = LAYOUT
         settings.update({"seam": L.seamless, "fit_view": L.fit_view, "game": L.game_grows, "snap": SNAP.enabled,
-                         "grid_on": HOST.grid_shown(), "grid": HOST.grid_size(), "dark": Kit.dark()})
+                         "grid_on": HOST.grid_shown(), "grid": HOST.grid_size(), "compact": Kit.compact,
+                         "cblind": Kit.cblind, "streamer": Kit.streamer, "situ_on": L.situ["on"],
+                         "fade": FADE.on, "fade_to": int(round(FADE.to * 100)), "fade_after": int(FADE.after),
+                         "fade_all": FADE.all})
 
     def save_settings():
         """Intentionally empty: the live owners (LAYOUT, SNAP, HOST) save their own values."""
@@ -285,6 +294,8 @@ def _module_interface():
                 g.CanMove = False
             Kit.add_window_frame(g, w, h, corners=False, mouse=False)
             Kit.add_box(g, M, M, w - 2 * M, h - 2 * M, 0.25, ZONE_COLORS.get(z.kind, "#FFFFFF"))
+            if z.kind == "w" and z.stack == "t":
+                Kit.add_box(g, M, M + 31, w - 2 * M, 4, 0.9, "#E8C15A")
             self._draw_overlaps(g, z)
             if z.kind == "k":
                 self._draw_game(g, z)
@@ -1327,6 +1338,7 @@ def _module_interface():
                 self.push()
                 stacks = [k for k, n in ZONE_STACKS]
                 z.stack = stacks[(stacks.index(z.stack) + 1) % len(stacks)]
+                self.build_zone(z)
                 self.rebuild = True
             elif Kit.was_clicked(store, "prio"):
                 self.push()
@@ -1979,8 +1991,7 @@ def _module_interface():
         st["back_at"] = now + BACK_EVERY
         W, H = Kit.screen()
         items, gp = backdrop_items()
-        # The signature is compared first, so an unchanged backdrop costs only this check.
-        sig = (W, H, items, gp, Kit.dark())
+        sig = (W, H, items, gp, Kit.look())
         if sig == st["back_sig"] and (not items or (Kit.is_open(back["g"]) and (gp is None or Kit.is_open(ring["g"])))):
             return
         st["back_sig"] = sig
@@ -2397,6 +2408,58 @@ def _module_interface():
             page["zone_dd"].append((key, dd, zi, ids))
             ry += 26
 
+    def situ_drops(f, x, y):
+        """Draw the "situation layout" drop downs of the settings page: one row per SITU_ROWS entry (war
+        mode, bank, dungeon, town).
+
+        f is the page frame; x and y are where the block starts. Each drop down offers (none), the default
+        and mirrored layouts and every saved layout name, with the one now assigned selected. The choices
+        are read back in page_clicks from page["situ_dd"].
+        """
+        L = LAYOUT
+        names = page["situ_names"] = ["(none)", LAYOUT_DEFAULT, LAYOUT_MIRRORED] + L.layout_names()
+        page["situ_dd"] = []
+        for n, (kind, cap, tip) in enumerate(SITU_ROWS):
+            cur = L.situ.get(kind, "")
+            i = names.index(cur) if cur in names else 0
+            Kit.add_label(f.g, cap, x + 12, y + 3 + 28 * n, Kit.HUE_TEXT)
+            page["situ_dd"].append((kind, drop(f.g, names, i, x + 92, y + 28 * n, tip), i))
+
+    def share_code():
+        """Make a shareable code of the layout in use and put it in the page's code field.
+
+        Says so when there are no zones yet. The code is also written to a file by a queued job, so it can
+        be copied from there.
+        """
+        code = LAYOUT.share_code()
+        if not code:
+            say("no zones to share yet.", Kit.HUE_BAD)
+            return
+        settings["code"] = code
+        f = cfg.f
+        if f is not None and "code" in f.c:
+            Kit.set(f.c["code"], "Text", code)
+        st["jobs"].append(lambda: write_code(code))
+        say("layout code ready; Ctrl+A then Ctrl+C in the field copies it.", Kit.HUE_GOOD)
+
+    def write_code(code):
+        """Write a layout code to the layout code file in the data folder (a script thread job).
+
+        Says why on failure.
+        """
+        try:
+            Kit.write_safe(Kit.data_path(Layout.CODE_FILE), code + "\n")
+        except Exception as ex:
+            say("couldn't write %s (%s)." % (Layout.CODE_FILE, ex), Kit.HUE_BAD)
+
+    def load_code():
+        """Read a layout code from the page's code field (or the saved one when the page is closed) and load
+        it as a new layout through the layout engine, which reports a bad code itself.
+        """
+        f = cfg.f
+        c = f.c.get("code") if f is not None else None
+        LAYOUT.load_code(str(c.Text or "") if c is not None else settings["code"])
+
     def page_table(w):
         """Return the rows of the Interface settings page: SCREEN, LOOK, SNAPPING, LAYOUTS and
         WINDOWS.
@@ -2409,7 +2472,21 @@ def _module_interface():
         wins = L.all_windows()
         pv = L.page_preview
         snap = ("check", "snap", "Snap windows together", "Windows dropped near each other line up")
-        dark = ("check", "dark", "Dark mode", "Tint every window's stone frame charcoal")
+        look = (("buttons", (("look", Kit.ART_PAGE, "Look: %s" % Kit.LOOK_NAMES[Kit.look()],
+                              "Next look: Classic, Dark, Parchment or High contrast"),
+                             ("tsize", Kit.ART_PAGE, "Text size: %d%%" % int(round(Kit.tscale * 100)),
+                              "Text in lists and bars (TazUO's own UI scale sizes every window)"))),
+                ("check", "compact", "Compact rows", "Tighter rows in lists and settings; smaller frames"),
+                ("check", "fade", "Fade windows when idle", "Dim windows until the mouse is over them or they change"),
+                ("num", "fade_to", "Faded:", "How solid an idle window stays (20-90)", "%", 20, 90),
+                ("num", "fade_after", "After:", "Seconds without the mouse or a change before it fades (2-30)", "s",
+                 2, 30),
+                ("check", "fade_all", "Fade the Action Bar and unit frames too",
+                 "Off: they stay solid while other windows fade"))
+        access = ("ACCESSIBILITY", (("check", "cblind", "Colour-blind marks",
+                                     "Letters beside notoriety and HP colours; colour-blind palette"),
+                                    ("check", "streamer", "Streamer mode",
+                                     "Hide names, guild and coordinates in Virtue Assistant windows")))
         grid = (snap, ("check", "grid_on", "Show the grid", "Show the snapping grid over the screen"),
                 ("num", "grid", "Grid:", "Grid spacing for snapping", "px", 8, 512))
         # Run alone there are no zones, so only a note is shown.
@@ -2419,7 +2496,7 @@ def _module_interface():
         if not L.enabled:
             return (("ZONES", (("note", "Interface is off, so zones are off."),
                                ("note", "Tick Interface on the Modules tab to use them."))),
-                    ("LOOK", (dark,)), ("SNAPPING", grid))
+                    ("LOOK", look), access, ("SNAPPING", grid))
         arr = (("arrange", Kit.ART_OK, "Done", "Lock every window in its zone") if L.arrange else
                ("arrange", Kit.ART_PLAY, "Arrange windows",
                 "Unlock windows to drag them between zones (Esc or Done locks them)"))
@@ -2430,7 +2507,7 @@ def _module_interface():
                                         arr)),
                            ("buttons", (("edit", Kit.ART_PAGE, "Edit zones", "Drag, resize, split or join zones"),
                                         ("new", Kit.ART_OK, "New zones", "Start a new frame layout with one zone"))))),
-               ("LOOK", tuple(("check", k, cap, tip) for k, cap, tip in LOOK_ROWS) + (dark,)), ("SNAPPING", grid),
+               ("LOOK", tuple(("check", k, cap, tip) for k, cap, tip in LOOK_ROWS) + look), access, ("SNAPPING", grid),
                ("LAYOUTS  (saved)", (("buttons", (("save", Kit.ART_OK, "Save windows",
                                  "Save where every window sits as the window layout in use"),
                                 ("reset", Kit.ART_CLOSE, "Reset", "Go back to the Default window layout"),
@@ -2440,7 +2517,15 @@ def _module_interface():
                                  "Print where each window in a zone sits and if it fills it"))),
                    ("buttons", (("reclaim", Kit.ART_PLAY, "Reclaim space",
                                  "Give the game area every gap beside it; windows keep their size"),) + undo),
-                   ("custom", 60, draw_drops))))
+                   ("custom", 60, draw_drops),
+                   ("buttons", (("share", Kit.ART_PAGE, "Share code",
+                                 "Put a code for the layouts in use in the field below"),
+                                ("load_code", Kit.ART_OK, "Load code", "Load the layout code in the field below"))),
+                   ("text", "code", "Code:", "Layout code: Ctrl+A then Ctrl+C copies it, Ctrl+V pastes one"))),
+               ("LAYOUTS BY SITUATION", (("check", "situ_on", "Switch layouts by situation",
+                                          "Use the layouts below in war mode, at the bank, in dungeons and in town"),
+                                         ("custom", 28 * len(SITU_ROWS), situ_drops),
+                                         ("note", "War mode first, then bank, dungeon, town"))))
         if not wins:
             return out
         rows = [("note", Kit.fit(t, 270), {"hue": Kit.HUE_TEXT, "ndy": 3, "h": 26}) for k, t in wins]
@@ -2480,8 +2565,25 @@ def _module_interface():
                 HOST.grid.redraw()
         if "grid_on" in ch and new["grid_on"] != HOST.grid_shown():
             HOST.grid_toggle()
-        if "dark" in ch and new["dark"] != Kit.dark():
-            HOST.set_dark(new["dark"])
+        if "situ_on" in ch:
+            L.situ_set(new["situ_on"])
+        for k in ("compact", "cblind", "streamer"):
+            if k in ch:
+                HOST.set_switch(k, new[k])
+        if ch & set(Fade.KEYS):
+            FADE.set(new)
+
+    def next_look():
+        """Switch to the next window look in the Kit's order, wrapping round at the end."""
+        o = Kit.LOOK_ORDER
+        HOST.set_look(o[(o.index(Kit.look()) + 1) % len(o)])
+
+    def next_tsize():
+        """Switch to the next text size in the Kit's list, wrapping round at the end (the first size when
+        the current one is not in the list).
+        """
+        o, cur = Kit.TEXT_SIZES, int(round(Kit.tscale * 100))
+        HOST.set_switch("tsize", o[(o.index(cur) + 1) % len(o)] if cur in o else o[0])
 
     def remove_frames():
         """Delete the frame layout in use, unless it is Default."""
@@ -2492,7 +2594,8 @@ def _module_interface():
                     ("edit", lambda: edit(False)), ("new", lambda: edit(True)), ("remove", remove_frames),
                     ("save", lambda: LAYOUT.save_windows()), ("reset", lambda: LAYOUT.use_windows(LAYOUT_DEFAULT)),
                     ("free", lambda: LAYOUT.use_windows("")), ("reclaim", lambda: LAYOUT.reclaim_space()),
-                    ("reclaim_undo", lambda: LAYOUT.reclaim_back()), ("check", lambda: LAYOUT.report_fit()))
+                    ("reclaim_undo", lambda: LAYOUT.reclaim_back()), ("check", lambda: LAYOUT.report_fit()),
+                    ("look", next_look), ("tsize", next_tsize), ("share", share_code), ("load_code", load_code))
 
     def page_clicks(f):
         """Handle the settings page's drop downs and buttons.
@@ -2533,6 +2636,12 @@ def _module_interface():
                 page["windows"] = (dd, i)
                 L.use_windows("" if i == 0 else page["layout_names"][i])
                 return
+        for n, (kind, dd, si) in enumerate(page["situ_dd"]):
+            i = Kit.dd_index(dd, si)
+            if i != si and 0 <= i < len(page["situ_names"]):
+                page["situ_dd"][n] = (kind, dd, i)
+                L.situ_pick(kind, "" if i == 0 else page["situ_names"][i])
+                return
         for k, fn in PAGE_ACTIONS:
             if Kit.was_clicked(f.store, k):
                 fn()
@@ -2542,7 +2651,7 @@ def _module_interface():
 
     def page_closed():
         """Forget the page's drop downs when the settings page closes."""
-        page.update({"zones": None, "windows": None, "zone_dd": []})
+        page.update({"zones": None, "windows": None, "zone_dd": [], "situ_dd": []})
         cfg.closed()
 
     def _start():
@@ -2553,7 +2662,7 @@ def _module_interface():
         never seen and no layout or window assignment exists.
         """
         st.update({"shutting": False, "docked": False, "queue": [], "minimized": False, "editor": None,
-                   "back_sig": None, "back_at": 0.0, "alone_up": False})
+                   "back_sig": None, "back_at": 0.0, "alone_up": False, "jobs": []})
         setup["open"] = False
         if VA_ALONE:
             load_settings()
@@ -2595,11 +2704,20 @@ def _module_interface():
             if W > 0 and H > 0:
                 ed.keep(W, H)
             ed.poll()
+        now = time.time()
+        LAYOUT.situ_tick(now, ed is not None or setup["open"])
         # Hover titles of windows joined in a zone panel, shown while the pointer rests on a
         # window's top.
         Seam.hover(LAYOUT.arrange)
-        backdrop_tick(time.time())
+        backdrop_tick(now)
         sink()
+
+    def _thread_tick():
+        """Script thread tick: run the queued jobs (file writes and the like) that must not run on the
+        client thread, one after another, until stopped.
+        """
+        while st["jobs"] and not st["shutting"]:
+            st["jobs"].pop(0)()
 
     def _interval():
         """Return the tick interval: 0.25 s when idle, 0.05 s while the editor, the setup,
@@ -2627,7 +2745,8 @@ def _module_interface():
         cleanup.close()
 
     return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
-            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": page_closed, "interval": _interval}
+            "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": page_closed, "interval": _interval,
+            "thread_tick": _thread_tick, "thread_wanted": lambda: bool(st["jobs"])}
 
 
 if "HOST" not in globals():

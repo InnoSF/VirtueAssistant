@@ -12,14 +12,14 @@ The main script (`VirtueAssistantV<x-y-z>.py`) holds the Virtue Assistant window
                                              Bandages, Pets)
    InventoryModule.py       Inventory        bags, paperdoll, storage, restock and
                                              supplies (Bags, Paperdoll, Storage,
-                                             Restock, Supplies)
+                                             Restock, Supplies, Bag Sections)
    GrimoireModule.py        Grimoire         spellbook, runebooks and reagents
    WorldMapModule.py        World Map        pings, corpse, dig and dry spots, traps,
                                              on TazUO's World Map too (Map Pings,
                                              Corpse, Treasure Maps, Ore Tracker,
                                              Traps & Fields)
    UltimaTrackerModule.py   Ultima Tracker   friends, foes and neutrals near you
-                                             (Tracker, Lookout)
+                                             (Tracker, Lookout, Overview)
    SocialModule.py          Social           friends, party, guild and profile
    SkillsModule.py          Skills           skills, training and AFK alarms
                                              (Skills Window, Training Alarm,
@@ -60,7 +60,12 @@ Any module also runs alone: pick its file (in the VirtueAssistantModules group) 
 - **Fold into the Action Bar** (gold arrow): the window hides; its tray button on the Action Bar brings it back. With no Action Bar up, it stays minimised until the bar opens.
 - **Snapping:** windows snap to each other and to the screen grid when dragged, and move with the window they snapped to (switch in Settings > Interface).
 - Every window uses the client's gump art.
-- **Dark mode** (Settings > Interface, LOOK): tints every window's stone frame and corner knots charcoal and makes the black sections a little darker; open windows redraw at once and keep their place. Saved per character; off by default.
+- **Look** (Settings > Interface, LOOK): the Look button cycles Classic, Dark (charcoal frames), Parchment (brown frames and sections) and High contrast. Open windows redraw at once and keep their place. Saved per character; Classic by default.
+- **Text size** (the same section): 100, 115, 130 or 150% for text in lists and bars; TazUO's own UI scale still sizes every window.
+- **Compact rows:** tighter rows in lists and settings, and smaller frames.
+- **Fade windows when idle:** a window fades (Faded: 20-90%, default 40) once the mouse has been off it and nothing in it changed for a while (After: 2-30 s, default 6), and comes back when the mouse is over it or it changes. The Action Bar and unit frames stay solid unless "Fade the Action Bar and unit frames too" is ticked; the Virtue Assistant window and alerts never fade.
+- **Colour-blind marks** (ACCESSIBILITY): a colour-blind palette for notoriety and HP colours, plus letters: R murderer, C criminal or grey, O enemy, A ally, I invulnerable before a name, and P poisoned, Z paralysed, M mortal wound after it.
+- **Streamer mode:** other players show as "Player <id>", you as "You", and guild names, places and coordinates as "(hidden)", so a stream or screenshot gives nothing away. Journal lines keep the real names.
 - Window places, minimised or folded state, which modules are on and each module's view are remembered per character as soon as you change them.
 
 ## Zones
@@ -69,8 +74,25 @@ Settings > Interface (the Interface module) splits the screen into zones. A wind
 
 - **Set up:** a three-step window (it opens by itself the first time, when no layout is chosen yet): pick one of five ready-made screens (Sides, Mirrored, Bottom bar, Right column, Compact; the screen shows each as you click it), check which zone each window goes in, then pick the look. Nothing changes until Done.
 - **One panel:** with "Join windows in zones into one panel" on, one stone frame covers every window zone and reserved zone (the journal and bag grid too), with no corners or lines between windows and a gold border round the game view. Windows lose their own frames and title rows; hover a window's top edge to show its title row. A zone set to "Apart" in the zone editor keeps its own edge.
-- **Zone editor:** Split cuts a zone in two, Join merges it with a matching neighbour; gold lines mark zones that join.
+- **Zone editor:** Split cuts a zone in two, Join merges it with a matching neighbour; gold lines mark zones that join. Stack: tabs shows one window of the zone at a time, with a strip of tabs above it; click a tab to show that window, and drop a window on the zone to add it.
+- **Share code** (LAYOUTS): puts a code for the frame and window layouts in use in the Code field (Ctrl+A then Ctrl+C copies it; it is also written to layout-code.txt in VirtueAssistantSettings). Paste someone's share code there and press Load code to add it as a layout, with " (shared)" after its name; it fits itself to your screen.
+- **Layouts by situation:** with "Switch layouts by situation" on, pick a window layout for war mode, the bank (for 5 minutes after you open it, while near), dungeons and towns (guard zones); war mode comes first, then bank, dungeon, town. Leaving them all puts back the windows as they were.
 - **Interface off:** every window is free again and your own game view comes back.
+
+## Settings
+
+- **Search:** the box at the top of the Settings tab finds any setting by its caption, section or tooltip, across every page (pages not opened yet are read one at a time). Click a hit to open its page, with "<- found" beside the row.
+- **New:** a setting added in this version shows a "new" tag until you have seen its page; a page or part with one is marked in the lists.
+- **Alerts:** History opens the ALERT HISTORY window, the last 50 alerts with their time (also from the alert banner). Quiet 30 min turns alert sounds and banners off for 30 minutes (Resume ends it early); alerts still go to the history and the journal, and alarms still pause skill loops.
+- **Backups** (this character): Back up now saves every Virtue Assistant setting of this character; Restore puts the picked backup back (press twice within 3 s; the settings of now are backed up first). One is also made by itself the first time a new version starts. The 10 newest are kept, in VirtueAssistantSettings/Backups.
+
+## Quick Launcher
+
+The Find button on the Virtue Assistant window (also a hotkey in Settings > Hotkeys, and an Action Bar Launcher cell) opens the QUICK LAUNCHER: type a few words to find a Grimoire rune, an Action Bar cell, a window, a layout (with Interface on), a setting or a command such as alert history and quiet. Every word must match. With the field empty it lists Recent, the last 5 runs of this session.
+
+- **Enter** runs the top row, a click runs that row; the launcher then closes. A run is one action: a rune is one trip through Grimoire, a cell is one use of that cell with its own checks.
+- Enter never counts as the second press of the harmful-cursor confirm (see Hotkeys): it can only arm it; a click on the row 0.6 to 3 s later confirms.
+- A cell that changed since it was listed is refused rather than run.
 
 ## Hotkeys
 

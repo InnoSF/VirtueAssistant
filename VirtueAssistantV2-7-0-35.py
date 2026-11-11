@@ -5,7 +5,7 @@ import re
 import struct
 import time
 APP_NAME="Virtue Assistant"
-APP_VERSION="2.7.0.34"
+APP_VERSION="2.7.0.35"
 MODULE_DIR="VirtueAssistantModules"
 SETTINGS_DIR="VirtueAssistantSettings"
 SETTINGS_KEY="VirtueAssistant_settings"
@@ -355,7 +355,7 @@ class Follow(object):
 		if serial and Follow.current()==serial:Follow.stop(who);return False
 		return Follow.start(serial,who)
 class Kit(object):
-	WINDOW_BG=5054;STONE_TILE=5058;SECTION_TILE=2624;SECTION_ALPHA=.8;FIELD_TILE=2624;CORNER_ART=10460;ART_PLAY=(4005,4007,4006);ART_CLOSE=(4017,4019,4018);DARK_HUE=1899;DARK_CORNER_HUE=2305;DARK_SECTION_ALPHA=.95;LIGHT_SECTION_ALPHA=.8;GOLD_H=2700;GOLD_V=2701;GOLD_T=3;_dark={};_wins={};ART_OK=(4023,4025,4024);ART_PAGE=(4011,4013,4012);ART_MIN=(253,252,253);ART_RESTORE=(251,250,251);ART_DOCK=(5602,5606,5602);ART_CIRCLE=(2117,2118,2118);DOCK_DX,DOCK_DY=20,2;DOCK_TIP="Fold into the Action Bar's tray";MIN_TIP="Minimize (or double-click the title)";RESTORE_TIP="Restore";SETTINGS_TIP="Open %s settings";CLOSE_TIP="Close %s (turns it off)";DOUBLE_TIP="Double-click: minimize or restore";LINE_RED,LINE_BLUE,LINE_POISON=2053,2054,2056;HUE_TITLE=53;HUE_TEXT=1153;HUE_GOOD=68;HUE_BAD=33;HUE_INFO=946;MARGIN=12;GAP=8;_sizes={}
+	WINDOW_BG=5054;STONE_TILE=5058;SECTION_TILE=2624;SECTION_ALPHA=.8;FIELD_TILE=2624;CORNER_ART=10460;ART_PLAY=(4005,4007,4006);ART_CLOSE=(4017,4019,4018);DARK_HUE=1899;DARK_CORNER_HUE=2305;DARK_SECTION_ALPHA=.95;LIGHT_SECTION_ALPHA=.8;PARCH_HUE=2960;PARCH_CORNER_HUE=1260;PARCH_SECTION_HUE=1845;PARCH_SECTION_ALPHA=.9;CONTRAST_HUE=1175;CONTRAST_SECTION_ALPHA=1.;LOOKS={"classic":(0,0,0,LIGHT_SECTION_ALPHA),"dark":(DARK_HUE,DARK_CORNER_HUE,0,DARK_SECTION_ALPHA),"parchment":(PARCH_HUE,PARCH_CORNER_HUE,PARCH_SECTION_HUE,PARCH_SECTION_ALPHA),"contrast":(CONTRAST_HUE,CONTRAST_HUE,0,CONTRAST_SECTION_ALPHA)};LOOK_ORDER=("classic","dark","parchment","contrast");LOOK_NAMES={"classic":"Classic","dark":"Dark","parchment":"Parchment","contrast":"High contrast"};TEXT_SIZES=(100,115,130,150);SECTION_HUE=0;tscale=1.;compact=cblind=streamer=False;GOLD_H=2700;GOLD_V=2701;GOLD_T=3;_hues={};_look="classic";_wins={};_behind=set();ART_OK=(4023,4025,4024);ART_PAGE=(4011,4013,4012);ART_MIN=(253,252,253);ART_RESTORE=(251,250,251);ART_DOCK=(5602,5606,5602);ART_CIRCLE=(2117,2118,2118);DOCK_DX,DOCK_DY=20,2;DOCK_TIP="Fold into the Action Bar's tray";MIN_TIP="Minimize (or double-click the title)";RESTORE_TIP="Restore";SETTINGS_TIP="Open %s settings";CLOSE_TIP="Close %s (turns it off)";DOUBLE_TIP="Double-click: minimize or restore";LINE_RED,LINE_BLUE,LINE_POISON=2053,2054,2056;HUE_TITLE=53;HUE_TEXT=1153;HUE_GOOD=68;HUE_BAD=33;HUE_INFO=946;MARGIN=12;GAP=8;_sizes={}
 	@staticmethod
 	def on_client(fn,fallback=True):
 		a,v=Client.on_main_ex(fn)
@@ -445,7 +445,9 @@ class Kit(object):
 		if a>0 and(h>a or g in Kit._scrolled):
 			b=Kit.scroll_fit(g,w,h,head,int(max_h)if max_h else None)
 			if b is not None:w,h=b
-		x,y=Kit.clamp(x,y,w,h);g.SetRect(x,y,w,h);Kit.note_rect(g,x,y,w,h)
+		c=g in Kit._behind or int(x or 0)<=TAB_X//2;x,y=Kit.clamp(x,y,w,h)
+		if c:x=TAB_X
+		g.SetRect(x,y,w,h);Kit.note_rect(g,x,y,w,h)
 		if g not in Kit._pinned:Kit.pin_size(g)
 		return x,y
 	_pinned=set()
@@ -607,7 +609,10 @@ class Kit(object):
 			if H>0 and a["H"]!=k:
 				try:
 					d=Kit._scroll_build(g,a["w"],a["h"],a["head"],k)
-					if d is not None:a=Kit._scrolled.get(g)or a;a["lim"]=h;x,y=Kit.clamp(int(g.GetX()),int(g.GetY()),d[0],d[1]);g.SetRect(x,y,d[0],d[1]);Kit.moved_by_code(g)
+					if d is not None:
+						a=Kit._scrolled.get(g)or a;a["lim"]=h;x,y=Kit.clamp(int(g.GetX()),int(g.GetY()),d[0],d[1])
+						if g in Kit._behind:x=TAB_X
+						g.SetRect(x,y,d[0],d[1]);Kit.moved_by_code(g)
 				except Exception:pass
 				continue
 			try:e=int(b.Children.Count)
@@ -693,27 +698,33 @@ class Kit(object):
 			a=Kit._sizes[graphic]=(w,h)
 		return a
 	@staticmethod
-	def dark():return bool(Kit._dark)
+	def dark():return Kit._look in("dark","contrast")
 	@staticmethod
-	def set_dark(on):a=[(Kit.WINDOW_BG+b,Kit.DARK_HUE)for b in range(9)]+[(Kit.CORNER_ART,Kit.DARK_CORNER_HUE)];Kit._dark=dict(a)if on else{};Kit.SECTION_ALPHA=Kit.DARK_SECTION_ALPHA if on else Kit.LIGHT_SECTION_ALPHA
+	def look():return Kit._look
 	@staticmethod
-	def look_hue(graphic,hue=0):return hue or Kit._dark.get(graphic,0)
+	def set_look(name):name=name if name in Kit.LOOKS else "classic";b,c,a,d=Kit.LOOKS[name];e=[(Kit.WINDOW_BG+f,b)for f in range(9)]+[(Kit.CORNER_ART,c),(Kit.SECTION_TILE,a)];Kit._hues=dict(g for g in e if g[1]);Kit._look,Kit.SECTION_HUE,Kit.SECTION_ALPHA=name,a,d
+	@staticmethod
+	def tsize(px):return int(round(px*Kit.tscale))
+	@staticmethod
+	def pitch(h):return max(20,h-4)if Kit.compact and h>20 else h
+	@staticmethod
+	def look_hue(graphic,hue=0):return hue or Kit._hues.get(graphic,0)
 	@staticmethod
 	def retint():
 		for a in list(Kit._frame_parts.values()):
 			for p in a:
-				with Kit.quiet:p.Hue=Kit._dark.get(int(p.Graphic),0)
+				with Kit.quiet:p.Hue=Kit._hues.get(int(p.Graphic),0)
 	@staticmethod
 	def add_pic(g,graphic,x,y,hue=0,mouse=True):
 		try:
-			hue=hue or Kit._dark.get(graphic,0);p=G.CreateGumpPic(graphic,x,y,hue)if hue else G.CreateGumpPic(graphic,x,y);p.SetPos(x,y)
+			hue=hue or Kit._hues.get(graphic,0);p=G.CreateGumpPic(graphic,x,y,hue)if hue else G.CreateGumpPic(graphic,x,y);p.SetPos(x,y)
 			if not mouse:p.SetAcceptMouseInput(False)
 			g.Add(p);return p
 		except Exception:return
 	@staticmethod
 	def add_tiled(g,graphic,x,y,w,h,alpha=None,fallback="#101010",hue=0):
 		if w<=0 or h<=0:return
-		hue=hue or Kit._dark.get(graphic,0)
+		hue=hue or Kit._hues.get(graphic,0)
 		try:t=(G.CreateTiledGumpPic(graphic,w,h,hue)if hue else G.CreateTiledGumpPic(graphic,w,h))
 		except Exception:t=G.CreateGumpColorBox(alpha if alpha is not None else 1.,fallback)
 		t.SetRect(x,y,w,h)
@@ -1266,7 +1277,7 @@ class Kit(object):
 	def save_min(key,minimized):Kit.put_var(key,"1"if minimized else "0")
 	@staticmethod
 	def save_pos(key,g):
-		if Kit.is_open(g)and g not in LAYOUT.held:Kit.put_var(key,"%d,%d"%(g.GetX(),g.GetY()))
+		if Kit.is_open(g)and g not in LAYOUT.held and g.GetX()>TAB_X//2:Kit.put_var(key,"%d,%d"%(g.GetX(),g.GetY()))
 	@staticmethod
 	def queuer(st):
 		def a(action,dup=False,front=False,cap=None,key=None):
@@ -1388,23 +1399,30 @@ class Kit(object):
 		except Exception:pass
 		return c,d
 	@staticmethod
+	def walk(g,fn,root=None):
+		root=Kit.client_control(g)if root is None else root
+		if root is None:return False
+		def a(c):
+			if fn(c)is False:return
+			b=c.Children
+			for i in range(b.Count):a(b[i])
+		try:
+			b=root.Children
+			for i in range(b.Count):a(b[i])
+			return True
+		except Exception:return False
+	@staticmethod
 	def scale_window(g,scale):
 		if abs(scale-1.)<.001:return True
 		a=Kit.client_control(g)
 		if a is None or not Kit.flush():return False
 		b,d=Kit._scroll_skip(g);e=Kit._same()
 		def f(c):
-			if b and any(e(c,j)for j in b):return
+			if b and any(e(c,h)for h in b):return False
 			if d is None or not e(c,d):
 				if str(c.GetType().Name)=="GumpPicTiled":Kit.set(c,"ScaleTiledTexture",True)
 				c.ApplyScale(scale,True,True,False)
-			a=c.Children
-			for i in range(a.Count):f(a[i])
-		try:
-			h=a.Children
-			for i in range(h.Count):f(h[i])
-			return True
-		except Exception:return False
+		return Kit.walk(g,f,a)
 	@staticmethod
 	def ui_pos(c,x,y):
 		if c is None:return
@@ -1502,6 +1520,25 @@ class Kit(object):
 		for b in str(text or "").split(";"):
 			if "="in b:k,v=b.split("=",1);a[k.strip()]=v.strip()
 		return a
+	B64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";B64_REV=dict((a,i)for i,a in enumerate(B64))
+	@staticmethod
+	def b64(data):
+		b=[];a=Kit.B64
+		for i in range(0,len(data),3):n=(data[i]<<16)|(data[i+1]<<8)|data[i+2];b+=[a[(n>>18)&63],a[(n>>12)&63],a[(n>>6)&63],a[n&63]]
+		return "".join(b)
+	@staticmethod
+	def unb64(s):
+		a=[];b=Kit.B64_REV
+		for i in range(0,len(s),4):
+			n=0
+			for c in s[i:i+4]:n=(n<<6)|b[c]
+			a+=[(n>>16)&255,(n>>8)&255,n&255]
+		return a
+	@staticmethod
+	def checksum(data):
+		s=7
+		for i,b in enumerate(data):s=(s*31+b+i)&65535
+		return s
 	@staticmethod
 	def kv_load(key,d,b,a=None,e=()):
 		a=a or{}
@@ -1576,7 +1613,7 @@ class Kit(object):
 		for b in rows:Kit.art_button(g,store,b[0],b[1],x,y,b[2],b[3],b[5]if len(b)>5 else None,b[4]if len(b)>4 else None);x+=35+Kit.text_w(b[2])+gap
 		return x
 	class Form(object):
-		OPTS={"top":30,"pad":10,"ch":26,"fh":28,"nh":20,"bh":28,"dx":12,"ldy":3,"lgap":10,"ugap":8,"fw":50,"sw":140,"sdy":2,"ndy":0,"bdy":-2,"bgap":20,"fmt":"%d"};STEP={"check":"ch","note":"nh","buttons":"bh","num":"fh","text":"fh","slider":"fh"};FIELDS=("num","text","slider")
+		OPTS={"top":30,"pad":10,"ch":26,"fh":28,"nh":20,"bh":28,"dx":12,"ldy":3,"lgap":10,"ugap":8,"fw":50,"sw":140,"sdy":2,"ndy":0,"bdy":-2,"bgap":20,"fmt":"%d"};STEP={"check":"ch","note":"nh","buttons":"bh","num":"fh","text":"fh","slider":"fh"};COMPACT={"ch":22,"fh":24,"bh":26,"top":28,"pad":6};FIELDS=("num","text","slider");sink=mark=fresh=page=None;BOX_W=20;FOUND="<- found";NEW="new"
 		def __init__(self,g,x,y,w,vals,page=(),store=None,**opts):
 			self.g,self.x,self.y,self.w,self.vals,self.opts=g,x,y,w,vals,opts;self.top,self.c,self.store,self.specs=y,{},store or({},{}),[]
 			for a in page:self.section(*a)
@@ -1585,7 +1622,9 @@ class Kit(object):
 		@staticmethod
 		def height(page,w=0,**opts):return Kit.Form(None,0,0,w,{},page,**opts).h
 		def _o(self,a,r=None):
-			o=dict(Kit.Form.OPTS);o.update(self.opts);o.update(a)
+			o=dict(Kit.Form.OPTS)
+			if Kit.compact:o.update(Kit.Form.COMPACT)
+			o.update(self.opts);o.update(a)
 			if r and type(r[-1])is dict:o.update(r[-1])
 			return o
 		@staticmethod
@@ -1594,33 +1633,45 @@ class Kit(object):
 			if r[0]in("gap","custom"):return r[1]
 			return o["h"]if "h"in o else o[Kit.Form.STEP[r[0]]]
 		def section(self,title,rows,a=None):
+			if Kit.Form.sink is not None:Kit.Form.sink.append((HOST.cur_part,title,rows))
 			a=a or{};b,c=self._o(a),[self._o(a,i)for i in rows];d=a.get("sh")or b["top"]+sum(Kit.Form._step(j,k)for j,k in zip(rows,c))+b["pad"];x,e,g=self.x,self.y+b["top"],self.g
 			if g is not None:Kit.add_section(g,x,self.y,self.w,d,title)
 			self.y+=d+Kit.GAP
 			if g is None:return
 			f=max([Kit.text_w(l[2])for l in rows if l[0]in Kit.Form.FIELDS]or[0])
 			for r,o in zip(rows,c):self._row(g,r,o,x,e,o.get("lw",f if o.get("align")else None));e+=Kit.Form._step(r,o)
+		@staticmethod
+		def _tag(r):
+			F=Kit.Form
+			if F.page is None or r[0]in("gap","custom"):return
+			a=HOST.cur_part;b=[d[0]for d in r[1]]if r[0]=="buttons"else[r[1]]
+			if F.mark is not None and F.mark[0]==a and F.mark[1]in b:return F.FOUND
+			c=F.page+"."+(a+"."if a else "")
+			if r[0]!="note"and F.fresh and any(c+str(e)in F.fresh for e in b):return F.NEW
+			return
 		def _row(self,g,r,o,sx,y,lw):
-			a,c,x=r[0],self.c,sx+o["dx"];k=r[1]if a in Kit.Form.FIELDS or a=="check"else None
-			if a=="check":c[k]=Kit.add_check(g,r[2],x,y,self.vals[k],r[3]);self.specs.append((r,o))
+			a,e,x=r[0],self.c,sx+o["dx"];k=r[1]if a in Kit.Form.FIELDS or a=="check"else None;c=Kit.Form._tag(r);b=None
+			if a=="check":e[k]=Kit.add_check(g,r[2],x,y,self.vals[k],r[3]);self.specs.append((r,o));b=x+Kit.Form.BOX_W+(Kit.text_w(r[2])if c else 0)
 			elif a=="note":
-				e=Kit.add_label(g,r[1],x,y+o["ndy"],o.get("hue",Kit.HUE_INFO))
-				if o.get("key"):c[o["key"]]=e
-			elif a=="buttons":Kit.buttons(g,self.store,x,y+o["bdy"],[i[:5]for i in r[1]],o["bgap"])
+				h=Kit.add_label(g,r[1],x,y+o["ndy"],o.get("hue",Kit.HUE_INFO))
+				if o.get("key"):e[o["key"]]=h
+				b=x+(Kit.text_w(r[1])if c else 0)
+			elif a=="buttons":b=Kit.buttons(g,self.store,x,y+o["bdy"],[m[:5]for m in r[1]],o["bgap"])-o["bgap"]
 			elif a=="custom":r[2](self,sx,y)
 			elif a in Kit.Form.FIELDS:
-				e=Kit.add_label(g,r[2],x,y+o["ldy"]);b=x+(Kit.text_w(r[2])if lw is None else lw)+o["lgap"];d=r[3]
+				h=Kit.add_label(g,r[2],x,y+o["ldy"]);d=x+(Kit.text_w(r[2])if lw is None else lw)+o["lgap"];f=r[3]
 				if a=="num":
-					if d and not d.endswith(")"):d+=" (%d-%d)"%(r[5],r[6])
-					c[k]=Kit.add_textbox(g,o["fmt"]%self.vals[k],b,y,o["fw"])
-					if r[4]:Kit.add_label(g,r[4],b+o["fw"]+o["ugap"],y+o["ldy"],Kit.HUE_INFO)
-				elif a=="text":f=o.get("tw")or self.w-(b-sx)-16;c[k]=Kit.add_textbox(g,self.vals[k],b,y,f,numbers=False)
+					if f and not f.endswith(")"):f+=" (%d-%d)"%(r[5],r[6])
+					e[k]=Kit.add_textbox(g,o["fmt"]%self.vals[k],d,y,o["fw"]);b=d+o["fw"]
+					if r[4]:Kit.add_label(g,r[4],d+o["fw"]+o["ugap"],y+o["ldy"],Kit.HUE_INFO);b+=o["ugap"]+(Kit.text_w(r[4])if c else 0)
+				elif a=="text":i=(o.get("tw")or self.w-(d-sx)-16)-(Kit.text_w(c)+6 if c else 0);e[k]=Kit.add_textbox(g,self.vals[k],d,y,i,numbers=False);b=d+i
 				else:
-					c[k]=Kit.add_slider(g,b,y+o["sdy"],o["sw"],r[4],r[5],self.vals[k])
-					if o.get("vfmt")or o.get("unit"):c[k+"_lbl"]=Kit.add_label(g,o["vfmt"]%self.vals[k]if o.get("vfmt")else o["unit"],b+o["sw"]+o["ugap"],y+o["ldy"],Kit.HUE_INFO)
-				Kit.with_tip(c[k],d)
-				if o.get("ltip"):Kit.with_tip(e,d)
+					e[k]=Kit.add_slider(g,d,y+o["sdy"],o["sw"],r[4],r[5],self.vals[k]);b=d+o["sw"]
+					if o.get("vfmt")or o.get("unit"):j=o["vfmt"]%self.vals[k]if o.get("vfmt")else o["unit"];e[k+"_lbl"]=Kit.add_label(g,j,d+o["sw"]+o["ugap"],y+o["ldy"],Kit.HUE_INFO);b+=o["ugap"]+(Kit.text_w(j)if c else 0)
+				Kit.with_tip(e[k],f)
+				if o.get("ltip"):Kit.with_tip(h,f)
 				self.specs.append((r,o))
+			if c and b is not None:l={"check":2,"note":o["ndy"],"buttons":o["bdy"]+3}.get(a,o["ldy"]);Kit.add_label(g,c,min(b+6,sx+self.w-4-Kit.text_w(c)),y+l,Kit.HUE_TITLE)
 		def read(self,strict=False,empty=None):
 			a=dict(self.vals)
 			for r,o in self.specs:
@@ -1676,7 +1727,7 @@ class Kit(object):
 				b,c=a.pop()
 				with Kit.quiet:b(*c)
 	class Window(object):
-		def __init__(self,key,title,st,win,build,a,b=None,default=(200,200),mini=None,icon=None,cleanup=None,gkey="g",names=("c","store"),lock=True,owner=True,close_tip=None,clear=None,docked_min=False):self.key,self.title,self.st,self.win,self.build,self.pos_key=key,title,st,win,build,a;self.min_key,self.default,self.mini,self.icon,self.cleanup=b,default,mini,icon,cleanup;self.gkey,self.names,self.lock,self.owner,self.close_tip=gkey,names,lock,owner,close_tip;self.clear,self.docked_min,self.slot,self.held,self.old=clear or{},docked_min,None,False,None;self.queue=Kit.queuer(st)if st is not None else None;self.x=self.y=self.w=self.h=0;self.c,self.store={},({},{})
+		def __init__(self,key,title,st,win,build,a,b=None,default=(200,200),mini=None,icon=None,cleanup=None,gkey="g",names=("c","store"),lock=True,owner=True,close_tip=None,clear=None,docked_min=False):self.key,self.title,self.st,self.win,self.build,self.pos_key=key,title,st,win,build,a;self.min_key,self.default,self.mini,self.icon,self.cleanup=b,default,mini,icon,cleanup;self.gkey,self.names,self.lock,self.owner,self.close_tip=gkey,names,lock,owner,close_tip;self.clear,self.docked_min,self.slot,self.held,self.old=clear or{},docked_min,None,False,None;self.queue=Kit.queuer(st)if st is not None else None;self.x=self.y=self.w=self.h=0;self.c,self.store,self.fade={},({},{}),True
 		def minimized(self):return self.st is not None and bool(self.st["minimized"])
 		def start_min(self):return bool(HOST.dock_wanted(self.key)or(self.min_key and Kit.load_min(self.min_key)))
 		def begin(self,w,h,default=None):
@@ -1696,9 +1747,10 @@ class Kit(object):
 		def end(self,g,parts=None,w=None,h=None,max_h=None):
 			c,parts=self.st,dict(parts or{});parts[self.gkey]=g
 			for d,v in zip(self.names or(),(self.c,self.store)):parts[d]=v
-			b=Kit.show_window(g,self.x,self.y,self.w if w is None else w,self.h if h is None else h,self.key if self.lock else None,c is not None and c["minimized"]and c["docked"],self.disposed(g),self.save_pos,self.win,parts,max_h);a=LAYOUT.placed.get(self.key)if LAYOUT.seamless and LAYOUT.holds(self.key)else None
+			b=Kit.show_window(g,self.x,self.y,self.w if w is None else w,self.h if h is None else h,self.key if self.lock else None,c is not None and c["minimized"]and c["docked"],self.disposed(g),self.save_pos,self.win,parts,max_h);a=LAYOUT.spot(self.key)if LAYOUT.seamless and LAYOUT.holds(self.key)else None
 			if a is not None and b is not None and(b[0],b[1])!=(a[0],a[1]):g.SetPos(int(a[0]),int(a[1]));Kit.note_rect(g,a[0],a[1]);Kit.moved_by_code(g);b=(a[0],a[1])
 			if a is not None and b is not None:LAYOUT.fit_now(self.key,g)
+			if FADE.on:FADE.wake(self.key)
 			e,self.old=self.old,None;Kit.dispose(e);return b
 		def disposed(self,g):
 			def a(*b):
@@ -1729,7 +1781,7 @@ class Kit(object):
 	class _Quiet(object):
 		def __enter__(self):return self
 		def __exit__(self,kind,value,tb):return kind is not None and issubclass(kind,Exception)
-	quiet=_Quiet();_notos={}
+	quiet=_Quiet();_notos={};NOTO_ORDER=("unknown","innocent","ally","gray","criminal","enemy","murderer","invulnerable");CB_RGB={"innocent":(0,114,178),"ally":(86,180,233),"gray":(153,153,153),"criminal":(153,153,153),"enemy":(230,159,0),"murderer":(213,94,0),"invulnerable":(240,228,66)};CB_HUE={"innocent":1266,"ally":1060,"gray":2958,"criminal":2958,"enemy":1174,"murderer":1100,"invulnerable":1568};NOTO_MARKS={"murderer":"R","criminal":"C","gray":"C","enemy":"O","ally":"A","invulnerable":"I"};VEILS={"me":"You","guild":"(hidden)","xy":"(hidden)","place":"(hidden)"};B36="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	@staticmethod
 	def noto_name(mob):
 		try:v=mob.Notoriety
@@ -1741,6 +1793,34 @@ class Kit(object):
 		except KeyError:pass
 		except Exception:return str(v).split(".")[-1].lower()
 		n=Kit._notos[v]=str(v).split(".")[-1].lower();return n
+	@staticmethod
+	def _noto_key(noto):
+		if type(noto)is int:return Kit.NOTO_ORDER[noto]if 0<=noto<len(Kit.NOTO_ORDER)else "unknown"
+		return noto if isinstance(noto,str)else Kit.noto_of(noto)
+	@staticmethod
+	def cb_rgb(noto,default=None):return Kit.CB_RGB.get(Kit._noto_key(noto),default)if Kit.cblind else default
+	@staticmethod
+	def cb_hex(noto,default=None):c=Kit.cb_rgb(noto);return default if c is None else "#%02X%02X%02X"%c
+	@staticmethod
+	def cb_hue(noto,default=0):return Kit.CB_HUE.get(Kit._noto_key(noto),default)if Kit.cblind else default
+	@staticmethod
+	def noto_mark(noto):return Kit.NOTO_MARKS.get(Kit._noto_key(noto),"")if Kit.cblind else ""
+	@staticmethod
+	def hp_mark(poisoned=False,a=False,b=False):
+		if not Kit.cblind:return ""
+		return("P"if poisoned else "")+("Z"if a else "")+("M"if b else "")
+	@staticmethod
+	def veil(kind,text,serial=0):
+		if not Kit.streamer:return text
+		if kind!="name":return Kit.VEILS.get(kind,"(hidden)")
+		try:s=int(serial or 0)
+		except(TypeError,ValueError):s=0
+		if s<=0:return "Player"
+		d=""
+		for a in range(3):
+			d=Kit.B36[s%36]+d;s//=36
+			if not s:break
+		return "Player "+d
 	@staticmethod
 	def set(obj,a,value):
 		try:setattr(obj,a,value)
@@ -1979,7 +2059,7 @@ class Fill(object):
 			for v,A in e:Fill._anchor(A,a["bgs"])
 			Fill._apply(a,e)
 		r=Snap.rect(g)
-		if r is not None and(r[0],r[1],r[2],r[3])==(x,y,W,H)and not e and a["placed"]is not None:return False
+		if r is not None and(r[0],r[1],r[2],r[3])==(TAB_X if g in Kit._behind else x,y,W,H)and not e and a["placed"]is not None:return False
 		if h or o:B=int(round(a["head0"]*k));Kit._place_raw(g,x,y,j[0],j[1],B,H)
 		else:Kit._place_raw(g,x,y,W,H,None,None)
 		r=Snap.rect(g);a["placed"]=(x,y,r[2],r[3])if r is not None else(x,y,W,H);a["slot"]=(x,y,W,H);return True
@@ -2058,22 +2138,56 @@ class PageCanvas(object):
 		if self._inner is None:raise AttributeError(name)
 		return getattr(self._inner,name)
 class Alerts(object):
-	KEY="VirtueAssistant_alerts";POS_KEY="VirtueAssistant_alert_pos";W,H=420,46;LEVELS={"info":Kit.HUE_INFO,"warn":Kit.HUE_TITLE,"alarm":Kit.HUE_BAD};TEST_KEY="va.test"
-	def __init__(self):self.kinds={};self.order=[];self.choice={};self.banner_on=True;self.mute=self.loaded=self.busy=self.shown=self.alarm=self.flash_on=self.clicked=False;self.last={};self.pending=[];self.sounds=[];self.pings=[];self.sound_at=self.hide_at=self.flash_at=self.moved_at=0.;self.g=self.pos=None;self.c={};self.count=0;self.hue=Kit.HUE_TITLE;self.line="";self.tw=self.W-36
+	KEY="VirtueAssistant_alerts";POS_KEY="VirtueAssistant_alert_pos";W,H=420,46;LEVELS={"info":Kit.HUE_INFO,"warn":Kit.HUE_TITLE,"alarm":Kit.HUE_BAD};TEST_KEY="va.test";LOG_KEY="VirtueAssistant_alert_log";LOG_CAP=50;LOG_EVERY=60.;LOG_CUT=160;QUIET_MAX=1440;QUIET_ALARM=30.
+	def __init__(self):self.kinds={};self.order=[];self.choice={};self.banner_on=True;self.mute=self.loaded=self.busy=self.shown=self.alarm=self.flash_on=self.clicked=False;self.last={};self.pending=[];self.sounds=[];self.pings=[];self.sound_at=self.hide_at=self.flash_at=self.moved_at=0.;self.g=self.pos=None;self.c={};self.count=0;self.hue=Kit.HUE_TITLE;self.line="";self.tw=self.W-36;self.scale=1.;self.log=[];self.log_ver=0;self.log_due=False;self.log_at=0.;self.quiet_until=0;self.bw=30;self.store=({},{});self.alarm_until=0.;self.line_who=("",0)
 	def load(self):
-		self.loaded=True;self.choice={};self.mute,self.banner_on=False,True
+		self.loaded=True;self.choice={};self.mute,self.banner_on=False,True;self.quiet_until=0
 		for k,v in Kit.codec_load(Kit.get_var(self.KEY)).items():
 			if k=="mute":self.mute=v=="1"
 			elif k=="banner":self.banner_on=v!="0"
+			elif k=="quiet":
+				try:self.quiet_until=int(v)
+				except ValueError:self.quiet_until=0
 			elif k.startswith("kind."):
 				a=v.split(",")
-				try:b=int(a[1])if len(a)>1 and a[1]!=""else None
-				except ValueError:b=None
-				self.choice[k[5:]]=[a[0]!="0",b]
+				try:c=int(a[1])if len(a)>1 and a[1]!=""else None
+				except ValueError:c=None
+				self.choice[k[5:]]=[a[0]!="0",c]
+		d=[]
+		for e in Kit.get_var(self.LOG_KEY).split("\n"):
+			b=e.split("~",5)
+			if len(b)<4:continue
+			try:t,f=float(b[0]),int(b[5])if len(b)>5 and b[5]else 0
+			except ValueError:continue
+			d.append((t,b[1],b[3],"",b[2]=="q",b[4]if len(b)>4 else "",f))
+		self.log=d[-self.LOG_CAP:];self.log_ver+=1;self.log_due=False
 	def save(self):
 		a=["mute=%d"%(1 if self.mute else 0),"banner=%d"%(1 if self.banner_on else 0)]
 		for k in sorted(self.choice):c,b=self.choice[k];a.append("kind.%s=%d,%s"%(k,1 if c else 0,""if b is None else int(b)))
-		Kit.put_var(self.KEY,";".join(a))
+		a.append("quiet=%d"%int(self.quiet_until));Kit.put_var(self.KEY,";".join(a))
+	@staticmethod
+	def _clip(s,n):return re.sub(r"[~\r\n]"," ",str(s))[:n]
+	@staticmethod
+	def veiled(line,name,serial=0):
+		if not Kit.streamer or not name or name not in line:return line
+		v=Kit.veil("name",name,serial);return re.sub(r"(?<!\w)%s(?!\w)"%re.escape(name),lambda m:v,line)
+	@staticmethod
+	def with_quiet(text,mine):a=[b for b in str(text or "").split(";")if b.strip()and not b.strip().startswith("quiet=")];return ";".join(a+[c for c in str(mine or "").split(";")if c.strip().startswith("quiet=")][-1:])
+	def shown_line(self):return Alerts.veiled(self.line,*self.line_who)
+	def save_log(self,now):self.log_due=False;self.log_at=now+self.LOG_EVERY;c=Alerts._clip;a=("%d~%s~%s~%s~%s~%d"%(int(b),c(d,8),"q"if f else "",c(e,self.LOG_CUT),c(g,40),h)for b,d,e,i,f,g,h in list(self.log));Kit.put_var(self.LOG_KEY,"\n".join(a))
+	def quiet_on(self,now=None):
+		if not self.loaded:self.load()
+		a=self.quiet_until-(time.time()if now is None else now);return 0<a<=60*self.QUIET_MAX
+	def quiet(self,a=30):
+		if not self.loaded:self.load()
+		m=max(1,min(self.QUIET_MAX,int(a)));self.quiet_until=int(time.time()+60*m);self.sounds,self.pending=[],[];self.save();HOST.refresh_settings(ALERTS_PAGE);API.SysMsg("Alerts: quiet until %s."%time.strftime("%H:%M",time.localtime(self.quiet_until)),Kit.HUE_INFO)
+	def resume(self):
+		if not self.loaded:self.load()
+		self.quiet_until=0;self.save();HOST.refresh_settings(ALERTS_PAGE);API.SysMsg("Alerts: back on.",Kit.HUE_INFO)
+	def quiet_alarm(self,now=None):a=self.alarm_until-(time.time()if now is None else now);return 0<a<=self.QUIET_ALARM
+	def toggle_quiet(self):
+		if self.quiet_on():self.resume()
+		else:self.quiet(30)
 	def setting(self,key):
 		if not self.loaded:self.load()
 		k=self.kinds.get(key);a=self.choice.get(key);b=a[0]if a is not None else True;c=a[1]if a is not None and a[1]is not None else(k["sound"]if k else 0);return b,int(c or 0)
@@ -2087,28 +2201,36 @@ class Alerts(object):
 			self.kinds[key]=a
 			if key!=self.TEST_KEY:HOST.refresh_settings(ALERTS_PAGE)
 		return key
-	def raise_(self,key,text,level="warn",sound=None,ping=None,who=None,owner=None):
+	def raise_(self,key,text,level="warn",sound=None,ping=None,who=None,owner=None,name=None,serial=None):
 		if not self.loaded:self.load()
 		key=str(key);k=self.kinds.get(key)
 		if k is None:self.kind(key,key,sound,owner);k=self.kinds[key]
-		h,c=self.setting(key)
-		if not h:return False
-		a=time.time();d=(key,str(who)if who is not None else str(text));t=self.last.get(d)
+		l,g=self.setting(key)
+		if not l:return False
+		a=time.time();h=(key,str(who)if who is not None else str(text));t=self.last.get(h)
 		if t is not None and 0<=a-t<ALERT_RATE:return False
 		if len(self.last)>200:
-			i=a-ALERT_RATE
-			for j in[m for m,l in self.last.items()if l<i or l>a]:del self.last[j]
-		self.last[d]=a;e=k["owner"];text=str(text);f=text if text.startswith(e+":")else "%s: %s"%(e,text);g=self.LEVELS.get(level,Kit.HUE_TITLE);API.SysMsg(f,g);b=(int(sound)if sound else c)if c else 0
-		if b and not self.mute and len(self.sounds)<4:
-			if not self.sounds and not 0<=a-self.sound_at<ALERT_SOUND_GAP:self._play(b,a)
-			else:self.sounds.append(b)
-		if self.banner_on:
-			self.pending.append((f,g,level=="alarm"))
+			m=a-ALERT_RATE
+			for n in[p for p,o in self.last.items()if o<m or o>a]:del self.last[n]
+		self.last[h]=a;i=k["owner"];text=str(text);d=text if text.startswith(i+":")else "%s: %s"%(i,text);e=str(name)if name else who if isinstance(who,str)and len(who)>1 else ""
+		try:b=int((0 if isinstance(who,str)else who)if serial is None else serial)or 0
+		except(TypeError,ValueError):b=0
+		j=self.LEVELS.get(level,Kit.HUE_TITLE);API.SysMsg(Alerts.veiled(d,e,b),j);c=self.quiet_on(a);self.log.append((a,str(level),d,key,c,e,b))
+		if len(self.log)>self.LOG_CAP:del self.log[:-self.LOG_CAP]
+		self.log_ver+=1;self.log_due=True
+		if c and level=="alarm":self.alarm_until=a+self.QUIET_ALARM
+		f=(int(sound)if sound else g)if g else 0
+		if f and not self.mute and not c and len(self.sounds)<4:
+			if not self.sounds and not 0<=a-self.sound_at<ALERT_SOUND_GAP:self._play(f,a)
+			else:self.sounds.append(f)
+		if self.banner_on and not c:
+			self.pending.append((d,j,level=="alarm",e,b))
 			if len(self.pending)>50:del self.pending[:-50]
 		if ping is not None and len(self.pings)<8:safe(lambda:self.pings.append([int(ping[0]),int(ping[1]),a+10.]))
 		self.busy=True;return True
 	def _play(self,sid,now):self.sound_at=now;API.PlaySound(int(sid))
 	def tick(self,now):
+		if self.log_due and not 0<=self.log_at-now<=self.LOG_EVERY:self.save_log(now)
 		if not self.busy:return
 		if self.sounds and not 0<=now-self.sound_at<ALERT_SOUND_GAP:self._play(self.sounds.pop(0),now)
 		if self.pings:
@@ -2122,18 +2244,18 @@ class Alerts(object):
 		self.busy=bool(self.sounds or self.pings or self.pending or self.shown)
 	def _show(self,items,now):
 		if not self.banner_on:return
-		a,b,c=items[-1]
-		if self.shown and Kit.is_open(self.g):self.count+=len(items);self.alarm=self.alarm or any(e for d,d,e in items)
-		else:self.count=len(items)-1;self.alarm=any(g for f,f,g in items)
-		self.line,self.hue=a,b
+		a,b,e,c,d=items[-1]
+		if self.shown and Kit.is_open(self.g):self.count+=len(items);self.alarm=self.alarm or any(f[2]for f in items)
+		else:self.count=len(items)-1;self.alarm=any(g[2]for g in items)
+		self.line,self.hue,self.line_who=a,b,(c,d)
 		if not Kit.is_open(self.g):self._build()
 		if self.g is None:return
 		self._label()
 		if not self.shown:Kit.set(self.g,"IsVisible",True);self.shown=True;self.clicked=False;self.pos=Snap.pos(self.g)
 		self.hide_at=now+ALERT_HOLD;self.flash_at=now+ALERT_FLASH;self.flash_on=True
 	def _label(self):
-		c=self.c;a=("+%d more"%self.count)if self.count>0 else "";b=Kit.text_px(a)if a else 0;d=self.W-36-((b+8)if a else 0);self.tw=d;Kit.set_text(c["text"],Kit.fit(self.line,d),self.hue);Kit.set_text(c["more"],a,Kit.HUE_INFO)
-		if a:c["more"].SetPos(self.W-18-b,15)
+		c=self.c;a=("+%d more"%self.count)if self.count>0 else "";b=Kit.text_px(a)if a else 0;d=self.bw+6;e=self.W-36-d-((b+8)if a else 0);self.tw=e;Kit.set_text(c["text"],Kit.fit(self.shown_line(),e),self.hue);Kit.set_text(c["more"],a,Kit.HUE_INFO)
+		if a:s=self.scale;c["more"].SetPos(int(round((self.W-18-d-b)*s)),int(round(15*s)))
 	def _watch(self,now):
 		g=self.g
 		if not Kit.is_open(g):self.shown,self.g=False,None;return
@@ -2145,17 +2267,64 @@ class Alerts(object):
 			self.clicked=False
 			if not 0<=now-self.moved_at<=.35:self.dismiss();return
 		if self.alarm:
-			if not 0<self.flash_at-now<=ALERT_FLASH:self.flash_at=now+ALERT_FLASH;self.flash_on=not self.flash_on;Kit.set_text(self.c["text"],Kit.fit(self.line,self.tw),Kit.HUE_BAD if self.flash_on else Kit.HUE_TEXT)
+			if not 0<self.flash_at-now<=ALERT_FLASH:self.flash_at=now+ALERT_FLASH;self.flash_on=not self.flash_on;Kit.set_text(self.c["text"],Kit.fit(self.shown_line(),self.tw),Kit.HUE_BAD if self.flash_on else Kit.HUE_TEXT)
 		elif not 0<self.hide_at-now<=ALERT_HOLD:self.dismiss()
 	def dismiss(self):
 		self.shown,self.count,self.alarm=False,0,False;g=self.g
 		if Kit.is_open(g):Kit.set(g,"IsVisible",False)
 	def _click(self):self.clicked=True;self.busy=True
-	def _build(self):W,H=self.W,self.H;a=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(a-W)//2),60),(W,H));g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H,corners=False);Kit.add_section(g,8,8,W-16,H-16);c={"text":Kit.add_label(g,"",18,15,Kit.HUE_TITLE),"more":Kit.add_label(g,"",W-60,15,Kit.HUE_INFO)};Kit.catcher(g,0,0,W,H,self._click,"Click to dismiss; drag to move",movable=True);Kit.show_window(g,x,y,W,H,None,False,None,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g,self.c=g,c;self.shown=False
+	def _build(self):
+		W,H,s=self.W,self.H,Kit.tscale;a,b=int(round(W*s)),int(round(H*s));d=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(d-a)//2),60),(a,b));g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H,corners=False);Kit.add_section(g,8,8,W-16,H-16);e={"text":Kit.add_label(g,"",18,15,Kit.HUE_TITLE),"more":Kit.add_label(g,"",W-60,15,Kit.HUE_INFO)};Kit.catcher(g,0,0,W,H,self._click,"Click to dismiss; drag to move",movable=True);f,c=Kit.pic_size(Kit.ART_PAGE[0]);self.bw,c=f or 30,c or 22;self.store=({},{});Binds.scoped("va.banner",Kit.art_button,g,self.store,"history",Kit.ART_PAGE,W-12-self.bw,(H-c)//2,None,"Show the last 50 alerts",None,lambda:HOST.alert_log.open());self.scale=s if Kit.scale_window(g,s)else 1.
+		if self.scale==1.:a,b=W,H
+		Kit.show_window(g,x,y,a,b,None,False,None,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g,self.c=g,e;self.shown=False
+	def rebuild(self):
+		g=self.g;a=self.shown and Kit.is_open(g)
+		if g is None:return
+		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
+		self.g=None;Kit.dispose(g);self.shown=False
+		if not a:return
+		self._build()
+		if self.g is None:return
+		self._label();Kit.set(self.g,"IsVisible",True);self.shown=True;self.pos=Snap.pos(self.g)
 	def close(self):
+		if self.log_due:self.save_log(time.time())
 		g,self.g=self.g,None
 		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
 		Kit.dispose(g);self.shown=False;self.pending,self.sounds,self.pings=[],[],[];self.busy=False
+class AlertLog(object):
+	W=600;ROW=20;POS_KEY="VirtueAssistant_alert_log_pos";EVERY=1.;TITLE="ALERT HISTORY"
+	def __init__(self):self.g=None;self.store=({},{});self.ver=-1;self.next=0.;self.want=0.
+	def open(self):
+		a=time.time()
+		if 0<=a-self.want<2.:return
+		self.want=a;Kit.pending.append(self._open);HOST.poke()
+	def _open(self):
+		self.want=0.
+		if not ALERTS.loaded:ALERTS.load()
+		if Kit.is_open(self.g):self.rebuild()
+		else:Binds.scoped("va.alertlog",self._build)
+	def rows(self):
+		b=[];f=self.W-2*Kit.MARGIN-24
+		for t,g,a,k,c,h,i in reversed(list(ALERTS.log)):a=Alerts.veiled(a,h,i);d=time.strftime("%H:%M",time.localtime(t))+"  ";e="  (quiet)"if c else "";j=d+Kit.fit(a,f-Kit.text_w(d)-Kit.text_w(e))+e;b.append((j,Kit.HUE_INFO if c else Alerts.LEVELS.get(g,Kit.HUE_TITLE)))
+		return b
+	def _build(self):
+		M,W,s=Kit.MARGIN,self.W,Kit.tscale;a=self.rows();self.store=({},{});self.ver=ALERTS.log_ver;self.next=time.time()+self.EVERY;e=16+self.ROW*max(1,len(a));H=M+30+Kit.GAP+e+M;g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,self.TITLE,M+30,M+7,Kit.HUE_TITLE);Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,M+4,None,"Close");b=M+30+Kit.GAP;Kit.add_section(g,M,b,W-2*M,e)
+		if not a:Kit.add_label(g,"No alerts yet.",M+12,b+8,Kit.HUE_INFO)
+		for i,(h,j)in enumerate(a):Kit.add_label(g,h,M+12,b+8+self.ROW*i,j)
+		c=s if Kit.scale_window(g,s)else 1.;d,f=int(round(W*c)),int(round(H*c));k=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(k-d)//2),80),(d,f));Kit.place(g,x,y,d,f,int(round((M+30+Kit.GAP)*c)));G.AddGump(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g=g
+	def rebuild(self):
+		g,self.g=self.g,None
+		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
+		Kit.dispose(g);Binds.scoped("va.alertlog",self._build)
+	def poll(self,now):
+		g=self.g
+		if g is None:return
+		if not Kit.is_open(g)or Kit.was_clicked(self.store,"close"):self.close();return
+		if self.ver!=ALERTS.log_ver and not 0<=self.next-now<=self.EVERY:self.rebuild()
+	def close(self):
+		g,self.g=self.g,None
+		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
+		Kit.dispose(g)
 class Guard(object):
 	KEY="VirtueAssistant_guard";EVERY=.25;NUMS={500112:GUARD_IN_TEXTS[0],500114:GUARD_IN_TEXTS[0],500113:GUARD_OUT_TEXTS[0],500115:GUARD_OUT_TEXTS[1]}
 	def __init__(self):self.state=self.rd=self.saved=None;self.next=0.;self.cache=(0.,None,None)
@@ -2206,11 +2375,12 @@ class _Page(object):
 	def api(self):return{"config_height":self.height,"build_config":self.build,"poll_config":self.poll,"config_closed":self.closed}
 class AlertsPage(_Page):
 	def kinds(self):return[a for a in ALERTS.order if a!=Alerts.TEST_KEY]
-	def table(self,w):return(("ALERTS  (every module's warnings)",(("check","mute","Mute every alert sound","No alert sounds; banners and journal lines stay",{"stay":True}),("check","banner","Show the banner","Show alerts in a banner (click to dismiss, drag to move)",{"dx":242}),("buttons",(("test",Kit.ART_PLAY,"Test alert","Raise a test alert"),),{"bdy":4,"stay":True}),("note","The same alert repeats at most every %d s."%int(ALERT_RATE),{"dx":172,"ndy":7})),{"top":32,"sh":98}),(Kit.fit("ALERT KINDS  (from modules on this session)",w-16),(("custom",0,self._kinds),),{"sh":40+28*max(1,len(self.kinds()))}))
+	QUIET_CAPS=("Quiet 30 min","Resume")
+	def table(self,w):q=ALERTS.quiet_on();a=12+35+max(Kit.text_w(d)for d in self.QUIET_CAPS)+20+35;a+=Kit.text_w("History")+20;b=("Quiet until %s"%time.strftime("%H:%M",time.localtime(ALERTS.quiet_until)))if q else "";c=(("quiet",Kit.ART_PLAY,self.QUIET_CAPS[1],"Turn alert sounds and banners back on")if q else("quiet",Kit.ART_PLAY,self.QUIET_CAPS[0],"No alert sounds or banners for 30 minutes; journal lines and the history stay"));return(("ALERTS  (every module's warnings)",(("check","mute","Mute every alert sound","No alert sounds; banners and journal lines stay",{"stay":True}),("check","banner","Show the banner","Show alerts in a banner (click to dismiss, drag to move)",{"dx":242}),("buttons",(("test",Kit.ART_PLAY,"Test alert","Raise a test alert"),),{"bdy":4,"stay":True}),("note","The same alert repeats at most every %d s."%int(ALERT_RATE),{"dx":172,"ndy":7}),("buttons",(c,("history",Kit.ART_PAGE,"History","Show the last 50 alerts")),{"bdy":4,"stay":True}),("note",b,{"dx":a,"ndy":7})),{"top":32,"sh":118}),(Kit.fit("ALERT KINDS  (from modules on this session)",w-16),(("custom",0,self._kinds),),{"sh":40+28*max(1,len(self.kinds()))}))
 	def height(self,w):return Kit.Form.height(self.table(w),w)
 	def build(self,g,x,y,w):
 		if not ALERTS.loaded:ALERTS.load()
-		self.store=({},{});self.c=Kit.Form(g,x,y,w,{"mute":ALERTS.mute,"banner":ALERTS.banner_on},self.table(w),self.store).c
+		self.store=({},{});self.quiet_drawn=ALERTS.quiet_on();self.c=Kit.Form(g,x,y,w,{"mute":ALERTS.mute,"banner":ALERTS.banner_on},self.table(w),self.store).c
 	def _kinds(self,f,x,y):
 		g,w,i,j=f.g,f.w,f.c,self.kinds();i.update(rows=[],dd=[])
 		if not j:Kit.add_label(g,"No alerts yet: turn on a module that has some.",x+12,y+6,Kit.HUE_INFO)
@@ -2234,10 +2404,99 @@ class AlertsPage(_Page):
 			except Exception:continue
 			if v!=ALERTS.setting(a)[0]:ALERTS.choose(a,on=v)
 		if Kit.was_clicked(self.store,"test"):ALERTS.kind(Alerts.TEST_KEY,"Test",490,APP_NAME);ALERTS.last.pop((Alerts.TEST_KEY,"test"),None);ALERTS.raise_(Alerts.TEST_KEY,"This is how an alert looks and sounds.","warn",who="test")
+		if Kit.was_clicked(self.store,"quiet"):ALERTS.toggle_quiet()
+		if Kit.was_clicked(self.store,"history"):HOST.alert_log.open()
+		q=ALERTS.quiet_on()
+		if q!=self.quiet_drawn:self.quiet_drawn=q;HOST.refresh_settings(ALERTS_PAGE)
 		for n,j in enumerate(c["dd"]):
 			a,g,b,d=j;i=Kit.dd_index(g,d)
 			if i!=d and 0<=i<len(b):d=i;c["dd"][n]=(a,g,b,i);ALERTS.choose(a,sound=b[i])
 			if Kit.was_clicked(self.store,"play%d"%n)and b[d]:API.PlaySound(int(b[d]))
+class BackupPage(_Page):
+	KEEP=10;ARM=3.;DIR="Backups";VER_KEY="VirtueAssistant_backup_ver";AUTO="before %s";SKIP=("VirtueAssistant_starting","VirtueAssistant_backup_ver")
+	def __init__(self):_Page.__init__(self);self.items=None;self.sel=0;self.armed=(None,0.);self.pick=None
+	def table(self,w):return(("BACKUPS  (this character)",(("buttons",(("backup_now",Kit.ART_OK,"Back up now","Save every Virtue Assistant setting of this character now (the 10 newest are kept)"),("restore",Kit.ART_PLAY,"Restore","Put the picked backup back (press twice; the settings of now are backed up first)"))),("custom",30,self._list),("note","In the VirtueAssistantSettings folder, Backups")),{}),)
+	def height(self,w):return Kit.Form.height(self.table(w),w)
+	def build(self,g,x,y,w):self.store=({},{});self.c=Kit.Form(g,x,y,w,{},self.table(w),self.store).c
+	def _list(self,f,x,y):
+		c=self.items or[];a=[e for g,e in c]
+		if not a:a=["Reading the backups"if self.items is None else "No backups yet"]
+		d=[h for h,j in enumerate(c)if j[0]==self.pick];self.sel=d[0]if d else max(0,min(self.sel,len(a)-1));b=G.CreateDropDown(min(380,f.w-24),a,self.sel);b.SetPos(x+12,y+2);f.g.Add(b);Kit.with_tip(b,"The backup that Restore puts back");f.c["dd"]=b
+	def poll(self):
+		c=self.c
+		if c is None:return
+		d=c.get("dd");a=self.items or[]
+		if d is not None:self.sel=Kit.dd_index(d,self.sel)
+		if 0<=self.sel<len(a):self.pick=a[self.sel][0]
+		if Kit.was_clicked(self.store,"backup_now"):self.ask(("backup","by hand"))
+		if not Kit.was_clicked(self.store,"restore"):return
+		if not a:API.SysMsg("Backups: there is no backup to restore yet.",Kit.HUE_BAD);return
+		b=a[max(0,min(self.sel,len(a)-1))][0];e=time.time();f=self.armed
+		if f[0]==b and 0<=f[1]-e<=self.ARM:self.armed=(None,0.);self.ask(("restore",b));return
+		self.armed=(b,e+self.ARM);API.SysMsg("Backups: press Restore again to confirm.",Kit.HUE_INFO)
+	@staticmethod
+	def ask(req):
+		if HOST.profile_req is not None:API.SysMsg("Backups: busy saving; try again.",Kit.HUE_BAD);return
+		HOST.profile_req=req;HOST.poke()
+	@staticmethod
+	def base():
+		a=safe(lambda:int(API.Player.Serial),0)
+		if not a:raise Exception("the character isn't in the world yet")
+		return os.path.join(Kit.data_path(BackupPage.DIR),"%08X"%a)
+	@staticmethod
+	def names():
+		a=BackupPage.base()
+		if not os.path.isdir(a):return[]
+		return sorted(b for b in os.listdir(a)if not b.endswith(".saving")and os.path.isfile(os.path.join(a,b,"info.txt")))
+	@staticmethod
+	def info(name):a=Kit.read_safe(os.path.join(BackupPage.base(),name,"info.txt"),None)or "";return dict((b.strip(),c.strip())for b,c in(d.split("=",1)for d in a.splitlines()if "="in d))
+	@staticmethod
+	def label(name):return "%s %s"%(name[:10],name[11:16].replace("-",":"))
+	def scan(self):
+		a=[]
+		for n in reversed(self.names()):b=self.info(n).get("why","");a.append((n,self.label(n)+("  (%s)"%b if b else "")))
+		self.items=a
+	@staticmethod
+	def snapshot(c):a=Profiles.char_vars();d=set(g.key for g in HOST.slots);e=tuple(set(h[:-8]for h in a if h.endswith("_settings")and h[:-9].lower()in d));f=set(Profiles.SESSION_VARS+BackupPage.SKIP+(PROFILE_STATE_KEY,));b=dict((i,j)for i,j in a.items()if i not in f and i.startswith(Profiles.VA_KEYS+e));b[SETTINGS_KEY]=c;return b
+	@staticmethod
+	def _drop(path):
+		for n in os.listdir(path):os.remove(os.path.join(path,n))
+		os.rmdir(path)
+	@staticmethod
+	def read_vars(path):return Profiles.parse_vars(Kit.read_safe(os.path.join(path,"va_vars.txt"),None)or "")
+	@staticmethod
+	def early():
+		if Kit.get_var(BackupPage.VER_KEY)==APP_VERSION:return
+		a=safe(Profiles.bag_path);return safe(lambda:(BackupPage.snapshot(Kit.get_var(SETTINGS_KEY)),Kit.read_safe(a,None)if a else None))
+	def make(self,why,o,keep=None,e=None):
+		b=self.base();t=time.time();f=time.strftime("%Y-%m-%d %H-%M-%S",time.localtime(t))
+		if not os.path.isdir(b):os.makedirs(b)
+		c=-1
+		for n in os.listdir(b):
+			if n.endswith(".saving"):safe(lambda:self._drop(os.path.join(b,n)));continue
+			d=n[len(f):]if n.startswith(f)else None
+			if d=="":c=max(c,0)
+			elif d and d[0]=="-"and d[1:].isdigit():c=max(c,int(d[1:]))
+		h=f if c<0 else "%s-%02d"%(f,c+1);i=os.path.join(b,h);a=i+".saving";os.makedirs(a);g=e[0]if e else self.snapshot(o);Profiles._write(os.path.join(a,"va_vars.txt"),"".join("%s\t%s\n"%(Profiles._esc(p),Profiles._esc(g[p]))for p in sorted(g)));j=Profiles.bag_path();k=e[1]if e else Kit.read_safe(j,None)if j else None
+		if k is not None:Profiles._write(os.path.join(a,"unified_bag.cfg"),k)
+		Profiles._write(os.path.join(a,"info.txt"),"saved=%d\nversion=%s\nwhy=%s\n"%(int(t),APP_VERSION,why))
+		if self.read_vars(a)!=g:safe(lambda:self._drop(a));raise Exception("the backup doesn't read back the same; try again")
+		os.rename(a,i);l=self.names();m=len(l)-self.KEEP
+		for n in l:
+			if m<=0:break
+			if n!=keep and n!=h:safe(lambda:self._drop(os.path.join(b,n)));m-=1
+		return h,len(g)
+	def read(self,name):
+		a=os.path.join(self.base(),name)
+		if not os.path.isfile(os.path.join(a,"info.txt")):raise Exception("that backup is gone")
+		return self.read_vars(a),Kit.read_safe(os.path.join(a,"unified_bag.cfg"),None)
+	@staticmethod
+	def apply(va,lay,gone=()):
+		for k in sorted(va):Kit.put_var(k,va[k])
+		for k in sorted(set(gone)-set(va)):Kit.put_var(k,"")
+		d=PROFILES.wait_vars(va);a=Profiles.bag_path();b=Profiles.BAG_OWN;c=Kit.read_safe(a)if lay is not None and a else None
+		if c is not None:e=[f for f in lay.splitlines()if f.strip()and not f.startswith(b)];Profiles._write(a,"\n".join(e+[g for g in c.splitlines()if g.startswith(b)]))
+		return d
 def _norm_key(k):a=[c for c in str(k or "").strip().upper().replace(" ","").split("+")if c];b=[d[5:]if d.startswith("SDLK_")else d for d in a if d not in("CTRL","SHIFT","ALT")];return "+".join([e for e in("CTRL","SHIFT","ALT")if e in a]+b[-1:])
 class Binds(object):
 	VAR="VirtueAssistant_binds";REPEAT=.6;ARM_SECS=20.;REG_CAP=5000;armed_until=0.;reg={};saved={};last={};hooked=set();armed=False;picked=None;answer=None;loaded=False;scope=None;OWNER="Button binds";IDS_VAR="VirtueAssistant_binds_ids"
@@ -2352,10 +2611,20 @@ class KeysPage(_Page):
 		if self.c is not None and Kit.was_clicked(self.store,"refresh"):HOST.refresh_settings(KEYS_PAGE)
 		if self.c is not None and Kit.was_clicked(self.store,"bind"):Binds.arm(True)
 		if self.c is not None and Kit.was_clicked(self.store,"bind_clear"):Binds.clear();HOST.refresh_settings(KEYS_PAGE)
-ALERTS_PAGE,KEYS_PAGE="va.alerts","va.keys"
+ALERTS_PAGE,KEYS_PAGE,BACKUP_PAGE="va.alerts","va.keys","va.backups"
 class WhatsNew(object):
-	W=520
+	W=520;SEEN_KEY="VirtueAssistant_new_seen";seen_keys=None;NEW_KEYS=("interface.look","interface.tsize","interface.compact","interface.cblind","interface.streamer","va.alerts.quiet","va.alerts.history","va.backups.backup_now","va.backups.restore","interface.share","interface.load_code","interface.code","interface.situ_on","interface.fade","interface.fade_to","interface.fade_after","interface.fade_all","ultima.overview","ultima.tracker.sort","ultima.overview.range","ultima.overview.rows","inventory.sections","inventory.sections.p_reagents","inventory.sections.p_potions","inventory.sections.p_bandages","inventory.sections.p_gold","inventory.sections.p_scrolls","inventory.sections.p_maps","inventory.sections.p_ores","inventory.sections.p_wood","inventory.sections.p_hides","inventory.sections.p_food","inventory.sections.p_weapons","inventory.sections.p_armour","inventory.sections.p_jewellery","inventory.sections.p_keys","inventory.sections.other","inventory.sections.add","actionbar.radial","actionbar.radial_page")
 	def __init__(self):self.g=None;self.store=({},{});self.text=None
+	@staticmethod
+	def seen():
+		if WhatsNew.seen_keys is None:a,c,b=Kit.get_var(WhatsNew.SEEN_KEY,"").partition(":");WhatsNew.seen_keys=set(d for d in b.split(",")if d)if a==APP_VERSION else set()
+		return WhatsNew.seen_keys
+	@staticmethod
+	def unseen(page=None):b=WhatsNew.seen();a=None if page is None else page+".";return set(c for c in WhatsNew.NEW_KEYS if c not in b and(a is None or c.startswith(a)))
+	@staticmethod
+	def see(keys):
+		a=WhatsNew.seen();b=set(keys)-a
+		if b:a.update(b);Kit.put_var(WhatsNew.SEEN_KEY,"%s:%s"%(APP_VERSION,",".join(sorted(a))))
 	def due(self):
 		if self.text is None:self.text=whats_new()
 		if not self.text:return False
@@ -2364,6 +2633,11 @@ class WhatsNew(object):
 		return str(a or "")!=APP_VERSION
 	def open(self):
 		if self.due():Kit.on_client(lambda:Binds.scoped("va.news",self._build))
+	def show(self):
+		if self.text is None:self.text=whats_new()
+		if not self.text:return False
+		if not Kit.is_open(self.g):Kit.on_client(lambda:Binds.scoped("va.news",self._build))
+		return True
 	def _build(self):
 		M,W=Kit.MARGIN,self.W;a=[]
 		for d in self.text:a+=Kit.wrap(d,W-2*M-24)or[""]
@@ -2378,7 +2652,7 @@ class WhatsNew(object):
 		g,self.g=self.g,None;Kit.dispose(g)
 		if seen:API.SavePersistentVar(WHATS_NEW_KEY,APP_VERSION,API.PersistentVar.Account)
 class ModuleSlot(object):
-	def __init__(self,key,title,desc,a,interval):self.key=key;self.title=title;self.desc=desc;self.factory=a;self.interval=interval;self.api=self.lazy=self.broken=self.iv_fn=self.thread_want=None;self.enabled=self.default_on=self.running=self.busy=self.pending_stop=False;self.thread_due=self.on_client=self.has_thread=False;self.category="Other";self.next_due=0.;self.errors=set();self.error_times={};self.load=[0.,0.,0.];self.part_load={};self.start_tok=None;self.page_err_at=0.;self.parts=self.aliases=();self.parts_on={};self.parts_running=set();self.folded=True
+	def __init__(self,key,title,desc,a,interval):self.key=key;self.title=title;self.desc=desc;self.factory=a;self.interval=interval;self.api=self.lazy=self.broken=self.iv_fn=self.thread_want=None;self.enabled=self.default_on=self.running=self.busy=self.pending_stop=False;self.thread_due=self.on_client=self.has_thread=False;self.category="Other";self.next_due=0.;self.errors=set();self.error_times={};self.load=[0.,0.,0.];self.part_load={};self.start_tok=None;self.page_err_at=0.;self.shipped=False;self.parts=self.aliases=();self.parts_on={};self.parts_running=set();self.folded=True
 	def part(self,key):
 		for p in self.parts:
 			if p[0]==key:return p
@@ -2595,9 +2869,9 @@ class _Memo(object):
 	def __int__(self):return int(self.__dict__["raw"].Serial)
 class Host(object):
 	def __init__(self):
-		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.boot=[("code",time.time()-START_AT)];self.boot_at=time.time();self.boot_load=0.;self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import threading;self._drain_lk=threading.Lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set();self.held_parts=set();self.marked=False;self.ask_g=None;self.ask_store=({},{});self.tz_at=0.;self.tz_off=set();self.tz_told=set()
-		for a,b,c in((ALERTS_PAGE,"Alerts",AlertsPage()),(KEYS_PAGE,"Hotkeys",KeysPage())):s=ModuleSlot(a,b,"",None,1.);s.api=c.api();self.pages.append(s)
-		self.whats_new=WhatsNew()
+		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.boot=[("code",time.time()-START_AT)];self.boot_at=time.time();self.boot_load=0.;self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import threading;self._drain_lk=threading.Lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set();self.held_parts=set();self.marked=False;self.ask_g=None;self.ask_store=({},{});self.tz_at=0.;self.tz_off=set();self.tz_told=set();self.backups=BackupPage();self.alert_log=AlertLog();self.launcher=None;self.early_backup=None
+		for a,b,c in((ALERTS_PAGE,"Alerts",AlertsPage()),(KEYS_PAGE,"Hotkeys",KeysPage()),(BACKUP_PAGE,"Backups",self.backups)):s=ModuleSlot(a,b,"",None,1.);s.api=c.api();self.pages.append(s)
+		self.whats_new=WhatsNew();self.services["alerts.history"]=self.alert_log.open;self.services["alerts.quiet"]=ALERTS.toggle_quiet
 	def _tell(self,msg):
 		if msg in self.told:return
 		if len(self.told)>50:self.told.clear()
@@ -2630,7 +2904,10 @@ class Host(object):
 		if b or a>=gate[0]:gate[0]=a+(every if every is not None else self.PAGE_EVERY);return True
 		return False
 	def alert_kind(self,key,label,a=None):s=self.current();return ALERTS.kind(key,label,a,s.title if s is not None else APP_NAME)
-	def alert(self,key,text,level="warn",sound=None,ping=None,who=None):s=self.current();return ALERTS.raise_(key,text,level,sound,ping,who,s.title if s is not None else APP_NAME)
+	def alert(self,key,text,level="warn",sound=None,ping=None,who=None,name=None,serial=None):
+		s=self.current()
+		if FADE.on and s is not None:FADE.wake(s.key)
+		return ALERTS.raise_(key,text,level,sound,ping,who,s.title if s is not None else APP_NAME,name,serial)
 	def guarded(self):return GUARD.guarded()
 	def guard_area(self):return GUARD.area()
 	def hotkey_note(self,a,owner,what=""):
@@ -2716,7 +2993,7 @@ class Host(object):
 		elif not on and not s.parts_wanted():self.disable(a)
 		else:self.save_prefs();self._part_notify(s)
 		self.refresh_settings(a)
-	def alarm_up(self):return bool(ALERTS.shown and ALERTS.alarm)
+	def alarm_up(self):return bool(ALERTS.shown and ALERTS.alarm)or ALERTS.quiet_alarm()
 	def typing(self):return Client.typing()
 	def release_typing(self):Typing.release()
 	def grid_size(self):return max(8,min(512,self.pref_int("grid",GRID_DEFAULT)))
@@ -2724,8 +3001,23 @@ class Host(object):
 	def grid_toggle(self):
 		if self.grid is not None:self.grid.toggle();self.prefs["grid_on"]="1"if self.grid_shown()else "0";self.save_prefs()
 		return self.grid_shown()
-	def set_dark(self,on):
-		on=bool(on);self.prefs["dark"]="1"if on else "0";self.save_prefs();Kit.set_dark(on);Kit.retint()
+	def set_look(self,name):name=name if name in Kit.LOOKS else "classic";self.prefs["look"]=name;self.prefs["dark"]="1"if name in("dark","contrast")else "0";self.save_prefs();Kit.set_look(name);self.restyle("Look: %s."%Kit.LOOK_NAMES[name])
+	SWITCHES={"compact":"Compact rows","cblind":"Colour-blind marks","streamer":"Streamer mode"}
+	def set_switch(self,key,value):
+		if key=="tsize":v=int(value)if int(value)in Kit.TEXT_SIZES else 100;self.prefs[key]=str(v);Kit.tscale=v/100.;b="Text size: %d%%."%v
+		elif key in self.SWITCHES:
+			a=bool(value);self.prefs[key]="1"if a else "0";b="%s %s."%(self.SWITCHES[key],"on"if a else "off")
+			if key=="compact":Kit.compact=a
+			elif key=="cblind":Kit.cblind=a
+			else:Kit.streamer=a
+		else:return
+		self.save_prefs();self.restyle(b)
+	def _apply_style(self):
+		a,b=self.prefs.get("look",""),self.pref_int("dark",0)==1
+		if a not in Kit.LOOKS or b!=(a in("dark","contrast")):a="dark"if b else "classic"
+		Kit.set_look(a);c=self.pref_int("tsize",100);Kit.tscale=(c if c in Kit.TEXT_SIZES else 100)/100.;Kit.compact,Kit.cblind=self.pref_int("compact",0)==1,self.pref_int("cblind",0)==1;Kit.streamer=self.pref_int("streamer",0)==1;FADE.load(self)
+	def restyle(self,note=None):
+		FADE.reset();Kit.retint()
 		for k,d in list(self.docks):
 			try:s=d["state"]()if d.get("redraw")is not None else None
 			except Exception:s=None
@@ -2734,7 +3026,15 @@ class Host(object):
 			if Kit.is_open(w.win.get(w.gkey)):w.queue.add("redraw")
 		for a,b in list(self.services.items()):
 			if a.startswith("look."):safe(b)
-		self.refresh_settings(LAYOUT_OWNER);self.poke();Kit.say("Dark mode on."if on else "Dark mode off.",Kit.HUE_GOOD)
+		self.refresh_settings(LAYOUT_OWNER);c=self.config
+		if c is not None and c.mode=="alone":c.refresh()
+		elif c is not None:
+			c.measured.clear()
+			if c.mode=="full":c.prof_redraw=True
+		safe(ALERTS.rebuild);self.poke()
+		if self.alert_log.g is not None:self.alert_log.open()
+		if self.launcher is not None and self.launcher.g is not None:Kit.pending.append(self.launcher.rebuild)
+		if note:Kit.say(note,Kit.HUE_GOOD)
 	def dock_wanted(self,key):return key in self._dock_want()
 	def _dock_want(self):
 		a=self.prefs.get("dock_want","")or ""
@@ -2775,7 +3075,7 @@ class Host(object):
 	def layout_rect(self,key):
 		key=str(key)
 		if not LAYOUT.holds(key):return
-		a=LAYOUT.placed.get(key);return tuple(a)if a is not None else None
+		a=LAYOUT.spot(key);return tuple(a)if a is not None else None
 	def layout_holds(self,key):return LAYOUT.holds(key)
 	def layout_need(self,key,w=None,h=None):LAYOUT.need(key,w,h)
 	def layout_base(self,key):return LAYOUT.zone_base(key)
@@ -2881,6 +3181,7 @@ class Host(object):
 		if self.boot is not None:t=time.time();self.boot.append((name,t-self.boot_at));self.boot_at=t
 	def boot_done(self):
 		a,self.boot=self.boot,None;t=time.time()
+		if self.alone is None:self.backup_start()
 		if self.alone is not None or self.pref_int("startup",0)!=1:return
 		a.append(("first build",max(0.,t-self.boot_at-self.boot_load)));Kit.say("start-up took %.1f s (%s)."%(t-START_AT,", ".join("%s %d ms"%(b,c*1000)for b,c in a)),Kit.HUE_INFO)
 	def current(self):return self.stack[-1]if self.stack else None
@@ -3268,6 +3569,9 @@ class Host(object):
 				if not VA_ALONE and a>=self.alive_at:self.alive_at=a+1.;API.SetSharedVar(ALIVE_KEY,str(a))
 				if self.hub is not None:self.hub.poll()
 				self.dock_tick();SNAP.tick()
+				if FADE.on:
+					try:FADE.tick(a)
+					except Exception as b:self._tell("%s: fade error: %s%s"%(APP_NAME,b,_error_where()))
 				if a-self.input_at>UI_IDLE_AFTER and not(SNAP.down or LAYOUT.arrange):self.ui_next=a+UI_IDLE
 				if self.grid is not None:self.grid.tick()
 				try:ALERTS.tick(a)
@@ -3275,6 +3579,8 @@ class Host(object):
 				try:GUARD.tick(a)
 				except Exception as b:self._tell("%s: guard-zone error: %s%s"%(APP_NAME,b,_error_where()))
 				if self.whats_new.g is not None:self.whats_new.poll()
+				if self.alert_log.g is not None:self.alert_log.poll(a)
+				if self.launcher is not None and self.launcher.g is not None:self.launcher.poll(a)
 				if self.ask_g is not None:self.ask_poll()
 		except Exception as b:
 			c="%s: settings window error: %s%s"%(APP_NAME,b,_error_where())
@@ -3287,7 +3593,7 @@ class Host(object):
 			s.enabled=s.key in b and(s.api is not None or s.lazy is not None)
 			if s.key in b and not s.enabled:f.add(s.key)
 			if s.enabled:self._parts_fill(s)
-		a["seen"]=",".join(sorted(c));Kit.set_dark(self.pref_int("dark",0)==1)
+		a["seen"]=",".join(sorted(c));self._apply_style()
 		if a["seen"]!=d or e:self.save_prefs()
 	def _migrate_parts(self,c,on,seen):
 		def f(key):
@@ -3354,8 +3660,8 @@ class Host(object):
 	def profile_job(self,req):
 		a,b=req
 		try:getattr(self,"_profile_"+a)(b)
-		except Exception as c:d={"fav":"set the favourite profile"}.get(a,a+" the profile");Kit.say("couldn't %s (%s%s)."%(d,Tz.why(c),_error_where()),Kit.HUE_BAD)
-		if a!="load"and self.config is not None and not self.stopping():
+		except Exception as c:d={"fav":"set the favourite profile","backup":"save the backup","restore":"restore the backup"}.get(a,a+" the profile");Kit.say("couldn't %s (%s%s)."%(d,Tz.why(c),_error_where()),Kit.HUE_BAD)
+		if a not in("load","restore")and self.config is not None and not self.stopping():
 			self.config.refresh_profiles()
 			if self.config.mode=="full":self.config.prof_redraw=False;self.config.redraw()
 	def _profile_save(self,name):
@@ -3369,27 +3675,47 @@ class Host(object):
 		PROFILES.report(name,"saved",n,True,e,a)
 	def _profile_load(self,name):
 		if PROFILES.info(name)is None:raise Exception('there is no profile "%s"'%name)
-		Kit.say('loading profile "%s".'%name,Kit.HUE_INFO);self.prefs_flush(True);self.prefs_frozen=True
+		Kit.say('loading profile "%s".'%name,Kit.HUE_INFO);a=self._reload(lambda:PROFILES.apply(name,"fav"if name==PROFILES.favorite()else "pick"),name);PROFILES.report(name,"loaded",*a)
+	def _reload(self,apply,sel=None):
+		self.prefs_flush(True);self.prefs_frozen=True
+		if ALERTS.log_due:ALERTS.save_log(time.time())
 		try:
 			if self.config is not None:safe(self.config.close)
 			for s in self.slots:
 				if s.running:self._stop(s)
 			if self.hub is not None:safe(self.hub.close)
-			Kit._vars.clear();a="fav"if name==PROFILES.favorite()else "pick";b=PROFILES.apply(name,a)
+			Kit._vars.clear();a=apply()
 			for c in set(Binds.saved.values())|Binds.hooked:Binds.unhook(c)
-			Binds.saved.clear();Binds.loaded=False;self._zone_was_d=None;Kit._vars.clear();ALERTS.loaded=False;GUARD.saved=None;Kit.read_screen();Binds.load()
+			Binds.saved.clear();Binds.loaded=False;self._zone_was_d=None;Kit._vars.clear();ALERTS.load();WhatsNew.seen_keys=None;GUARD.saved=None;Kit.read_screen();Binds.load()
 			for s in self.slots:
 				if s.api is not None and s.lazy is None and s.factory is not None:
 					try:s.api=s.factory();s.broken=None
-					except Exception as d:s.api,s.broken=None,str(d)+_error_where();Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
+					except Exception as b:s.api,s.broken=None,str(b)+_error_where();Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
 			self.load_prefs();self.tz_check();LAYOUT.load()
 		finally:
-			self.prefs_frozen=False;self.config=ConfigWindow(self);self.config.prof_sel=name;self.config.open();self.hub=HubWindow(self)
+			self.prefs_frozen=False;self.config=ConfigWindow(self)
+			if sel is not None:self.config.prof_sel=sel
+			self.config.open();self.hub=HubWindow(self)
 			if self.grid is not None:safe(self.grid.show if self.pref_int("grid_on",0)==1 else self.grid.hide)
 			for s in self.slots:
 				if s.enabled:self.start(s)
 			Kit.note_screen()
-		PROFILES.report(name,"loaded",*b)
+		return a
+	def backup_start(self):
+		try:self.backups.scan()
+		except Exception:self.backups.items=[]
+		self.refresh_settings(BACKUP_PAGE)
+		if Kit.get_var(BackupPage.VER_KEY)!=APP_VERSION and self.profile_req is None:self.profile_req=("backup",BackupPage.AUTO%APP_VERSION)
+	def _profile_backup(self,why,keep=None):
+		if ALERTS.log_due:ALERTS.save_log(time.time())
+		a=why==BackupPage.AUTO%APP_VERSION;b,n=self.backups.make(why,self.save_prefs(True),keep,self.early_backup if a else None)
+		if a:Kit.put_var(BackupPage.VER_KEY,APP_VERSION);self.early_backup=None
+		self.backups.scan();self.refresh_settings(BACKUP_PAGE);API.SysMsg("Backups: saved %s (%s)."%(Kit.count(n,"setting"),BackupPage.label(b)),Kit.HUE_GOOD)
+	def _profile_restore(self,name):
+		a,b=self.backups.read(name)
+		if not a:raise Exception("that backup is empty")
+		self._profile_backup("before restore",name);c=list(BackupPage.snapshot(""));API.SysMsg("Backups: restoring %s."%BackupPage.label(name),Kit.HUE_INFO);d=self._reload(lambda:BackupPage.apply(a,b,c));self.backups.scan();self.refresh_settings(BACKUP_PAGE);API.SysMsg("Backups: restored %s from %s."%(Kit.count(len(a),"setting"),BackupPage.label(name)),Kit.HUE_GOOD)
+		if not d:API.SysMsg("Backups: some settings were still saving; restart Virtue Assistant if a module looks unchanged.",Kit.HUE_BAD)
 	def _profile_fav(self,name):
 		if PROFILES.info(name)is None:raise Exception("save a profile first, then star it")
 		if PROFILES.favorite()==name:PROFILES.set_favorite("");safe(lambda:PROFILES.set_client_default(None));Kit.say('"%s" is no longer the favourite profile.'%name,Kit.HUE_INFO);return
@@ -3460,7 +3786,7 @@ class Host(object):
 	def run(self):
 		c=self.mark_start();Client.find()
 		if Client.mouse is None:Kit.say("no client mouse timer; double-clicks use the client's own event.",Kit.HUE_INFO)
-		self.load_prefs();self.tz_check();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self)
+		self.early_backup=BackupPage.early();self.load_prefs();ALERTS.load();self.tz_check();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self);self.launcher=Launcher(self);self.services["launcher.open"]=self.launcher.toggle
 		try:self.config=ConfigWindow(self);self.config.open()
 		except Exception as a:
 			self._tell("%s: couldn't build the window: %s%s"%(APP_NAME,a,_error_where()))
@@ -3494,7 +3820,7 @@ class Host(object):
 		if self.shut:return
 		self.shut=self.quitting=True;safe(Picker.drop);self.unmark(True)
 		if self.off_q:self._drop_offs()
-		if not VA_ALONE:safe(lambda:Kit.on_client(LAYOUT.game_view_restore));safe(lambda:LAYOUT.set_arrange(False,tell=False));safe(lambda:Kit.on_client(lambda:[b.free()for b in list(ClientWin.found.values())+[LAYOUT.journal_held]if b is not None]))
+		if not VA_ALONE:safe(lambda:Kit.on_client(LAYOUT.game_view_restore));safe(lambda:LAYOUT.set_arrange(False,tell=False));safe(lambda:Kit.on_client(LAYOUT._tabs_off));safe(LAYOUT.situ_park);safe(lambda:Kit.on_client(lambda:[b.free()for b in list(ClientWin.found.values())+[LAYOUT.journal_held]if b is not None]))
 		if self.config is not None:safe(lambda:self.save_prefs(True));safe(self.config.close)
 		else:safe(lambda:self.prefs_flush(True))
 		for s in reversed(self.slots):
@@ -3503,7 +3829,8 @@ class Host(object):
 				except Exception:s.running=False
 		self._refresh_active()
 		if self.hub is not None:safe(self.hub.close)
-		for a in(ALERTS.close,self.whats_new.close,GUARD.store,Kit.note_screen,lambda:Kit.dispose(self.ask_g),lambda:Kit.unhook(None)):safe(a)
+		if self.launcher is not None:safe(self.launcher.close)
+		for a in(self.alert_log.close,ALERTS.close,self.whats_new.close,GUARD.store,Kit.note_screen,lambda:Kit.dispose(self.ask_g),lambda:Kit.unhook(None)):safe(a)
 		if self.grid is not None:safe(self.grid.hide)
 		safe(lambda:API.SysMsg("%s stopped."%APP_NAME,Kit.HUE_INFO))
 class PartSet(object):
@@ -3623,7 +3950,7 @@ class PartSet(object):
 		def e():return bool(a["thread_wanted"]())or self._thread_wanted()
 		f={"tick":b,"stop":c,"thread_tick":d,"thread_wanted":e};h.update((g,f[g])for g in a);return h
 class Tz(object):
-	_types={};_MISS=object();NEED=(("LegionScripting.LegionAPI","_onStopScheduled","early_event_handling"),("LegionScripting.LegionAPI","World","actionbar meters social"),("Game.GameActions","","actionbar social skills.window"),("Game.GameActions","DropItem","inventory.bags"),("Game.GameActions","Equip QueueEquipSwap","inventory.paperdoll"),("Game.Managers.UIManager","Gumps","actionbar grimoire interface hud inventory.bags skills.window social"),("Game.Managers.UIManager","ContainerScale","inventory.bags"),("Game.Managers.UIManager","KeyboardFocusControl _gumpsStructureVersion SystemChat","interface"),("Game.Managers.UIManager","MakeTopMostGump","hud skills.window"),("Game.Managers.UIManager","Add","skills.window"),("Game.Managers.UIManager","IsMouseOverWorld","worldmap.pings"),("Game.Managers.MacroManager","GetAllMacros SetMacroToExecute Update FindMacro","actionbar"),("Game.Managers.MacroObject","Items","actionbar"),("Game.Managers.MacroObject","","social"),("Common.Enums.MacroType","","actionbar social"),("Common.Enums.MacroSubType","","actionbar social"),("LegionScripting.LegionScripting","LoadedScripts","actionbar"),("Input.Keyboard","KeyDownEvent KeyUpEvent","actionbar"),("Input.Mouse","CancelDoubleClick","inventory.bags"),("Input.Mouse","Position MClickPosition MButtonPressed","worldmap.pings"),("Game.World","Macros","actionbar social"),("Game.World","Instance Get TargetManager","hud.frames"),("Game.World","TargetManager","meters"),("Game.World","Instance Player SkillsGroupManager","skills.window"),("Game.World","Party Player","social"),("Game.Managers.TargetManager","LastAttack","hud.frames meters"),("Client","Game","hud.frames inventory.bags inventory.paperdoll social"),("GameController","UO","hud.frames inventory.bags inventory.paperdoll social"),("UltimaOnline","Animations FileManager","hud.frames"),("UltimaOnline","GameCursor","inventory.bags inventory.paperdoll"),("UltimaOnline","World","social"),("Game.GameCursor","ItemHold","inventory.bags"),("Game.ItemHold","Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic","inventory.bags"),("Configuration.ProfileManager","CurrentProfile","hud.frames inventory.bags inventory.storage TazUO_settings_check"),("Configuration.Profile","EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors","TazUO_settings_check"),("Game.Managers.ScavengerManager","Instance IsLoaded ScavengerEntries","TazUO_settings_check"),("Configuration.Profile","OpenHealthBarForLastAttack","hud.frames"),("Configuration.Profile","Username ServerName","inventory.storage"),("Game.UI.Gumps.BaseHealthBarGump","LastAttackBar","hud.frames"),("Game.GameObjects.Mobile","GetGroupForAnimation","hud.frames"),("Game.GameObjects.Mobile","IsCovered","inventory.paperdoll"),("Renderer.SpriteInfo","","hud.frames"),("Time","Ticks","hud.timers"),("Game.UI.Controls.Control","SetHitTestOffset _bounds Location","inventory.bags"),("Game.UI.Controls.Control","_bounds Location","interface inventory.paperdoll"),("Game.UI.Gumps.ContainerGump","_data _gumpPicContainer _hitBox","inventory.bags"),("Assets.TileDataLoader","_staticData","inventory.bags"),("Game.Data.Layer","","inventory.paperdoll"),("Game.UI.Controls.PaperDollInteractable","GetAnimID","inventory.paperdoll"),("Game.Managers.EventSink","OnEntityDamage","meters"),("Game.GameObjects.Entity","","meters"),("Game.Data.Lock","","skills.window"),("Game.Data.Skill","Lock","skills.window"),("Game.GameObjects.PlayerMobile","Skills","skills.window"),("Game.GameObjects.PlayerMobile","Serial","social"),("Game.Managers.SkillsGroupManager","Groups","skills.window"),("Game.Managers.SkillsGroup","","skills.window"),("Game.UI.Gumps.SkillButtonGump","SkillID","skills.window"),("Game.Managers.FriendsListManager","Instance","social"),("Game.Managers.PartyManager","Leader Inviter CanLoot Members","social"),("Game.UI.Gumps.IgnoreManagerGump","","social"),("Network.AsyncNetClient","Socket","social sysstats"),("Network.AsyncNetClient","Statistics","sysstats"),("Network.NetClientExt","Send_PartyDecline","social"),("CUOEnviroment","CurrentRefreshRate","sysstats"),("CUOEnviroment","ExecutablePath","worldmap"),("Game.Managers.EnhancedMap.EnhancedMapManager","Instance IsConnected Config Reconnect _client","worldmap.pings"),("Game.SelectedObject","Object","worldmap.pings"),("Game.UI.Gumps.WorldViewportGump","Instance ResizeGameWindow SetGameWindowPosition","interface"),("Game.UI.Gumps.SystemChatControl","IsDisposed ParentX ParentY TextBoxControl","interface"),)
+	_types={};_MISS=object();NEED=(("LegionScripting.LegionAPI","_onStopScheduled","early_event_handling"),("LegionScripting.LegionAPI","World","actionbar meters social"),("Game.GameActions","","actionbar social skills.window"),("Game.GameActions","DropItem","inventory.bags"),("Game.GameActions","Equip QueueEquipSwap","inventory.paperdoll"),("Game.Managers.UIManager","Gumps","actionbar grimoire interface hud inventory.bags skills.window social"),("Game.Managers.UIManager","ContainerScale","inventory.bags"),("Game.Managers.UIManager","KeyboardFocusControl _gumpsStructureVersion SystemChat","interface"),("Game.Managers.UIManager","MakeTopMostGump","hud skills.window"),("Game.Managers.UIManager","Add","skills.window"),("Game.Managers.UIManager","IsMouseOverWorld","worldmap.pings"),("Game.Managers.MacroManager","GetAllMacros SetMacroToExecute Update FindMacro","actionbar"),("Game.Managers.MacroObject","Items","actionbar"),("Game.Managers.MacroObject","","social"),("Common.Enums.MacroType","","actionbar social"),("Common.Enums.MacroSubType","","actionbar social"),("LegionScripting.LegionScripting","LoadedScripts","actionbar"),("Input.Keyboard","KeyDownEvent KeyUpEvent","actionbar"),("Input.Mouse","CancelDoubleClick","inventory.bags"),("Input.Mouse","Position MClickPosition MButtonPressed","worldmap.pings"),("Game.World","Macros","actionbar social"),("Game.World","Instance Get TargetManager","hud.frames"),("Game.World","TargetManager","meters"),("Game.World","Instance Player SkillsGroupManager","skills.window"),("Game.World","Party Player","social"),("Game.Managers.TargetManager","LastAttack","hud.frames meters"),("Client","Game","hud.frames inventory.bags inventory.paperdoll social"),("GameController","UO","hud.frames inventory.bags inventory.paperdoll social"),("UltimaOnline","Animations FileManager","hud.frames"),("UltimaOnline","GameCursor","inventory.bags inventory.paperdoll"),("UltimaOnline","World","social"),("Game.GameCursor","ItemHold","inventory.bags"),("Game.ItemHold","Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic","inventory.bags"),("Configuration.ProfileManager","CurrentProfile","hud.frames inventory.bags inventory.storage TazUO_settings_check"),("Configuration.Profile","EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors","TazUO_settings_check"),("Game.Managers.ScavengerManager","Instance IsLoaded ScavengerEntries","TazUO_settings_check"),("Configuration.Profile","OpenHealthBarForLastAttack","hud.frames"),("Configuration.Profile","Username ServerName","inventory.storage"),("Game.UI.Gumps.BaseHealthBarGump","LastAttackBar","hud.frames"),("Game.GameObjects.Mobile","GetGroupForAnimation","hud.frames"),("Game.GameObjects.Mobile","IsCovered","inventory.paperdoll"),("Renderer.SpriteInfo","","hud.frames"),("Time","Ticks","hud.timers"),("Game.UI.Controls.Control","SetHitTestOffset _bounds Location","inventory.bags"),("Game.UI.Controls.Control","_bounds Location","interface inventory.paperdoll"),("Game.UI.Gumps.ContainerGump","_data _gumpPicContainer _hitBox","inventory.bags"),("Assets.TileDataLoader","_staticData","inventory.bags"),("Game.Data.Layer","","inventory.paperdoll"),("Game.UI.Controls.PaperDollInteractable","GetAnimID","inventory.paperdoll"),("Game.Managers.EventSink","OnEntityDamage","meters"),("Game.GameObjects.Entity","","meters"),("Game.Data.Lock","","skills.window"),("Game.Data.Skill","Lock","skills.window"),("Game.GameObjects.PlayerMobile","Skills","skills.window"),("Game.GameObjects.PlayerMobile","Serial","social"),("Game.Managers.SkillsGroupManager","Groups","skills.window"),("Game.Managers.SkillsGroup","","skills.window"),("Game.UI.Gumps.SkillButtonGump","SkillID","skills.window"),("Game.Managers.FriendsListManager","Instance","social"),("Game.Managers.PartyManager","Leader Inviter CanLoot Members","social"),("Game.UI.Gumps.IgnoreManagerGump","","social"),("Network.AsyncNetClient","Socket","social sysstats"),("Network.AsyncNetClient","Statistics","sysstats"),("Network.NetClientExt","Send_PartyDecline","social"),("CUOEnviroment","CurrentRefreshRate","sysstats"),("CUOEnviroment","ExecutablePath","worldmap"),("Game.Managers.EnhancedMap.EnhancedMapManager","Instance IsConnected Config Reconnect _client","worldmap.pings"),("Game.SelectedObject","Object","worldmap.pings"),("Game.UI.Gumps.WorldViewportGump","Instance ResizeGameWindow SetGameWindowPosition","interface"),("Game.UI.Gumps.SystemChatControl","IsDisposed ParentX ParentY TextBoxControl","interface"),("Game.UI.Controls.TTFTextInputField","EnterPressed","launcher_Enter_key"),)
 	@staticmethod
 	def missing():
 		if Client._type("ClassicUO.Client")is None:return()
@@ -3712,7 +4039,7 @@ class Tz(object):
 		while getattr(e,"InnerException",None)is not None:e=e.InnerException
 		return str(getattr(e,"Message",None)or e)
 class Profiles(object):
-	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active","VirtueAssistant_starting");MISSING="\x01VA-missing"
+	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active","VirtueAssistant_starting","VirtueAssistant_new_seen","VirtueAssistant_alert_log","VirtueAssistant_backup_ver");MISSING="\x01VA-missing"
 	def __init__(self):self.base=os.path.join(Kit.data_dir(),PROFILE_DIR)
 	@staticmethod
 	def _read(path):return Kit.read_safe(path,None)if path else None
@@ -3754,20 +4081,25 @@ class Profiles(object):
 		if key==PROFILE_STATE_KEY or self.SERIAL_KEY.search(key)or key in self.SESSION_VARS:return False
 		if key in self.OWN_VARS or key.startswith(("Grimoire_H_","Layout_client_locked_")):return False
 		return key.startswith(self.VA_KEYS+tuple(extra))
-	def profile_vars(self,a):b=set(d.key for d in HOST.slots);c=tuple(set(e[:-8]for e in a if e.endswith("_settings")and e[:-9].lower()in b));return dict((f,g)for f,g in a.items()if self.keep_var(f,c))
+	def profile_vars(self,b):
+		c=set(e.key for e in HOST.slots);d=tuple(set(f[:-8]for f in b if f.endswith("_settings")and f[:-9].lower()in c));a=dict((g,h)for g,h in b.items()if self.keep_var(g,d))
+		if Alerts.KEY in a:a[Alerts.KEY]=Alerts.with_quiet(a[Alerts.KEY],"")
+		return a
 	@staticmethod
 	def char_vars():
 		import System;t=Tz.T("ClassicUO.LegionScripting.PersistentVars")
 		for m in t.GetMethods():
 			if m.Name=="GetAllVars"and m.GetParameters().Length==1:a=System.Enum.Parse(m.GetParameters()[0].ParameterType,"Char");d=m.Invoke(None,System.Array[object]([a]));return dict((str(b.Key),""if b.Value is None else str(b.Value))for b in d)
 		raise Exception("can't list this character's saved settings")
-	def read_vars(self,name):
-		c=self._read(os.path.join(self.folder(name),"va_vars.txt"))or "";a={}
-		for b in c.split("\n"):
+	@staticmethod
+	def parse_vars(text):
+		a={}
+		for b in text.split("\n"):
 			if "\t"in b:
-				k,v=b.split("\t",1);k=self._unesc(k)
-				if k:a[k]=self._unesc(v.rstrip("\r"))
-		return self.profile_vars(a)
+				k,v=b.split("\t",1);k=Profiles._unesc(k)
+				if k:a[k]=Profiles._unesc(v.rstrip("\r"))
+		return a
+	def read_vars(self,name):return self.profile_vars(self.parse_vars(self._read(os.path.join(self.folder(name),"va_vars.txt"))or ""))
 	def wait_vars(self,wanted,timeout=5.):
 		a=dict(wanted);c=time.time()+timeout
 		while a and not API.StopRequested:
@@ -3871,6 +4203,7 @@ class Profiles(object):
 		f=self.info(name)
 		if f is None:raise Exception('there is no profile "%s"'%name)
 		g=self.folder(name);a=self.read_vars(name)
+		if Alerts.KEY in a:a[Alerts.KEY]=Alerts.with_quiet(a[Alerts.KEY],Kit.get_var(Alerts.KEY))
 		for k in sorted(a):Kit.put_var(k,a[k])
 		h=self.wait_vars(a);c=self._read(os.path.join(g,"unified_bag.cfg"));b=self.bag_path();d=Kit.read_safe(b)if c is not None and b else None
 		if d is not None:i=[m for m in d.splitlines()if m.startswith(self.BAG_OWN)];self._write(b,"\n".join([n for n in c.splitlines()if n.strip()]+i))
@@ -3891,7 +4224,7 @@ class Profiles(object):
 class ConfigWindow(object):
 	W=640;GEAR=52;TABS=(("modules","Modules"),("settings","Settings"));DOCK_KEY="va";LINK_CMD="VirtueAssistant_cmd";LINK_STATE="VirtueAssistant_state";LINK_ALIVE="ActionBar_alive";LINK_STALE=10.;LINK_ENABLE="VirtueAssistant_enable"
 	def __init__(self,host):
-		self.host=host;self.g=self.mode=self._pp_key=self.shown_page=self.request=self.request_tab=None;self.lag_lbl=self.dirty=self.gear_pos=self.body=self.head=None;self.link_state=self.prof_sel=self.prof_cache=self.prof_shown=None;self.loading=self.stale_page=self.search_tb=self.search_text=None;self.gear_clicked=self.closing=self.docked=self.prof_stale=self.prof_redraw=False;self.box_hit=self.redraw_req=self.search_focus=False;self.gear_look=self.lag_next=self.gear_moved=self.link_next=self.box_next=self.search_at=0.;self.resize_at=0.;self.store=({},{});self.seen={};self._pp_gate=[0.];self._fld_gate=[0.];self._fld_due=True;self.x,self.y=Kit.adapt(host.pref_int("cfg_x",140),host.pref_int("cfg_y",80),self.W,self.MIN_H);self.gx,self.gy=Kit.adapt(host.pref_int("gear_x",self.x),host.pref_int("gear_y",self.y),self.GEAR,self.GEAR);self.minimized=host.pref_int("cfg_min",0)==1 or host.dock_wanted(self.DOCK_KEY);self.tab=host.prefs.get("cfg_tab","modules")
+		self.host=host;self.g=self.mode=self._pp_key=self.shown_page=self.request=self.request_tab=None;self.lag_lbl=self.dirty=self.gear_pos=self.body=self.head=None;self.link_state=self.prof_sel=self.prof_cache=self.prof_shown=None;self.loading=self.stale_page=self.search_tb=self.search_text=None;self.gear_clicked=self.closing=self.docked=self.prof_stale=self.prof_redraw=False;self.box_hit=self.redraw_req=self.search_focus=self.find_prof=False;self.gear_look=self.lag_next=self.gear_moved=self.link_next=self.box_next=self.search_at=0.;self.resize_at=0.;self.store=({},{});self.seen={};self._pp_gate=[0.];self._fld_gate=[0.];self._fld_due=True;self.opt_search="";self.opt_index={};self.opt_ver=0;self.opt_open=False;self.opt_wait=self.opt_mark=self.opt_lbl=self.opt_drawn=self.fresh_view=None;self.opt_hits=(None,None);self.hit_keys=[];self.x,self.y=Kit.adapt(host.pref_int("cfg_x",140),host.pref_int("cfg_y",80),self.W,self.MIN_H);self.gx,self.gy=Kit.adapt(host.pref_int("gear_x",self.x),host.pref_int("gear_y",self.y),self.GEAR,self.GEAR);self.minimized=host.pref_int("cfg_min",0)==1 or host.dock_wanted(self.DOCK_KEY);self.tab=host.prefs.get("cfg_tab","modules")
 		if self.tab not in("modules","settings"):self.tab="modules"
 		self.page=host.prefs.get("cfg_page","");SNAP.enabled=host.pref_int("snap",1)==1;self.reported=set();self.page_keys=[];self.box_list=[];self.part_boxes=[];self.fold_keys=[];self.measured={};self.mod_search="";self._prof_reset();a=Kit.screen()[1];self.lim_w=max(self.W,host.pref_int("cfg_w",self.W));self.lim_h=max(self.MIN_H,host.pref_int("cfg_h",(a-60)if a>400 else 1000));self.scale=max(50,min(200,host.pref_int("cfg_scale",100)))/100.;self.size=(0,0)
 		for b in(self.LINK_CMD,self.LINK_ENABLE):API.RemoveSharedVar(b)
@@ -3914,9 +4247,9 @@ class ConfigWindow(object):
 		if b[0]!="ok":raise b[1]
 		a,d,h=b[1],b[2],b[3];c=self.prof_sel if self.prof_sel in a else None
 		if c is None:c=h if h in a else(d if d in a else(a[0]if a else None))
-		self.prof_sel,self.prof_names,self.prof_fav=c,a,d;H=self.PROF_H;Kit.add_section(g,x,y,w,H);f=x+12+self.PROF_DD_W+10;i=y+(H-16)//2;m="#%02X%02X%02X"%self.STAR_OFF;n=[Kit.add_box(g,f+s,i+t,u,v,1.,m)for s,t,u,v in self.STAR_RECTS];self.prof_stars=[z for z in n if z is not None];Kit.catcher(g,f-3,i-3,22,22,self._star_click,"Favourite: characters that haven't loaded another profile get it (click again to clear)");e=f+28
+		self.prof_sel,self.prof_names,self.prof_fav=c,a,d;H=self.PROF_H;Kit.add_section(g,x,y,w,H);f=x+12+self.PROF_DD_W+10;i=y+(H-16)//2;m="#%02X%02X%02X"%self.STAR_OFF;n=[Kit.add_box(g,f+t,i+u,v,z,1.,m)for t,u,v,z in self.STAR_RECTS];self.prof_stars=[A for A in n if A is not None];Kit.catcher(g,f-3,i-3,22,22,self._star_click,"Favourite: characters that haven't loaded another profile get it (click again to clear)");e=f+28
 		for o,j,k,p,q in(("p_load",Kit.ART_PLAY,"Load",14,"Load the picked profile here"),("p_save",Kit.ART_OK,"Save",6,"Save this setup under the typed name, or over the picked profile")):Kit.art_button(g,self.store,o,j,e,y+6,k,q);e+=self._cap_w(j,k)+p
-		Kit.add_label(g,"as",e,y+9,Kit.HUE_INFO);l=e+Kit.text_w("as")+8;self.prof_tb=Kit.with_tip(Kit.add_textbox(g,"",l,y+6,max(60,x+w-12-l),numbers=False),"New profile name (empty: save over the picked one)");r=[A+("  (favourite)"if A==d else "")for A in a]or["(no profiles saved yet)"];self.prof_dd_args=(x+12,y+7,self.PROF_DD_W,r,a.index(c)if c in a else 0)
+		Kit.add_label(g,"as",e,y+9,Kit.HUE_INFO);l=e+Kit.text_w("as")+8;r=(Kit.pic_size(Kit.ART_PAGE[0])[0]or 30)+8 if self.find_prof else 0;self.prof_tb=Kit.with_tip(Kit.add_textbox(g,"",l,y+6,max(60,x+w-12-l-r),numbers=False),"New profile name (empty: save over the picked one)");s=[B+("  (favourite)"if B==d else "")for B in a]or["(no profiles saved yet)"];self.prof_dd_args=(x+12,y+7,self.PROF_DD_W,s,a.index(c)if c in a else 0)
 	def _add_profile_list(self,g):
 		if self.prof_dd_args is None:return
 		a=self.prof_dd;d,e,f,h,b=self.prof_dd_args
@@ -4057,8 +4390,8 @@ class ConfigWindow(object):
 		return b
 	@staticmethod
 	def _row_h(r):
-		if r[0]in("mod","part"):return 26+20*(len(r[3])-1)
-		return 24
+		if r[0]in("mod","part"):return Kit.pitch(26)+20*(len(r[3])-1)
+		return Kit.pitch(24)
 	def _units_modules(self,slots):a=self.COL_W;b=self._mod_rows(slots,a);c=[k for f in self.HELP_LINES for k in Kit.wrap(f,a-42)];d=8+22*len(c)+24;e=[{"rows":[self._row_h(l)for l in b],"head":34,"tail":4,"draw":lambda g,x,y,h,i,j:self._draw_mods(g,x,y,a,h,b[i:j],i==0)},{"h":d,"draw":lambda g,x,y,h,i,j:self._draw_opts(g,x,y,a,h,c)}];return e,a
 	PAGE_MAX_W=1100
 	def _measure_page(self,page,b,i,a):
@@ -4085,16 +4418,87 @@ class ConfigWindow(object):
 	def forget_measure(self,key):
 		for a in[b for b in self.measured if b[0]==key]:self.measured.pop(a,None)
 	def loaded(self,key):
-		self.forget_measure(key)
+		self.forget_measure(key);self._forget_index(key)
+		if self.opt_wait is not None and self.opt_wait.key==key:self.opt_wait=None
 		if self.loading is not None and self.loading.key==key:self.redraw_req=True
+	OPT_TIP="Type words to find an option on any settings page";OPT_CAP=4000;OPT_MAX=30;READING="Reading settings: %d of %d pages"
 	def _pick_unit(self,pages,b,lit):
-		c=35+max([Kit.text_w(e.title)for e in pages]or[80])+12;a=max(1,1+(b-30-c)//196);self.page_keys=[("page_"+f.key,f.key)for f in pages];n=(len(pages)+a-1)//a
-		def d(g,x,y,h,i,j):
-			Kit.add_section(g,x,y,b,h)
+		c=35+max([Kit.text_w(f.title)for f in pages]or[80])+12;a=max(1,1+(b-30-c)//196);self.page_keys=[("page_"+l.key,l.key)for l in pages];n=(len(pages)+a-1)//a;d=set(m.key for m in pages if WhatsNew.unseen(m.key))
+		def e(g,x,y,h,i,j):
+			Kit.add_section(g,x,y,b,h,"SETTINGS  (pick a page)"if i==0 else "SETTINGS  (continued)")
+			if i==0:self._search_box(g,x+b-12-self.SEARCH_W,y,self.opt_search,self.OPT_TIP)
+			f=max(((Kit.pic_size(Kit.ART_PAGE[0])[1]or 22)-16)//2,0)
 			for k,s in enumerate(pages):
-				r=k//a
-				if i<=r<j:Kit.art_button(g,self.store,"page_"+s.key,Kit.ART_PAGE,x+30+(k%a)*196,y+6+(r-i)*28,s.title,"Show %s settings"%s.title,Kit.HUE_TITLE if lit(s)else Kit.HUE_TEXT)
-		return{"rows":[28]*n,"head":6,"tail":4,"draw":d}
+				r=k//a;c,e=x+30+(k%a)*196,y+32+(r-i)*28
+				if not i<=r<j:continue
+				Kit.art_button(g,self.store,"page_"+s.key,Kit.ART_PAGE,c,e,s.title,"Show %s settings"%s.title,Kit.HUE_TITLE if lit(s)else Kit.HUE_TEXT)
+				if s.key in d:Kit.add_label(g,Kit.Form.NEW,c+self._cap_w(Kit.ART_PAGE,s.title)+6,e+f,Kit.HUE_INFO)
+		return{"rows":[28]*n,"head":34,"tail":4,"draw":e}
+	def _search_box(self,g,a,y,text,tip):Kit.add_label(g,"Search",a-8-Kit.text_w("Search"),y+7,Kit.HUE_INFO);self.search_tb=Kit.with_tip(Kit.add_textbox(g,text,a,y+5,self.SEARCH_W,numbers=False),tip);self.search_text=None
+	def _forget_index(self,key):
+		if self.opt_index.pop(key,None)is not None:self.opt_ver+=1
+	def _index_page(self,s):
+		a=[(s.key,None,"","page",s.title,s.desc or "",None)];a+=[(s.key,j[0],"","part",j[1],j[2]or "",None)for j in s.parts];g=Kit.Form.sink=[]
+		try:s.api["config_height"](self.COL_W)
+		except Exception:pass
+		finally:Kit.Form.sink=None
+		for b,h,i in g:
+			c=str(h or "").split("  ")[0]
+			for r in i:
+				if r[0]=="buttons":a+=[(s.key,b,c,"button",str(k[2]or ""),str(k[3]or ""),k[0])for k in r[1]]
+				elif r[0]=="note":a.append((s.key,b,c,"note",str(r[1]),"",r[1]))
+				elif r[0]=="check"or r[0]in Kit.Form.FIELDS:a.append((s.key,b,c,r[0],str(r[2]),str(r[3]or ""),r[1]))
+		d,f=[],set()
+		for e in a:
+			if e not in f and(e[3]in("page","part")or e[4].strip()):f.add(e);d.append(e)
+		return d
+	def _index_tick(self):
+		b=self.opt_index;a=[c for c in self.settings_slots()if c.key not in b]
+		if not a:return False
+		s=next((d for d in a if d.lazy is None),None)
+		if s is None:
+			if self.opt_wait is not a[0]:self.opt_wait=a[0];self.host.request_load(a[0])
+			return False
+		n=sum(len(e)for e in b.values());b[s.key]=self._index_page(s)[:max(0,self.OPT_CAP-n)];self.opt_ver+=1;return True
+	def _opt_hits(self):
+		b=(self.opt_search.lower(),self.opt_ver)
+		if self.opt_hits[0]==b:return self.opt_hits[1]
+		h=b[0].split();c=[]
+		for i,s in enumerate(self.settings_slots()):
+			for n,e in enumerate(self.opt_index.get(s.key,())):
+				p=s.part(e[1])if e[1]else None;j,k=e[4].lower(),e[5].lower();l=" ".join((e[2],s.title,p[1]if p else "")).lower();a=0
+				for w in h:
+					d=3 if w in j else 2 if w in l else 1 if w in k else 0
+					if not d:a=0;break
+					a+=d
+				if a:c.append((-a,i,n,e))
+		c.sort(key=lambda f:f[:3]);g=[m[3]for m in c[:self.OPT_MAX]];self.opt_hits=(b,g);return g
+	def _poll_index(self):
+		c=self._index_tick();a=self.settings_slots();b=sum(1 for d in a if d.key in self.opt_index)
+		if not a:return False
+		if b<len(a):
+			if c and self.opt_lbl is not None:Kit.set_text(self.opt_lbl,self.READING%(b,len(a)))
+			return False
+		if self.search_at or self._opt_hits()==self.opt_drawn:return False
+		self.search_focus=True;self.redraw();return True
+	def _hit_text(self,e):
+		s=self.host.page_slot(e[0]);a=s.title if s is not None else e[0];b=e[4].rstrip(":")
+		if e[3]=="page":return a
+		if e[3]=="part"or not e[2]:return "%s > %s"%(a,b)
+		return "%s > %s: %s"%(a,e[2],b)
+	def _found_unit(self,pages,a):
+		c=sum(1 for k in pages if k.key in self.opt_index);b=self._opt_hits()if c==len(pages)else None;self.opt_drawn=b;d=b or[None];e=self.READING%(c,len(pages))if b is None else 'No option matches "%s".'%self.opt_search
+		def f(g,x,y,h,i,j):
+			Kit.add_section(g,x,y,a,h,"FOUND  (click one to open it)"if i==0 else "FOUND  (continued)")
+			for r in range(i,j):
+				b,c=d[r],y+32+(r-i)*28
+				if b is None:self.opt_lbl=Kit.add_label(g,Kit.fit(e,a-24),x+12,c+3,Kit.HUE_INFO);continue
+				f,k="hit_%d"%r,self._hit_text(b);self.hit_keys.append((f,b));Kit.art_button(g,self.store,f,Kit.ART_PAGE,x+30,c,Kit.fit(k,a-77),b[5]or "Open %s"%k)
+		return{"rows":[28]*len(d),"head":34,"tail":4,"draw":f}
+	def _fresh(self,key):
+		a=self.fresh_view
+		if a is None or a[0]!=key:a=self.fresh_view=(key,WhatsNew.unseen(key))
+		return a[1]
 	def _units_loading(self,pages,title):
 		a=self.COL_W
 		def b(g,x,y,h,i,j):Kit.add_section(g,x,y,a,h);Kit.add_label(g,"Loading %s settings"%title,x+12,y+12,Kit.HUE_INFO)
@@ -4126,49 +4530,53 @@ class ConfigWindow(object):
 			if a and t<a[-1][1]:a[-1]=(a[-1][0],max(a[-1][1],d))
 			else:a.append((t,d))
 		return a
-	def _draw_page(self,g,page,b,a,i,m,at):
-		j=PageCanvas(g)
+	def _draw_page(self,g,page,b,a,i,n,at):
+		j=PageCanvas(g);F=Kit.Form;m=self.opt_mark;F.page,F.fresh=page.key,self._fresh(page.key);F.mark=(m[1],m[2])if m is not None and m[0]==page.key and m[3]!="part"else None
 		try:page.api["build_config"](j,b,a,i)
 		except Exception as k:self._settings_error(page,"window",k);Kit.add_section(g,b,a,i,40);Kit.add_label(g,"Settings unavailable: %s"%k,b+12,a+12,Kit.HUE_BAD)
-		self.shown_page=page.key;c=[]
-		for n,(d,u)in enumerate(m):o,p=at.get(n,(b,a+d));c.append((d,o-b,p-(a+d)))
-		if all(v==0 and w==0 for x,v,w in c):return
+		finally:F.page=F.fresh=F.mark=None
+		WhatsNew.see(self._fresh(page.key));self.shown_page=page.key;c=[]
+		for o,(d,v)in enumerate(n):p,q=at.get(o,(b,a+d));c.append((d,p-b,q-(a+d)))
+		if all(w==0 and x==0 for y,w,x in c):return
 		if not Kit.flush():return
 		for e in j.ctrls:
-			try:q,l=int(e.GetX()),int(e.GetY())
+			try:r,l=int(e.GetX()),int(e.GetY())
 			except Exception:continue
-			r=l-a;f,h=c[0][1],c[0][2]
-			for d,s,t in c:
-				if r>=d:f,h=s,t
-			if f or h:safe(lambda:e.SetPos(q+f,l+h))
+			s=l-a;f,h=c[0][1],c[0][2]
+			for d,t,u in c:
+				if s>=d:f,h=t,u
+			if f or h:safe(lambda:e.SetPos(r+f,l+h))
 	SEARCH_W=150
 	def _draw_parts(self,g,x,y,w,h,s):
-		Kit.add_section(g,x,y,w,h,"PARTS  (tick a part to turn it on)");a=y+32
-		for p in s.parts:self._part_box(g,s,p,x+12,a);Kit.add_label(g,Kit.fit(p[2]or "",w-236),x+224,a+2,Kit.HUE_INFO);a+=26
+		Kit.add_section(g,x,y,w,h,"PARTS  (tick a part to turn it on)");a=y+32;m=self.opt_mark;c=self._fresh(s.key)
+		for p in s.parts:
+			self._part_box(g,s,p,x+12,a);e=m is not None and m[3]=="part"and m[:2]==(s.key,p[0]);b=Kit.Form.FOUND if e else Kit.Form.NEW if "%s.%s"%(s.key,p[0])in c else None;d=Kit.fit(p[2]or "",w-236-(Kit.text_w(b)+6 if b else 0));Kit.add_label(g,d,x+224,a+2,Kit.HUE_INFO)
+			if b:Kit.add_label(g,b,x+224+Kit.text_w(d)+6,a+2,Kit.HUE_TITLE)
+			a+=26
 	def _part_box(self,g,s,p,x,c):a=bool(s.parts_on.get(p[0]));b=Kit.add_check(g,p[1],x,c,a,"%s: %s"%(s.title,p[2]or p[1]));self._hook_box(b);self.part_boxes.append((s,p[0],b));self.seen["%s.%s"%(s.key,p[0])]=a
 	ZONE_TIP="Click: next zone (free: stays where you put it; Settings > Interface lists them all)"
 	def _draw_windows(self,g,x,y,w,h,wins):
 		Kit.add_section(g,x,y,w,h,"WINDOWS  (the zone each sits in)");e=LAYOUT.zone_choices();a=y+32
 		for b,f in wins:Kit.add_label(g,Kit.fit(f,200),x+12,a+3);c=LAYOUT.zone_of(b);i="Zone: "+(c if c else "free");d="zone_"+b;Kit.art_button(g,self.store,d,Kit.ART_PAGE,x+224,a-2,i,self.ZONE_TIP);self.zone_keys.append((d,b,e));a+=26
-	FOLD_TIP="Show its parts";UNFOLD_TIP="Hide its parts";NEW_TAG="(new)"
+	FOLD_TIP="Show its parts";UNFOLD_TIP="Hide its parts";MOD_TIP="Type part of a name or feature to list matching modules (old names work)"
 	def _draw_mods(self,g,x,y,w,h,rows,first):
 		Kit.add_section(g,x,y,w,h,"MODULES  (tick a module to turn it on)"if first else "MODULES  (continued)")
-		if first:f=x+w-12-self.SEARCH_W;Kit.add_label(g,"Search",f-8-Kit.text_w("Search"),y+7,Kit.HUE_INFO);self.search_tb=Kit.with_tip(Kit.add_textbox(g,self.mod_search,f,y+5,self.SEARCH_W,numbers=False),"Type part of a name or feature to list matching modules (old names work)");self.search_text=None
-		b=y+32
+		if first:self._search_box(g,x+w-12-self.SEARCH_W,y,self.mod_search,self.MOD_TIP)
+		b=y+32;m=WhatsNew.unseen()
 		for a in rows:
 			if a[0]=="part":
-				s,p,c,i=a[1],a[2],a[3],a[4];self._part_box(g,s,p,x+36,b);j=x+236
-				for k,d in enumerate(c):Kit.add_label(g,d,j,b+2+20*k,Kit.HUE_INFO)
-				e="<- found"if i else(self.NEW_TAG if not p[4]else "")
-				if e:n=Kit.text_w(c[0])if c else 0;Kit.add_label(g,e,min(j+n+10,x+w-12-Kit.text_w(e)),b+2,Kit.HUE_TITLE if i else Kit.HUE_INFO)
+				s,p,c,f=a[1],a[2],a[3],a[4];self._part_box(g,s,p,x+36,b);i=x+236
+				for k,d in enumerate(c):Kit.add_label(g,d,i,b+2+20*k,Kit.HUE_INFO)
+				e=Kit.Form.FOUND if f else(Kit.Form.NEW if "%s.%s"%(s.key,p[0])in m else "")
+				if e:n=Kit.text_w(c[0])if c else 0;Kit.add_label(g,e,min(i+n+10,x+w-12-Kit.text_w(e)),b+2,Kit.HUE_TITLE if f else Kit.HUE_INFO)
 			elif a[0]!="mod":Kit.add_label(g,a[1].upper()if a[0]=="head"else a[1],x+12,b+3,Kit.HUE_TITLE if a[0]=="head"else Kit.HUE_INFO)
 			else:
-				s,l,c=a[1],a[2],a[3]
-				if l:Kit.add_label(g,s.title,x+36,b+2,Kit.HUE_INFO)
+				s,j,c=a[1],a[2],a[3]
+				if j:Kit.add_label(g,s.title,x+36,b+2,Kit.HUE_INFO)
 				else:
-					m=Kit.add_check(g,s.title,x+12,b,s.enabled,s.desc);self._hook_box(m);self.box_list.append((s,None,m));self.seen[s.key]=s.enabled
+					l=Kit.add_check(g,s.title,x+12,b,s.enabled,s.desc);self._hook_box(l);self.box_list.append((s,None,l));self.seen[s.key]=s.enabled
 					if s.parts:o=">"if s.folded else "v";Kit.add_label(g,o,x+184,b+2,Kit.HUE_TITLE);Kit.catcher(g,x+178,b,18,22,self._fold_click(s.key),self.FOLD_TIP if s.folded else self.UNFOLD_TIP);self.fold_keys.append(("fold_"+s.key,s.key))
-				for k,d in enumerate(c):Kit.add_label(g,d,x+200,b+2+20*k,Kit.HUE_BAD if l else Kit.HUE_INFO)
+				for k,d in enumerate(c):Kit.add_label(g,d,x+200,b+2+20*k,Kit.HUE_BAD if j else Kit.HUE_INFO)
 			b+=self._row_h(a)
 	def _fold_click(self,key):
 		a=self.store
@@ -4191,33 +4599,38 @@ class ConfigWindow(object):
 	def _step_scale(self,d):
 		a=list(self.SCALES);b=int(round(self.scale*100));i=min(range(len(a)),key=lambda k:abs(a[k]-b));i=max(0,min(len(a)-1,i+d))if d else a.index(100)
 		if a[i]!=b:self.scale=a[i]/100.;self.redraw()
-	def _reset(self):self._leave_page();self.search_tb,self.search_text,self.search_at=None,None,0.;self.store=({},{});self.page_keys,self.box_list,self.zone_keys=[],[],[];self.lag_lbl=None;self._prof_reset()
+	def _reset(self):self._leave_page();self.search_tb,self.search_text,self.search_at=None,None,0.;self.store=({},{});self.page_keys,self.box_list,self.zone_keys,self.hit_keys=[],[],[],[];self.lag_lbl=self.opt_lbl=None;self._prof_reset()
 	def _plan(self):
-		h,c,d=self._context();M,i=Kit.MARGIN,Kit.GAP;f=self._body_y()
-		if self.tab=="settings"and d is not None:b,a=self._units_settings(c,d,M,f)
-		elif self.tab=="settings"and self.loading is not None and c:b,a=self._units_loading(c,self.loading.title)
-		else:b,a=self._units_modules(h)
-		e=self._flow(b,a);g=1+max([j[1]for j in e]or[0]);W=2*M+g*a+(g-1)*i;H=f+max([k[2]+k[5]for k in e]or[40])+M;return d,b,a,e,W,H
+		h,b,d=self._context();M,i=Kit.MARGIN,Kit.GAP;f=self._body_y()
+		if self.tab=="settings"and b and self.opt_search and not self.opt_open:a,d,self.fresh_view=self.COL_W,None,None;c=[self._pick_unit(b,a,lambda s:False),self._found_unit(b,a)]
+		elif self.tab=="settings"and d is not None:c,a=self._units_settings(b,d,M,f)
+		elif self.tab=="settings"and self.loading is not None and b:c,a=self._units_loading(b,self.loading.title)
+		else:c,a=self._units_modules(h);self.fresh_view=None
+		e=self._flow(c,a);g=1+max([j[1]for j in e]or[0]);W=2*M+g*a+(g-1)*i;H=f+max([k[2]+k[5]for k in e]or[40])+M;return d,c,a,e,W,H
 	def _draw_body(self,g,units,b,placed):
 		a=PageCanvas(g);c=self._body_y()
 		for u,d,e,i,j,h in sorted(placed,key=lambda p:p[0]):units[u]["draw"](a,Kit.MARGIN+d*(b+Kit.GAP),c+e,h,i,j)
 		return a
 	def _build_full(self,x,y):
-		self._reset();self.seen,self.resize_at={},0.;self.part_boxes,self.fold_keys=[],[];M,q=Kit.MARGIN,Kit.GAP;L=M;B,r,s,t,W,H=self._plan();a=M;j=a+34+q;u=self._body_y();k=W-2*M;S=self.scale;b,c=int(round(W*S)),int(round(H*S));g=G.CreateModernGump(x,y,b,c,True,int(self.MIN_W*S),int(self.MIN_H*S),self._on_resized);g.SetAlpha(0);Kit.add_window_frame(g,W,H,mouse=False);Kit.add_section(g,L,a,k,34);Kit.add_label(g,"VIRTUE ASSISTANT",L+30,a+9,Kit.HUE_TITLE);l=L+30+Kit.text_w("VIRTUE ASSISTANT")+12;Kit.add_label(g,"v"+APP_VERSION,l,a+9,Kit.HUE_INFO);d=l+Kit.text_w("v"+APP_VERSION)+16;Kit.title_catcher(g,L,a,d-6-L,34,lambda:self.store[1].__setitem__("min",True),key="va")
-		for m,e in self.TABS:v=m==self.tab;Kit.art_button(g,self.store,"tab_"+m,Kit.ART_PAGE,d,a+6,e,"Show the %s tab"%e,Kit.HUE_TITLE if v else Kit.HUE_INFO);d+=self._cap_w(Kit.ART_PAGE,e)+16
-		f="%d%%"%int(round(S*100));n=W-M-74-Kit.DOCK_DX-8-16;Kit.art_button(g,self.store,"scale_up",self.ART_MORE,n,a+9,None,"Larger window and text");h=n-6-Kit.text_w(f);Kit.add_label(g,f,h,a+9,Kit.HUE_TEXT);Kit.catcher(g,h-2,a+6,Kit.text_w(f)+4,22,lambda:self.store[1].__setitem__("scale_reset",True),"Scale (click: 100%)");Kit.art_button(g,self.store,"scale_down",self.ART_LESS,h-6-16,a+9,None,"Smaller window and text");Kit.dock_button(g,self.store,W-M-74,a+9);Kit.art_button(g,self.store,"min",Kit.ART_MIN,W-M-74,a+9,None,"Minimize to the gear (or double-click the title)");Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,a+6,None,"Close Virtue Assistant (stops every module)")
-		try:self._build_profiles(g,L,j,k)
-		except Exception as w:self.prof_dd_args=None;Kit.add_label(g,"Profiles unavailable: %s"%w,L+12,j+9,Kit.HUE_BAD)
-		z=frozenset(self.store[0]);A=self._draw_body(g,r,s,t);self._add_profile_list(g)
-		if not Kit.scale_window(g,S)and S!=1.:self.scale,S,b,c=1.,1.,W,H;Kit.say("can't scale the window; it stays at 100%.",Kit.HUE_BAD)
-		self._replace(g,"full",x,y,b,c,int(round(u*S)));i=Kit.scroll_info(g);self.size=(i["w2"],i["hv"])if i else(b,c);self.minimized=False;self.dirty=None;self.body,self.head=A,(g,W,self.tab,Kit.dark(),z)
+		self._reset();self.seen,self.resize_at={},0.;self.part_boxes,self.fold_keys=[],[];M,u=Kit.MARGIN,Kit.GAP;L=M;F,v,w,z,W,H=self._plan();a=M;i=a+34+u;A=self._body_y();j=W-2*M;S=self.scale;d,e=int(round(W*S)),int(round(H*S));g=G.CreateModernGump(x,y,d,e,True,int(self.MIN_W*S),int(self.MIN_H*S),self._on_resized);g.SetAlpha(0);Kit.add_window_frame(g,W,H,mouse=False);Kit.add_section(g,L,a,j,34);Kit.add_label(g,"VIRTUE ASSISTANT",L+30,a+9,Kit.HUE_TITLE);o=L+30+Kit.text_w("VIRTUE ASSISTANT")+12;Kit.add_label(g,"v"+APP_VERSION,o,a+9,Kit.HUE_INFO);c=o+Kit.text_w("v"+APP_VERSION)+16;Kit.title_catcher(g,L,a,c-6-L,34,lambda:self.store[1].__setitem__("min",True),key="va")
+		for p,k in self.TABS:B=p==self.tab;Kit.art_button(g,self.store,"tab_"+p,Kit.ART_PAGE,c,a+6,k,"Show the %s tab"%k,Kit.HUE_TITLE if B else Kit.HUE_INFO);c+=self._cap_w(Kit.ART_PAGE,k)+16
+		l="%d%%"%int(round(S*100));q=W-M-74-Kit.DOCK_DX-8-16;Kit.art_button(g,self.store,"scale_up",self.ART_MORE,q,a+9,None,"Larger window and text");f=q-6-Kit.text_w(l);Kit.add_label(g,l,f,a+9,Kit.HUE_TEXT);Kit.catcher(g,f-2,a+6,Kit.text_w(l)+4,22,lambda:self.store[1].__setitem__("scale_reset",True),"Scale (click: 100%)");Kit.art_button(g,self.store,"scale_down",self.ART_LESS,f-6-16,a+9,None,"Smaller window and text");Kit.dock_button(g,self.store,W-M-74,a+9);Kit.art_button(g,self.store,"min",Kit.ART_MIN,W-M-74,a+9,None,"Minimize to the gear (or double-click the title)");Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,a+6,None,"Close Virtue Assistant (stops every module)");self.find_prof=False;b=self.host.launcher;h=f-6-16-8;r,m=self._cap_w(Kit.ART_PAGE,"Find"),Kit.pic_size(Kit.ART_PAGE[0])[0]or 30
+		if b is not None and c+r<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-r,a+6,"Find",Launcher.TIP,Kit.HUE_INFO,b.toggle)
+		elif b is not None and c+m<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-m,a+6,None,Kit.caption_tip("Find",Launcher.TIP),None,b.toggle)
+		else:self.find_prof=b is not None
+		try:self._build_profiles(g,L,i,j)
+		except Exception as C:self.prof_dd_args=None;Kit.add_label(g,"Profiles unavailable: %s"%C,L+12,i+9,Kit.HUE_BAD)
+		if self.find_prof:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,L+j-12-m,i+6,None,Kit.caption_tip("Find",Launcher.TIP),None,b.toggle)
+		D=frozenset(self.store[0]);E=self._draw_body(g,v,w,z);self._add_profile_list(g)
+		if not Kit.scale_window(g,S)and S!=1.:self.scale,S,d,e=1.,1.,W,H;Kit.say("can't scale the window; it stays at 100%.",Kit.HUE_BAD)
+		self._replace(g,"full",x,y,d,e,int(round(A*S)));n=Kit.scroll_info(g);self.size=(n["w2"],n["hv"])if n else(d,e);self.minimized=False;self.dirty=None;self.body,self.head=E,(g,W,self.tab,(Kit.look(),Kit.compact),D)
 		if self.search_focus:
-			self.search_focus=False;o=self.search_tb
-			if o is not None:
-				p=Kit.client_control(o)
-				if p is not None and Kit.flush():safe(lambda:p.SetKeyboardFocus())
+			self.search_focus=False;s=self.search_tb
+			if s is not None:
+				t=Kit.client_control(s)
+				if t is not None and Kit.flush():safe(lambda:t.SetKeyboardFocus())
 	def build_gear(self,x,y):
-		self._reset();S=self.GEAR;g=G.CreateGump(True,True);Kit.add_window_frame(g,S,S,corners=False);Kit.add_section(g,7,7,S-14,S-14);p=G.CreateGumpItemPic(4179,S-18,S-18);p.SetPos(9,9);p.SetAcceptMouseInput(False);g.Add(p);Kit.catcher(g,0,0,S,S,self._gear_click,"%s: click to open, drag to move"%APP_NAME,movable=True);self.gear_clicked,self.gear_pos,self.gear_moved=False,None,0.;self._replace(g,"gear",x,y,S,S);self.minimized=True;self.docked=self.host.dock_wanted(self.DOCK_KEY)and self.host.bar_alive()
+		self._reset();self.fresh_view=None;S=self.GEAR;g=G.CreateGump(True,True);Kit.add_window_frame(g,S,S,corners=False);Kit.add_section(g,7,7,S-14,S-14);p=G.CreateGumpItemPic(4179,S-18,S-18);p.SetPos(9,9);p.SetAcceptMouseInput(False);g.Add(p);Kit.catcher(g,0,0,S,S,self._gear_click,"%s: click to open, drag to move"%APP_NAME,movable=True);self.gear_clicked,self.gear_pos,self.gear_moved=False,None,0.;self._replace(g,"gear",x,y,S,S);self.minimized=True;self.docked=self.host.dock_wanted(self.DOCK_KEY)and self.host.bar_alive()
 		if self.docked:self._show_gear(False)
 	def fold_to_bar(self):
 		self.host.dock_want_set(self.DOCK_KEY,True)
@@ -4274,7 +4687,7 @@ class ConfigWindow(object):
 		Kit.on_client(self._swap_body);self.host.save_prefs()
 	def _swap_body(self):
 		g,a=self.g,self.head;b=False
-		if a is not None and a[0]is g and Kit.is_open(g)and self.tab==a[2]=="settings"and a[3]==Kit.dark()and self.scale==1. and g not in Kit._scrolled and g not in Fill.recs and not self.resize_at and self.prof_cache is not None and self._prof_key(self.prof_cache)==self.prof_shown:
+		if a is not None and a[0]is g and Kit.is_open(g)and self.tab==a[2]=="settings"and a[3]==(Kit.look(),Kit.compact)and self.scale==1. and g not in Kit._scrolled and g not in Fill.recs and not self.resize_at and self.prof_cache is not None and self._prof_key(self.prof_cache)==self.prof_shown:
 			try:b=self._fast_body(g,a[1],a[4])
 			except Exception as c:self.host._tell("%s: settings window error: %s%s"%(APP_NAME,c,_error_where()))
 		if not b:self._build_full(self.x,self.y)
@@ -4287,7 +4700,7 @@ class ConfigWindow(object):
 		self.body=self._draw_body(g,e,f,h);self._add_profile_list(g);self.x,self.y=Kit.place(g,self.x,self.y,W,H);Kit.moved_by_code(g);self.size,self.dirty=(W,H),None;return True
 	def show_settings(self,key):self.request=key
 	def refresh(self,key):
-		self.forget_measure(key)
+		self.forget_measure(key);self._forget_index(key)
 		if self.shown_page==key:self.dirty=self.stale_page=key
 	def close(self):self.closing=True;self._leave_page();g,self.g=self.g,None;Kit.dispose(g);self.docked,self.link_state=False,None;API.SetSharedVar(self.LINK_STATE,"off")
 	def poll(self):
@@ -4321,6 +4734,8 @@ class ConfigWindow(object):
 		if self._poll_buttons():return
 		self._fld_due=self.host.poll_due(self._fld_gate);self._poll_profiles()
 		if self.search_tb is not None and self._fld_due and self._poll_search():return
+		if self.tab=="settings"and self.opt_search and not self.opt_open and self._fld_due:
+			if self._poll_index():return
 		if self.lag_lbl is not None and time.time()>=self.lag_next:
 			self.lag_next=time.time()+1.;c=self.host.active
 			if c:e=max(c,key=lambda s:s.load[2]);f="%d modules on; slowest lately: %s, %d ms"%(len(c),e.title,e.load[2])
@@ -4341,13 +4756,17 @@ class ConfigWindow(object):
 	def _poll_search(self):
 		try:t=str(self.search_tb.Text or "")
 		except Exception:return False
-		a=time.time()
+		b=time.time()
 		if t!=self.search_text:
-			if self.search_text is not None:self.search_at=a
+			if self.search_text is not None:self.search_at=b
 			self.search_text=t;return False
-		if self.search_at and a-self.search_at>=SEARCH_SETTLE:
-			self.search_at=0.
-			if t.strip().lower()!=self.mod_search.strip().lower():self.mod_search=t.strip();self.search_focus=True;self.redraw();return True
+		if self.search_at and b-self.search_at>=SEARCH_SETTLE:
+			self.search_at=0.;q=t.strip();a=self.tab=="settings"
+			if q.lower()!=(self.opt_search if a else self.mod_search).strip().lower():
+				if not a:self.mod_search=q
+				else:self.opt_search,self.opt_open=q,False
+				if a and not q:self.opt_mark=None
+				self.search_focus=True;self.redraw();return True
 		return False
 	BOX_EVERY=1.
 	def _hook_box(self,a):
@@ -4355,18 +4774,19 @@ class ConfigWindow(object):
 		def b(*a):Kit.clicks_seen=True;self.box_hit=True;HOST.poke()
 		G.AddControlOnClick(a,b)
 	def _poll_boxes(self):
-		c=self.seen
+		d=self.seen
 		for s,a,e in self.box_list+self.part_boxes:
-			d,b=(s.key,s.enabled)if a is None else("%s.%s"%(s.key,a),bool(s.parts_on.get(a)))
+			b,c=(s.key,s.enabled)if a is None else("%s.%s"%(s.key,a),bool(s.parts_on.get(a)))
 			try:v=bool(e.IsChecked)
-			except Exception:v=b
-			if v!=c.get(d):
-				c[d]=v
+			except Exception:v=c
+			if v!=d.get(b):
+				d[b]=v
 				if a is not None:self.host.part_set(s.key,a,v)
+				if a is not None and v:WhatsNew.see((b,))
 				elif v:self.host.enable(s.key)
 				else:self.host.disable(s.key)
 				if not Kit.is_open(self.g)or self.mode!="full":return True
-			elif v!=b:safe(lambda:e.SetIsChecked(b));c[d]=b
+			elif v!=c:safe(lambda:e.SetIsChecked(c));d[b]=c
 		return False
 	def _poll_buttons(self):
 		b=self.store
@@ -4374,12 +4794,15 @@ class ConfigWindow(object):
 		if Kit.was_clicked(b,"close"):self.host.save_prefs();self.host.quitting=True;return True
 		if Kit.was_clicked(b,"min"):self.host.dock_forget(self.DOCK_KEY);self.fold();return True
 		if Kit.was_clicked(b,"tobar"):self.fold_to_bar();return True
-		for a,g in(("scale_down",-1),("scale_up",1),("scale_reset",0)):
-			if Kit.was_clicked(b,a):self._step_scale(g);return True
-		for a,j in self.TABS:
+		Kit.was_clicked(b,"find")
+		for a,h in(("scale_down",-1),("scale_up",1),("scale_reset",0)):
+			if Kit.was_clicked(b,a):self._step_scale(h);return True
+		for a,k in self.TABS:
 			if Kit.was_clicked(b,"tab_"+a)and a!=self.tab:self.tab=a;self.redraw();return True
 		for d,a in self.page_keys:
-			if Kit.was_clicked(b,d)and a!=self.shown_page:self._switch_page(a);return True
+			if Kit.was_clicked(b,d)and a!=self.shown_page:self.opt_open,self.opt_mark=bool(self.opt_search),None;self._switch_page(a);return True
+		for d,e in self.hit_keys:
+			if Kit.was_clicked(b,d):self.opt_open,self.opt_mark=True,(e[0],e[1],e[6]if e[6]is not None else e[4],e[3]);self._switch_page(e[0]);return True
 		for d,a in self.fold_keys:
 			if Kit.was_clicked(b,d):
 				s=dict.get(self.host.by_key,a)
@@ -4387,9 +4810,9 @@ class ConfigWindow(object):
 				self.redraw();return True
 		for d,a,c in self.zone_keys:
 			if Kit.was_clicked(b,d):
-				f=LAYOUT.zone_of(a);i=c.index(f)if f in c else 0;e=c[(i+1)%len(c)]if c else None;h=LAYOUT._map_zone()
-				if e is not None and a!="worldmap"and e==h and len(c)>2:e=c[(i+2)%len(c)]
-				LAYOUT.assign_to(a,e);self.redraw();return True
+				g=LAYOUT.zone_of(a);i=c.index(g)if g in c else 0;f=c[(i+1)%len(c)]if c else None;j=LAYOUT._map_zone()
+				if f is not None and a!="worldmap"and f==j and len(c)>2:f=c[(i+2)%len(c)]
+				LAYOUT.assign_to(a,f);self.redraw();return True
 		return False
 class AlonePage(object):
 	W=460;prof_stale=False;mode="alone"
@@ -4494,7 +4917,7 @@ class HubWindow(object):
 				try:Binds.scoped(i,p["build"],g,M,y,c,q)
 				except Exception as m:Kit.add_section(g,M,y,c,l);Kit.add_label(g,"%s: %s"%(t,m),M+10,y+10,Kit.HUE_BAD);self._error(i,m)
 				y+=l+d
-		if e:n=LAYOUT.placed.get("hub")or(self.x,self.y);g.SetPos(int(n[0]),int(n[1]))
+		if e:n=LAYOUT.spot("hub")or(self.x,self.y);g.SetPos(int(n[0]),int(n[1]))
 		else:self.x,self.y=Kit.place(g,self.x,self.y,w,h)
 		self.H=h;self.g,self.store=g,b;G.AddControlOnDisposed(g,lambda*a:self._disposed(g));G.AddGump(g)
 		if not e:g.SetInScreen()
@@ -4536,6 +4959,153 @@ class HubWindow(object):
 				if not self.host.poll_due(c,b.get("poll_every")):continue
 				try:b["poll"](d)
 				except Exception as e:self._error(a,e)
+class Launcher(object):
+	W=560;ROWS=8;ROW=28;SETTLE=.15;RECENT=5;POS_KEY="VirtueAssistant_launcher_pos";ONCE="va.launcher.run";GAP=.6;SOON="too soon after the last run; press again.";TITLE="QUICK LAUNCHER";TIP="Quick launcher: find a rune, cell, window or option";NAME="Quick Launcher";ENTER_OFF="launcher_Enter_key";ORDER=("rune","cell","window","layout","option","command");FIELD_TIP="Type words to find something; Enter runs the top row";HINT="Type to find a rune, cell, window, layout, option or command";RUN="Enter runs the top row; click a row to run it";CLICK="Click a row to run it"
+	def __init__(self,host):self.host=host;self.g=self.tb=self.ver=self.pick=None;self.store=({},{});self.rows=[];self.recent=[];self.text=self.shown=self.status="";self.typed_at=0.;self.enter=self.hooked=False;self.toggle=Kit.once(self._toggle_req,"va.launcher",.4);self.go=Kit.once(self._go,self.ONCE,self.GAP)
+	def _toggle_req(self):Kit.pending.append(self._toggle);self.host.poke()
+	def _toggle(self):
+		if Kit.is_open(self.g):self.close();return
+		self.text=self.shown="";self.typed_at=0.;self.enter=False;self.ver=None;self.rows,self.status=self.find("");Binds.scoped("va.launcher",self._build)
+	@staticmethod
+	def score(words,text,extra=""):
+		a=text.lower();d=a.replace("("," ").replace(">"," ").split();e=extra.lower();b=0
+		for w in words:
+			c=3 if any(f.startswith(w)for f in d)else 2 if w in a else 1 if w in e else 0
+			if not c:return 0
+			b+=c
+		return b
+	def zones_on(self):s=dict.get(self.host.by_key,LAYOUT_OWNER);return s is not None and s.running
+	def windows(self):
+		a=[];b=[f for f in self.host.slots if f.api is not None or f.lazy is not None];e=[h[0]for g in b for h in g.parts]
+		for s in b:
+			if not s.parts:a.append(((s.key,(s.key,)),s.title));continue
+			for p in s.parts:c="%s.%s"%(s.key,p[0]);d=tuple(p[4][:1])if len(p)>4 else();d+=(c,)+((p[0],)if e.count(p[0])==1 and p[0]not in self.host.by_key else());a.append(((c,d),s.part_title(p[0])))
+		return a
+	def commands(self):return(("history","Alert history"),("quiet","Resume alerts"if ALERTS.quiet_on()else "Quiet alerts for 30 minutes"),("backup","Back up settings now"),("settings","Settings"),("news","What's new"))
+	def options(self,words):
+		c=self.host.config
+		if c is None or c.mode=="alone":return[],True
+		a=c.settings_slots();b=[]
+		for s in a:
+			for e in c.opt_index.get(s.key,()):
+				d=" ".join((s.title,e[2],e[4],e[5],"option")).lower()
+				if e[3]!="note"and all(f in d for f in words):b.append((e,c._hit_text(e)))
+		return b,all(g.key in c.opt_index for g in a)
+	def ask(self,name,q,n=None):a=self.host.services.get(name);return(safe(lambda:a(q,n or self.ROWS),None)or())if a is not None else()
+	def find(self,q):
+		c=str(q or "").lower().split()
+		if not c:
+			if self.recent:return list(self.recent),"Your last runs this session"
+			return[],self.HINT
+		d=[]
+		def a(label,kind,data,tip,extra="",pre=False):
+			a=self.score(c,label,extra)or(len(c)if pre else 0)
+			if a:d.append((-a,self.ORDER.index(kind),len(d),(label,kind,data,tip)))
+		for b,n in self.ask("grimoire.find",q):a("Rune: "+b,"rune",n,"Travel to %s"%b,"rune",True)
+		for b,o,j in self.ask("actionbar.find",q):p="Outfit"if j=="outfit"else "Cell";a("%s: %s"%(p,b),"cell",(o,b),"Use %s"%b,"cell "+j,True)
+		for e,k in self.windows():s=self.host.by_key.get(e[0]);r=s is not None and s.running;a("Window: "+k,"window",e,("Show %s"if r else "Turn %s on")%k,"window")
+		if self.zones_on():
+			for h in[LAYOUT_DEFAULT,LAYOUT_MIRRORED]+list(LAYOUT.layout_names()):a("Layout: "+h,"layout",h,'Use the window layout "%s"'%h,"layout")
+		t,u=self.options(c)
+		for i,l in t:a("Option: "+l,"option",i,i[5]or "Open %s"%l,i[5]+" option")
+		for e,m in self.commands():a(m,"command",e,m,"command")
+		d.sort(key=lambda f:f[:3]);g=[v[3]for v in d[:self.ROWS]]
+		if not u:return g,"Still reading settings pages; options appear as they are read"
+		if not g:return g,'Nothing matches "%s"'%str(q).strip()
+		return g,self.RUN
+	def _build(self):
+		M,W,n=Kit.MARGIN,self.W,Kit.GAP;s=Kit.tscale;d=Kit.pitch(self.ROW);e=self.rows;c=self.g;f=({},{});a=M+30+n;j=a+44;o=self._caret();k=44+d*len(e)+28;H=a+k+M;g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,self.TITLE,M+30,M+7,Kit.HUE_TITLE);Kit.art_button(g,f,"close",Kit.ART_CLOSE,W-M-54,M+4,None,"Close");Kit.add_section(g,M,a,W-2*M,k);b=Kit.add_textbox(g,self.text,M+12,a+10,W-2*M-24,numbers=False);self.hooked=self._hook(b);Kit.with_tip(b,self.FIELD_TIP if self.hooked else self.FIELD_TIP.split(";")[0])
+		for l,r in enumerate(e):Kit.art_button(g,f,"run%d"%l,Kit.ART_PLAY,M+12,j+d*l,Kit.fit(r[0],W-2*M-70),r[3])
+		p=self.status if self.hooked or self.status!=self.RUN else self.CLICK;Kit.add_label(g,Kit.fit(p,W-2*M-24),M+12,j+d*len(e)+4,Kit.HUE_INFO);h=s if Kit.scale_window(g,s)else 1.;i,m=int(round(W*h)),int(round(H*h))
+		if Kit.is_open(c):x,y=int(c.GetX()),int(c.GetY())
+		else:q=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(q-i)//2),120),(i,m))
+		Kit.place(g,x,y,i,m,int(round(a*h)));G.AddGump(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g,self.tb,self.store=g,b,f;Kit.dispose(c);safe(b.SetFocus);self._put_caret(b,o)
+	def _caret(self):
+		with Kit.quiet:
+			n=int(self.tb.CaretIndex)
+			if 0<=n<len(self.text):return n
+		return
+	@staticmethod
+	def _put_caret(tb,n):
+		if n is None:return
+		with Kit.quiet:Kit.client_control(tb).TextBox.CaretIndex=n
+	def _hook(self,tb):
+		if self.ENTER_OFF in self.host.tz_off:return False
+		try:import clr;import System;c=Kit.client_control(tb);a=c.GetType().GetEvent("EnterPressed");h=clr.GetPythonType(a.EventHandlerType)(self._enter_hit);a.GetAddMethod(True).Invoke(c,System.Array[object]([h]));return True
+		except Exception:return False
+	def _enter_hit(self,sender=None,e=None):self.enter=True;self.host.poke()
+	def rebuild(self):
+		if Kit.is_open(self.g):Kit.save_pos(self.POS_KEY,self.g);Binds.scoped("va.launcher",self._build)
+	def poll(self,now):
+		if not Kit.is_open(self.g)or Kit.was_clicked(self.store,"close"):self.close();return
+		try:t=str(self.tb.Text or "")
+		except Exception:t=self.text
+		if t!=self.text:self.text,self.typed_at=t,now
+		if self.enter:
+			self.enter=False;self.rows,self.status=self.find(self.text);self.shown=self.text
+			if self.rows:self.run(0,True)
+			else:self.rebuild()
+			return
+		for i in range(len(self.rows)):
+			if Kit.was_clicked(self.store,"run%d"%i):self.run(i);return
+		c=self.host.config;a=self.text.split()
+		if a and c is not None and c.mode!="alone":safe(c._index_tick)
+		b=c.opt_ver if c is not None and c.mode!="alone"else 0
+		if(self.text!=self.shown and now-self.typed_at>=self.SETTLE)or(a and b!=self.ver):
+			d,e=self.find(self.text);self.shown,self.ver=self.text,b
+			if d!=self.rows or e!=self.status:self.rows,self.status=d,e;self.rebuild()
+	def run(self,i,enter=False):
+		if not 0<=i<len(self.rows):return
+		if 0.<=time.time()-Kit._fired.get(self.ONCE,0.)<self.GAP:self.say(self.SOON);return
+		self.pick=(self.rows[i],enter);self.close();self.go()
+	def _go(self):
+		d,j=self.pick;k,e,b=d[0],d[1],d[2];f=self.host.services;a=False
+		if e=="rune":
+			c=f.get("grimoire.go");a=c is not None and bool(c(b))
+			if c is None:self.say("Grimoire is off.")
+		elif e=="cell":
+			c=f.get("actionbar.use");g,h=b;i=h.rsplit("  (",1)[0]
+			if c is None:self.say("the Action Bar is off.")
+			elif(h,g)not in[l[:2]for l in self.ask("actionbar.find",i,200)]:self.say("%s is no longer on the Action Bar."%i)
+			else:
+				if j:self.host.harm_conf=(None,0,0.)
+				a=bool(c(g))
+		elif e=="window":a=self._window(b)
+		elif e=="layout":
+			a=self.zones_on()
+			if a:LAYOUT.use_windows(b)
+			else:self.say("window layouts need the Interface module on.")
+		elif e=="option":a=self._option(b)
+		else:a=self._command(b)
+		if a:self.recent=[d]+[m for m in self.recent if m[1:3]!=d[1:3]];del self.recent[self.RECENT:]
+		return a
+	def say(self,text):API.SysMsg("%s: %s"%(self.NAME,text),Kit.HUE_BAD)
+	def _window(self,key):
+		b,c=key;s=self.host.by_key.get(b);e=dict(self.host.docks)
+		if s is None:self.say("that window is no longer loaded.");return False
+		a=next((f for f in c if f in e),c[0])
+		if not s.running:self.host.dock_forget(a);self.host.enable(b);return True
+		d=e.get(a)
+		if d is not None and safe(d.get("state"))!="open":safe(d.get("show"));self.host.dock_forget(a)
+		return True
+	def _option(self,e):
+		c=self.host.config
+		if c is None or c.mode=="alone"or self.host.page_slot(e[0])is None:return False
+		c.opt_open,c.opt_mark=True,(e[0],e[1],e[6]if e[6]is not None else e[4],e[3]);c.show_settings(e[0]);return True
+	def _command(self,key):
+		h=self.host
+		if key=="history":h.alert_log.open()
+		elif key=="quiet":ALERTS.toggle_quiet()
+		elif key=="backup":BackupPage.ask(("backup","by hand"))
+		elif key=="settings":
+			if h.config is None:return False
+			h.config.request_tab="settings"
+		elif key=="news":return h.whats_new.show()
+		return True
+	def close(self):
+		g,self.g,self.tb=self.g,None,None;self.enter=False
+		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
+		Kit.dispose(g);self.store=({},{})
 SNAP_DIST=16
 SNAP_SETTLE=.25
 SNAP_EVERY=.08
@@ -4786,7 +5356,7 @@ class Snap(object):
 		if(self.moved or self.lost)and not self.drag:self._tell_moved()
 	def keep_one(self,g):
 		r=self.rect(g)
-		if r is None:return False
+		if r is None or(Kit._behind and self.attached.get(g)in Kit._behind):return False
 		b,c,d,e=r[0],r[1],r[0]+r[2],r[1]+r[3]
 		for f in self.followers(g):
 			a=self.rect(f)
@@ -4862,6 +5432,7 @@ LAYOUT_DEFAULT="Default"
 LAYOUT_MIRRORED="Mirrored"
 LAYOUT_MINE="Default (mine)"
 LAYOUT_GONE=frozenset(("spelltimers","bandage","swing"))
+DUNGEON_AREAS=((0,5120,0,6143,2303),)
 WINDOWS_DEFAULT=("L1=character;L2=bag;C1=unitframes.player;C2=unitframes.target;C4=actionbar;R1=worldmap;R2=ultima.friend,ultima.neutral,ultima.foe;R3=meters")
 WINDOWS_MIRRORED=("L1=worldmap;L2=ultima.friend,ultima.neutral,ultima.foe,meters;C1=unitframes.player;C2=unitframes.target;C4=actionbar;R1=character;R2=bag")
 SIDE_MIN,SIDE_MAX,SIDE_SHARE=240,440,.22
@@ -4874,7 +5445,9 @@ MINI_BAR=46
 ZONE_MIN_W,ZONE_MIN_H=96,64
 ZONE_COLORS={"w":"#3A78C8","k":"#3AA060","r":"#C88A3A"}
 ZONE_KINDS=(("w","window"),("k","keep clear"),("r","reserved"))
-ZONE_STACKS=(("d","down"),("u","up"),("r","right"),("l","left"))
+ZONE_STACKS=(("d","down"),("u","up"),("r","right"),("l","left"),("t","tabs"))
+TAB_H=26
+TAB_X=-20000
 SHRINK_MAX=6
 LAYOUT_OWNER="interface"
 SEAM_PAD=6
@@ -4893,7 +5466,7 @@ def _ordinal(n):
 	return "%d%s"%(n,{1:"st",2:"nd",3:"rd"}.get(n%10,"th"))
 class Zone(object):
 	__slots__=("id","kind","rect","pins","min","stack","prio","px","squeezed","fit","hug","arch","overlap","lock","solo","free","exact")
-	def __init__(self,id,kind="w",rect=(0,0,200,200),pins="",mins=(0,0),stack="d",prio=0,fit="w",hug=False,arch=False,overlap=False,lock=False,solo=False,free=False):self.id=str(id);self.kind=kind if kind in("w","k","r")else "w";self.rect=tuple(int(a)for a in rect);self.pins="".join(b for b in str(pins or "").upper()if b in "LTRBXY");self.min=(int(mins[0]),int(mins[1]));self.stack=stack if stack in("d","u","r","l")else "d";self.prio=max(0,min(SHRINK_MAX,int(prio)));self.fit=fit if fit in("w","s","n")else "w";self.hug=bool(hug)and self.kind=="w";self.arch=bool(arch)and self.kind=="k";self.overlap=bool(overlap);self.lock=bool(lock);self.solo=bool(solo);self.free=bool(free);self.px=None;self.squeezed=False;self.exact=None
+	def __init__(self,id,kind="w",rect=(0,0,200,200),pins="",mins=(0,0),stack="d",prio=0,fit="w",hug=False,arch=False,overlap=False,lock=False,solo=False,free=False):self.id=str(id);self.kind=kind if kind in("w","k","r")else "w";self.rect=tuple(int(a)for a in rect);self.pins="".join(b for b in str(pins or "").upper()if b in "LTRBXY");self.min=(int(mins[0]),int(mins[1]));self.stack=stack if stack in("d","u","r","l","t")else "d";self.prio=max(0,min(SHRINK_MAX,int(prio)));self.fit=fit if fit in("w","s","n")else "w";self.hug=bool(hug)and self.kind=="w";self.arch=bool(arch)and self.kind=="k";self.overlap=bool(overlap);self.lock=bool(lock);self.solo=bool(solo);self.free=bool(free);self.px=None;self.squeezed=False;self.exact=None
 	def kind_name(self):return dict(ZONE_KINDS)[self.kind]
 	def stack_name(self):return dict(ZONE_STACKS)[self.stack]
 	def copy(self):z=Zone(self.id,self.kind,self.rect,self.pins,self.min,self.stack,self.prio,self.fit,self.hug,self.arch,self.overlap,self.lock,self.solo,self.free);z.px=tuple(self.px)if self.px else None;z.exact=self.exact;return z
@@ -5314,7 +5887,7 @@ class Tex(object):
 	@staticmethod
 	def control(g,name,x,y,w,h):t=G.LegionTextureControl(name,int(w),int(h));t.SetRect(int(x),int(y),int(w),int(h));safe(lambda:t.SetAcceptMouseInput(False));g.Add(t);return t
 class Layout(object):
-	def __init__(self):self.wins={};self.assign={};self.frames=None;self.frames_name=LAYOUT_DEFAULT;self.layout_name="";self.game_grows=True;self.fit_view=True;self.screen=None;self.dirty=True;self.occ=None;self.gump_key={};self.placed={};self.titles={};self.min_seen={};self.loaded=False;self.page_refresh=False;self.enabled=True;self.seamless=False;self.gv_off_done=False;self.seam_skip={};self.seam_wait={};self.hooks={};self.owner={};self.fitted={};self.base={};self.fresh=False;self.fresh_adds=set();self.client_seen={};self.journal_held=None;self.pair_tried=None;self.client_settle={};self.misfit={};self.fallback={};self.client_told=set();self.chat_seen=(0.,None);self.held={};self.arrange=False;self.arrange_last=0.;self.arrange_g=None;self.arrange_lit={};self.arrange_hot=None;self.client_target={};self.repair_at=0.;self.repair_told=set();self.freed=None;self.page_preview="";self.homes=None;self.back_told=False;self._arrange_sig=None;self.rev={};self.retry_at=0.;self.slot_was={};self.bags_swept=False;self.reclaim_undo=self._vp_fields=self.gv_applied=self.small_said=None;self._undo_read=self.gv_small_told=self.gv_checked=self.need_due=self.migrating=False
+	def __init__(self):self.wins={};self.assign={};self.frames=None;self.frames_name=LAYOUT_DEFAULT;self.layout_name="";self.game_grows=True;self.fit_view=True;self.screen=None;self.dirty=True;self.occ=None;self.gump_key={};self.placed={};self.titles={};self.min_seen={};self.loaded=False;self.page_refresh=False;self.enabled=True;self.seamless=False;self.gv_off_done=False;self.seam_skip={};self.seam_wait={};self.hooks={};self.owner={};self.fitted={};self.base={};self.fresh=False;self.fresh_adds=set();self.client_seen={};self.journal_held=None;self.pair_tried=None;self.client_settle={};self.misfit={};self.fallback={};self.client_told=set();self.chat_seen=(0.,None);self.held={};self.arrange=False;self.arrange_last=0.;self.arrange_g=None;self.arrange_lit={};self.arrange_hot=None;self.client_target={};self.repair_at=0.;self.repair_told=set();self.freed=None;self.page_preview="";self.homes=None;self.back_told=False;self._arrange_sig=None;self.rev={};self.retry_at=0.;self.slot_was={};self.bags_swept=False;self.reclaim_undo=self._vp_fields=self.gv_applied=self.small_said=None;self._undo_read=self.gv_small_told=self.gv_checked=self.need_due=self.migrating=False;self.situ={"on":False,"base":""};self.situ_now=self.situ_pend=self.situ_last=self.situ_back=None;self.situ_at=0.;self.situ_busy=False;self.situ_bank=(-1e9,0,0,-1);self.tabs={};self.behind={};self.strips={}
 	def _client_getter(self,kind,key):
 		def a():
 			a=ClientWin.of(kind)
@@ -5388,7 +5961,7 @@ class Layout(object):
 		if self.frames_name!=LAYOUT_DEFAULT and self.frames_name not in self.frame_names():self.frames_name=LAYOUT_DEFAULT
 		self.layout_name=Kit.get_var(LAYOUT_ACTIVE,"");b=Kit.get_var(LAYOUT_OPTS,"game=1");self.game_grows="game=0"not in b;self.fit_view="fit=0"not in b;a=Kit.get_var(LAYOUT_VAR,"");self.seamless="seam=1"in b;c=dict.get(HOST.by_key,LAYOUT_OWNER);self.enabled=bool(c is not None and c.enabled and c.api is not None);self.assign=self.parse_windows(a)[1]
 		if a and a!=self.windows_text()and any(e.strip()in LAYOUT_GONE for d in str(a).split(";")if "="in d and d.split("=",1)[0].strip()!="frames"for e in d.split("=",1)[1].split(",")):self.save_assign()
-		self.frames=None;self.dirty=True
+		self.frames=None;self.dirty=True;self.situ_load();self.tabs=self._tabs_parse(Kit.get_var(self.TABS_VAR,""))
 	def save_assign(self):Kit.put_var(LAYOUT_VAR,self.windows_text());self._note_homes()
 	RECLAIM_VAR="VirtueAssistant_reclaim_undo";RECLAIM_FIXED="VirtueAssistant_reclaim_fixed"
 	def _undo_load(self):
@@ -5454,6 +6027,7 @@ class Layout(object):
 		if not on:self.set_arrange(False,tell=False)
 		self.enabled,self.gv_off_done=on,False;self.refit_all();HOST.poke()
 	def _off(self):
+		if self.behind or self.strips or Kit._behind:self._tabs_off()
 		Seam.undo_all()
 		for b in list(self.fitted):self._unfit(b)
 		for b in list(self.placed):
@@ -5475,7 +6049,7 @@ class Layout(object):
 			d=[e.strip()for e in v.split(",")if e.strip()and e.strip()not in LAYOUT_GONE]
 			if k and d:b[k]=d
 		return a,b
-	def windows_text(self,frames=None):return ";".join(["frames=%s"%(frames or self.frames_name)]+["%s=%s"%(a,",".join(self.assign[a]))for a in sorted(self.assign)if self.assign[a]])
+	def windows_text(self,frames=None,assign=None):a=self.assign if assign is None else assign;return ";".join(["frames=%s"%(frames or self.frames_name)]+["%s=%s"%(b,",".join(a[b]))for b in sorted(a)if a[b]])
 	@staticmethod
 	def _names(a):return[b for b in Kit.get_var(a,"").split(",")if b.strip()]
 	def frame_names(self):return self._names(FRAMES_LIST)
@@ -5536,7 +6110,7 @@ class Layout(object):
 	def need(self,key,w,h):
 		a=self.zone_of(str(key));b=self.frames
 		if a is None or b is None:return
-		c=(w,h)if(w or h)else None
+		z=b.by_id(a);c=(w,h+TAB_H if h and z is not None and z.stack=="t"else h)if(w or h)else None
 		if b.needs.get(a)!=c:
 			if c is None:b.needs.pop(a,None)
 			else:b.needs[a]=c
@@ -5546,7 +6120,7 @@ class Layout(object):
 		if z is None:return
 		W,H=a.screen
 		if W<=0 or H<=0:W,H=Kit.screen()
-		return(max(1,int(W*z.rect[2]/1000.)),max(1,int(H*z.rect[3]/1000.)))
+		c=TAB_H if z.stack=="t"else 0;return(max(1,int(W*z.rect[2]/1000.)),max(1,int(H*z.rect[3]/1000.)-c))
 	def holds(self,key):
 		if not self.enabled:return False
 		a=self.zone_of(str(key))
@@ -5613,7 +6187,8 @@ class Layout(object):
 	def _too_small(self,key,z,g=None):
 		a=self._min_of(key,g)
 		if a is None or z is None or z.px is None:return False
-		if z.px[2]>=a[0]and z.px[3]>=a[1]:return False
+		b=self._body(z)
+		if b[2]>=a[0]and b[3]>=a[1]:return False
 		Kit.say("%s needs a zone at least %d x %d."%(self.title_of(key),a[0],a[1]),Kit.HUE_BAD);return True
 	def title_of(self,key):
 		t=self.titles.get(key)
@@ -5779,6 +6354,7 @@ class Layout(object):
 		return Kit.get_var(LAYOUT_NAMED%name,"")
 	def use_windows(self,name,tell=True):
 		if(name and name not in(LAYOUT_DEFAULT,LAYOUT_MIRRORED)and name not in self.layout_names()):name=""
+		if self.situ["on"]and not self.situ_busy:self.situ["base"]=name;self.situ_now=self.situ_last;self.situ_pend=self.situ_back=None;self.situ_save()
 		a,b=(self.parse_windows(self.window_layout_text(name))if name else(self.frames_name,{}))
 		if name:self.unfree(None)
 		else:self.free_by_you(list(self.wins)+[d for c in self.assign.values()for d in c])
@@ -5793,6 +6369,115 @@ class Layout(object):
 		name=self.clean_name(name,LAYOUT_MINE);Kit.put_var(LAYOUT_NAMED%name,self.windows_text());a=self.layout_names()
 		if name not in a:a.append(name);Kit.put_var(LAYOUT_LIST,",".join(a))
 		self.layout_name=name;Kit.put_var(LAYOUT_ACTIVE,name);Kit.say('window layout "%s" saved.'%name,Kit.HUE_GOOD);self.page_refresh=True
+	CODE_HEAD,CODE_TAG,CODE_VER,CODE_FILE,CODE_MAX="VA-","VAL1",1,"layout-code.txt",8000;CODE_RAW=65536;CODE_BAD="Interface: that isn't a Virtue Assistant layout code."
+	def _shipped(self,key):
+		if key=="worldmap":return True
+		s=dict.get(HOST.by_key,self.owner_of(key)[0]or "");return s is not None and s.shipped
+	def share_code(self):
+		import zlib;W,H=Kit.screen();a=self.frames_in_use(W,H)if W>0 and H>0 else self.frames
+		if a is None or not a.zones:return ""
+		if self.frames_name!=LAYOUT_DEFAULT and W>0 and H>0:
+			e=FRAMES_NAMED%self.frames_name;c=Kit.get_var(e+"@"+ratio_class(W,H),"");d=ZoneSet.parse(self.frames_name,c or Kit.get_var(e,""))
+			if d is not None and d.zones:a=d
+		f={}
+		for i,j in self.assign.items():
+			g=[l for l in j if self._shipped(l)]
+			if g:f[i]=g
+		c="\n".join((self.CODE_TAG,self.frames_name,a.save_text(),self.windows_text(self.frames_name,f)));b=[self.CODE_VER]+list(bytearray(zlib.compress(c.encode("utf-8"),9)));h=Kit.checksum(b);b+=[(h>>8)&255,h&255];n=len(b);return self.CODE_HEAD+Kit.b64(b+[0]*(-n%3))[:(n*4+2)//3]
+	def _code_read(self,t):
+		import zlib
+		try:
+			if len(t)%4==1 or len(t)>self.CODE_MAX:return
+			if any(g not in Kit.B64_REV for g in t):return
+			d=Kit.unb64(t+"A"*(-len(t)%4));n=len(t)*3//4;b=d[:n]
+			if n<4 or any(d[n:])or b[0]!=self.CODE_VER:return
+			if Kit.checksum(b[:-2])!=(b[-2]<<8|b[-1]):return
+			e=zlib.decompressobj();f=e.decompress(bytes(bytearray(b[1:-2])),self.CODE_RAW)
+			if e.unconsumed_tail or len(f)>=self.CODE_RAW:return
+			a=f.decode("utf-8").split("\n")
+			if len(a)!=4 or a[0]!=self.CODE_TAG:return
+			c=ZoneSet.parse(a[1],a[2])
+			if c is None or not c.zones:return
+			return a[1],c,self.parse_windows(a[3])[1]
+		except Exception:return
+	def load_code(self,text):
+		t=re.sub(r"\s+","",str(text or ""));e=self._code_read(t[len(self.CODE_HEAD):])if t.startswith(self.CODE_HEAD)else None
+		if e is None:API.SysMsg(self.CODE_BAD,Kit.HUE_BAD);return False
+		b,c,f=e;b=b[:-9]if b.endswith(" (shared)")else b;a=self.clean_name(b,"Shared")[:15].strip()+" (shared)";W,H=Kit.screen()
+		if W<=0 or H<=0:W,H=c.screen
+		if(W,H)!=c.screen:c.reflow(W,H,HOST.grid_size())
+		self.save_frames(c,a,W,H);Kit.put_var(LAYOUT_NAMED%a,self.windows_text(a,f));d=self.layout_names()
+		if a not in d:d.append(a);Kit.put_var(LAYOUT_LIST,",".join(d))
+		self.use_windows(a);return True
+	SITU_VAR="VirtueAssistant_layout_situations";SITU_KINDS=("war","bank","dungeon","town");SITU_SAY={"war":"war mode","bank":"bank","dungeon":"dungeon","town":"town"};SITU_EVERY,SITU_HOLD,SITU_WAR_HOLD,SITU_BANK_FOR,SITU_BANK_NEAR=1.,2.,.5,300.,8
+	def situ_load(self):
+		s={"on":False,"base":""}
+		for k in self.SITU_KINDS:s[k]=""
+		for k,v in Kit.codec_load(Kit.get_var(self.SITU_VAR,"")).items():
+			if k=="on":s["on"]=v=="1"
+			elif k in s:s[k]=self.clean_name(v,"")
+		self.situ=s;self.situ_now=self.situ_pend=self.situ_last=self.situ_back=None;self.situ_at=0.
+	def situ_park(self):
+		b,self.situ_back=self.situ_back,None
+		if b is None or not self.situ_now:return
+		Kit.put_var(LAYOUT_ACTIVE,b[0]);Kit.put_var(FRAMES_ACTIVE,b[1]);Kit.put_var(LAYOUT_VAR,self.windows_text(b[1],b[2]))
+	def situ_save(self):s=self.situ;Kit.put_var(self.SITU_VAR,";".join(["on=%d"%(1 if s["on"]else 0)]+["%s=%s"%(a,s.get(a,""))for a in self.SITU_KINDS+("base",)]))
+	def situ_set(self,on):
+		on=bool(on)
+		if on==self.situ["on"]:return
+		if not on and self.situ_now:self._situ_go("",self.situ["base"],self.situ_now)
+		self.situ["on"]=on;self.situ_now=self.situ_pend=self.situ_last=self.situ_back=None;self.situ_at=0.
+		if on:self.situ["base"]=self.layout_name
+		self.situ_save()
+	def situ_pick(self,kind,name):
+		if kind not in self.SITU_KINDS:return
+		self.situ[kind]=self.clean_name(name,"");self.situ_now=self.situ_pend=None;self.situ_save()
+	def _bank_note(self,now,w):
+		try:b=int(API.Bank or 0);a=API.FindItem(b)if b else None;c=a is not None and bool(a.Opened)
+		except Exception:c=False
+		if c and w is not None:self.situ_bank=(now,w[0],w[1],w[2])
+	def situ_want(self,now):
+		s=self.situ;w=None
+		if s["bank"]:w=Guard._where();self._bank_note(now,w)
+		for a in self.SITU_KINDS:
+			if not s[a]:continue
+			if a=="war":e=HOST.me();b=e is not None and bool(e.InWarMode)
+			elif a=="bank":d=self.situ_bank;b=(w is not None and now-d[0]<=self.SITU_BANK_FOR and d[3]==w[2]and max(abs(d[1]-w[0]),abs(d[2]-w[1]))<=self.SITU_BANK_NEAR)
+			elif a=="dungeon":
+				if w is None:w=Guard._where()
+				b=False
+				for c in DUNGEON_AREAS:
+					if w is not None and c[0]==w[2]and c[1]<=w[0]<=c[3]and c[2]<=w[1]<=c[4]:b=True
+			else:b=GUARD.guarded()is True
+			if b:return a,s[a]
+		return "",s["base"]
+	def situ_tick(self,now,busy=False):
+		if not self.situ["on"]or not self.enabled or now<self.situ_at:return
+		self.situ_at=now+self.SITU_EVERY
+		if self.situ_now==""and self.layout_name!=self.situ["base"]:self.situ["base"]=self.layout_name;self.situ_back=None;self.situ_save()
+		try:a,d=self.situ_want(now)
+		except Exception:return
+		self.situ_last=a;b=self.situ_now
+		if a==b:self.situ_pend=None;return
+		if b is None and d==self.layout_name:self.situ_now,self.situ_pend=a,None;return
+		c=self.SITU_WAR_HOLD if a=="war"else self.SITU_HOLD;p=self.situ_pend
+		if p is None or p[0]!=a:self.situ_pend=(a,now);self.situ_at=now+min(c,self.SITU_EVERY);return
+		if now-p[1]<c:self.situ_at=min(self.situ_at,p[1]+c);return
+		if busy or self.arrange or SNAP.pressed():return
+		self.situ_now,self.situ_pend=a,None;self._situ_go(a,d,b)
+	def _situ_go(self,kind,name,was):
+		if name==self.layout_name and(kind or self.situ_back is None):return
+		if name and name not in(LAYOUT_DEFAULT,LAYOUT_MIRRORED)and name not in self.layout_names():return
+		if kind and was in("",None)and self.situ_back is None:self.situ_back=(self.layout_name,self.frames_name,dict((b,list(c))for b,c in self.assign.items()))
+		a=self.situ_back if not kind else None;self.situ_busy=True
+		try:self.use_windows(name,tell=False)
+		finally:self.situ_busy=False
+		if a is not None:
+			self.situ_back=None
+			if a[0]==name:
+				if a[1]!=self.frames_name:self.use_frames(a[1],tell=False)
+				self.unfree(None);self.assign=a[2];self.save_assign();self.placed={};self.dirty=True
+		t=name or "(none)";API.SysMsg("Interface: %s layout (%s)."%(t,self.SITU_SAY[kind])if kind else "Interface: back to %s."%t,Kit.HUE_INFO)
 	def free_scrolled(self):
 		for a in[d for d in self.fitted if not self.holds(d)]:self._unfit(a)
 		for a,c in list(self.placed.items()):
@@ -5801,85 +6486,95 @@ class Layout(object):
 				if b is not None:
 					with Kit.quiet:Kit.place(g,int(g.GetX()),int(g.GetY()),b["w"],b["h"],b["head"]);Kit.moved_by_code(g)
 				self.placed.pop(a,None)
-	def keep(self,W,H,i=None):
+	def keep(self,W,H,f=None):
 		if not self.loaded or W<=0 or H<=0:return
 		if not self.enabled:self.fresh_adds.clear();self._off();return
 		p=self.occupied()
 		if p!=self.occ:
 			self.occ=p
 			if self.frames_name==LAYOUT_DEFAULT:self.dirty=True
-		e=self.frames_in_use(W,H);Kit.flush();self.fresh=False;self.fresh_adds.clear();Fill.prune()
-		for b in[L for L in self.fitted if not self.holds(L)]:self._unfit(b)
-		q=time.time();f=[(self._hold_journal,(e,H)),(self._client_drops,()),(self._arrange_tick,(e,W,H))]
-		if q>=self.repair_at and not SNAP.drag:self.repair_at=q+2.;f.append((self._repair,(e,)))
-		for j,C in f:
-			try:j(*C)
+		b=self.frames_in_use(W,H);Kit.flush();self.fresh=False;self.fresh_adds.clear();Fill.prune()
+		if self.behind:self._tabs_prune(b)
+		for c in[N for N in self.fitted if not self.holds(N)]:self._unfit(c)
+		q=time.time();h=[(self._hold_journal,(b,H)),(self._client_drops,()),(self._arrange_tick,(b,W,H))]
+		if q>=self.repair_at and not SNAP.drag:self.repair_at=q+2.;h.append((self._repair,(b,)))
+		for k,C in h:
+			try:k(*C)
 			except Exception:pass
-		D=SNAP.drag;k=[];l=set();f=[]
-		if i is None:self.gump_key={}
-		for z in(e.zones if self.assign else()):
+		D=SNAP.drag;l=[];m=set();h=[]
+		if f is None:self.gump_key={}
+		for z in(b.zones if self.assign else()):
 			n=self.assign.get(z.id)
 			if not n or z.kind!="w"or z.px is None:continue
-			if i is not None and not any(self.gump_of(M)in i for M in n):continue
-			m=[]
-			for b in n:
-				g=self.gump_of(b)
+			if f is not None and not any(self.gump_of(O)in f for O in n):continue
+			i=[]
+			for c in n:
+				g=self.gump_of(c)
 				if g is None:continue
-				self.gump_key[g]=b
-				if g in l or g in SNAP.attached or not Snap.visible(g):continue
-				s=(self.hooks.get(b)or{}).get("riding")
+				self.gump_key[g]=c
+				if g in m or g in SNAP.attached or not Snap.visible(g):continue
+				s=(self.hooks.get(c)or{}).get("riding")
 				if s is not None:
 					try:
 						if s():continue
 					except Exception:pass
-				l.add(g);self._hold(g,b);r=Snap.rect(g)
+				m.add(g);self._hold(g,c);r=Snap.rect(g)
 				if r is None:
 					if isinstance(g,ClientWin):
 						try:g.rect();t="it has no size"
 						except Exception as E:t=Tz.why(E)
 						g.fail["size"]="its place and size couldn't be read (%s)"%t;g.report()
 					continue
-				u=self.hooks.get(b)or{};v=[N for N in SNAP.followers(g)if Snap.visible(N)];c=r
+				u=self.hooks.get(c)or{};v=[P for P in SNAP.followers(g)if Snap.visible(P)];d=r
 				for F in v:
-					d=Snap.rect(F)
-					if d is not None:w,x=min(c[0],d[0]),min(c[1],d[1]);G=max(c[0]+c[2],d[0]+d[2]);I=max(c[1]+c[3],d[1]+d[3]);c=(w,x,G-w,I-x)
+					e=Snap.rect(F)
+					if e is not None:w,x=min(d[0],e[0]),min(d[1],e[1]);G=max(d[0]+d[2],e[0]+e[2]);I=max(d[1]+d[3],e[1]+e[3]);d=(w,x,G-w,I-x)
 				o=False;y=u.get("state")
 				if y is not None:
 					try:o=y()=="minimized"
 					except Exception:pass
-				m.append((b,g,r,c,v,u,o,self._base(b,g,c,o)))
-			if m:f.extend((O,P,z)for O,P in zip(m,self._slots(z,m)))
-		J,K=(Seam.pad(),)*4,(Kit.MARGIN,)*4;A=set()
-		for a,h,z in f:
+				i.append((c,g,r,d,v,u,o,self._base(c,g,d,o)))
+			if i and z.stack=="t":
+				J=self.tab_shown(z)
+				for a in i:
+					if a[0]!=J:self.behind[a[0]]=z.id
+			if i:h.extend((Q,R,z)for Q,R in zip(i,self._slots(z,i)))
+		if self.behind or Kit._behind:Kit._behind=set(S for S in map(self.gump_of,self.behind)if S is not None)
+		K,L=(Seam.pad(),)*4,(Kit.MARGIN,)*4;A=set()
+		for a,j,z in h:
 			if a[1]in D:continue
 			if self._small(a[0],z,a[1]):
-				A.add(a[1]);self.placed[a[0]]=h
+				A.add(a[1]);self.placed[a[0]]=j
 				if a[0]in self.fitted:self._unfit(a[0])
-				if self._move_all(a[1],a[4],a[2],h[0],h[1]):k.append(a[1])
+				if self._move_all(a[1],a[4],a[2],j[0],j[1]):l.append(a[1])
 				continue
 			try:
-				if self._fit_slot(a,h,z,(K if z.solo else J)if self.seamless else None):k.append(a[1])
-			except Exception:self.placed[a[0]]=h
-		if i is None:
-			self._release(l)
-			for g in[Q for Q in Seam.recs if Q not in l]:Seam.undo(g)
+				M=(L if z.solo else K)if self.seamless and a[0]not in self.behind else None
+				if self._fit_slot(a,j,z,M):l.append(a[1])
+			except Exception:self.placed[a[0]]=j
+		if f is None:
+			self._release(m)
+			for g in[T for T in Seam.recs if T not in m]:Seam.undo(g)
 		B=set()
 		if self.seamless and self.enabled:
-			for a,h,z in[R for R in f if R[0][1]not in A]:
+			for a,j,z in[U for U in h if U[0][1]not in A and U[0][0]not in self.behind]:
 				for g in[a[1]]+list(a[4]):
 					try:
 						if not isinstance(g,ClientWin)and Seam.strip(g,g is a[1]and a[5].get("untitled")):B.add(g)
 					except Exception:pass
-		for g in([S for S in Seam.bare if S not in B]if i is None else()):Seam.unstrip(g)
-		try:self._game_view(e)
+		for g in([V for V in Seam.bare if V not in B]if f is None else()):Seam.unstrip(g)
+		if f is None and(self.strips or self.behind or any(X.stack=="t"for X in b.zones)):
+			try:self._strips_keep(b)
+			except Exception:pass
+		try:self._game_view(b)
 		except Exception:pass
-		if self.assign and self.need_due:self.need_due=False;e.reflow(W,H,HOST.grid_size())
-		if k:
+		if self.assign and self.need_due:self.need_due=False;b.reflow(W,H,HOST.grid_size())
+		if l:
 			Kit.flush()
-			for g in k:
-				j=SNAP.moved_cb.get(g)
-				if j is not None:
-					try:j()
+			for g in l:
+				k=SNAP.moved_cb.get(g)
+				if k is not None:
+					try:k()
 					except Exception:pass
 	def _base(self,key,g,a,mini):
 		if mini:return a[2],a[3]
@@ -5887,6 +6582,7 @@ class Layout(object):
 		if b is None:c=Fill.recs.get(g);b=c["nat"]if c is not None else(a[2],a[3]);self.base[key]=b
 		return b
 	def _slots(self,z,items):
+		if z.stack=="t":return[self._body(z)]*len(items)
 		f,g,h,i=z.px;c=z.stack in("d","u");j=i if c else h;q=len(items);x=all(y[6]for y in items);b=[];a=[]
 		for k in items:
 			r=k[7][1]if c else k[7][0]
@@ -5904,6 +6600,74 @@ class Layout(object):
 			v.append((f,d,h,e)if c else(d,g,e,i))
 			if not w:d+=e
 		return v
+	TABS_VAR="VirtueAssistant_layout_tabs";TABS_CAP=64
+	@staticmethod
+	def _body(z):a,b,c,d=z.px;return(a,b+TAB_H,c,max(1,d-TAB_H))if z.stack=="t"else(a,b,c,d)
+	@staticmethod
+	def _tabs_parse(text):
+		a={}
+		for b in str(text or "").split(";"):
+			if "="not in b:continue
+			k,v=b.split("=",1)
+			if k.strip()and v.strip():a[k.strip()]=v.strip()
+		return a
+	def _tabs_save(self):Kit.put_var(self.TABS_VAR,";".join("%s=%s"%a for a in sorted(self.tabs.items())))
+	def tab_shown(self,z):
+		a=self.assign.get(z.id,[])
+		if not a:return
+		k=self.tabs.get(z.id)
+		if k in a and self._tab_ok(k):return k
+		return next((b for b in a if self._tab_ok(b)),a[0])
+	def _tab_ok(self,key):
+		g=self.gump_of(key)
+		if g is None or not Snap.visible(g):return False
+		a=(self.hooks.get(key)or{}).get("riding");return a is None or not safe(a,False)
+	def tab_pick(self,a,key):
+		a,key=str(a),str(key)
+		if key not in self.assign.get(a,()):return False
+		if self.tabs.get(a)!=key:
+			self.tabs[a]=key
+			if len(self.tabs)>self.TABS_CAP:self.tabs=dict(b for b in self.tabs.items()if b[0]in self.assign)
+			self._tabs_save()
+		for k in self.assign.get(a,()):self.seam_skip.pop(k,None);self.seam_wait.pop(k,None)
+		self.fresh=True;HOST.poke();return True
+	def spot(self,key):
+		a=self.placed.get(key)
+		if a is None or key not in self.behind:return a
+		return(TAB_X,)+tuple(a[1:])
+	def _unhide(self,key):
+		self.behind.pop(key,None);g=self.gump_of(key)
+		if g is None:return
+		Kit._behind.discard(g);r=Snap.rect(g)
+		if r is None or r[0]>TAB_X//2:return
+		a=self.placed.get(key);x=a[0]if a is not None else Kit.clamp(0,r[1],r[2],r[3])[0];self._move_all(g,SNAP.followers(g),r,x,r[1])
+	def _tabs_prune(self,zs):
+		for a,b in list(self.behind.items()):
+			z=zs.by_id(b)if zs is not None else None
+			if(z is None or z.stack!="t"or z.kind!="w"or z.px is None or not self.holds(a)or self.zone_of(a)!=b or self.tab_shown(z)==a):self._unhide(a)
+	def _tabs_off(self):
+		for a in list(self.behind):self._unhide(a)
+		Kit._behind=set()
+		for s in list(self.strips.values()):Kit.dispose(s["g"])
+		self.strips={}
+	def _strips_keep(self,zs):
+		b={}
+		for z in(zs.zones if self.assign else()):
+			if z.stack!="t"or z.kind!="w"or z.px is None:continue
+			c=tuple(f for f in self.assign.get(z.id,[])if self.gump_of(f)is not None)
+			if c:b[z.id]=(tuple(z.px),c,self.tab_shown(z),tuple(self.title_of(g)for g in c),Kit.look(),Kit.SECTION_ALPHA)
+		for a in[h for h in self.strips if h not in b]:Kit.dispose(self.strips.pop(a)["g"])
+		for a,d in b.items():
+			s=self.strips.get(a)
+			if s is not None and s["sig"]==d and Kit.is_open(s["g"]):continue
+			e=s["g"]if s is not None else None;self.strips[a]={"g":self._strip(a,d),"sig":d};Kit.dispose(e)
+	def _strip(self,l,sig):
+		(x,y,w,p),e,m,n=sig[0],sig[1],sig[2],sig[3];g=G.CreateGump(True,False);Kit.add_section(g,0,0,w,TAB_H);f=max(1,w//len(e));a,c=Kit.pic_size(Kit.ART_PAGE[0]);a,c=a or 30,c or 22
+		for o,(k,t)in enumerate(zip(e,n)):h=o*f+4;i=self._tab_click(l,k);j="Show %s in this zone"%t;b=G.CreateGumpButton("",Kit.HUE_TEXT,Kit.ART_PAGE[0],Kit.ART_PAGE[1],Kit.ART_PAGE[2]);b.SetPos(h,max(0,(TAB_H-c)//2));g.Add(b);Kit.on_click(b,i);Kit.with_tip(b,j);d=Kit.add_label(g,Kit.fit(t,max(10,f-a-15)),h+a+5,max(0,(TAB_H-16)//2),Kit.HUE_TITLE if k==m else Kit.HUE_TEXT);d.SetAcceptMouseInput(True);Kit.on_click(d,i);Kit.with_tip(d,j)
+		g.SetRect(x,y,w,TAB_H);g.CanMove=False;G.AddGump(g);SNAP.skip_gump(g);return g
+	def _tab_click(self,a,key):
+		def b():self.tab_pick(a,key)
+		return b
 	def retry_due(self,now):
 		if not self.seam_wait or now<self.retry_at:return False
 		self.retry_at=now+SEAM_RETRY
@@ -5914,6 +6678,7 @@ class Layout(object):
 		return bool(self.fresh_adds)
 	def fit_now(self,key,g):
 		c=self.slot_was.get(key)
+		if key in self.behind:Kit._behind.add(g)
 		if(c is None or not(self.seamless and self.enabled)or self.dirty or self.fresh or g in SNAP.drag or g in SNAP.attached or not Client.on_client_thread()):return
 		Kit.flush();a=self.hooks.get(key)or{};r=Snap.rect(g)
 		if r is None or a.get("riding")is not None or SNAP.followers(g):return
@@ -5922,7 +6687,7 @@ class Layout(object):
 		d,z,e=c;self.gump_key[g]=key
 		try:
 			self._fit_slot((key,g,r,r,[],a,b,self._base(key,g,r,b)),d,z,e)
-			if not isinstance(g,ClientWin):Seam.strip(g,a.get("untitled"))
+			if not isinstance(g,ClientWin)and key not in self.behind:Seam.strip(g,a.get("untitled"))
 		except Exception:pass
 	def _fit_slot(self,it,slot,z=None,pads=None):
 		a,g,r,l,f,h,k,m=it;c=int(h.get("inset")or 0)
@@ -5986,12 +6751,13 @@ class Layout(object):
 		a=Fill.fit(g,e,f,h,b,d.get("fill")or "anchor")
 		if a is None:
 			Fill.unfit(g);y=Kit.scroll_info(g);H,A=(y["w"],y["h"])if y is not None else(r[2],r[3])
-			if(r[0],r[1])==(e,f)and r[3]==min(A,b):return False
+			if(r[0],r[1])==(TAB_X if g in Kit._behind else e,f)and r[3]==min(A,b):return False
 			Kit._place_raw(g,e,f,H,A,None,b if A>b else None);a=True
 		if a:Kit.moved_by_code(g)
 		return bool(a)
 	@staticmethod
 	def _move_all(g,b,r,x,y):
+		if g in Kit._behind:x=TAB_X
 		if(r[0],r[1])==(x,y):return False
 		Snap.move(g,x,y);Kit.moved_by_code(g)
 		for f in b:
@@ -6042,31 +6808,32 @@ class Layout(object):
 		if g is not None and g in Seam.recs:Seam.undo(g)
 		if g is not None:Fill.unfit(g)
 	def _small(self,key,z,g):
-		b=(z.id,tuple(z.px));a=self.min_seen.get(key)
+		b=(z.id,tuple(z.px),z.stack);a=self.min_seen.get(key)
 		if a is None or a[0]!=b:a=self.min_seen[key]=(b,self._too_small(key,z,g))
 		return a[1]
 	def report_fit(self):
-		W,H=Kit.screen();d=self.frames_in_use(W,H)if W>0 and H>0 else None;n=i=0;j=[]
+		W,H=Kit.screen();d=self.frames_in_use(W,H)if W>0 and H>0 else None;n=i=j=0;k=[]
 		for z in(d.zones if d is not None else[]):
-			b=self.assign.get(z.id,[]);q=[safe((self.hooks.get(t)or{}).get("riding")or(lambda:False),False)for t in b]
-			if b and all(q)and z.px is not None:j.append(z.px)
+			b=self.assign.get(z.id,[]);s=[safe((self.hooks.get(v)or{}).get("riding")or(lambda:False),False)for v in b]
+			if b and all(s)and z.px is not None:k.append(z.px)
 		for z in(d.zones if d is not None else[]):
-			b=self.assign.get(z.id,[]);f=[v for v in b if self.gump_of(v)is None]
+			b=self.assign.get(z.id,[]);f=[w for w in b if self.gump_of(w)is None]
 			if z.kind=="w"and not b:Kit.say('zone "%s": empty.'%z.id,Kit.HUE_INFO)
-			if f:s=", ".join(self.title_of(w)for w in f);Kit.say('zone "%s": %s.'%(z.id,("empty (%s not open)"if len(f)==len(b)else "%s not open")%s),Kit.HUE_BAD)
+			if f:t=", ".join(self.title_of(x)for x in f);Kit.say('zone "%s": %s.'%(z.id,("empty (%s not open)"if len(f)==len(b)else "%s not open")%t),Kit.HUE_BAD)
 			for c in b:
-				g=self.gump_of(c);k=self.placed.get(c)
-				if g is None or k is None:continue
+				g=self.gump_of(c);l=self.placed.get(c)
+				if g is None or l is None:continue
+				if c in self.behind:n+=1;j+=1;Kit.say('%s: behind a tab in "%s".'%(self.title_of(c),z.id),Kit.HUE_GOOD);continue
 				r=Snap.rect(g)
 				if r is None:continue
-				n+=1;a=tuple(k);e=all(abs(x-y)<=self.MISFIT_SLACK for x,y in zip(r,a))
-				for p in j:
-					l,m=min(a[0],p[0]),min(a[1],p[1]);u=(l,m,max(a[0]+a[2],p[0]+p[2])-l,max(a[1]+a[3],p[1]+p[3])-m)
-					if all(abs(A-B)<=self.MISFIT_SLACK for A,B in zip(r,u)):e=True
+				n+=1;a=tuple(l);e=all(abs(y-A)<=self.MISFIT_SLACK for y,A in zip(r,a))
+				for p in k:
+					m,o=min(a[0],p[0]),min(a[1],p[1]);u=(m,o,max(a[0]+a[2],p[0]+p[2])-m,max(a[1]+a[3],p[1]+p[3])-o)
+					if all(abs(B-C)<=self.MISFIT_SLACK for B,C in zip(r,u)):e=True
 				if not e:i+=1
-				Kit.say('%s in "%s": %d x %d at %d, %d%s.'%(self.title_of(c),z.id,r[2],r[3],r[0],r[1],"; fills it"if e else "; its zone is %d x %d at %d, %d"%(a[2],a[3],a[0],a[1])),Kit.HUE_GOOD if e else Kit.HUE_BAD);o,h=self.drawn_at(c,g)
-				if o<.995 and h is not None:Kit.say('%s is drawn at %d%% in zone "%s"; %d x %d shows it at 100%%.'%(self.title_of(c),int(round(o*100)),z.id,h[0],h[1]),Kit.HUE_INFO)
-		if self.seamless:Kit.say("One panel: on; %s without a title row, %s with its title hidden in place, %s left as is."%(Kit.count(len(Seam.recs),"window"),Kit.count(sum(1 for C in Seam.bare.values()if C["title"]),"window"),Kit.count(max(0,n-len(Seam.recs)-sum(1 for D in Seam.bare.values()if D["title"])),"window")),Kit.HUE_INFO)
+				Kit.say('%s in "%s": %d x %d at %d, %d%s.'%(self.title_of(c),z.id,r[2],r[3],r[0],r[1],"; fills it"if e else "; its zone is %d x %d at %d, %d"%(a[2],a[3],a[0],a[1])),Kit.HUE_GOOD if e else Kit.HUE_BAD);q,h=self.drawn_at(c,g)
+				if q<.995 and h is not None:Kit.say('%s is drawn at %d%% in zone "%s"; %d x %d shows it at 100%%.'%(self.title_of(c),int(round(q*100)),z.id,h[0],h[1]),Kit.HUE_INFO)
+		if self.seamless:Kit.say("One panel: on; %s without a title row, %s with its title hidden in place, %s left as is."%(Kit.count(len(Seam.recs),"window"),Kit.count(sum(1 for D in Seam.bare.values()if D["title"]),"window"),Kit.count(max(0,n-j-len(Seam.recs)-sum(1 for E in Seam.bare.values()if E["title"])),"window")),Kit.HUE_INFO)
 		if not n:Kit.say("no window sits in a zone.",Kit.HUE_INFO)
 		else:Kit.say("%d of %d windows fill their zone; screen %d x %d (UI scale %.2f)."%(n-i,n,W,H,Kit.render_scale()),Kit.HUE_INFO)
 	def drawn_at(self,key,g):
@@ -6197,39 +6964,41 @@ class Layout(object):
 		if safe(Follow.alt_held,False):return
 		r=rect if rect is not None else Snap.rect(g)
 		if r is None:return
-		i,j=r[0]+r[2]//2,r[1]+r[3]//2;b=self._drop_zone(r);self.fresh=True
+		i,j=r[0]+r[2]//2,r[1]+r[3]//2;a=self._drop_zone(r);self.fresh=True
 		if self.arrange_hot is not None:
 			l=self.arrange_lit.get(self.arrange_hot)
 			if l is not None:l.IsVisible=False
 			self.arrange_hot=None
 		for m,s in list(SNAP.links.items()):
 			if m is g or s is g:SNAP.links.pop(m,None)
-		a=self.zone_of(key)
-		if b is None:
-			if a is None:return
+		b=self.zone_of(key)
+		if a is None:
+			if b is None:return
 			self._back()
 			if not self.back_told:self.back_told=True;Kit.say("%s stays in its zone; drop it on another zone to move it (Settings > Interface frees windows)."%self.title_of(key),Kit.HUE_INFO)
 			return
-		if a==b.id and len(self.assign.get(a,[]))<=1:self._back();return
-		t=self._map_zone();e=[x for x in self.assign.get(b.id,[])if x!=key];n=len(e)==1 and self.gump_of(e[0])is not None
-		if(key!="worldmap"and b.id==t and b.id!=a and(a is None or not n))or(key=="worldmap"and e and(a is None or not n)):self._back();Kit.say("TazUO's World Map keeps its zone to itself; drop %s on another zone."%(self.title_of(key)if key!="worldmap"else "it"),Kit.HUE_BAD);return
-		if a!=b.id and self._too_small(key,b,g):self._back();return
-		c=None;u=dict((y,self.placed.get(y))for y in self.assign.get(b.id,[]))
-		if a is not None:
-			f=[z for z in self.assign.get(b.id,[])if z!=key]if a!=b.id else[]
-			if len(f)==1 and self.gump_of(f[0])is not None:
+		if b==a.id and len(self.assign.get(b,[]))<=1:self._back();return
+		if b==a.id and a.stack=="t":self.tab_pick(a.id,key);self._back();return
+		t=self._map_zone();e=[x for x in self.assign.get(a.id,[])if x!=key];n=len(e)==1 and self.gump_of(e[0])is not None
+		if(key!="worldmap"and a.id==t and a.id!=b and(b is None or not n))or(key=="worldmap"and e and(b is None or not n)):self._back();Kit.say("TazUO's World Map keeps its zone to itself; drop %s on another zone."%(self.title_of(key)if key!="worldmap"else "it"),Kit.HUE_BAD);return
+		if b!=a.id and self._too_small(key,a,g):self._back();return
+		c=None;u=dict((y,self.placed.get(y))for y in self.assign.get(a.id,[]))
+		if b is not None:
+			f=[z for z in self.assign.get(a.id,[])if z!=key]if b!=a.id else[]
+			if len(f)==1 and self.gump_of(f[0])is not None and a.stack!="t":
 				c=f[0]
-				if self._too_small(c,self.frames.by_id(a)):self._back();return
-			for k in list(self.assign.get(a,[]))+list(self.assign.get(b.id,[])):self._refit(k)
-			v=self.assign[a].index(key)if key in self.assign[a]else 0;self.assign[a]=[A for A in self.assign[a]if A!=key]
-			if c is not None:self.assign[a].insert(min(v,len(self.assign[a])),c);self.assign[b.id]=[B for B in self.assign[b.id]if B!=c];self.placed.pop(c,None)
-			if not self.assign[a]:del self.assign[a]
-		h=self.assign.setdefault(b.id,[]);o=len(h)
-		for w,k in enumerate(h):
+				if self._too_small(c,self.frames.by_id(b)):self._back();return
+			for k in list(self.assign.get(b,[]))+list(self.assign.get(a.id,[])):self._refit(k)
+			v=self.assign[b].index(key)if key in self.assign[b]else 0;self.assign[b]=[A for A in self.assign[b]if A!=key]
+			if c is not None:self.assign[b].insert(min(v,len(self.assign[b])),c);self.assign[a.id]=[B for B in self.assign[a.id]if B!=c];self.placed.pop(c,None)
+			if not self.assign[b]:del self.assign[b]
+		h=self.assign.setdefault(a.id,[]);o=len(h)
+		if a.stack=="t":self.tabs[a.id]=key;self._tabs_save()
+		for w,k in enumerate(h if a.stack!="t"else()):
 			p=u.get(k)or self.placed.get(k)
 			if p is None:continue
-			if b.stack in("d","u"):d=p[1]+p[3]//2;q=j<d if b.stack=="d"else j>d
-			else:d=p[0]+p[2]//2;q=i<d if b.stack=="r"else i>d
+			if a.stack in("d","u"):d=p[1]+p[3]//2;q=j<d if a.stack=="d"else j>d
+			else:d=p[0]+p[2]//2;q=i<d if a.stack=="r"else i>d
 			if q:o=w;break
 		h.insert(o,key);self.unfree(key);self.save_assign();self.dirty=True;HOST.poke()
 	def _size_of(self,key):
@@ -6243,19 +7012,19 @@ class Layout(object):
 		if key is None or z is None or z.px is None:return ""
 		t=self.title_of(key)
 		if z.kind!="w":return "!%s can only go in a window zone."%t
-		f=self._map_zone()
-		if(key!="worldmap"and z.id==f and z.id!=self.zone_of(key))or(key=="worldmap"and[i for i in self.assign.get(z.id,[])if i!=key]):return "!TazUO's World Map keeps its zone to itself."
-		a=self._min_of(key)
-		if a and(z.px[2]<a[0]or z.px[3]<a[1]):return("!%s needs %d x %d at least; this zone is %d x %d."%(t,a[0],a[1],z.px[2],z.px[3]))
-		keys=([j for j in(keys if keys is not None else self.assign.get(z.id,[]))if j!=key]+[key]);b=None
-		for k,g in self.slots_for(z,keys):
-			if k==key:b=g
+		g=self._map_zone()
+		if(key!="worldmap"and z.id==g and z.id!=self.zone_of(key))or(key=="worldmap"and[j for j in self.assign.get(z.id,[])if j!=key]):return "!TazUO's World Map keeps its zone to itself."
+		a=self._min_of(key);d=self._body(z)
+		if a and(d[2]<a[0]or d[3]<a[1]):return("!%s needs %d x %d at least; this zone is %d x %d."%(t,a[0],a[1],d[2],d[3]))
+		keys=([l for l in(keys if keys is not None else self.assign.get(z.id,[]))if l!=key]+[key]);b=None
+		for k,i in self.slots_for(z,keys):
+			if k==key:b=i
 		if b is None:b=z.px
-		w,h=max(1,b[2]),max(1,b[3]);c=self._size_of(key);d=""
+		w,h=max(1,b[2]),max(1,b[3]);c=self._size_of(key);e=""
 		if c and c[0]>0 and c[1]>0:
-			e=min(1.,float(w)/c[0],float(h)/c[1])
-			if e<.995:d=" (shown at %d%%)"%int(round(e*100))
-		return "%s: %d x %d here%s."%(t,w,h,d)
+			f=min(1.,float(w)/c[0],float(h)/c[1])
+			if f<.995:e=" (shown at %d%%)"%int(round(f*100))
+		return "%s: %d x %d here%s."%(t,w,h,e)
 	def status_text(self):
 		W,H=Kit.screen();a=HOST.grid_size()
 		if W<=0 or H<=0:return "Screen: not known yet"
@@ -6417,10 +7186,117 @@ class Seam(object):
 					for t in a["title"]:
 						try:t[0].IsVisible=c and t[3]
 						except Exception:pass
+class Fade(object):
+	EVERY=.2;HIT_EVERY=1.;PRUNE_EVERY=2.;RETRY=1.;NEAR=.003;CAP=64;TO,AFTER=(20,90),(2,30);KEYS=("fade","fade_to","fade_after","fade_all");ALL_ONLY=("actionbar","unitframes")
+	def __init__(self):self.on=self.all=False;self.to,self.after=.4,6.;self.base={};self.dim={};self.gk={};self.woke={};self.under=set();self.mouse=self.sig=None;self.next=self.hit_at=self.prune_at=0.;self.kids={};self.look_at=0.
+	def load(self,host):self.opts(host.pref_int("fade",0)==1,host.pref_int("fade_to",40),host.pref_int("fade_after",6),host.pref_int("fade_all",0)==1)
+	def opts(self,on,a,after,all_):
+		a=max(self.TO[0],min(self.TO[1],int(a)))/100.;after=float(max(self.AFTER[0],min(self.AFTER[1],int(after))));on,all_=bool(on),bool(all_)
+		if self.on and(not on or a!=self.to or all_!=self.all):self.reset()
+		self.on,self.to,self.after,self.all=on,a,after,all_
+		if not on:self.base,self.woke={},{}
+	def set(self,new):
+		p=HOST.prefs
+		for k in self.KEYS:
+			try:p[k]=str(int(new[k]))
+			except Exception:pass
+		self.load(HOST);p["fade"],p["fade_all"]=("1"if self.on else "0"),("1"if self.all else "0");p["fade_to"],p["fade_after"]=str(int(round(self.to*100))),str(int(self.after));HOST.save_prefs()
+	def reset(self):
+		for k,a in list(self.dim.items()):
+			for g in a:
+				if Kit.is_open(g):self._walk(g,False)
+		self.dim,self.gk,self.under,self.mouse,self.sig,self.kids={},{},set(),None,None,{}
+	def wake(self,key):
+		a=time.time();key=str(key);self.woke[key]=a;b=key+"."
+		for k in list(LAYOUT.wins)+list(Kit._wins):
+			if k.startswith(b)or LAYOUT.owner.get(k,(None,))[0]==key:self.woke[k]=a
+	def _may(self,k,g,skip):
+		if g in skip or g in Kit._behind or k in LAYOUT.behind or k.endswith("_alone"):return False
+		if(LAYOUT.hooks.get(k)or{}).get("fade")is False:return False
+		return self.all or not any(k==a or k.startswith(a+".")for a in self.ALL_ONLY)
+	def _units(self):
+		c=HOST.config;h=(c.g if c is not None else None,ALERTS.g,HOST.alert_log.g);d=set(l for l in h if l is not None);a={};b=set();e=set()
+		for k,w in list(Kit._wins.items()):
+			g=w.win.get(w.gkey)
+			if not w.fade:e.add(k)
+			elif Kit.is_open(g)and self._may(k,g,d):a[k]=[g];b.add(g)
+		for k in list(LAYOUT.wins):
+			if k in a or k in e:continue
+			g=LAYOUT.gump_of(k)
+			if g is not None and g not in b and not isinstance(g,ClientWin)and self._may(k,g,d):a[k]=[g];b.add(g)
+		for i,j in list(LAYOUT.strips.items()):
+			f=j.get("g")
+			if not Kit.is_open(f):continue
+			for k in LAYOUT.assign.get(i)or():
+				if k in a and k not in LAYOUT.behind:a[k].append(f);break
+		return a
+	@staticmethod
+	def _kids(g):
+		try:
+			a=Kit.client_control(g).Children;n=0
+			for i in range(int(a.Count)):n+=1+int(a[i].Children.Count)
+			return n
+		except Exception:return-1
+	@staticmethod
+	def _over(g,m):r=Kit.rect(g);return r is not None and r[0]<=m[0]<r[0]+r[2]and r[1]<=m[1]<r[1]+r[3]
+	def tick(self,now):
+		if now<self.next:return
+		self.next=now+self.EVERY;L=LAYOUT;d=(L.frames_name,L.layout_name,L.arrange,L.enabled,L.seamless,frozenset(L.behind),Kit.look())
+		if d!=self.sig:
+			if self.sig is not None:self.reset()
+			self.sig=d
+		if L.arrange:return
+		m=Kit.mouse_pos();a=self._units();c=self.woke
+		for k,b in a.items():
+			if self.gk.get(k)is not b[0]:self.gk[k]=b[0];c[k]=max(c.get(k,0.),now)
+		if m!=self.mouse or now>=self.hit_at:self.mouse,self.hit_at=m,now+self.HIT_EVERY;self.under=set(f for f,h in a.items()if m is not None and any(self._over(i,m)for i in h))
+		for k in self.under:
+			if k in a:c[k]=now
+		e=set(j for j in a if now-c.get(j,now)>=self.after)
+		for k,b in list(self.dim.items()):
+			if k not in e or a.get(k)!=b:
+				self.dim.pop(k,None)
+				for g in b:
+					if Kit.is_open(g):self._walk(g,False)
+		if now>=self.look_at:
+			self.look_at=now+self.RETRY
+			for k,b in list(self.dim.items()):
+				for g in b:
+					if not Kit.is_open(g):continue
+					n=self._kids(g)
+					if n!=self.kids.get(g,n):self.kids[g]=n;self._walk(g,True)
+		for k in e:
+			if k not in self.dim:
+				if all([self._walk(l,True)for l in a[k]]):
+					self.dim[k]=list(a[k])
+					for g in a[k]:self.kids[g]=self._kids(g)
+				else:c[k]=now-self.after+self.RETRY
+		if now>=self.prune_at:self.prune_at=now+self.PRUNE_EVERY;self._prune(a,now)
+	def _prune(self,units,now):self.base=dict((a,b)for a,b in self.base.items()if Kit.is_open(a));self.kids=dict((c,d)for c,d in self.kids.items()if c in self.base);self.gk=dict((e,f)for e,f in self.gk.items()if e in units);self.woke=dict((g,h)for g,h in self.woke.items()if g in units or now-h<self.after)
+	def _walk(self,g,on):
+		a=self.base.get(g)
+		if a is None:
+			if not on:return False
+			if len(self.base)>=self.CAP:
+				self.base=dict((i,j)for i,j in self.base.items()if Kit.is_open(i))
+				if len(self.base)>=self.CAP:return False
+			a={}
+		b={};f=self.to;d=self.NEAR
+		def e(c):
+			try:
+				e=float(c.Alpha);r=a.get(c)
+				if on:g=r[0]if r is not None and abs(e-r[1])<=d else e;v=g*f
+				elif r is None:return
+				elif abs(e-r[1])>d:b[c]=(e,e);return
+				else:g=v=r[0]
+				c.Alpha=v;b[c]=(g,v)
+			except Exception:pass
+		h=Kit.walk(g,e);self.base[g]=b;return h
 SNAP=Snap()
 ALERTS=Alerts()
 GUARD=Guard()
 LAYOUT=Layout()
+FADE=Fade()
 HOST=Host()
 MODULE_FILES=(("actionbar","Action Bar","ActionBarModule.py"),("hud","Character HUD","CharacterHudModule.py"),("interface","Interface","InterfaceModule.py"),("inventory","Inventory","InventoryModule.py"),("grimoire","Grimoire","GrimoireModule.py"),("worldmap","World Map","WorldMapModule.py"),("ultima","Ultima Tracker","UltimaTrackerModule.py"),("social","Social","SocialModule.py"),("skills","Skills","SkillsModule.py"),("butler","Property Butler","PropertyButlerModule.py"),("meters","Meters","MetersModule.py"),("mongotchi","Mongotchi","MongotchiModule.py"),)
 RETIRED_KEYS=("autodoors",)
@@ -6474,28 +7350,30 @@ def read_registration(text):
 def load_modules():
 	h=module_folders()
 	if not h:Kit.say("no %s folder beside this script, so no modules loaded."%MODULE_DIR,Kit.HUE_BAD);return
-	i=dict((z,x)for x,(y,y,z)in enumerate(MODULE_FILES));d,j=[],set()
+	i=dict((B,z)for z,(A,A,B)in enumerate(MODULE_FILES));d,j=[],set()
 	for k in h:
-		for n in sorted(A for A in safe(lambda:os.listdir(k),[])or[]if A.endswith("Module.py")):
+		for n in sorted(C for C in safe(lambda:os.listdir(k),[])or[]if C.endswith("Module.py")):
 			if n not in j:j.add(n);d.append((k,n))
-	d.sort(key=lambda e:i.get(e[1],len(i)));r=dict((D,(B,C))for B,C,D in MODULE_FILES)
-	for t,a in d:
-		b=os.path.join(t,a)
+	d.sort(key=lambda e:i.get(e[1],len(i)));t=dict((F,(D,E))for D,E,F in MODULE_FILES)
+	for l,a in d:
+		b=os.path.join(l,a);u=os.path.basename(l)==MODULE_DIR;v=len(HOST.slots)
 		if not os.path.isfile(b):continue
 		m=None
 		try:
-			l=_read_text(b);m=read_registration(l)
+			o=_read_text(b);m=read_registration(o)
 			if m is not None and m.key in RETIRED_KEYS:Kit.say("skipped %s (retired; the file can be deleted)."%a,Kit.HUE_INFO);continue
-			if m is not None and m.key in HOST.old_map and HOST.old_map[m.key][0]!=m.key:o,w=HOST.old_map[m.key];p=dict.get(HOST.by_key,o);Kit.say("skipped %s (now part of %s; the file can be deleted)."%(a,p.title if p else o),Kit.HUE_INFO);continue
+			if m is not None and m.key in HOST.old_map and HOST.old_map[m.key][0]!=m.key:p,y=HOST.old_map[m.key];q=dict.get(HOST.by_key,p);Kit.say("skipped %s (now part of %s; the file can be deleted)."%(a,q.title if q else p),Kit.HUE_INFO);continue
 			if m is not None and dict.__contains__(HOST.by_key,m.key):API.SysMsg(HOST.TWICE%(APP_NAME,m.title,m.key),Kit.HUE_BAD);continue
 			if m is not None and m.interval is not None:HOST.add_lazy(m.key,m.title,m.desc,b,m.interval,m.default_on,m.category,m.parts,m.aliases);continue
-			exec(compile(l,b,"exec"),globals())
+			exec(compile(o,b,"exec"),globals())
 		except Exception as c:
-			q=getattr(c,"lineno",None)
-			if q:f="%s (%s line %s)"%(getattr(c,"msg",None)or c,a,q)
+			r=getattr(c,"lineno",None)
+			if r:f="%s (%s line %s)"%(getattr(c,"msg",None)or c,a,r)
 			else:f="%s%s"%(c,_error_where())
-			Kit.say("couldn't load %s (%s)."%(a,f),Kit.HUE_BAD);g=(m.key,m.title)if m is not None else r.get(a)
-			if g is not None and not dict.__contains__(HOST.by_key,g[0]):u,v=g;s=HOST.add(u,v,"",lambda:None,.1);s.api,s.broken=None,f
+			Kit.say("couldn't load %s (%s)."%(a,f),Kit.HUE_BAD);g=(m.key,m.title)if m is not None else t.get(a)
+			if g is not None and not dict.__contains__(HOST.by_key,g[0]):w,x=g;s=HOST.add(w,x,"",lambda:None,.1);s.api,s.broken=None,f
+		finally:
+			for s in HOST.slots[v:]:s.shipped=u
 Kit.data_setup()
 PROFILES=Profiles()
 if not VA_ALONE:
@@ -6569,4 +7447,4 @@ def _module_sysstats():
 			if a["open"]and i["g"]is not None and not(a["minimized"]and a["docked"]):E()
 	def V():a["shutting"]=True;u(b);Kit.save_min(o,a["minimized"]);m(g,"1"if a["open"]else "0");c.close();e,d["g"]=d["g"],None;z(p,e);Kit.dispose(e)
 	return{"start":T,"tick":U,"stop":V,"client_tick":True,"config_height":k.height,"build_config":k.build,"poll_config":k.poll,"config_closed":k.closed}
-if not VA_ALONE:load_modules();HOST.boot_mark("module files");HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen");HOST.run()
+if not VA_ALONE:load_modules();HOST.boot_mark("module files");HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen").shipped=True;HOST.run()

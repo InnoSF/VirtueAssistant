@@ -48,9 +48,10 @@
 def _module_mongotchi():
     """Build the Mongotchi module in its own namespace and return its hooks.
 
-    Everything (settings, pet, shop, windows, companion) lives in this one function's scope, so the
-    module's names never leak into the mother script. The returned MODULE table holds start, tick,
-    stop and interval, which the mother calls.
+    Everything (settings, pet, shop, windows, companion, playpen) lives in this one function's scope,
+    so the module's names never leak into the mother script. The returned MODULE table holds start,
+    tick, stop and interval, which the mother calls. Code helpers shared with other modules
+    (Base64 packing, checksum, streamer veils) come from Kit.
     """
     KEY = "mongotchi"
     TITLE = "Mongotchi"
@@ -1177,38 +1178,9 @@ def _module_mongotchi():
         sprite(SPR_SPARKLE, PX0 + PW / 2.0, YMIN + 30, 1.2, 0, 64)
         say("a pup has adopted you: meet %s (rename it on the settings page)." % name(), Kit.HUE_GOOD)
 
-    # The playpen code: 48 bytes become 64 characters of an URL-safe alphabet, three bytes to four
-    # characters.
-    B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    B64_REV = dict((ch, i) for i, ch in enumerate(B64))
     # A 64-character run with no alphabet character on either side, so a code is not cut out of
     # a longer word.
     CODE_RE = re.compile(r"(?<![A-Za-z0-9_\-])([A-Za-z0-9_\-]{64})(?![A-Za-z0-9_\-])")
-
-    def b64(data):
-        """Encode bytes (a multiple of three) as base 64 text."""
-        out = []
-        for i in range(0, len(data), 3):
-            n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2]
-            out += [B64[(n >> 18) & 63], B64[(n >> 12) & 63], B64[(n >> 6) & 63], B64[n & 63]]
-        return "".join(out)
-
-    def unb64(s):
-        """Decode base 64 text back into a list of bytes. The characters must be in B64."""
-        data = []
-        for i in range(0, len(s), 4):
-            n = 0
-            for ch in s[i:i + 4]:
-                n = (n << 6) | B64_REV[ch]
-            data += [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-        return data
-
-    def checksum(data):
-        """A 16-bit checksum of the bytes, so garbled codes are rejected."""
-        s = 7
-        for i, b in enumerate(data):
-            s = (s * 31 + b + i) & 0xFFFF
-        return s
 
     def slot_index(slot, iid):
         """The 1-based position of an item inside its category, or 0 for none. This is how a worn item is
@@ -1251,22 +1223,26 @@ def _module_mongotchi():
         """Build the 64-character playpen code of this pet.
 
         Layout (48 bytes): version, stage, eleven worn slots, mood, age in hours, swats, pet id (two
-        bytes), name (12), owner (16), checksum (two bytes).
+        bytes), name (12), owner (16), checksum (two bytes). The bytes are packed with Kit.b64 and sealed
+        with Kit.checksum, so every module that shares codes reads and writes the same format.
         """
         data = [1, pet["stage"]] + [slot_index(s, shop["eq"].get(s, "")) for s in CODE_SLOTS]
         data += [int(mood()), min(255, int(pet["age"] // 3600)), min(255, pet["swats"]),
                  (pet["uid"] >> 8) & 255, pet["uid"] & 255] + text_bytes(name(), 12) + text_bytes(my_owner(), 16)
-        c = checksum(data)
-        return b64(data + [(c >> 8) & 255, c & 255])
+        c = Kit.checksum(data)
+        return Kit.b64(data + [(c >> 8) & 255, c & 255])
 
     def decode(code):
         """Read a playpen code into a guest record, or None when its length, characters, version or
         checksum are wrong. Items out of range fall back to the slot's default.
+
+        Uses Kit.unb64 and Kit.checksum, the same routines my_code packs with. Codes arrive from other
+        players' chat, so nothing in them is trusted until the checks pass.
         """
-        if not code or len(code) != 64 or any(ch not in B64_REV for ch in code):
+        if not code or len(code) != 64 or any(ch not in Kit.B64_REV for ch in code):
             return None
-        d = unb64(code)
-        if len(d) != 48 or d[0] != 1 or checksum(d[:46]) != (d[46] << 8 | d[47]):
+        d = Kit.unb64(code)
+        if len(d) != 48 or d[0] != 1 or Kit.checksum(d[:46]) != (d[46] << 8 | d[47]):
             return None
         g = {"code": code, "stage": min(2, d[1]), "mood": d[13], "age": d[14], "swats": d[15],
              "uid": d[16] << 8 | d[17], "name": bytes_text(d[18:30]) or "Mongotchi",
@@ -3365,7 +3341,8 @@ def _module_mongotchi():
 
         build(g, store, c, v) draws into a fresh gump; w x h is its size, max_h the zone's height (taller
         than it, the body scrolls) and hidden starts it unseen. The new gump replaces the old one, which
-        is disposed last so the screen never shows a gap.
+        is disposed last so the screen never shows a gap. The place comes from the layout manager when
+        it holds the window, else from the open window or the saved position.
         """
         holder = wins[which]
         key = dock_key(which)
@@ -3373,8 +3350,8 @@ def _module_mongotchi():
         x, y = Kit.load_pos(POS_KEYS[which], POS_DEFAULTS[which], (w, h))
         if Kit.is_open(holder["g"]):
             x, y = holder["g"].GetX(), holder["g"].GetY()
-        # A window held in a layout zone takes the zone's place instead of its own.
-        at = LAYOUT.placed.get(key) if HOST.layout_holds(key) else None
+        # The layout manager's remembered spot for this window, only while it holds this zone's windows.
+        at = LAYOUT.spot(key) if HOST.layout_holds(key) else None
         if at is not None:
             x, y = int(at[0]), int(at[1])
         # The old gump is kept until the new one is up.
@@ -4698,7 +4675,13 @@ def _module_mongotchi():
                 if not mb["mine"]:
                     Kit.art_button(g, store, "rm%d" % n, Kit.ART_CLOSE, x, y, None,
                                    "Send %s home" % mb["name"], on_click=queue(("pen", "rm", n)))
-                txt = "%s (yours)" % mb["name"] if mb["mine"] else "%s (%s)" % (mb["name"], mb["owner"])
+                # Another player's pet carries that player's name. In streamer mode it is replaced by a stable
+                # veiled label, derived from a checksum of the lower-cased name, so the same owner always looks the
+                # same on stream without being named.
+                own = mb["owner"]
+                if Kit.streamer:
+                    own = Kit.veil("name", own, Kit.checksum(own.lower().encode("utf-8")))
+                txt = "%s (yours)" % mb["name"] if mb["mine"] else "%s (%s)" % (mb["name"], own)
                 Kit.add_label(g, fit(txt, colw - 50), x + 34, y + 3, Kit.HUE_GOOD if mb["mine"] else Kit.HUE_TEXT)
             # Paste a code.
             ya = QAY + dh

@@ -178,8 +178,9 @@ def _module_butler():
 
         Settings line: cooldown|range then the FIELDS in order, split on "|"; a short line (older save)
         is padded and missing text fields take their defaults. Action log: one line per entry, tab
-        separated: time, hue, text. Visitor log: tab separated time in, time out, serial, notoriety,
-        times, flag, then the name last, so a name can hold anything but a tab.
+        separated: time, hue, text, then the name and serial of the player the line is about (a line
+        saved without them reads back with no name). Visitor log: tab separated time in, time out,
+        serial, notoriety, times, flag, then the name last, so a name can hold anything but a tab.
         """
         p = Kit.get_var(SETTINGS_KEY).split("|")
         if len(p) >= 8:
@@ -201,7 +202,8 @@ def _module_butler():
             q = line.split("\t")
             if len(q) >= 3:
                 with Kit.quiet:
-                    log.append((float(q[0]), q[2], int(q[1])))
+                    log.append((float(q[0]), q[2], int(q[1]), q[3] if len(q) > 4 else "",
+                                int(q[4]) if len(q) > 4 else 0))
         # Bad lines are skipped one by one (Kit.quiet), and only the newest are kept.
         del log[:-LOG_KEEP]
         del visits[:]
@@ -226,10 +228,15 @@ def _module_butler():
         Kit.put_var(VIEW_KEY, "1" if st["sweep"] else "0")
 
     def save_log():
-        """Save the action log, one tab-separated line each, and clear the dirty flag."""
+        """Save the action log, one tab-separated line each, and clear the dirty flag.
+
+        Each line holds time, hue, text, name and serial. Tabs and line breaks in the text and name are
+        turned into spaces so they cannot split a line.
+        """
         st["log_dirty"] = False
-        Kit.put_var(LOG_KEY, "\n".join(["%d\t%d\t%s" % (t, hue, text.replace("\t", " ").replace("\n", " "))
-                                         for (t, text, hue) in log[-LOG_KEEP:]]))
+        Kit.put_var(LOG_KEY, "\n".join(["%d\t%d\t%s\t%s\t%d" % (e[0], e[2], e[1].replace("\t", " ").replace("\n", " "),
+                                                               e[3].replace("\t", " ").replace("\n", " "), e[4])
+                                         for e in log[-LOG_KEEP:]]))
 
     def save_visits():
         """Save the visitor log, one tab-separated line each, and clear the dirty flag."""
@@ -246,13 +253,15 @@ def _module_butler():
         if win["log_view"] == "visits" and logs["g"] is not None:
             st["visits_redraw"] = True
 
-    def add_log(text, hue=None):
+    def add_log(text, hue=None, name="", serial=0):
         """Add a line to the action log and say it in the journal.
 
-        The journal form ends with a full stop; the log line itself stays bare. Saved later by _tick.
+        name and serial say which player the line is about, so the log can show a veiled name while the
+        streamer mode is on (the text itself is stored as written). The journal form ends with a full
+        stop; the log line itself stays bare. Saved later by _tick.
         """
         hue = Kit.HUE_INFO if hue is None else hue
-        log.append((time.time(), text, hue))
+        log.append((time.time(), text, hue, name or "", serial))
         del log[:-LOG_KEEP]
         st["log_dirty"] = True
         say(text + ("" if text.endswith((".", "!", "?")) else "."), hue)
@@ -286,6 +295,21 @@ def _module_butler():
         ready for a log line.
         """
         return VERBS[h["kind"]].lower(), h["name"] or "the target"
+
+    def target_of(h):
+        """Return (name, serial) of a house command's target when it is a named player, else ("", 0).
+
+        Only commands that aim at a mobile have a player to name; the pair goes straight to add_log.
+        """
+        return (h["name"], h["serial"]) if h["name"] and CMDS[h["kind"]][2] == "mobile" else ("", 0)
+
+    def who_name(name, serial, noto=None):
+        """Return a name ready to show: the notoriety mark (colour-blind mode only) then the name.
+
+        In streamer mode the name is replaced by the veiled label for that serial.
+        """
+        mark = Kit.noto_mark(noto) if noto else ""
+        return (mark + " " if mark else "") + Kit.veil("name", name, serial)
 
     # Section heights and widths in pixels. Visitor rows, the action section and the whole window are
     # worked out from them; layout() recomputes them for the width and height it is given.
@@ -364,7 +388,8 @@ def _module_butler():
         """Work out every place in the full window for a width of w and a height of h.
 
         h of None means the window's own height at that width. Returns the plan as a dict; its "h" is
-        the height the plan comes out at, which may exceed h when the window is too short for it.
+        the height the plan comes out at, which may exceed h when the window is too short for it. Row
+        pitch comes from Kit.pitch, so compact mode makes the rows shorter; the plan keeps it as "rh".
         """
         M = Kit.MARGIN
         IW = w - 2 * M
@@ -380,7 +405,8 @@ def _module_butler():
         yv = ys + sweep_h + Kit.GAP
         dist_w = Kit.text_w("18 tiles")
         single = 12 + NAME_MIN + 6 + dist_w + 10 + btn_line_w() + 10 <= IW
-        row_h = ROW_H if single else 2 * ROW_H
+        rh = Kit.pitch(ROW_H)
+        row_h = rh if single else 2 * rh
         if single:
             x_ban = M + IW - 10 - cap_w("Ban")
             x_ej = x_ban - 12 - cap_w("Eject")
@@ -422,7 +448,7 @@ def _module_butler():
         return {"IW": IW, "ys": ys, "sweep_xy": (M + 10, ys + 26), "sweep_h": sweep_h, "yv": yv, "row_h": row_h,
                 "now_xy": (M + 10 + sw_w + 16, ys + 26) if one else (M + 10, ys + 52),
                 "status_y": ys + 58 if one else ys + 84, "count_room": count_room,
-                "status_room": max(40, IW - 20 - count_room - 10), "btn_dy": 0 if single else ROW_H,
+                "status_room": max(40, IW - 20 - count_room - 10), "btn_dy": 0 if single else rh, "rh": rh,
                 "x": (x_fr, x_ej, x_ban, x_dist), "dist_w": dist_w,
                 "name_w": max(20, min(NAME_W, x_dist - 6 - (M + 12))),
                 "empty": Kit.wrap(EMPTY_ROWS, max(60, IW - 24)), "act_rows": rows_used, "groups": groups,
@@ -511,7 +537,7 @@ def _module_butler():
                 row = {"val": None, "prev": None, "changed": 0.0}
                 row["name_lbl"] = Kit.add_label(g, "", M + 12, ry + 3, Kit.HUE_TEXT)
                 row["dist_lbl"] = Kit.add_label(g, "", x_dist, ry + 3, Kit.HUE_INFO)
-                row["catch"] = Kit.catcher(g, M + 10, ry, x_dist - M - 10 + P["dist_w"], ROW_H,
+                row["catch"] = Kit.catcher(g, M + 10, ry, x_dist - M - 10 + P["dist_w"], P["rh"],
                                            Kit.row_clicker(row, queue, "last"), LAST_TIP)
                 for bk, art, bx, cap, tip, act in btns:
                     row[bk] = Kit.art_button(g, store, "%s%d" % (bk, i), art, bx, ry + bdy, cap, tip,
@@ -562,8 +588,10 @@ def _module_butler():
         """Rewrite the visitor rows from the last scan.
 
         Each row keeps a signature of what it shows and is skipped when nothing changed. Rows without a
-        visitor hide their controls. The empty sentence and the "N near" count are set only when their
-        inputs change; the count is right-aligned, so it is moved when its width changes.
+        visitor hide their controls. Names go through who_name (veiled in streamer mode, marked in
+        colour-blind mode) and the colour comes from the notoriety, swapped for the colour-blind one
+        when that mode is on. The empty sentence and the "N near" count are set only when their inputs
+        change; the count is right-aligned, so it is moved when its width changes.
         """
         rows = win["rows"]
         if not rows or st["minimized"]:
@@ -580,13 +608,14 @@ def _module_butler():
                 if row.get("sig") == sig:
                     continue
                 row["sig"] = sig
-                hue = NOTO_HUE.get(v["noto"], Kit.HUE_TEXT)
+                hue = Kit.cb_hue(v["noto"], NOTO_HUE.get(v["noto"], Kit.HUE_TEXT))
+                name = who_name(v["name"], v["serial"], v["noto"])
                 # A hidden player's name gives way to a " (hidden)" tag so the row stays inside its column.
                 if v["hidden"]:
                     hue = Kit.HUE_TITLE
-                    Kit.set_text(row["name_lbl"], short(v["name"], name_w - hidden_w) + " (hidden)", hue)
+                    Kit.set_text(row["name_lbl"], short(name, name_w - hidden_w) + " (hidden)", hue)
                 else:
-                    Kit.set_text(row["name_lbl"], short(v["name"], name_w), hue)
+                    Kit.set_text(row["name_lbl"], short(name, name_w), hue)
                 Kit.set_text(row["dist_lbl"], Kit.count(v["dist"], "tile"))
                 for k in ROW_CTRLS:
                     set_vis(row[k], True, row, k)
@@ -616,8 +645,13 @@ def _module_butler():
                 at_k(near, Kit.MARGIN + IW - 10 - tw, c["near_y"])
 
     def log_line(entry, width):
-        """Return one action log entry as "HH:MM  text" cut to width pixels, and its hue."""
-        t, text, hue = entry
+        """Return one action log entry as "HH:MM  text" cut to width pixels, and its hue.
+
+        In streamer mode the player's name inside the text is swapped for the veiled label.
+        """
+        t, text, hue, name, serial = entry
+        if name and Kit.streamer:
+            text = text.replace(name, who_name(name, serial))
         return "%s  %s" % (time.strftime("%H:%M", time.localtime(t)), short(text, width)), hue
 
     def refresh_log():
@@ -700,7 +734,8 @@ def _module_butler():
         """Return one visit as a line and its hue: when, name, notoriety, how often, ejected or banned.
 
         The time shows the date only when it is not today. "inside" marks a visit still open; a visit
-        with no leave time (the module stopped while they were in) ends in a question mark.
+        with no leave time (the module stopped while they were in) ends in a question mark. The name
+        goes through who_name and the hue through Kit.cb_hue.
         """
         t_in, t_out, serial, name, noto, times, flag = e
         lt = time.localtime(t_in)
@@ -718,7 +753,8 @@ def _module_butler():
         if flag:
             tail += "  banned" if flag == 2 else "  ejected"
         name_w = max(60, width - Kit.text_px(when + "  " + tail))
-        return "%s  %s%s" % (when, short(name, name_w), tail), NOTO_HUE.get(noto, Kit.HUE_TEXT)
+        return ("%s  %s%s" % (when, short(who_name(name, serial, noto), name_w), tail),
+                Kit.cb_hue(noto, NOTO_HUE.get(noto, Kit.HUE_TEXT)))
 
     def refresh_logwin():
         """Rewrite the log window's rows from the log or the visits.
@@ -760,12 +796,14 @@ def _module_butler():
     def status_text(now):
         """Return the status line text and hue for the main window.
 
-        In order: a house command waiting, a short note, the Detect Hidden phases, then the sweep's
-        state with the seconds left or the reason it is held.
+        In order: a house command waiting (its target's name veiled in streamer mode), a short note, the
+        Detect Hidden phases, then the sweep's state with the seconds left or the reason it is held.
         """
         h = st["house"] or st["house_wait"]
         if h is not None:
-            return ("%s %s: waiting for the %s cursor" % (VERBS[h["kind"]], h["name"] or "the target",
+            nm, ser = target_of(h)
+            return ("%s %s: waiting for the %s cursor" % (VERBS[h["kind"]], who_name(nm, ser) if nm else
+                                                          (h["name"] or "the target"),
                     "house" if st["house"] is not None else "sweep"), Kit.HUE_TITLE)
         if st["note"] and now < st["note_until"]:
             return st["note"], Kit.HUE_INFO
@@ -1032,7 +1070,8 @@ def _module_butler():
         Runs after a scan when the setting is on and you are in a house. It never ejects: the alert asks
         whether to eject, and the Eject button on the player's row does it on your press, as R8 requires
         for anything against a player. Each player alerts at most once per EJECT_FOE_EVERY seconds;
-        party members and friends are never flagged. When HOST.alert does not raise the alert, the line
+        party members and friends are never flagged. The alert and the log line carry the player's name
+        and serial so streamer mode can veil them. When HOST.alert does not raise the alert, the line
         goes to the action log instead.
         """
         if not settings["eject_foes"] or not st["in_house"]:
@@ -1058,8 +1097,8 @@ def _module_butler():
             eject_at[s] = now + EJECT_FOE_EVERY
             what = "red" if v["noto"] == "murderer" else "Foe"
             if not HOST.alert(ALERT_FOE, "%s (%s) in your house: Eject from their row?"
-                              % (v["name"] or "Someone", what), "alarm", who=s):
-                add_log("%s (%s) stepped in" % (v["name"] or "someone", what), Kit.HUE_BAD)
+                              % (v["name"] or "Someone", what), "alarm", who=s, name=v["name"]):
+                add_log("%s (%s) stepped in" % (v["name"] or "someone", what), Kit.HUE_BAD, v["name"], s)
             return
 
     def sweep_held(now):
@@ -1137,8 +1176,8 @@ def _module_butler():
         Client tick. In phase "cursor" it waits for the skill's own neutral cursor and aims it at you,
         giving up at the deadline. Another claim or a hand pick means waiting; a harmful or beneficial
         cursor belongs to a spell, so it is never aimed or cancelled and the sweep drops. In phase "cast"
-        anyone who was not in view before and appears within REVEAL_WINDOW is called out, logged and
-        counted, then the phase ends after REPLY_WAIT.
+        anyone who was not in view before and appears within REVEAL_WINDOW is called out, logged (with
+        name and serial for the veil) and counted, then the phase ends after REPLY_WAIT.
         """
         if st["phase"] == "cursor":
             # Check the deadline first so another claim cannot keep the sweep waiting past it, then step aside
@@ -1175,9 +1214,10 @@ def _module_butler():
                         st["seen"].add(v["serial"])
                         st["revealed"] += 1
                         API.HeadMsg("* revealed *", v["serial"], Kit.HUE_BAD)
-                        add_log("revealed %s" % (v["name"] or "someone"), Kit.HUE_BAD)
+                        add_log("revealed %s" % (v["name"] or "someone"), Kit.HUE_BAD, v["name"], v["serial"])
                         if settings["sound"]:
-                            HOST.alert(ALERT_REVEAL, "Revealed %s" % (v["name"] or "someone"), "warn", who=v["serial"])
+                            HOST.alert(ALERT_REVEAL, "Revealed %s" % (v["name"] or "someone"), "warn", who=v["serial"],
+                                       name=v["name"])
             if now - st["cast_at"] > REPLY_WAIT:
                 st["phase"] = "idle"
 
@@ -1186,7 +1226,8 @@ def _module_butler():
 
         Ignored when nothing waits. A skill delay gives the cooldown back and retries soon. A reveal line
         sets a flag and alerts. For a house command a success line is logged (and marks the visit for an
-        eject or ban) and a refusal is logged with the shard's own words; either ends the command.
+        eject or ban) and a refusal is logged with the shard's own words; either ends the command. House
+        log lines carry the target's name and serial through target_of.
         """
         now = time.time()
         # True while a sweep is waiting for the shard.
@@ -1217,13 +1258,13 @@ def _module_butler():
         if h is None:
             return
         if any(t in low for t in J_DONE[h["kind"]]):
-            add_log("%s %s" % (CMDS[h["kind"]][1], h["name"] or "the target"), Kit.HUE_GOOD)
+            add_log("%s %s" % (CMDS[h["kind"]][1], h["name"] or "the target"), Kit.HUE_GOOD, *target_of(h))
             if h["kind"] in ("eject", "ban"):
                 mark_visit(h["serial"], 2 if h["kind"] == "ban" else 1)
             finish_house()
             return
         if any(t in low for t in J_HOUSE_NO):
-            add_log("%s %s failed: %s" % (who(h) + (ln.text.strip(),)), Kit.HUE_BAD)
+            add_log("%s %s failed: %s" % (who(h) + (ln.text.strip(),)), Kit.HUE_BAD, *target_of(h))
             finish_house()
             return
 
@@ -1293,7 +1334,7 @@ def _module_butler():
         Client tick. Check the deadline first, then step aside for another claim or a hand pick, and aim
         only a neutral cursor: a harmful or beneficial one is someone's spell, so the command is dropped
         and the cursor never aimed or cancelled. A target out of sight cancels. With no journal reply
-        within REPLY_WAIT it logs what was done.
+        within REPLY_WAIT it logs what was done. Every log line names the target through target_of.
         """
         h = st["house"]
         if h is None:
@@ -1304,12 +1345,12 @@ def _module_butler():
                     return
                 if not HOST.cursor_ok(KEY, "neutral"):
                     if has_target():
-                        add_log("%s %s: dropped, a spell cursor came up" % who(h), Kit.HUE_BAD)
+                        add_log("%s %s: dropped, a spell cursor came up" % who(h), Kit.HUE_BAD, *target_of(h))
                         finish_house()
                     return
                 if find_t(h["kind"], h["serial"]) is None:
                     API.CancelTarget()
-                    add_log("%s %s: out of sight" % who(h), Kit.HUE_BAD)
+                    add_log("%s %s: out of sight" % who(h), Kit.HUE_BAD, *target_of(h))
                     finish_house()
                     return
                 API.Target(h["serial"])
@@ -1318,24 +1359,25 @@ def _module_butler():
             # Past the deadline: give up.
             else:
                 add_log("%s %s: no house cursor (in your house, with the right? Else use the house sign)" % who(h),
-                        Kit.HUE_BAD)
+                        Kit.HUE_BAD, *target_of(h))
                 finish_house()
             return
         # No journal reply seen: say what was aimed.
         if now - h["aimed"] > REPLY_WAIT:
-            add_log("%s aimed at %s (no reply seen)" % who(h))
+            add_log("%s aimed at %s (no reply seen)" % who(h), None, *target_of(h))
             finish_house()
 
     def want_ban(serial, name, now):
         """Ban, asking for a second click within CONFIRM_SECS first when that setting is on.
 
-        A second click within 0.3 s of the first is ignored, so a double click does not confirm.
+        A second click within 0.3 s of the first is ignored, so a double click does not confirm. The
+        confirm note names the player through who_name, so it is veiled in streamer mode.
         """
         if settings["confirm"]:
             c = st["confirm"]
             if not (c and c[0] == serial and now < c[1]):
                 st["confirm"] = (serial, now + CONFIRM_SECS, now)
-                note("Ban %s? Click Ban again to confirm" % (name or "them"), CONFIRM_SECS)
+                note("Ban %s? Click Ban again to confirm" % (who_name(name, serial) if name else "them"), CONFIRM_SECS)
                 return
             if len(c) > 2 and now - c[2] < 0.3:
                 return

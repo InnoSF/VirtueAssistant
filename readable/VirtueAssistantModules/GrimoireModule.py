@@ -1559,7 +1559,7 @@ def _module_grimoire():
             l.SetAcceptMouseInput(False)
             place_uo(l, x, y, size, width, align)
             return put(parent, l, track)
-        size = max(6, sc(size))
+        size = max(6, Kit.tsize(sc(size)))
         if width:
             l = G.CreateGumpTTFLabel(text, size, color, aligned=align, maxWidth=sc(width))
         else:
@@ -1932,11 +1932,11 @@ def _module_grimoire():
         The scale is part of the cache key since a label's real size depends on it. The cache is cleared
         when it grows large.
         """
-        key = (text, size, view["scale"])
+        key = (text, size, view["scale"], Kit.tscale)
         if key not in _ttf_widths:
             if len(_ttf_widths) >= 4000:
                 _ttf_widths.clear()
-            l = G.CreateGumpTTFLabel(text, max(6, sc(size)), COL_TEXT)
+            l = G.CreateGumpTTFLabel(text, max(6, Kit.tsize(sc(size))), COL_TEXT)
             px = int(l.GetWidth() or 0)
             l.Dispose()
             # A measure that comes back as 0 falls back to an estimate.
@@ -2762,20 +2762,7 @@ def _module_grimoire():
         q = fav_ui["text"].strip().lower()
         rows = []
         if q:
-            words = q.split()
-            more = False
-            for s in order:
-                lst = rune_cache.get(s) or ()
-                tl = titles[s].lower()
-                for i in range(len(lst)):
-                    hay = lst[i]["name"].lower() + "  " + tl
-                    if all(wd in hay for wd in words):
-                        if len(rows) >= SEARCH_MAX:
-                            more = True
-                            break
-                        rows.append((s, i, lst[i]["name"], titles[s], None, False))
-                if more:
-                    break
+            rows, more = rune_hits(q.split(), SEARCH_MAX)
             if more:
                 return rows, "More than %d found; type more letters." % SEARCH_MAX
             if rows:
@@ -2812,6 +2799,24 @@ def _module_grimoire():
             info += "  (%d not in the books you carry)" % away
         # One more than SEARCH_MAX covers the last-trip row on top.
         return rows[:SEARCH_MAX + 1], info
+
+    def rune_hits(words, cap):
+        """Return the destinations of the carried runebooks whose name or book title holds every search word.
+
+        words is a list of lower-case words; cap limits the rows. Returns (rows, more): each row is
+        (book serial, index, destination name, book title, None, False) and more is True when the cap cut
+        the list short. Reads the saved destination lists only, no book is opened.
+        """
+        rows = []
+        for b in runebooks:
+            s, tl = b["serial"], b["title"].lower()
+            lst = rune_cache.get(s) or ()
+            for i in range(len(lst)):
+                if all(wd in lst[i]["name"].lower() + "  " + tl for wd in words):
+                    if len(rows) >= cap:
+                        return rows, True
+                    rows.append((s, i, lst[i]["name"], b["title"], None, False))
+        return rows, False
 
     def fav_render(building=False):
         """Fills the Favourites page's rows from fav_rows, in place.
@@ -3542,6 +3547,41 @@ def _module_grimoire():
         queue.add(("travel", serial, dest, method), dup=True)
         return True
 
+    def svc_find(q, n=8):
+        """Host service "grimoire.find": list up to n destinations matching the search text q.
+
+        Each result is (label, token); the token is what svc_go takes. Returns an empty list when q is
+        empty or Grimoire is closing.
+        """
+        words = str(q or "").lower().split()
+        if not words or st["shutting"] or st["closed"]:
+            return []
+        return [("%s  (%s)" % (r[2], r[3]), (r[0], r[1], r[2])) for r in rune_hits(words, max(0, int(n or 0)))[0]]
+
+    def svc_go(token):
+        """Host service "grimoire.go": queue a trip to the destination a svc_find token names.
+
+        token is (book serial, index, name). Returns True when the trip was queued; says why and returns
+        False when Grimoire is closing, the token is bad, the book is no longer carried or a trip is
+        already on its way.
+        """
+        if st["shutting"] or st["closed"]:
+            say("trip not made; Grimoire is closing.", Kit.HUE_INFO)
+            return False
+        try:
+            serial, index, name = int(token[0]), int(token[1]), str(token[2])
+        except Exception:
+            return False
+        if not any(b["serial"] == serial for b in runebooks) or resolve(serial, index, name) is None:
+            say("%s isn't in the runebooks you carry any more." % name, Kit.HUE_BAD)
+            return False
+        if travel_pending():
+            say("a trip is already on its way.", Kit.HUE_INFO)
+            return False
+        queue.add(stamped(("favgo", serial, index, name, None, False)), dup=True)
+        HOST.poke(KEY)
+        return True
+
     def svc_destinations():
         """HOST.services "grimoire.destinations": every destination of every carried runebook, from the
         saved lists (no book is read).
@@ -3571,7 +3611,7 @@ def _module_grimoire():
 
     # Services this module offers while it is on; start registers them and the cleanup removes them.
     SERVICES = {"grimoire.travel": svc_travel, "grimoire.destinations": svc_destinations,
-                "grimoire.book_charges": svc_book_charges}
+                "grimoire.book_charges": svc_book_charges, "grimoire.find": svc_find, "grimoire.go": svc_go}
 
     def _thread_tick():
         """The script-thread pass: _thread_work, then the saved values written once if any changed."""

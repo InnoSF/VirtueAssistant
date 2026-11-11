@@ -13,6 +13,8 @@ Key "actionbar", On screen. Cells for items, spells, skills and windows.
 - Bag slots, Grimoire, Virtue Assistant and Module windows buttons show their window, or fold it into the bar's tray.
 - Travel cells go to a runebook destination through Grimoire.
 - Thin gold lines (3 px) edge the slot frames and separate the cells, bag slots and window buttons; they stay gold in Dark mode.
+- **Radial ring** (RADIAL RING): set a key with Ring key (Backspace clears it). Hold the key and the cells of one page (Ring page: shown, or a page 1-12) open in a radial ring round the mouse; move onto a cell and let go to use it once, as a click would (a harmful cell on a blue in town still asks for a second press). Letting go in the middle, far outside or before moving uses nothing; the ring closes after 10 s.
+- A Launcher window cell opens the Quick Launcher, which also finds and runs this bar's cells.
 
 ## Character HUD (CharacterHudModule.py)
 
@@ -32,7 +34,7 @@ Buffs & Timers: since 2.7.0.32 its settings page has **Also show Polymorph as a 
 
 ## Grimoire (GrimoireModule.py)
 
-Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, charge or scroll, star favourite destinations and search every runebook.
+Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, charge or scroll, star favourite destinations and search every runebook. The Quick Launcher finds its runes too; running one is one trip, refused while another is on its way.
 
 ## Interface (InterfaceModule.py)
 
@@ -41,8 +43,9 @@ Key "interface", On screen. Zones, layout and the unified UI. On by default.
 - Its settings page (Settings > Interface) holds everything about zones, layouts and snapping: Set up, Arrange windows, Edit zones, the look, saved frame and window layouts, the zone of each window, snapping and the grid.
 - **Set up** opens a three-step window: a ready-made screen, the zone of each window, the look. It opens by itself once, when no layout has been chosen yet.
 - **One panel** (Join windows in zones into one panel): one frame over every zone, no corners or dividing lines, a gold border round the game view; windows drop their frames and title rows (hover a window's top edge for it).
-- **Dark mode** (Settings > Interface, LOOK): tints every window's stone frame charcoal; it stays on with Interface off.
-- The zone editor (Edit zones) adds Split, Join and Apart to the zone tools.
+- **LOOK:** Look (Classic, Dark, Parchment, High contrast), Text size, Compact rows and Fade windows when idle (Faded:, After:, and whether the Action Bar and unit frames fade too); they stay on with Interface off. ACCESSIBILITY: Colour-blind marks and Streamer mode (see the README).
+- The zone editor (Edit zones) adds Split, Join and Apart to the zone tools. Its Stack button also cycles to tabs: the zone shows one window at a time under a strip of tabs (the window's title on each), and the others wait behind it, still running.
+- **Share code** and **Load code** (LAYOUTS) pass the layouts in use as a text code; **LAYOUTS BY SITUATION** switches window layouts in war mode, at the bank, in dungeons and in town.
 - Windows in zones (2.7.0.12): every window that holds a list or rows draws at its zone's size and shows as many rows as fit; a window too small for its zone keeps its own size and says so once. A window assigned to a zone opens there even if it was closed, and its own buttons don't close it. Windows that can sit in a zone include the Ultima Tracker panel, Supplies (and Supplies Rows), the killer window, Mongotchi's Shop, Playpen, Journeys and Achievements, the Property Butler Log and Skill Bags Results.
 - The Paperdoll pairs with a "<zone> bags" zone below it for the bags; an empty bags zone left behind when the Paperdoll moves is removed.
 - **Check fit** (Settings > Interface > LAYOUTS) lists every zoned window and whether it fills its zone, plus empty zones and windows assigned but not open. Windows assigned but not open stay in the window lists, marked "(not open)".
@@ -58,7 +61,10 @@ Key "inventory", Your things. Bags, paperdoll, storage, restock, supplies.
    Storage          What the containers you opened hold
    Restock          Refills from a chest or bank, on a press
    Supplies         Pack supplies, low counts marked
+   Bag Sections     What you carry, grouped by kind
 ```
+
+Bag Sections shows your backpack's items grouped into sections (REAGENTS, POTIONS and so on), one picture per kind of item with its total. Its settings pick up to 12 sections in all: ready-made ones (14, six ticked at first) and your own, made with "Add from target..." (the item's kind, checked first); Show Other adds a last section for the rest. Double-click a picture to use one of that item, once.
 
 Paperdoll joins the Bags window. Storage re-reads an open container soon after its items change (and every 15 s while it is open); a Name or Forget shows a moment later.
 
@@ -129,7 +135,10 @@ Key "ultima", The world. Friends, foes and neutrals near you.
 ```
    Tracker          Trackers and combat bars
    Lookout          A second client keeps watch
+   Overview         Players, monsters, pets and corpses near you
 ```
+
+Overview is a window with four tabs (Players, Monsters, Pets, Corpses): one row each with name, health, a bar and distance, up to a set number of rows within a set range (settings LIST). Its Sort: button orders each tab by distance, HP or name (Corpses: distance or name), kept per tab. The Tracker's settings have their own Sort: button (name, distance or HP) for the tracker list. Alt+click a row (not on Corpses) to auto-follow it (again to stop).
 
 ## World Map (WorldMapModule.py)
 
@@ -144,6 +153,10 @@ Key "worldmap", The world. Pings, corpse, dig and dry spots, traps, also shown o
 ```
 
 The other parts send their pings through Map Pings. Corpse uses only a corpse named "corpse of <your name>" (or "remains of"); a nameless one waits until you click it once, and Get my things refuses a corpse that isn't yours.
+
+## Alerts (in the main script)
+
+Settings > Alerts. Alert banners and sounds from every module. History (also on the banner) opens the Alert History window: the last 50 alerts with their time, kept across restarts. Quiet 30 min stops banners and sounds for 30 minutes (Resume ends it); alerts still reach the history and journal, and an alarm still pauses skill loops.
 
 ## System Stats (in the main script)
 

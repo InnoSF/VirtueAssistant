@@ -27,6 +27,10 @@
 def _module_social():
     """Build the Social module in its own namespace and return its hooks for the mother: start, tick,
     stop, the settings page and the script-thread tick.
+
+    The module shows the friends list, the party, your own profile and the guild roster in one
+    window, and keeps per-account notes on players. Names shown in it go through vis_name or
+    Kit.veil, so streamer mode hides them and colour-blind mode marks notoriety.
     """
     # Module identity and the names of the saved keys. Settings, the minimized flag, the friend
     # names and the guild and roster copies are per character; notes (below) are per account.
@@ -151,7 +155,7 @@ def _module_social():
     # and docked flags, queued client-thread work, lists read from the client, the party read, the
     # parsed profile, last typed chat text per tab, guild gump ids, and caches.
     st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "friends": [], "names_dirty": False,
-          "party": None, "profile": None, "msg": {}, "gids": {}, "me_s": 0, "fserials": []}
+          "party": None, "profile": None, "msg": {}, "gids": {}, "me_s": 0, "fserials": [], "notos": {}}
     # The main window: its gump, the control table and the pool store used to reuse its rows.
     win = {"g": None, "c": {}, "store": ({}, {})}
     # Kit.basics gives the standard clean-up list, the client-thread work queue and the journal
@@ -372,6 +376,28 @@ def _module_social():
 
     # Kit.fit cuts text to a pixel width using letter sums, so no label is created per trial width.
     fit = Kit.fit
+
+    def vis_name(name, serial=0, me=False):
+        """Return the text to show for a player's name in a row or a line.
+
+        me True means your own character: Kit.veil("me") decides what shows. Otherwise, in colour-blind
+        mode, the notoriety mark of that serial (from the last scan) goes in front, and in streamer mode
+        the name becomes the veiled label for the serial, or for a checksum of the lower-cased name when
+        the player is not in view and has no serial.
+        """
+        if me:
+            return Kit.veil("me", name)
+        mark = Kit.noto_mark(st["notos"].get(serial, 0)) if Kit.cblind and serial else ""
+        if Kit.streamer:
+            name = Kit.veil("name", name, serial or Kit.checksum(name.lower().encode("utf-8")))
+        return mark + " " + name if mark else name
+
+    def row_h():
+        """Return the height of one list row in pixels: ROW_H, or a little less in compact mode (Kit.pitch).
+
+        Every row position and row count in the window is worked out from this, never from ROW_H.
+        """
+        return Kit.pitch(ROW_H)
 
     def shift_held():
         """Return True while a Shift key is held, read from the client."""
@@ -785,13 +811,14 @@ def _module_social():
     def scan_view():
         """One pass over the mobiles in view: players by lower-case name (for the roster), the Ally
         (green) ones as a list, the set of every serial in view, and name and distance of each player
-        kept for the rows.
+        kept for the rows. In colour-blind mode it also keeps each player's notoriety by serial, which
+        vis_name turns into a mark.
 
         Pets and NPCs are left out so a pet or vendor sharing a member's name cannot stand in for the
         member: only humans and gargoyles count, and invulnerable ones are skipped.
         """
         me = player_serial()
-        view, allies, serials, kept = {}, [], set(), {}
+        view, allies, serials, kept, notos = {}, [], set(), {}, {}
         for m in HOST.mobiles():
             try:
                 s = int(m.Serial)
@@ -814,9 +841,11 @@ def _module_social():
                 if ni == 2:
                     allies.append((s, name))
                 kept[s] = (name, int(m.Distance))
+                if Kit.cblind:
+                    notos[s] = ni
             except Exception:
                 continue
-        st["view"], st["allies"], st["view_serials"], st["kept"] = view, allies, serials, kept
+        st["view"], st["allies"], st["view_serials"], st["kept"], st["notos"] = view, allies, serials, kept, notos
 
     def friends_in_view(serials):
         """Return which of the friend serials are in view this pass. Uses the serials scan_view made when
@@ -1316,9 +1345,9 @@ def _module_social():
         return info, bars, settings["rows"] if info < 7 else 0
 
     def window_h(tab):
-        """Height in pixels of the window for a tab at its own size."""
+        """Height in pixels of the window for a tab at its own size (list rows count row_h() each)."""
         info, bars, rows = tab_layout(tab)
-        body = (8 + info * 22 + (8 if info else 0) + bars * 30 + rows * ROW_H + (8 if rows else 0) + 4)
+        body = (8 + info * 22 + (8 if info else 0) + bars * 30 + rows * row_h() + (8 if rows else 0) + 4)
         return M + 30 + Kit.GAP + 30 + Kit.GAP + body + M
 
     def min_size():
@@ -1326,7 +1355,7 @@ def _module_social():
         tab can change after the window is placed), plus 30 for the tab row wrapping onto a second
         line. Below that the info lines and toolbars would be drawn past the window's bottom.
         """
-        return (min_title_w(), max(window_h(t) - max(0, tab_layout(t)[2] - 1) * ROW_H for t, _c in TABS) + 30)
+        return (min_title_w(), max(window_h(t) - max(0, tab_layout(t)[2] - 1) * row_h() for t, _c in TABS) + 30)
 
     def build_window():
         """Draw the window for the current tab: title bar, tab row, body, then fill it with refresh. At
@@ -1386,18 +1415,19 @@ def _module_social():
     def build_tab(g, store, c, rows, tab, x, y, w, h, fit=False):
         """Draw the body of one tab (info labels, toolbars, chat field and list rows) inside the section
         at x, y of size w by h. With fit set, the window is sized by a zone: the rows and the info
-        lines are counted from the height that is there.
+        lines are counted from the height that is there. Row pitch comes from row_h().
         """
         info, bars, nrows = tab_layout(tab)
         TOOL_RIGHT[0] = x + w - 6
+        rh = row_h()
 
         def list_rows(yy):
-            """The number of list rows that fit under yy in a zone (at least one), else the setting's."""
-            return max(1, (y + h - 12 - yy) // ROW_H) if fit else nrows
+            """The number of list rows (of pitch rh) that fit under yy in a zone (at least one), else the
+            setting's.
+            """
+            return max(1, (y + h - 12 - yy) // rh) if fit else nrows
 
-        # In a zone fewer info lines are shown when the height is short; the rest are stacked on the
-        # last visible position and hidden.
-        vis = max(1, min(info, (h - 16 - bars * 30 - (ROW_H + 12 if nrows else 4)) // 22)) if fit and info else info
+        vis = max(1, min(info, (h - 16 - bars * 30 - (rh + 12 if nrows else 4)) // 22)) if fit and info else info
         c["info"] = [Kit.add_label(g, "", x + 10, y + 8 + 22 * min(i, vis - 1), Kit.HUE_INFO) for i in range(info)]
         for lbl in c["info"][vis:]:
             lbl.IsVisible = False
@@ -1612,7 +1642,8 @@ def _module_social():
         """Build a pool of n list rows: name, extra columns before the bar, the health bar, status,
         extra columns after, and an X button when removable. before and after are [(key, width)]
         extra label columns, with width 0 meaning the rest of the row. Rows are reused for the life of
-        the window and only their text is rewritten.
+        the window and only their text is rewritten. Rows are row_h() apart and their catcher is one
+        row tall.
 
         A row too narrow for its columns drops them: the last extra columns first, then the health
         bar. What a dropped column would show goes into the row's tooltip instead.
@@ -1651,8 +1682,9 @@ def _module_social():
                 bw = max(30, min(bw, int(room * 0.30)))
             name_w = max(40, room - status_w - 8 - (bw + 8 if bars else 0))
         c["bar_w"], c["name_w"], c["status_w"] = bw, name_w, status_w
+        rh = row_h()
         for i in range(n):
-            ry = y + i * ROW_H
+            ry = y + i * rh
             # One row: serial and who it shows now, serial and who it showed before with the time it
             # changed, the controls as [control, visible] parts, and the extra labels.
             r = {"serial": 0, "prev": (0, 0.0), "parts": [], "name": None, "status": None,
@@ -1689,8 +1721,7 @@ def _module_social():
                 r["extra"][key] = (lbl, wd)
                 r["parts"].append([lbl, True])
                 cx += wd + 8
-            # An invisible catcher over the whole row (the X excluded) takes the clicks and shows the tip.
-            r["catch"] = Kit.catcher(g, x + 4, ry, w - 8 - (40 if removable else 0), ROW_H, row_click(rows, i), tip)
+            r["catch"] = Kit.catcher(g, x + 4, ry, w - 8 - (40 if removable else 0), rh, row_click(rows, i), tip)
             r["parts"].append([r["catch"], True])
             if removable:
                 r["x"] = Kit.art_button(g, store, "rm%d" % i, Kit.ART_CLOSE, x + w - 42, ry + 1,
@@ -1751,15 +1782,18 @@ def _module_social():
         if r[key] != v:
             r[prev], r[key] = (r[key], time.time()), v
 
-    def set_row(r, serial, name, status, hue, frac, extra=None, name_hue=None, bar=True, show_x=True):
+    def set_row(r, serial, name, status, hue, frac, extra=None, name_hue=None, bar=True, show_x=True, me=False):
         """Write a row: the name, status, health bar and extra columns, only what changed since the last
         pass. extra holds rank and title; text too long for its column goes into the row's tooltip,
         with the player's note when there is one. A pass identical to the last one writes nothing. The
-        notes version is part of that comparison so a changed note refreshes its tooltip.
+        notes version and the name as shown (vis_name) are part of that comparison, so a changed note
+        or a switch of streamer or colour-blind mode refreshes the row. me marks your own row.
         """
         # The comparison key: everything the row shows.
         ex = extra or NO_EXTRA
-        key = (serial, name, status, hue, frac, ex.get("rank"), ex.get("title"), name_hue, bar, show_x, notes_st["ver"])
+        shown = vis_name(name, serial, me)
+        key = (serial, name, status, hue, frac, ex.get("rank"), ex.get("title"), name_hue, bar, show_x, notes_st["ver"],
+               shown)
         if key == r.get("last"):
             return
         r["last"] = key
@@ -1768,7 +1802,7 @@ def _module_social():
         if name_hue is None:
             name_hue = Kit.HUE_TEXT if frac is not None else Kit.HUE_INFO
         c = win["c"]
-        Kit.set_text(r["name"], fit(name, c.get("name_w", NAME_W)), name_hue)
+        Kit.set_text(r["name"], fit(shown, c.get("name_w", NAME_W)), name_hue)
         Kit.set_text(r["status"], fit(status, c.get("status_w", STATUS_W)), hue)
         # Columns too long for the row, listed in the tooltip.
         cut = []
@@ -1981,6 +2015,9 @@ def _module_social():
         """Write what changed into the window: labels, rows and bars, for the tab shown, or the one status
         line when minimized. Client tick. Does nothing while the window is folded into the Action Bar
         or while its drawn form does not match the minimized flag (a rebuild is on its way).
+
+        Names of the party leader and of an inviter go through vis_name; your own profile lines use
+        Kit.veil, and the notoriety line takes the colour-blind hue.
         """
         g, c = win["g"], win["c"]
         if g is None or (st["minimized"] and st["docked"]) or ("status" in c) != bool(st["minimized"]):
@@ -2019,7 +2056,7 @@ def _module_social():
                 items = []
             else:
                 leader, inviter, loot, members = party
-                lname = "you" if leader == me else mob_name(leader)
+                lname = "you" if leader == me else vis_name(mob_name(leader), leader)
                 Kit.set_text(info[0], fit(("Party of %d, led by %s" % (len(members) + 1, lname))
                                           if leader else "Party of %d" % (len(members) + 1), tw), Kit.HUE_TEXT)
                 Kit.set_text(info[1], fit("Party may loot your corpse: %s" % ("yes" if loot else "no"), tw),
@@ -2037,7 +2074,7 @@ def _module_social():
             if invite:
                 nm = st["mobs"].get(inviter)
                 Kit.set_text(info[0], fit("Party invite from %s: Accept or Decline" % (
-                    nm[0] if nm and nm[0] else "0x%08X" % inviter), tw), Kit.HUE_TITLE)
+                    vis_name(nm[0], inviter) if nm and nm[0] else "0x%08X" % inviter), tw), Kit.HUE_TITLE)
             shown, pg = page_of(items)
             # Only the leader can remove members, so the X shows for the leader alone.
             show_rows(c, [(s, mob_name(s)) for s in shown], pg, bool(party) and party[0] == me and bool(me))
@@ -2061,9 +2098,10 @@ def _module_social():
             win["info"]["prof"] = pk
             name, lines, noto, gold, fol, fmax, wt, wmax, war, hidden = prof
             titles = [l for l in lines if l != name]
-            texts = [(name, Kit.HUE_TITLE), (" / ".join(titles) if titles else
+            texts = [(Kit.veil("me", name), Kit.HUE_TITLE), (Kit.veil("guild", " / ".join(titles)) if titles else
                       "No titles read yet: hover yourself once", Kit.HUE_INFO),
-                     ("Notoriety: %s" % (noto or "unknown"), Kit.HUE_TEXT), ("Gold: %d" % gold, Kit.HUE_TEXT),
+                     ("Notoriety: %s" % (noto or "unknown"), Kit.cb_hue(noto.lower(), Kit.HUE_TEXT)),
+                     ("Gold: %d" % gold, Kit.HUE_TEXT),
                      ("Followers: %d / %d" % (fol, fmax), Kit.HUE_TEXT), ("Weight: %d / %d" % (wt, wmax), Kit.HUE_TEXT),
                      ("%s%s" % ("War mode" if war else "Peace", ", hidden" if hidden else ""),
                       Kit.HUE_BAD if war else Kit.HUE_GOOD)]
@@ -2122,6 +2160,9 @@ def _module_social():
     def refresh_guild(info, c, tw):
         """Fill the Guild tab: the six info lines (name, your guild line, alliance and faction, charter,
         website, read status), then the roster rows with health for the members in view.
+
+        Guild text (name, titles, alliance, charter, website) goes through Kit.veil("guild") so streamer
+        mode hides it, except the titles of allied members, which are shown as read.
         """
         # Beside the page arrows when in a zone.
         tw0 = tw - c.get("info_cut", 0)
@@ -2134,15 +2175,16 @@ def _module_social():
         elif not gd["in_guild"]:
             plain_info(info[0], fit("Not in a guild", tw0), Kit.HUE_INFO)
         else:
-            set_info(info[0], gd["name"] or "Guild name not shown", tw0, Kit.HUE_TITLE)
-        # A line cut to the window's width has its whole text as its tooltip.
-        set_info(info[1], ("You: " + " / ".join(lines)) if lines else
+            gname = Kit.veil("guild", gd["name"]) if gd["name"] else "Guild name not shown"
+            set_info(info[0], gname, tw0, Kit.HUE_TITLE)
+        set_info(info[1], ("You: " + Kit.veil("guild", " / ".join(lines))) if lines else
                  "Your guild line isn't read yet: hover yourself once", tw, Kit.HUE_TEXT if lines else Kit.HUE_INFO)
         if gd["ok"] and gd["in_guild"]:
             set_info(info[2], "Alliance: %s     Faction: %s" % (
-                gd["alliance"] or "none", gd["faction"] or "none"), tw, Kit.HUE_TEXT)
-            set_info(info[3], "Charter: %s" % (gd["charter"] or "not set"), tw, Kit.HUE_INFO)
-            set_info(info[4], "Website: %s" % (gd["website"] or "not set"), tw, Kit.HUE_INFO)
+                Kit.veil("guild", gd["alliance"]) if gd["alliance"] else "none", gd["faction"] or "none"), tw,
+                Kit.HUE_TEXT)
+            for lbl, cap, k in ((info[3], "Charter", "charter"), (info[4], "Website", "website")):
+                set_info(lbl, "%s: %s" % (cap, Kit.veil("guild", gd[k]) if gd[k] else "not set"), tw, Kit.HUE_INFO)
         else:
             for l in info[2:5]:
                 plain_info(l, "")
@@ -2180,15 +2222,16 @@ def _module_social():
                 stat, hue, frac = "Online", Kit.HUE_GOOD, None
             else:
                 stat, hue, frac = (m["laston"] or "offline"), Kit.HUE_INFO, None
-            # You (also after the saved copy was loaded) get the title colour.
-            if m["me"] or (me_name and mkey(m) == me_name):
+            mine = bool(m["me"] or (me_name and mkey(m) == me_name))
+            if mine:
                 nhue = Kit.HUE_TITLE
             elif d is not None or m["online"]:
                 nhue = Kit.HUE_GOOD if d is None else Kit.HUE_TEXT
             else:
                 nhue = Kit.HUE_INFO
+            title = Kit.veil("guild", m["title"]) if m["title"] and not m.get("ally") else m["title"]
             set_row(r, serial if d is not None else 0, m["name"], stat, hue, frac,
-                    extra={"rank": m["rank"], "title": m["title"]}, name_hue=nhue, bar=d is not None)
+                    extra={"rank": m["rank"], "title": title}, name_hue=nhue, bar=d is not None, me=mine)
         for r in win["rows"][len(shown):]:
             hide_row(r)
 
@@ -2198,6 +2241,9 @@ def _module_social():
     def open_note(name):
         """Open the note window for name; one at a time, a new name replaces the old window. It sits
         where it was last left, else beside this module's window.
+
+        The name box shows the veiled form when streamer mode is on; the real name is kept in ed so the
+        note is still saved under it.
         """
         notew.close()
         w, h = NOTE_W, NOTE_H
@@ -2217,7 +2263,8 @@ def _module_social():
         lx = M + 12
         fx = lx + max(Kit.text_w("Player:"), Kit.text_w("Note:")) + 10
         Kit.add_label(g, "Player:", lx, yb + 13)
-        c["name"] = Kit.with_tip(Kit.add_textbox(g, name, fx, yb + 10, 200, numbers=False),
+        shown = vis_name(name) if name else name
+        c["name"] = Kit.with_tip(Kit.add_textbox(g, shown, fx, yb + 10, 200, numbers=False),
                                  "Player name as shown over their head (any case)")
         Kit.add_label(g, "Note:", lx, yb + 43)
         c["text"] = Kit.with_tip(Kit.add_textbox(g, NOTES.get(name.lower(), ("", ""))[1], fx, yb + 40,
@@ -2230,7 +2277,7 @@ def _module_social():
                        "Delete", "Delete this note", on_click=queue("note_delete"))
         hint = "Kept per account"
         Kit.add_label(g, hint, M + IW - 12 - Kit.text_w(hint), by + 3, Kit.HUE_INFO)
-        notew.end(g, {"name": name})
+        notew.end(g, {"name": name, "shown": shown})
 
     # A second window of this module for the note; it keeps its own place under the note position key.
     notew = Kit.Window(KEY, TITLE, None, ed, open_note, NOTE_POS_KEY, cleanup=cleanup, lock=False, owner=False,
@@ -2239,11 +2286,16 @@ def _module_social():
     def note_fields():
         """The player name and note text as typed in the note window, read on the client thread. Falls
         back to the name the window was opened for.
+
+        A name box still holding the veiled text shown on open is read as the real name, so streaming
+        never changes which player a note belongs to.
         """
         c = ed["c"]
         try:
             name = str(c["name"].Text or "")
         except Exception:
+            name = ed["name"]
+        if name and name == ed.get("shown"):
             name = ed["name"]
         try:
             text = str(c["text"].Text or "")

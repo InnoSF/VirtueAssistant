@@ -26,7 +26,8 @@ def _module_worldmap():
     """Builds the World Map module from its parts and returns its hooks.
 
     The shared Atlas and helpers come first, then the parts: Map Pings, Corpse, Treasure Maps, Ore
-    Tracker and Traps & Fields.
+    Tracker and Traps & Fields. Every coordinate pair the parts show goes through xy, so streamer
+    mode can hide where things are.
     """
     # Module identity: the key the mother, the Action Bar and HOST.by_key know this module by.
     KEY = "worldmap"
@@ -446,6 +447,14 @@ def _module_worldmap():
         if not text or text[0] in "[(\"'" or text.startswith(JOURNAL_NAMES):
             return text
         return text[0].lower() + text[1:]
+
+    def xy(x, y, fmt="%d, %d"):
+        """Format a map position for display, hidden in streamer mode.
+
+        fmt is the pattern for the two numbers (x then y); the result goes through Kit.veil("xy"), which
+        returns it unchanged unless streamer mode is on.
+        """
+        return Kit.veil("xy", fmt % (x, y))
 
     def list_h(rows, row_h):
         """Height of a list window with the given rows of row_h pixels each."""
@@ -1898,8 +1907,11 @@ def _module_worldmap():
                 return best
 
             def where_text(self, e, px, py, pm):
-                """The Where column text: facet and spot, or direction and distance when on your facet."""
-                spot = "(%d, %d)" % (e.x, e.y)
+                """The Where column text: facet and spot, or direction and distance when on your facet.
+
+                The spot is the coordinates through xy, so it is hidden in streamer mode.
+                """
+                spot = xy(e.x, e.y, "(%d, %d)")
                 if pm != e.map or px <= 0:
                     return "%s %s" % (facet_name(e.map), spot)
                 return "%s  %s" % (Kit.where_text(e.x - px, e.y - py, "here"), spot)
@@ -1910,6 +1922,7 @@ def _module_worldmap():
                 Minimised: only the status line, when the history changed. Otherwise rows are rewritten only
                 when the history, page or arrow changed, or you moved (checked once a second): the texts would
                 come out the same otherwise. Row controls are pooled and only their text and visibility change.
+                Senders are shown through sender, so streamer mode veils other players' names.
                 """
                 hs = self.st
                 disp = self.app.display
@@ -1921,7 +1934,8 @@ def _module_worldmap():
                     self.drawn = disp.hist_ver
                     if hist:
                         e = hist[-1]
-                        txt = "%s: %s, last %s %s" % (HIST_TITLE, Kit.count(len(hist), "ping"), label_of(e.type), e.who)
+                        txt = "%s: %s, last %s %s" % (HIST_TITLE, Kit.count(len(hist), "ping"), label_of(e.type),
+                                                       self.sender(e))
                     else:
                         txt = "%s: no pings yet" % HIST_TITLE
                     if c.get("status") is not None:
@@ -1969,7 +1983,7 @@ def _module_worldmap():
                     rsig = (e.seq, where, on)
                     if rsig != r["sig"]:
                         r["sig"] = rsig
-                        texts = (time.strftime("%H:%M:%S", time.localtime(e.at)), label_of(e.type), e.who)
+                        texts = (time.strftime("%H:%M:%S", time.localtime(e.at)), label_of(e.type), self.sender(e))
                         hues = (Kit.HUE_INFO, hue, Kit.HUE_TEXT if not e.local else Kit.HUE_INFO)
                         for j, lbl in enumerate(r["labels"]):
                             Kit.set_text(lbl, Kit.fit(texts[j], r["widths"][j]), hues[j])
@@ -1980,6 +1994,17 @@ def _module_worldmap():
                             r["tip"] = tip
                             Kit.with_tip(r["catch"], tip)
                     self._show(r, True)
+
+            def sender(self, e):
+                """The sender name of a ping entry as it should be shown.
+
+                Your own pings read "You" and are never veiled. In streamer mode another player's name becomes
+                a veiled label derived from a checksum of the lower-cased name, so one sender always looks the
+                same.
+                """
+                if e.who == "You" or not Kit.streamer:
+                    return e.who
+                return Kit.veil("name", e.who, Kit.checksum(e.who.lower().encode("utf-8")))
 
             def _show(self, r, on, only_first=False):
                 """Show or hide a pooled row's controls; only_first leaves just the first label (the empty note)."""
@@ -2992,9 +3017,14 @@ def _module_worldmap():
                 r["serial"], r["x"], r["y"], r["facet"], r["died"], r["body"], 1 if r["spot"] else 0,
                 1 if r["exact"] else 0, r["name"].replace("|", "")))
 
-        def note(text, secs=6.0):
-            """Show a note in the window for secs seconds and in the journal."""
-            st["note"], st["note_until"] = text, time.time() + secs
+        def note(text, secs=6.0, spot=None):
+            """Show a note in the window for secs seconds and in the journal.
+
+            spot is an (x, y) pair that appears in text as "x, y"; the window copy has it replaced by xy's
+            veiled form, while the journal line keeps the text as given.
+            """
+            st["note"] = text if spot is None else text.replace("%d, %d" % spot, xy(*spot))
+            st["note_until"] = time.time() + secs
             st["lbl_at"] = 0.0
             say(journal_case(text))
 
@@ -3094,6 +3124,7 @@ def _module_worldmap():
 
             Returns (where text, its hue, decay text, its hue, info text, minimised bar text). me is the
             player and mm the facet. Counting times are marked "at most" when the death was not seen.
+            Coordinates in the texts go through xy.
             """
             r = st["rec"]
             j = st["job"]
@@ -3107,11 +3138,11 @@ def _module_worldmap():
             if not r["spot"]:
                 where, mini = "Looking for your corpse round you", "looking"
             elif mm != r["facet"]:
-                where = "On %s, at %d, %d" % (Kit.facet_name(r["facet"]), r["x"], r["y"])
+                where = "On %s, at %s" % (Kit.facet_name(r["facet"]), xy(r["x"], r["y"]))
                 mini = Kit.facet_name(r["facet"])
             else:
                 wt = Kit.where_text(r["x"] - mx, r["y"] - my)
-                where = "%s%s, at %d, %d" % (wt[0].upper(), wt[1:], r["x"], r["y"])
+                where = "%s%s, at %s" % (wt[0].upper(), wt[1:], xy(r["x"], r["y"]))
                 mini = wt
             bones_at = 60.0 * settings["bones"]
             most = "" if r["exact"] else "at most "
@@ -3407,7 +3438,8 @@ def _module_worldmap():
             Runs on the client tick when the Get my things button is pressed. Each failed check says why in the
             part's note line and returns; nothing is sent to the server until all of them pass. On success it
             double-clicks the corpse (so the client learns what is inside) and sets up the job record that
-            job_tick and send_move work through.
+            job_tick and send_move work through. Notes that name a spot pass it as spot= so the window copy
+            is veiled in streamer mode.
             """
             r = st["rec"]
             if st["job"] is not None:
@@ -3419,12 +3451,13 @@ def _module_worldmap():
             if bool(st["was_dead"]):
                 note("You are still a ghost: get resurrected first.")
                 return
+            spot = (r["x"], r["y"])
             if not r["serial"]:
-                note("Your corpse hasn't been seen yet: go to %d, %d." % (r["x"], r["y"]))
+                note("Your corpse hasn't been seen yet: go to %d, %d." % spot, spot=spot)
                 return
             it = item_of(r["serial"])
             if it is None:
-                note("Your corpse isn't in view yet (%d, %d)." % (r["x"], r["y"]))
+                note("Your corpse isn't in view yet (%d, %d)." % spot, spot=spot)
                 return
             # mine() answers 2 for the player's corpse, 1 while the owner's name has not arrived yet (the client
             # only learns a corpse's name once it is clicked), anything else for someone else's body (R2: only
@@ -4596,9 +4629,13 @@ def _module_worldmap():
                                (int(e["x"]), int(e["y"]), int(e["f"]), "yellow") for e in keep})
 
         def where_of(e, fac):
-            """Where text, hue and row tooltip of one list entry; fac is the facet the player is on."""
+            """Where text, hue and row tooltip of one list entry; fac is the facet the player is on.
+
+            The coordinates are shown through xy (veiled in streamer mode); an approximate spot is prefixed
+            with "about".
+            """
             if e["x"] is not None:
-                spot = ("about (%d, %d)" if e.get("approx") else "(%d, %d)") % (e["x"], e["y"])
+                spot = ("about " if e.get("approx") else "") + xy(e["x"], e["y"], "(%d, %d)")
                 if e["done"]:
                     return "dug up  " + spot, Kit.HUE_INFO, DUG_TIP
                 if e["f"] == fac:
@@ -5534,9 +5571,12 @@ def _module_worldmap():
             return max(abs(e["x"] - me[0]), abs(e["y"] - me[1]))
 
         def where_text(e, me):
-            """The where text of a spot: here, the direction and distance, the facet, or the bare coordinates."""
+            """The where text of a spot: here, the direction and distance, the facet, or the bare coordinates.
+
+            The bare coordinates (no position known) go through xy, so streamer mode hides them.
+            """
             if me is None:
-                return "(%d, %d)" % (e["x"], e["y"])
+                return xy(e["x"], e["y"], "(%d, %d)")
             if me[2] != e["m"]:
                 return "in %s" % Kit.facet_name(e["m"])
             if bank_of(e["kind"], me[2], me[0], me[1]) == e["key"]:
@@ -5552,7 +5592,10 @@ def _module_worldmap():
             return "back within %s" % mins(e["hi"] - now), Kit.HUE_TITLE
 
         def row_tip(e, on):
-            """Tooltip of a row: the spot, the block it belongs to, when it is back and what a click does."""
+            """Tooltip of a row: the spot, the block it belongs to, when it is back and what a click does.
+
+            Both the spot and the corner of its block are shown through xy.
+            """
             bw, bh = BANK[e["kind"]]
             x0, y0 = (e["x"] // bw) * bw, (e["y"] // bh) * bh
             when = time.strftime("%H:%M", time.localtime(e["hi"]))
@@ -5560,9 +5603,9 @@ def _module_worldmap():
                 back = "back between %s and %s" % (time.strftime("%H:%M", time.localtime(e["lo"])), when)
             else:
                 back = "back by %s at the latest" % when
-            return "%s ran dry at %d, %d%s: the %dx%d block from %d, %d, %s.  %s" % (
-                KIND_NAME[e["kind"]], e["x"], e["y"], " (about: the tile in front of you)" if e["about"] else "",
-                bw, bh, x0, y0, back, "Take the tracking arrow down" if on else ROW_TIP)
+            return "%s ran dry at %s%s: the %dx%d block from %s, %s.  %s" % (
+                KIND_NAME[e["kind"]], xy(e["x"], e["y"]), " (about: the tile in front of you)" if e["about"] else "",
+                bw, bh, xy(x0, y0), back, "Take the tracking arrow down" if on else ROW_TIP)
 
         def shown_spots():
             """The spots of the kinds that are ticked."""

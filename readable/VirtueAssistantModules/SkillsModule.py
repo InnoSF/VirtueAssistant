@@ -1201,6 +1201,13 @@ def _module_skills():
             m["sa_w"] = m["row_w"] + 16
             return m
 
+        def row_h():
+            """Return the height of one list row in pixels: ROW_H, or a little less in compact mode (Kit.pitch).
+
+            Every row position and every row count in the window is worked out from this, never from ROW_H.
+            """
+            return Kit.pitch(ROW_H)
+
         def detail_rows():
             """The number of rows in the picked skill's details: five, six with the training tip."""
             return 6 if settings["tips"] else 5
@@ -1210,7 +1217,8 @@ def _module_skills():
 
             Returns a dict: IW, W, H, a (y, height) per section, rows, and the limits the corner drag works
             with: min_w, min_h and fixed_h (the height of everything but the list's rows, which apply_resize
-            turns a height back into rows with). A window taller than the screen has fewer rows.
+            turns a height back into rows with). A window taller than the screen has fewer rows. Heights use
+            row_h(), so compact mode fits more rows in the same space.
             """
             M, GAP = Kit.MARGIN, Kit.GAP
             m = natural_metrics()
@@ -1238,21 +1246,21 @@ def _module_skills():
             rows = settings["rows"] if fitst["rows"] is None else fitst["rows"]
             # (section, shown, height) from top to bottom. The list is the one whose height depends on rows.
             for key, on, hh in (("sum", n_sum, 6 + 24 * n_sum + 4), ("tool", True, 36),
-                                ("list", True, 26 + rows * ROW_H + 6), ("locks", settings["sec_locks"], 36),
+                                ("list", True, 26 + rows * row_h() + 6), ("locks", settings["sec_locks"], 36),
                                 ("detail", settings["sec_detail"], 6 + 24 * detail_rows() + 4),
                                 ("log", settings["sec_log"], 26 + 20 * settings["log_lines"] + 4)):
                 if on:
                     L[key] = (y, hh)
                     y += hh + GAP
             L["H"] = y - GAP + M
-            L["fixed_h"] = L["H"] - rows * ROW_H
+            L["fixed_h"] = L["H"] - rows * row_h()
             lo = LIMITS["rows"][0]
-            L["min_h"] = L["fixed_h"] + lo * ROW_H
+            L["min_h"] = L["fixed_h"] + lo * row_h()
             # Taller than the screen: fewer rows, and every section below the list moves up.
             if sh and L["H"] > sh - 10 and rows > lo:
-                fit_rows = max(lo, (sh - 10 - L["fixed_h"]) // ROW_H)
+                fit_rows = max(lo, (sh - 10 - L["fixed_h"]) // row_h())
                 if fit_rows < rows:
-                    shrink = (rows - fit_rows) * ROW_H
+                    shrink = (rows - fit_rows) * row_h()
                     L["list"] = (L["list"][0], L["list"][1] - shrink)
                     for key in ("locks", "detail", "log"):
                         if key in L:
@@ -1307,9 +1315,9 @@ def _module_skills():
 
             Returns a dict like layout()'s, plus: stats, T (the search row), locks_p and D (the details)
             with the places the sections use, total2 and sess_own for lines that wrapped, rows (the list's
-            whole rows; the pixels left over go to its section), log_n, need (the height with ZONE_MIN_ROWS
-            rows and ZONE_LOG_MIN log lines) and short (fewer rows than that fit). Layout pixels, before
-            scaling.
+            whole rows of row_h(); the pixels left over go to its section), log_n, need (the height with
+            ZONE_MIN_ROWS rows and ZONE_LOG_MIN log lines) and short (fewer rows than that fit). Layout
+            pixels, before scaling.
             """
             M, GAP = Kit.MARGIN, Kit.GAP
             IW = w - 2 * M
@@ -1383,28 +1391,26 @@ def _module_skills():
                 secs.append(("log", None))
 
             def height(rows, logn):
-                """Height of the whole window with a given number of list rows and log lines."""
+                """Height of the whole window with a given number of list rows (of row_h() each) and log lines."""
                 y = M + 30 + GAP
                 for key, hh in secs:
                     if key == "list":
-                        hh = 26 + rows * ROW_H + 6
+                        hh = 26 + rows * row_h() + 6
                     elif key == "log":
                         hh = 26 + 20 * logn + 4
                     y += hh + GAP
                 return y - GAP + M
 
             lo = LIMITS["rows"][0]
-            # Rows that fit; the log gives way first, down to ZONE_LOG_MIN lines.
-            rows = (h - height(0, n_log)) // ROW_H
+            rows = (h - height(0, n_log)) // row_h()
             while rows < lo and n_log > ZONE_LOG_MIN:
                 n_log -= 1
-                rows = (h - height(0, n_log)) // ROW_H
+                rows = (h - height(0, n_log)) // row_h()
             Z["need"] = height(ZONE_MIN_ROWS, min(n_log, ZONE_LOG_MIN) if settings["sec_log"] else 0)
             Z["short"] = rows < ZONE_MIN_ROWS
             rows = max(1, rows)
             Z["rows"], Z["log_n"] = rows, n_log
-            # The list gets the pixels the whole rows leave over, so the window fills the slot exactly.
-            list_h = max(26 + rows * ROW_H + 6, h - height(0, n_log) + 32)
+            list_h = max(26 + rows * row_h() + 6, h - height(0, n_log) + 32)
             y = M + 30 + GAP
             for key, hh in secs:
                 if key == "list":
@@ -1630,8 +1636,8 @@ def _module_skills():
 
             Picks the form: the minimized bar, the zone form (its slot exactly, drawn smaller if need be) or
             the plain window, which has a corner drag. Keeps its place across rebuilds, or takes the
-            layout's place when it holds one. Then shows the target text, reads the groups, works the rows
-            out and fills the texts. Client thread, from the tick.
+            layout's remembered spot (LAYOUT.spot) when the layout holds the window. Then shows the target
+            text, reads the groups, works the rows out and fills the texts. Client thread, from the tick.
             """
             old, win["g"] = win["g"], None
             UIC.clear()
@@ -1660,8 +1666,7 @@ def _module_skills():
             x, y = Kit.load_pos(POS_KEY, (160, 120), (w, h))
             if Kit.is_open(old):
                 x, y = old.GetX(), old.GetY()
-            # A window the layout holds sits where the layout put it.
-            at = LAYOUT.placed.get(KEY) if HOST.layout_holds(KEY) else None
+            at = LAYOUT.spot(KEY) if HOST.layout_holds(KEY) else None
             if at is not None:
                 x, y = int(at[0]), int(at[1])
             if Z is not None:
@@ -1730,8 +1735,9 @@ def _module_skills():
         def apply_resize():
             """The corner drag was let go: turns the dragged size into settings and draws the window again.
 
-            The dragged height sets the rows of the list, the width spreads the columns; both are saved with
-            the settings, shown on the settings page, and the window is rebuilt at that size.
+            The dragged height sets the rows of the list (height over row_h(), rounded), the width spreads
+            the columns; both are saved with the settings, shown on the settings page, and the window is
+            rebuilt at that size.
             """
             g = win["g"]
             L = win.get("L")
@@ -1744,7 +1750,7 @@ def _module_skills():
                 return
             w, h = int(g.GetWidth()), int(g.GetHeight())
             lo, hi = LIMITS["rows"]
-            rows = max(lo, min(hi, (h - L["fixed_h"] + ROW_H // 2) // ROW_H))
+            rows = max(lo, min(hi, (h - L["fixed_h"] + row_h() // 2) // row_h()))
             # At its narrowest the width is natural (0).
             width = w if w > L["min_w"] else 0
             # A drag that changed nothing: hide the preview again.
@@ -1763,7 +1769,8 @@ def _module_skills():
             """Builds the list's header and scroll area; the rows are made later by rebuild_rows.
 
             Each header label has a catcher over it that sorts by that column (again to reverse); the lock
-            column has its own arrow. A column the player turned off has no header.
+            column has its own arrow. A column the player turned off has no header. The scroll area is
+            rows times row_h() high.
             """
             m = metrics()
             Kit.add_section(g, x0, y0, IW, h)
@@ -1788,7 +1795,7 @@ def _module_skills():
                 Kit.with_tip(lp, "Sort by lock (again to reverse)")
             c["hdr"]["lock_pic"] = lp
             c["arrow"] = Kit.add_pic(g, LOCK_ART[1], sx, y0 + 8, mouse=False)
-            c["sa"] = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * ROW_H)
+            c["sa"] = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * row_h())
             g.Add(c["sa"])
             c["sa_xy"] = (sx, y0 + 26)
 
@@ -1827,7 +1834,7 @@ def _module_skills():
 
             The list is worked out again only when something it depends on changed (see touch) or, with the
             gaining filter, once a second. Rows are made when first needed and then reused: moved, shown or
-            hidden, never destroyed.
+            hidden, never destroyed. Row y positions are the row's index times row_h().
             """
             c = win["c"]
             if "sa_xy" not in c:
@@ -1847,7 +1854,7 @@ def _module_skills():
             made = len(win["rowmap"]) + (0 if "selbox" in c else 1) + (0 if c.get("empty") else 1)
             # Made first, so it is drawn under the rows.
             if "selbox" not in c:
-                c["selbox"] = Kit.add_box(tgt, 0, 0, m["row_w"], ROW_H - 1, SEL_ALPHA, SEL_COLOR)
+                c["selbox"] = Kit.add_box(tgt, 0, 0, m["row_w"], row_h() - 1, SEL_ALPHA, SEL_COLOR)
                 setp(c["selbox"], "IsVisible", False)
             empty = "" if desc else ("No skill matches; change the search or the filter."
                                      if SK["n"] else "Waiting for the server to send your skills.")
@@ -1858,8 +1865,9 @@ def _module_skills():
                 setp(c["empty"], "IsVisible", bool(empty))
             rowmap = win["rowmap"]
             rows, want, nth = [], set(), {}
+            rh = row_h()
             for n, d in enumerate(desc):
-                ry = n * ROW_H
+                ry = n * rh
                 k = (d[0], d[1])
                 # A pinned skill is listed twice with groups on (under Pinned and in its own group), so a row is
                 # keyed by its kind, key and how many times that key came before.
@@ -1893,10 +1901,13 @@ def _module_skills():
             return ctl
 
         def build_group_row(tgt, ry, d, m):
-            """Builds a group header row: arrow, name and totals, with a catcher that folds it."""
+            """Builds a group header row: arrow, name and totals, with a catcher that folds it.
+
+            The row's boxes are row_h() tall, so they follow compact mode.
+            """
             key, shut = d[1], d[2]
             r = {"kind": "g", "key": key, "y": ry, "hidden": False, "parts": [], "sig": None}
-            put(r, Kit.add_box(tgt, 0, ry + 1, m["row_w"], ROW_H - 2, GROUP_ALPHA, GROUP_COLOR), 0, 1)
+            put(r, Kit.add_box(tgt, 0, ry + 1, m["row_w"], row_h() - 2, GROUP_ALPHA, GROUP_COLOR), 0, 1)
             r["arrow"] = put(r, Kit.add_pic(tgt, GROUP_SHUT if shut else GROUP_OPEN, 4, ry + 5, mouse=False), 4, 5)
             remember(r["arrow"], "Graphic", GROUP_SHUT if shut else GROUP_OPEN)
             r["lbl"] = put(r, Kit.add_label(tgt, "", m["name_x"], ry + 3, Kit.HUE_TITLE), m["name_x"], 3)
@@ -1905,12 +1916,15 @@ def _module_skills():
             r["val"] = put(r, Kit.add_label(tgt, "", m["val_x"], ry + 3, Kit.HUE_INFO), m["val_x"], 3)
             r["gain"] = put(r, Kit.add_label(tgt, "", m["gain_x"], ry + 3, Kit.HUE_INFO),
                             m["gain_x"], 3) if m["gain_x"] is not None else None
-            put(r, Kit.catcher(tgt, 0, ry, m["row_w"], ROW_H - 1, queue(("fold", key), dup=True),
+            put(r, Kit.catcher(tgt, 0, ry, m["row_w"], row_h() - 1, queue(("fold", key), dup=True),
                             "Fold or unfold this group"), 0, 0)
             return r
 
         def build_skill_row(tgt, ry, i, m):
-            """Builds the parts of one skill row: name, columns, progress bar, use gem, lock arrow and catcher."""
+            """Builds the parts of one skill row: name, columns, progress bar, use gem, lock arrow and catcher.
+
+            The progress bar is centred in the row's height (row_h()) and the catcher covers the name area.
+            """
             r = {"kind": "s", "i": i, "y": ry, "hidden": False, "parts": [], "sig": None}
             r["name"] = put(r, Kit.add_label(tgt, row_name(i, m), m["name_x"], ry + 3), m["name_x"], 3)
             r["real"] = put(r, Kit.add_label(tgt, "", m["real_x"], ry + 3), m["real_x"], 3) \
@@ -1922,7 +1936,7 @@ def _module_skills():
                             m["gain_x"], 3) if m["gain_x"] is not None else None
             r["bar"] = None
             if m["bar_x"] is not None:
-                bdy = (ROW_H - m["bar_h"]) // 2
+                bdy = (row_h() - m["bar_h"]) // 2
                 by = ry + bdy
                 # The bar's background is the client's red line art, or a plain tile when that art is missing.
                 if Kit.pic_size(Kit.LINE_RED)[0] > 0:
@@ -1935,7 +1949,7 @@ def _module_skills():
             tip = "Click: pick it (details below); double-click: its floating button" \
                 if SK["click"][i] else "Click: pick it (details below)"
             r["cat"] = put(r, Kit.catcher(tgt, m["name_x"] - 2, ry, m["lock_x"] - m["name_x"] - 2,
-                                       ROW_H - 1, row_click(i), tip), m["name_x"] - 2, 0)
+                                       row_h() - 1, row_click(i), tip), m["name_x"] - 2, 0)
             # The tooltip without the training tip, and the one now set (with it).
             r["tip0"] = r["cat_tip"] = tip
             r["use"] = None
@@ -3284,11 +3298,12 @@ def _module_skills():
             return rx["ignore"]
 
         def sound_of(kind):
-            """The sound id to play for this kind of alarm, 0 when it is silent or all alert sounds are muted.
+            """The sound id to play for this kind of alarm, 0 when it is silent, the alerts are in quiet mode or
+            all alert sounds are muted.
 
             Follows the player's choice on Settings > Alerts, else the default of the kind.
             """
-            if ALERTS.mute:
+            if ALERTS.quiet_on() or ALERTS.mute:
                 return 0
             on, sid = ALERTS.setting(ALERT_KEY[kind])
             return sid if on else 0
@@ -3311,12 +3326,14 @@ def _module_skills():
                 return True
             return bool(settings["anyalarm"] and HOST.alarm_up())
 
-        def raise_alarm(kind, text, who=None, serial=0, gid=0, said=None):
+        def raise_alarm(kind, text, who=None, serial=0, gid=0, said=None, nm=""):
             """Add a reason to the alarm (client thread). Returns True if it was new, False if a repeat.
 
             The same speaker with the same text or words counts once (a whisper that names you is seen both
             by the journal and by the client event). A new alarm starts the sound clock and the banner; a
-            further reason on an alarm already up only refreshes the window.
+            further reason on an alarm already up only refreshes the window. nm is the player's name when
+            the reason is about one, passed on with the serial to the shared alert so the banner can veil
+            it in streamer mode.
             """
             fresh = not st["alarm"]
             again = False
@@ -3330,7 +3347,7 @@ def _module_skills():
             if fresh:
                 st["seq"] += 1
             st["alarm"].append({"kind": kind, "text": text, "who": who, "serial": int(serial or 0),
-                                "gid": int(gid or 0), "at": now, "said": said})
+                                "gid": int(gid or 0), "at": now, "said": said, "nm": nm})
             # Only the newest reasons are kept.
             if len(st["alarm"]) > REASONS_MAX:
                 del st["alarm"][:-REASONS_MAX]
@@ -3343,9 +3360,7 @@ def _module_skills():
             if again:
                 refresh()
                 return True
-            # The who key carries the alarm number, so the same speaker or gump in a later alarm is a new
-            # banner, not one the rate limit drops.
-            HOST.alert(ALERT_KEY[kind], text, "alarm", who="%s#%d" % (who or text, st["seq"]))
+            HOST.alert(ALERT_KEY[kind], text, "alarm", who="%s#%d" % (who or text, st["seq"]), name=nm, serial=serial)
             refresh()
             return True
 
@@ -3543,7 +3558,7 @@ def _module_skills():
 
             Uses the pass's shared mobile scan. Each mobile is checked once and cached, with up to two
             rechecks because a title can arrive after the mobile does. A staff mobile alarms again only
-            after STAFF_GONE seconds out of view.
+            after STAFF_GONE seconds out of view. The alarm carries the staff name for the streamer veil.
             """
             pat = marker_re()
             if pat is None:
@@ -3583,7 +3598,8 @@ def _module_skills():
                 last = seen.get(s)
                 seen[s] = now
                 if last is None or not 0 <= now - last <= STAFF_GONE:
-                    raise_alarm("staff", "Staff in view: %s" % (hit[3] or "someone"), "staff %X" % s, serial=s)
+                    raise_alarm("staff", "Staff in view: %s" % (hit[3] or "someone"), "staff %X" % s, serial=s,
+                                nm=hit[3])
             if len(seen) > 50:
                 for k in [k for k, t in seen.items() if not 0 <= now - t <= STAFF_GONE]:
                     del seen[k]
@@ -3608,7 +3624,8 @@ def _module_skills():
             """Read the new journal lines and raise the alarm when another player says your name (client thread).
 
             Your own lines are not alarms: a line you typed just before marks you as present, while a skill
-            loop's spell words and system messages are ignored.
+            loop's spell words and system messages are ignored. The alarm carries the speaker's name for
+            the streamer veil.
             """
             rd = st["rd"]
             if rd is None:
@@ -3638,10 +3655,13 @@ def _module_skills():
                     continue
                 if nre.search(text) or (wre is not None and wre.search(text)):
                     raise_alarm("name", '%s said your name: "%s"' % (name, quote(text)), name,
-                                serial=speaker_serial(name), said=text)
+                                serial=speaker_serial(name), said=text, nm=name)
 
         def heard_tick():
-            """Raise the whisper alarm for whispers the client event handed over since the last tick."""
+            """Raise the whisper alarm for whispers the client event handed over since the last tick.
+
+            The alarm carries the speaker's name and serial for the streamer veil.
+            """
             q = st["heard"]
             if not q:
                 return
@@ -3652,7 +3672,7 @@ def _module_skills():
                     continue
                 if mt in WHISPER_TYPES and settings["whisper"]:
                     raise_alarm("whisper", '%s whispers to you: "%s"' % (name, quote(text)), name,
-                                serial=speaker_serial(name), said=text)
+                                serial=speaker_serial(name), said=text, nm=name)
 
         def on_used(*args):
             """Client event ObjectUsed: remember when you last double-clicked, while the module is on."""
@@ -3788,7 +3808,8 @@ def _module_skills():
             """Redraw the status lines (only when the text, colour or width changed).
 
             While an alarm waits the line flashes between two colours and shows how many more reasons are
-            there; otherwise it shows what is watched and the pause countdown after an answer.
+            there; otherwise it shows what is watched and the pause countdown after an answer. In streamer
+            mode the alarm text hides the speaker's name (veiled by serial) and your own character name.
             """
             g = win["g"]
             if g is None or (st["minimized"] and st["docked"]):
@@ -3798,7 +3819,13 @@ def _module_skills():
             al = st["alarm"]
             if al:
                 r = al[-1]
-                line = ("%s: " % TITLE if st["minimized"] else "ALARM: ") + r["text"]
+                text = r["text"]
+                if Kit.streamer:
+                    if r["nm"]:
+                        text = text.replace(r["nm"], Kit.veil("name", r["nm"], r["serial"]))
+                    if st["name_re"] is not None:
+                        text = st["name_re"].sub(Kit.veil("me", ""), text)
+                line = ("%s: " % TITLE if st["minimized"] else "ALARM: ") + text
                 hue = Kit.HUE_BAD if st["flash_on"] else Kit.HUE_TEXT
                 line2 = ("+%d more. " % (len(al) - 1) if len(al) > 1 else "") + \
                     "Skill loops paused: click here or I'm here"

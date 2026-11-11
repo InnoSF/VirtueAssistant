@@ -1,4 +1,13 @@
-WHATS_NEW = ("2.7.0.34: tidy-up only: the deepest code in four modules is laid out flatter; nothing you see changes.",
+WHATS_NEW = ("2.7.0.35: new settings show a \"new\" tag.",
+    "Settings > Interface: four looks (Classic, Dark, Parchment, High contrast), text size, compact rows, "
+    "colour-blind marks and streamer mode, which hides names and places.",
+    "Settings: a search box finds any setting; Alerts keeps a history and can go quiet; Backups saves and "
+    "restores your settings.",
+    "Layouts: share one as a code, switch them by situation (war, bank, dungeon, town), show a zone's "
+    "windows as tabs and fade idle windows.",
+    "New: Ultima Tracker Overview and list sort, Inventory Bag Sections, an Action Bar radial ring, and the "
+    "Quick Launcher (the Find button) for runes, cells, windows and settings.",
+    "2.7.0.34: tidy-up only: the deepest code in four modules is laid out flatter; nothing you see changes.",
     "2.7.0.33: tidy-up only: a few shared helpers replace copies in four modules; nothing you see changes.",
     "2.7.0.32: Buffs & Timers can also show your Polymorph timer as a TazUO cooldown bar (a setting, off by default).",
     "2.7.0.31: guard lines, cast failures, poison, paralysis and bandage results are read by the "

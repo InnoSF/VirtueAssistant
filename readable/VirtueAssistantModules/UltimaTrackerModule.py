@@ -3,15 +3,15 @@
 # This file is not a script to run on its own. Virtue Assistant loads it from the modules folder
 # beside it and runs it inside its own namespace, which supplies everything used here: API, safe,
 # Client, Kit, Follow, HOST, Journal, the main loop and the settings window. Run Virtue Assistant
-# and tick Ultima Tracker on its Modules tab. Taking this file out of the folder leaves the module
-# out.
+# and tick Ultima Tracker on its Modules tab. Taking this file out of the folder leaves the
+# module out.
 #
 # The module is made of parts, each with its own box under the module's row on the Modules tab,
 # run side by side by the mother's PartSet while ticked:
 #
 #     Tracker    trackers and combat bars for the players around you
 #     Lookout    a second client watches a spot and raises the alarm here
-#
+#     Overview   one window with tabs for the players, monsters, pets and corpses near you
 # On the lookout client tick only Lookout: the trackers, combat bars and the sightings file then
 # cost nothing there.
 def _module_ultima():
@@ -23,14 +23,357 @@ def _module_ultima():
                  "innocent": "blue", "ally": "green", "invulnerable": "yellow"}
     NOTO_HUE = {"murderer": 0x0022, "criminal": 0x03B2, "gray": 0x03B2, "enemy": 0x0090,
                 "innocent": 0x0059, "ally": 0x003F, "invulnerable": 0x0035}
+    NPC_RECHECK_SECONDS = 3.0
+    CACHE_CAP = 2000
+    FOES = {}
+    IGNORE = {}
+    PLAYER_NAMES = {}
+    NPC_CACHE = {}
+    SEEN_PLAYER = set()
+    TITLED_NPCS = set()
+    TITLE_CACHE = {}
+    PEOPLE = {"party": set(), "scan_at": 0.0}
+    TITLE_PREFIXES = ("lord ", "lady ")
+
+    def name_key(name):
+        """Return a name as a lookup key: trimmed, lower case, without a Lord or Lady prefix."""
+        n = (name or "").strip().lower()
+        for p in TITLE_PREFIXES:
+            if n.startswith(p):
+                n = n[len(p):]
+        return n
+
+    def capped(cache):
+        """Empty a per-mobile cache once it has grown past CACHE_CAP entries."""
+        if len(cache) > CACHE_CAP:
+            cache.clear()
+
+    FRIEND_Q = {}
+    FRIEND_Q_SECONDS = 1.0
+    FRIEND_Q_AT = [0.0]
+
+    def is_friend(serial):
+        """Return True when the player is on TazUO's friends list (cached for a second)."""
+        v = FRIEND_Q.get(serial)
+        if v is None:
+            v = bool(API.IsFriend(serial))
+            if len(FRIEND_Q) > 500:
+                FRIEND_Q.clear()
+            FRIEND_Q[serial] = v
+        return v
+
+    def friends_fresh(now):
+        """Drop the per-pass friend answers once a second.
+
+        now is the time of the pass. FRIEND_Q caches API.IsFriend per serial; this empties it when its
+        second has run out, so a friend added or removed is picked up within about a second. The Tracker
+        scan and the Overview both call it before they read anything.
+        """
+        if not 0.0 < FRIEND_Q_AT[0] - now <= FRIEND_Q_SECONDS:
+            FRIEND_Q.clear()
+            FRIEND_Q_AT[0] = now + FRIEND_Q_SECONDS
+
+    def mflag(m, attr):
+        """Return a mobile's on/off property, False when it cannot be read."""
+        try:
+            return bool(getattr(m, attr))
+        except Exception:
+            return False
+
+    def acts_like_player(mob, serial, name, low):
+        """Return True when a mobile behaves like a player rather than a town NPC.
+
+        low is the lower-case name. A name that starts with Lord or Lady, one on the Foe list or among
+        the names seen as players, a party member, anything running, mounted or in war mode, or a friend
+        all count. Used by is_npc before any title is read.
+        """
+        if low.startswith(TITLE_PREFIXES) or name_key(name) in FOES or low in PLAYER_NAMES or serial in PEOPLE["party"]:
+            return True
+        if mflag(mob, "IsRunning") or mflag(mob, "IsMounted") or mflag(mob, "InWarMode"):
+            return True
+        return is_friend(serial)
+
+    def is_npc(mob, serial, name):
+        """Return True for a blue town NPC.
+
+        Blue town NPCs are recognised by a job title in the name line ("Bob the guard", when the shard
+        sends titles) or by a plain first name from the server's NPC name lists ("Candra", "Thierry").
+        Anything seen acting like a player is remembered as a player for the rest of the session.
+        `serial` and `name` are as the caller read them.
+        """
+        if serial in SEEN_PLAYER:
+            return False
+        low = name.strip().lower()
+        if acts_like_player(mob, serial, name, low):
+            capped(SEEN_PLAYER)
+            SEEN_PLAYER.add(serial)
+            NPC_CACHE.pop(serial, None)
+            return False
+        # The name lists and the titles learned from the journal answer without a client call.
+        if low in npc_names() or low in TITLED_NPCS:
+            return True
+        now = time.time()
+        hit = NPC_CACHE.get(serial)
+        # A found NPC stays one; a "no" is asked again after NPC_RECHECK_SECONDS because the title may
+        # arrive late.
+        if hit is not None and (hit[0] or now - hit[1] < NPC_RECHECK_SECONDS):
+            return hit[0]
+        text = name_props(mob)
+        npc = bool(NPC_TITLE_RE.search(text.split("\n")[0] + " " + name))
+        capped(NPC_CACHE)
+        NPC_CACHE[serial] = (npc, now)
+        return npc
+
+    def name_props(mob):
+        """Return the mobile's name-and-title line ("Bob the guard") as the client has it, or ''.
+
+        It reads what the client already holds and never waits for the server.
+        """
+        try:
+            return str(mob.NameAndProps(False) or "")
+        except Exception:
+            return ""
+
+    def titled_npc(mob, serial, name):
+        """Return True when a non-blue mobile is a titled NPC ("Name the title") rather than a player.
+
+        Red, grey and orange players carry no job title, so a title in the name line marks an NPC. A
+        mobile seen acting like a player, or known as a Foe, a party member, a friend or by a player
+        name, is never an NPC. The title test is cached per serial and asked again after
+        NPC_RECHECK_SECONDS when it said no, because the title can arrive late.
+        """
+        if serial in SEEN_PLAYER:
+            return False
+        low = name.strip().lower()
+        if not low:
+            return False
+        npc = low in TITLED_NPCS
+        if not npc:
+            now = time.time()
+            hit = TITLE_CACHE.get(serial)
+            if hit is not None and (hit[0] or now - hit[1] < NPC_RECHECK_SECONDS):
+                npc = hit[0]
+            else:
+                first = name_props(mob).split("\n")[0].strip().lower()
+                npc = first.startswith(low + " the ")
+                capped(TITLE_CACHE)
+                TITLE_CACHE[serial] = (npc, now)
+        if not npc:
+            return False
+        if low in PLAYER_NAMES or name_key(name) in FOES or serial in PEOPLE["party"] or is_friend(serial):
+            return False
+        return True
+
+    def looks_like_player(mob, serial):
+        """Return (notoriety, dead, name) when the mobile looks like a player, else None.
+
+        The cheap body test comes first: a monster or an animal costs three reads, and only a human,
+        gargoyle or ghost reaches the NPC tests. The name is str(mob.Name or "").
+        """
+        dead = mflag(mob, "IsDead")
+        if not dead and not (mflag(mob, "IsHuman") or mflag(mob, "IsGargoyle")):
+            return None
+        # Renamable mobiles are pets.
+        if mflag(mob, "IsRenamable"):
+            return None
+        noto = Kit.noto_name(mob)
+        if noto == "invulnerable":
+            return None
+        try:
+            name = str(mob.Name or "")
+        except Exception:
+            return None
+        # Blue ones may be town NPCs; red, grey and orange ones only when they carry a title.
+        if noto == "innocent":
+            if is_npc(mob, serial, name):
+                return None
+        elif not dead and titled_npc(mob, serial, name):
+            return None
+        return (noto, dead, name)
+
+    def mnum(m, attr):
+        """Return a number of a mobile (hits and so on), 0 when it cannot be read."""
+        try:
+            return getattr(m, attr) or 0
+        except Exception:
+            return 0
+
+    NPC_NAMES_DATA = ("0aaron2sin1ba2bott3y2del3iel2el4la3y2igail3jah3na3ona3ra2ner2ra4h5am4n2sinthe1cacia3nit4tha"
+        "2calia2e3lin2hen3illes2kerley1da3ir3lia3m3ra2di4son2eben3laide4e4ia5ne4le3m3na3res3sina2ie3mina3ran3va2la"
+        "i3er4y2mon2olph3n4cia4ia5s3ra2rian4el5nne1elina2neas1fina2ra3ika2ton1gate4ha2nes2ustin1hara3ve2earn2imsa2"
+        "mik2ren1ida4n2ella2ken3o2la3een3sa2mee4ry2n3a3hoa3sley3tzane2rlia2sling6n2tan3hne2yana1jara3y4i2inora1kak"
+        "o3la3ndo4ke3sma2baar2ela4lo2il4ah4i5na3na2shay1laina3ke3la3manada3n4a4d4i4na4o3qua3ric3stair3vda3zne2ben4"
+        "rt6a3inka2cander3ina3ott2dea4n4r5cy3rick2ec3k4a4sy3nne3ron3ser4ia4sa3thea3x4a5nder7ra8ia9na4is2fred2ger2i"
+        "3a3ce4ia3da3ke3m4a3na3son4tair3ta3x3z4a2laard4n4rd3ele4n3igra4nora4son3yn2ma2odie3nzo3ysia2phonse7o2ston2"
+        "tair3hea3on2ula3mit2vin5a4ta2ysa4sa6nd2zena1ma3bel3deo4i5ka5s4o3ia3la4ia3nda5ine3ra5nde6te4is3ta2bar3er3i"
+        "ka4s3rose2eerah3lia5na3thyst2ie4l5la3na4ta3ssa3ta4y2mon2oke3s2sden2y1nanda3stasia2celin2ders3i3ra5ianna5s"
+        "4e5a5us5w5y4ies4omeda2eida3lla3mone3zka2gela5ica6ne6que5o4ni3us2i3ca3eli3sa3ta2ke4r2n3a4bel7le4marie3e4tt"
+        "e3ikka3ora2oki3rah3ush2sel5me3ley3on3reana2teia3hea4ony3je3oinette4nia6o2war1olani1para2irka2olline5oina3"
+        "ni2ril5le1qua3ene1ra3bella7e3celi3minta3xie2cadia3her4ibald2dath3elia4n3is4th3on2eiela3lla3n3s3tha4ina2gu"
+        "s2i3adne4na3cia5n3el4ne3on3sta5o6tle2kin2len5e4y3in5da3o2man3en3ina5da3on3strong2ne3old4n2on2piar2sen5io2"
+        "temisia3hur2una2ziki1saria2enka2h3a3by3er3ford3lan4eigh5y4in3on3ur2ia3sa2linda2pasia2ta3er5a3ra4ea4id1tal"
+        "anta3ra2enne3ri2halia4n3ena4ron3la2ifa2man2ta1ubrey2da3ny3rey4ianna5c3un2gustin8a6us2ra3e4k4lia3ilia4na3k"
+        "ene3ora2stin2tumn1va3na3sa2ella3na3rill4y2ie3s3va1xel4la1ya3luna3me3na3sha2dee2ela2iana3la3sha3ta2la2nora"
+        "2una1zaleah4ia3rael2era2ha2ilea3na3ze2ora2ura0babette2cia2e2iley3ngana2ka4ri5ne2layna3bo3der4win3e4a4ndin"
+        "3i4a4n5t2mbi2nan3croft3dele3e4lla3ning2ra4n3bara3clay3den4o5n3ika3nabas6y4ett5y3on3rett4y3se3t4h5olomew4o"
+        "n2sha3ia4l4mah3tiaan2takah3hsheba3ya2ul2vol2xter2y3ana5i4rd3lor3o3ta2zyli1ea3can3gan3man3trice6x3u4ina4mo"
+        "nt4regard2cca3k4y2delia2l3ana3don3en3ina5da4ta3lanca4e3ora2m3an2n3edict4n3jamin3nett3son3t4e4ley4on2radin"
+        "e3enger3gren3illa4t3k4eley3nadette5rd4ice3sh3t4hold4on4ram3yl2ss4ine2ta3h4ana6y3ony3ty2ulah2val4n3erly3in"
+        "1ialy3n4ca2lal3lie2na3dy3ti2rdie3kita2shop2talo2xenta1jorn1lade3ine4r4se3ke3nche4da3z2enda2iss2orn2y3the1"
+        "o2den2gart2hdan6a2lton2namy3d3ita3nie4y2oker3ne2rden3gny3is2tan2wie3man2yce3d4en1rad4en4ford4ney4y3ina3m3"
+        "n4d5eis5i5on5y4t3xton3y3z4il2en4cis4da6n5on4na6n4t5an3t4t5a3wster2iac4n5d3ce3dget3e4g4r4tta3git6te3na4ley"
+        "3ona5y3shen3tes4ta6ny2ock3derick4ny4y3nson4t4wyn3oke2uce3no3tus2yan5t3ce3nn3son1ucia3k2d3o2rgess3han3ian3"
+        "ke3l3r3ton1yran3on0cadence4o3or2edmon2ilan3mile3n4e3tlin4rin2la4ndia6ra3der4well3eb4ndonia4y3ida4sta3la5n"
+        "4ia5dora5e3tha3vin3ypso2m3den3elia4ron3ilia5le2nace3dace5n4ida6e4ra3tara4on3ute2oimhe2pri5ce2ra4doc3den3e"
+        "sse4y3i4na5e4ssa4ta3l4a4een5n4in6g4o5s5ta4ton4y3ma4el6ina5n3na4elian3ol5ina7e5yn4n3r4ick5e4ocio5ll3son3te"
+        "r3ver3yn2sey3ilda3per3sandra4ia5dy5us3ta5lia4el2talina4va3erina3herine4leen4y3o4n3riona2van2yla1eara3sar2"
+        "cania3il5ia2dric2landine3este3ia4na3lia2mal2relia1had4wick3im4tra3l4e4mers3nah4da5er5i5ler5ra4e5l5y4na5in"
+        "g4tal3pin4man3ris6sa5ty4les5otte5ton4maine3se4tity3tha3uncy3va4iva3y4a4ton2elsea3n4ey4oa3rica6e5e4yl3sna4"
+        "ter3t3valier2iara3ka4e3lali3mlis3n3po2loe4ris2o2rista7ble6ian7na8e6oph9er7s6y2uck2you1ia3nnait3r2cely4ron"
+        "2ndy2ro1laire3ra4ence4inda5ssa4k3ude6tte5ia6ne3y4ton2ement7ina9e3veland2iantha3fford4ton3nt5on3ve2orinda3"
+        "ver2yde1ochiti2dy2lby3e4ene4man4tte3in3lin3on3ton2man2ndon3nie4or3rad3stance7za4uela3way2ra4lie4zon3bett5"
+        "y4in3coran3deali5ll3etta4y3i4nna4s3liss3nelius3rine3t4ney2ty2urtland1raig3ndall2eighton3scent4sida2ispin2"
+        "osby2ystal1ullen4in3ver2rran3tis1ybele3il2nric3thia2prien2rano3ene3il5la3us2theria0dabria2cey3ia4e4o2e2g3"
+        "an3mar3na2i3ly3sel4y2karai3ota2le3ila5ia3lin3ton3y2mara3ek4n3ian4en4on4tri3on2na3e4tt3ia4el6la4or3nik3te3"
+        "yelle2phene4ne5ie2r3a4lis3by3en3ia4en4o3la4ene3nell3rel6l5n3yl2sha2vene3id4n5e4s4ta2wn2ya3na1eacon3n4a4dr"
+        "a2b3ra2cker2de2e3dee2ianira3ene3rdre2lana5ey5o3bert4in3ia4cia4lia3la5n3more3phina3sin2man3be3i4tria3psey5"
+        "ter2na3by3ice3nis4ys3ton3ver2r3ek3rick4y2va4ki4l3erell3i4n3lin3net3on2wey1iamanta3ne4the2ederik4re3go3lla"
+        "3ter2llian4on4y3ys2mitri2nah2onne2rk2sa2ta3i2xie1obry2die2lores2minic7k6que2na4ld4ta5ien5o3ielle3nelley7y"
+        "5r3ovan2oriya2phina2ra3een3inda4s4thy3on3y2ugie4las7s2v2yle1rake2ew2ina2ucilla1uane2gan3las2lcie5nea2ncan"
+        "3stan2rand3riken2san3tin4y2tch1wayne2ight1yami3n4i3stro2lan2mas3phna2na0eamon2rl4e3tha2ster2ton1bony1cho1"
+        "dan4a2gan4r2ie3son3th2lyn2mund2na2olie2ria4n2ward3in5a1fia1gan1ileen2nar2rene1lad3ine3na2den3roth2ek3ora2"
+        "i3anor4s3jah3na3sa4e4ka4sa3ta3za5beeth2kan3e2la3e4n4ry3iot6t4s3sworth3y2mer3o2odie3ise2sa3ie3ton2ton2wood"
+        "2ynor3se4ia1ma3jane3lia3nuel2ber2elie4yne2il4io4y2ma3ett2o1ndora2gracia2id2och3la2rico4que2ye1phraim1rasm"
+        "a2ek2ianthe3c4a3k3n2lina2nest2ol2rol2skine2wand3in2yx1skarne2merelda2peranza2sien2ta3eban4lle3her3u1tain5"
+        "a3nthe2han2ta1udocia2gene5ia2lalia2stacia1va3csa3dine4ne3n4der4geline4the2e3lyn3rett2ita2onne2zen1yota1ze"
+        "kial2ra0fabienne4o2ifuza3nche3rfax3th3zah2llon2ntine2rha3ima3ley3rah4ell2tin2wne2xon2y3e3ina3me1elcia3ici"
+        "te7y4x2mi2nn3ton2rgus3idwyn3n3onia3ran4is1ielding2lbert3inda3more2na3lay4ey3n4igan3ola2ona3renza2sk2tzger"
+        "ald1lavia2eta4cher2indo4t2ora4ence3yd2ynn1orbes3rest3sythe2ster1rances7ca5ine6s7ca4ek4k5lin3sier3zer4ier2"
+        "ed4a4erica8k3mont3ya2ida3eda3tz1uller3ton2scienne0gabe3riel7la8e2ge2ia3l2latea3en5o3i4na3vin3ya2mble2na3e"
+        "sa3non2reth3field3gan3ner3rett4ick5dan5son5tt3th3vin3y2spar3ton2uri2vin3rie2ye3le4ord3nor1elasia2mma2nevi"
+        "eve2off5rey6y3gia3rge6anne6tta8e5iana2radline4ldine4rd3da3ik3main3ri4y3trude2va1hislaine1iacinta3nina2deo"
+        "n2gi2lana3berto3da3en4s3lian2n3a3ger3ton2selle2tana3ha2von2zane1leda3n4n5a5o5ys1odfrey2lda4ie2rdon4y3man2"
+        "tzone1race4ie3dy3ham3inne3m3nger4t4ville3yson3zia2ear3g4er4or6y3sham3ta4chen4te2iffen5ith1uilhem2nnar3the"
+        "r2s3tave2thrie2y1wen4dolyn4eth2ynne1ytha0hackett2dara4ssa3den3i4ya3ley3rian2gan2idee3ley3mi2l3den4is3e4y3"
+        "i4an4ma3le4ie3sey2milton3lin2na4n3k3nah4e3s2rden4y3ith3lan3man4oni3old3per3riet5son4y3t4ley3vey2sna3san3t"
+        "in6gs2va2ya3den3es3lee3nes2zel1ea3th5er2ctor2i3di2laku3degarde3en5a5e3ki2nka3ning3rietta4y2rbert3man3sche"
+        "l2sper3ter1ilary3da3liard3ton2nda2roshi2sa1obart2gan2lden3ly3t2mes2pe2race3ton2shi2uston2ward3rence2yt1ug"
+        "h3o2mphrey2nter4ley1yacinth2e2man2patia0iain1da2ola3nia1lene2ias2ona1man2ogene1ndia4ra3ra2es3z2ga3mar3ram"
+        "4id1olana5the2na1ra3tze2ena4e2is2ma2vin5g2win1saac3beau5l6la3dora3iah3ura2is2leta2obel3ke2rael2tas1tzak1v"
+        "an4a3r2ory2y0jabari3ir2celyn3inda5the3k3ob5e3ques3son3y2da2el3n2far2gger2imie3one2ke3inda2l3a3eel2mal3es3"
+        "ie4la6h4son2n3a3e4lle4t3ice4s3na4elle2rdena3ed4k3man3on3rod3via5nia5s2smine3on3per2van3ier2y3a3ne1ean4ett"
+        "e4ine2bidiah2d3idiah3rek2ff4rey2lani3ena2na4y3dayi4yose3ica3nettia4ifer3sine2remiah5y3olin4me5y3rilyn3zy2"
+        "sse5e4ica2thro2wel2zebel1ibril2han2llian2n3a3ny3x2ro2vin1oakima3n4ne2bey3ihna2casa3elyn2di3y2el4le5iane2h"
+        "ann6a3n2ia2lan5ta3ene3ie4ne3on2nah4than6on3ina2ra3dan6e4on3gen3vin2seph6ine3hua3ie2tha2y3ce3e1uanita2dd3e"
+        "3ith6a2lia5n6a6e4e5tta4nka4us2ma3oke2n3e3g2stin6e0kaatje2chine3lyn2din2ede3the2i3a3e3kara3li3mi3ros3ya2kr"
+        "a2la4din4ma4nit4re3b3e4a3i4ka4l5a4nda3kin3le4i3man3onice3yca2ma4l5a5i4ria3bo3eko3ilah5ia2nda3e4ne3iel4ka3"
+        "tha3ya2pera2ra4n4yan3dal3el4n3ida4mah4sa3ka3l4a4enne4i4yn3mina3ol3sten3ylin4n2sa3ch3en3ia4nda3par3sia2te4"
+        "b3herine4leen3ja3oka3rien5na2ula2veri3indra2y3a3e3in3la3sa2zia1eane3ra4ney2dar2efe3lan4in4y3nan2fira2gan2"
+        "hinde2i3ko3r3sha3th2lby3da3eman3ia3l4en5y4i5e4y3sey3vin2n3an3dall4ra5ick3elm3ley3nard4edy5th4is3t4on3yang"
+        "i4on2ona2pa2r3ani3by3ensa3n3ry3s4en4tan3win2sare3i4a3sie3ter2turah3zia2vin1halida5l2oury1ichi2efer3le3ran"
+        "4nan2llian2m3berly3mie4y2n3eta3nel3sey3tan2ona2p2ra4n3by3ima3k3sten3ti2sa3ka3met3sa2ta2yoshi1liftin2og1oh"
+        "ana2lina2mor2ntar2ren4ssa1rischan4ten6r1urt1yle4r3y2na3thia2oko0lacey3ie2ethan2ila4ie3rd2keisha2la4sa2mar"
+        "3ont2n3a3ce3der4on4ra3e3g3i2ra4ine4lee3i4ssa3k3ry3s2tika3onia2ura5na4el4ie5nda4yn2veda4rn6e3inia2wler3ren"
+        "ce2zarus1ea3h3la3ndra3r2ba2dah2e2if3gh5ton3ko3la5na2land2n3a3e3non5r5x3or5a5e3sar2o3n4a5rd3ra2ron4y2slie3"
+        "ter2tha3itia2v3ana3i2wis2xine1i2a3dan3m3n4a4e2bby2en2ke2la3ith3lian5e3y2mber2na3coln3da4say5ey3ette3nae4e"
+        "a2onel2sa3ette2tsa2v2za1lewellyn2oyd1ogan2is2kelani2la2ni2ra3e4lei5le4n5zo4tta3i3ne3raine2tus2uis5e2well1"
+        "ucas3ian4lle4ne3retia3y2dia2ela2is4a2ke4ne3ina3yan2lu2na3t2ther1ydia2le2nda4on3elle3n4da4ette2ris2sander3"
+        "el3nadra0mabel2c3aria3er3hi3k4enzie2ddy3elaine5ina7e5on5yn3y2e2gan4ra3dalen8a6ine3ena5ta3gie3nus2hala5ia2"
+        "i3a3da3sie3tane3zah2j2laya3colm3ik4la4na5da3ka3lory3u2mie2nco3da5ra4ek5r4isa4y3fred3gena3ning3on3si4ur3ue"
+        "l3ya2ra3c4ella4ia4os4us4y3den3ek4n3garet6ita4o5t4uirte3ia5h5m6a5n6a6na7e4bel4e5l5tta4ly6n4na4o4s5a5ha5sa3"
+        "jani4eta4orie3k4ham4os3lene4in4o5n3mara3nie5na3sha6l7l4ten3ta4ha4i5n6a6go3vin3y4ann4beth4lou3zia2son2tai4"
+        "na3eo3hea5r3ilda3rika3thew5ias2ud3ra4een4ice5ta2vis2x3ine3well2y3a3nard3on1ead3ra2da3ea2g3an4ra3han2i3ra2"
+        "ka2la4nie5tha3ba3ia5n4na5da4senda5sa3linio3odie5y4sa3va2rcedes5r3edith4le3ill3le3rick5k2sha2ta2yer1ia3kod"
+        "a2cael3hael7a4ele6le2dori2gina3non3on3uel2ka3e3kel3os2les3licent5e3o3ton2n3a3da4el4y3er5va3ka3na4ie2ra4nd"
+        "a3em5ba4ya3iam4elle2ssy3ty2tchell3ena4xi3zi1oira2llie4y2na3ique3roe3te2on2rena3gan6a6ce3ia5h3ley3ris3time"
+        "r4on3ven3z2tega1ukasa2rdoch6k3iel3phy1yles2ra3on0nada3ia4ne3ya2eem2ia3lah3mah2lini3ren2mazzi3i2n3a3cy3ett"
+        "e3tale5n2omi2pea2ra3da3mada2siche3tassia2talie4ne4sha3esa3han6iel2ysa2zirqah1eal4a4e2ci2diva2ely2il2kane2"
+        "lek3l3son2ola3ma3na2ria4ne4ssa3on2stor2tti2va4da4n3ille4n2ysa1icanor3holas3ia3ola5e6tte2gel2ka3ki3olos2ls"
+        "2mah2na2obe3la2ra3velli2ssa2ta4ra2xie1oah2din2e3l4ani4la2lan3ita2na2ra4h3bert3een3i4ko3ma5n3ris3ton1uri1y"
+        "dia2le2rna2ssa0oakes3ley1belia1chen2tavia6us1delia4l3ra3ssa3tta5e2ile3n3on2on1gden1hanna1kelani1laf3the3y"
+        "inka2esia2ga2iana3n4da3ver5tte4ia1mar1na2ida1pal2helia1ralie3ne2dano2en4da2iana5na3el3ole4n2lantha2man5d2"
+        "nidaa2rin2son2ville1scar2good2mond1tis2to1wen0paco2ige2kuna2lmer4iera3oma2mela2ndita4ora3thea4zike3ya4in2"
+        "olo2ris3ker3nell2scal6e2tamon3ia4ence3ricia6k3sy3terson4on2ul4a4ette4in6e2vel3la2xton2yton2zia1earce4l2de"
+        "r2g3gy2lagia2mba4roke2nda3elope3inna3n4y3thea2ony2rcival3dita3ouze3ry3sis2ter3ra2yton1haedra2earcy3dra2il"
+        "ip4lip7pe4omena2oebe4nix2ylis4lis1ia2er4ce4re4son2la4n2per1laton1olly3oma2rche3ter4ia1rentice3scot7t4ton2"
+        "iscilla2udence4y1yrena2thia0qamra1ueena3lla3nby4tin5on2illan3ncy4lan4n4tina3terie0rachel2d3cliffe3ella3in"
+        "ka3man2e2fael3ferty2gnar2i3don3zel2leigh3ph2miro3la3on5a3say4ey3ya2nard3ce3dall4ie4olph3e4e4n3ger3i3kin2o"
+        "ul2phael2quel2shida3ine2tri2ul2ven3i4d2wnie2y3mond3na4ell4or2ziya1eade2ba3ecca2dford3mond2ed3se3ve2gan3in"
+        "a6ld4s2idun2mington3y2na4ldo4ta3dor3e4e3fry3ny2uben2x2yhan1hea3tt2iamon4nne6on2oda5nthe3nda4na2ys4sa1ia3n"
+        "e2ca4rdo3hard4ter3o2der3gley2gby2hana2kki2ley2mon2ngo2o3dan3rdan2sa2ta2va1oanna3rke2bert6a6o3i4n3yn2chell"
+        "e3kwell2d3erick3man3ney3rigo2ger2hanna2i2land3dan3f2na4ld4n2oney2rie3y2sa4lind8a8e7e4nne3coe3e4anne4marie"
+        "7y3s2th2wan3ena3land2xana5ne2y3ce1uben3y2dd3i3yard2fus2mer2nako2skin3s4ell3ty2th4ann4erford3ledge1yan4n5e"
+        "2ba2der2lan2ssa0saba3ina5y4rah3ra4ina2cha4i2de3ira2ffi3iya2gara2hale3en2idah2kari3inah3ti3ura2lihah4m5ah4"
+        "na3ly3oman5e2m3antha4ra3ien4rah3mon3son3uel2ncia3ders4ia4on5r4ra5ine4ya3ford2ra4h4i5d3ee4na3gent3i4sha3ng"
+        "in3ojin2sha4enka2tinka2ul3nders2vanna2wyer2xon1chuyler2otia4t1ean3rlait3son2basten6ian7en2ema2if2la3by3en"
+        "a3ina3ma2mele2non3ta2rafina3gio3ilda2sha2th2ung2verin3ilin2ward2ymour1haine3kira4o3mmara3na5ta4dra5y4e4i4"
+        "ley4na5on4tay5ha3rman4on4ri3shi3wn3yndel2ea3ba3ena3ffield3ila3la4by4don4ley5y3n3ridan4man4ri4win5ood2ika3"
+        "n4a4g3ra4ley2obi3shana2unnar1ibley3ongile3yl2dney3onia3ra2egfried3rra2gourney2ham2las3eas3va4ia2mba3on5e2"
+        "ne4ad2obhan2ran3ena3oun2tara3embile2v3an3e1kip2yler1lade2evin1mith1ofi2lana5ge3edad3ita3omon2ndra3ia3ja3y"
+        "a2phia5e4ronia2rgan2terios1palding2encer4ser2ica1tacey4ia4y3ndford4ley4ton3sio2efan6ia3lla3phan7i8e5en3r4"
+        "ling3sha3van4e5n3wart2ockard3ke3rm3yan2rom2uart1ubrey2katai3i2laiman3lican2mi3mer3ner2n2san5na2therland3t"
+        "on2zanne1ven3tlana1ybil2delle3ney2eira2lvester4ia2na3ia0tab3ari3itha2ci4ta2d3i2ffy2hirah2i3ma3nn3pa3te2jo"
+        "2ka4ra3iyah3oda2lasi3bart4ot3e3ia4tha3lulah3man3os2m3a4ra5y3ma4y2naka3ek3i3ner3o3sy3ya2o2ra3o2te3yana2uri"
+        "n2wnie4y2yce3lor1eague2hya2kla2m3ina2rence5tia4se3rence4ill6yn4y3tia3yn2sia3s4a1haddeus4ea3i4s3lassa4ia3m"
+        "an3n4a4e4os3ra2ea3kla3lma3obald4dore6sia4ne3ra4on2ierry3rza2omas3ra4pe2urston2yra1ia3ra2balt2enette3rnan5"
+        "ey4ra2ffany2lda2mandra3othy2na2ponya2rza2tus2vona1obey3ias3y2d3d2la2mas2ng2r3a3i4n3rance3y2sia2ve2wnsend1"
+        "racey4y3vers4is2easa3main7e3nt3sa3va4or3y2ianon3cia3lby3na4d3sh5a4tan2oy2udy2yne3on3phena1ucker2lly1yee2l"
+        "er2mon2ne2rone0ula3ni2tima1ma1na2dine1pton1rania2iah4n5a2sula1ta0vala3entina4ria6e4ska3onia4ra2n3ce3da3es"
+        "sa3ora3ya2shti2ughn1eda2lika3ma2nesssa2ra3ena3ity3n4on3onica2sta2vila1ictor6ia2donia2ncent3son2olet6ta2rg"
+        "il5nia3idis2to2veka3ian1lad4imir1okes2leta3f1rinda0wade2gner2kanda2lden4o3ker3lace4y3ter2nda3eta2rd3ner3r"
+        "en2tson2ylan6d4on3ne1ebb3ster2ndell4y2sley3ton2ylin1hilhelmina3taker4ney1ijdan2lfen3l4ard4em4iam4ow3ma3on"
+        "a3son2nda3ema3ifred3na3ona3ston3throp1lby1oody1yatt2nee3n3ona0xanthe2veria3ier6a1ena3ia3os2rxes1imen5a1yl"
+        "ia3ona0yachne2kecan2le2ncey3ice2rdley3in3milla2smeen4in1elinda2nene2rik3o3vant2smina2tta2va1okiko2landa3i"
+        "e2nina2rk2vela1usuf1vella3s3tte2onne0zachariah6y3kery2da2hara3irah3ra2id4e2kia2lea3ika3tana2ndra3e3iel3n2"
+        "ra4h3ed4k2za1ehava2ke2lda3enka3ia3la2na4ide3ia3on2rlinda2va3ida1ia3zan2gana2la2na3nia2on2ta2ven1oe2la2na2"
+        "ra4h3da3n2sia1uleika4ma2za4nny")
+    NPC_NAMES = [None]
+
+    def npc_names():
+        """Return the set of common NPC given names, unpacked from NPC_NAMES_DATA on first use."""
+        names = NPC_NAMES[0]
+        if names is None:
+            names, prev = set(), ""
+            # Each entry is a digit (how many leading letters to keep from the previous name)
+            # and the new ending.
+            for d, rest in re.findall(r"(\d)([a-z]*)", NPC_NAMES_DATA):
+                prev = prev[:int(d)] + rest
+                names.add(prev)
+            NPC_NAMES[0] = names
+        return names
+
+    def vid(name):
+        """Return a stable number for a player's name, or 0 when streamer mode is off or there is no name.
+
+        It stands in for a serial when the player is only known by name, so Kit.veil gives the same
+        label to the same name every time.
+        """
+        return Kit.checksum(name.lower().encode("utf-8")) if Kit.streamer and name else 0
+
+    def nm(name, serial=0):
+        """Return the name to show: the name itself, or its veiled label in streamer mode.
+
+        Without a serial the checksum of the lower-cased name (vid) is used to pick the label.
+        """
+        return Kit.veil("name", name, serial or vid(name))
+
+    def who(name, serial, noto):
+        """Return a player's name for a row or title: the notoriety mark (colour-blind mode only), then
+        the name, veiled in streamer mode.
+        """
+        mark = Kit.noto_mark(noto)
+        return (mark + " " if mark else "") + Kit.veil("name", name, serial or vid(name))
 
     def _part_tracker():
         """Build the Tracker part and return its hooks.
 
         The part draws three tracker windows (Friends, Foes, Neutral) with a health bar for every player
-        near you, the Combat window with bars for what you fight, pop-out bars, the Foe list panel, the
-        sightings log and the killer window. All state lives in the closures below; windows are native
-        Kit windows with a flat fallback when the client art cannot be loaded.
+        near you, ordered by name, distance or HP as the Sort setting says, the Combat window with bars
+        for what you fight, pop-out bars, the Foe list panel, the sightings log and the killer window.
+        All state lives in the closures below; windows are native Kit windows with a flat fallback when
+        the client art cannot be loaded. Names go through nm and who, and places and coordinates through
+        Kit.veil, so streamer mode hides them; colour-blind mode swaps the notoriety colours and adds
+        marks.
         """
         KEY = "ultima"
         TITLE = "Ultima Tracker"
@@ -41,7 +384,6 @@ def _module_ultima():
         COMBAT_TICK_SECONDS      = 0.15
         HP_EVERY = 0.05
         DOUBLE_CLICK_SECONDS     = 0.45
-        NPC_RECHECK_SECONDS      = 3.0
         DEFAULT_OPACITY = 85
         SCALE_MIN, SCALE_MAX = 50, 200
         RANGE_MIN, RANGE_MAX = 1, 24
@@ -107,8 +449,6 @@ def _module_ultima():
         FIXED_WINDOWS  = ("friend", "foe", "neutral", "combat", "panel")
         ANCHOR_SETTLE_POLLS = 4
         ANCHOR_LINGER_POLLS = 10
-        # Caps that keep the per-mobile caches and the name lists from growing without end.
-        CACHE_CAP      = 2000
         PLAYER_NAMES_CAP  = 5000
         PLAYER_NAMES_KEEP = 4000
         LABELS_CAP     = 4000
@@ -171,8 +511,9 @@ def _module_ultima():
         OLD_DATA_FILE = os.path.join(Kit.script_dir(), "_player_tracker_data.txt")
         CATS = ["friend", "foe", "neutral"]
         INT_SETTINGS = {"scale": (SCALE_MIN, SCALE_MAX), "opacity": (0, 100), "range": (RANGE_MIN, RANGE_MAX),
-                        "alert_minutes": (ALERT_MIN, ALERT_MAX)}
-        INT_ORDER = ("scale", "opacity", "range", "alert_minutes")
+                        "alert_minutes": (ALERT_MIN, ALERT_MAX), "sort": (0, 2)}
+        INT_ORDER = ("scale", "opacity", "range", "alert_minutes", "sort")
+        SORT_NAMES = ("name", "distance", "HP")
         BOOL_SETTINGS = ("sync", "magery", "combat_shown", "combat_only", "healing", "borders",
                          "alert_red", "alert_foes", "alert_orange", "alert_gray", "sightings", "killer")
         # Default places of the fixed windows: x, y, width, height, locked, minimised, opacity.
@@ -181,15 +522,13 @@ def _module_ultima():
             "neutral": [540, 140, 240, 220, False, False, DEFAULT_OPACITY],
             "combat":  [300, 200, BASE_WIDTH, 0, False, False, DEFAULT_OPACITY],
             "panel":   [40, 380, 0, 0, False, False, DEFAULT_OPACITY],}
-        FOES = {}
-        IGNORE = {}
         # LAYOUT holds the live places of the fixed windows; it starts as a copy of the defaults.
         LAYOUT = {k: list(v) for k, v in DEFAULT_LAYOUT.items()}
         settings = {"scale": 100, "opacity": DEFAULT_OPACITY, "range": 18,
                        "sync": False, "magery": False, "combat_shown": True,
                        "combat_only": True, "healing": False, "borders": True,
                        "alert_red": True, "alert_foes": True, "alert_orange": False,
-                       "alert_gray": False, "alert_minutes": 5, "sightings": True, "killer": True}
+                       "alert_gray": False, "alert_minutes": 5, "sightings": True, "killer": True, "sort": 0}
         DEFAULTS = dict(settings)
         # Values the module returns to when it is switched off and on again, so no old state leaks in.
         STATE_DEFAULTS = {"dirty_save": False, "foe_ver": 0, "combat_loaded": False, "shutting": False,
@@ -243,8 +582,10 @@ def _module_ultima():
             return s if s > 1.0 else 1.0
 
         def tsc(v):
-            """Scale a font size with the Scale setting: grown above 100%, never shrunk below it."""
-            return sc(v) if settings["scale"] > 100 else int(v)
+            """Scale a font size with the Scale setting: grown above 100%, never shrunk below it, then by the
+            text size setting (Kit.tsize).
+            """
+            return Kit.tsize(sc(v) if settings["scale"] > 100 else int(v))
 
         def empty_lines(text, width):
             """Split an empty-state sentence into lines no wider than `width` pixels in the label font.
@@ -289,17 +630,6 @@ def _module_ultima():
         def stopping():
             """Return True once the script has been asked to stop."""
             return API.StopRequested
-
-        # Rank prefixes that are dropped when names are compared, so "Lord Name" and "Name" are one player.
-        TITLE_PREFIXES = ("lord ", "lady ")
-
-        def name_key(name):
-            """Return a name as a lookup key: trimmed, lower case, without a Lord or Lady prefix."""
-            n = (name or "").strip().lower()
-            for p in TITLE_PREFIXES:
-                if n.startswith(p):
-                    n = n[len(p):]
-            return n
 
         def short(text, n):
             """Shorten text to n characters, ending in two dots when it was cut."""
@@ -461,9 +791,22 @@ def _module_ultima():
                 NATIVE["font_h"] = h
 
         HUES = {}
+        CB_HEX_HUE = dict(("#%02X%02X%02X" % Kit.CB_RGB[k], Kit.CB_HUE[k]) for k in Kit.CB_RGB)
+
+        def noto_col(noto, default):
+            """Return the #RRGGBB colour for a notoriety: the colour-blind palette when that mode is on, else
+            the tracker's own colour for it, else default.
+            """
+            return Kit.cb_hex(noto, NOTO_COLOR.get(noto, default))
 
         def hue_of(color):
-            """Return the UO hue closest to a #RRGGBB colour (cached)."""
+            """Return the UO hue closest to a #RRGGBB colour (cached).
+
+            The colour-blind palette's colours map straight to their own hues, so they stay exact instead of
+            being matched to the nearest palette entry.
+            """
+            if Kit.cblind and color in CB_HEX_HUE:
+                return CB_HEX_HUE[color]
             h = HUES.get(color)
             if h is not None:
                 return h
@@ -671,7 +1014,8 @@ def _module_ultima():
 
             Heal and Cure only with Magery on (Shift+click for Greater Heal and Arch Cure), Bandage with
             Healing on. With `row` (a pooled tracker row) the buttons act for whoever the row shows when
-            clicked. Returns [(click target, tooltip with %s)] so tooltips can follow the row's name.
+            clicked. Returns [(click target, tooltip with %s)] so tooltips can follow the row's name; the
+            name in a tooltip goes through nm, so it is veiled in streamer mode.
             """
             fs = max(7, int(h * 0.7 / min(1.0, settings["scale"] / 100.0)))
             tips, specs, parts = [], [], [] if store is None else store
@@ -687,7 +1031,8 @@ def _module_ultima():
                 specs.append(("B", make_bandage_click(serial, name) if row is None else
                               RowClick(row, make_bandage_click), TIP_BANDAGE, COL_BANDAGE, "#202020"))
             for text, fn, tip, face, color in specs:
-                flat_button(parent, x, y, w, h, text, fn, tip % name, face=face, color=color, font=fs, store=parts)
+                flat_button(parent, x, y, w, h, text, fn, tip % nm(name, serial), face=face, color=color,
+                            font=fs, store=parts)
                 tips.append((parts[-1], tip))
                 x += w + 2
             return tips
@@ -2054,12 +2399,15 @@ def _module_ultima():
                 return "?"
 
         def seen_text(k, now):
-            """Return 'seen 5m ago, Fel 1432,1690 (guarded)' for a Foe list name key."""
+            """Return 'seen 5m ago, Fel 1432,1690 (guarded)' for a Foe list name key.
+
+            The place goes through Kit.veil("place"), so streamer mode hides it.
+            """
             s = LAST_SEEN.get(k)
             if s is None:
                 return "not seen yet"
             t, facet, x, y, guard = s
-            return "seen %s, %s%s" % (Kit.ago(now - t, Kit.AGO_WORDS), place_text(facet, x, y),
+            return "seen %s, %s%s" % (Kit.ago(now - t, Kit.AGO_WORDS), Kit.veil("place", place_text(facet, x, y)),
                 " (guarded)" if guard else "")
 
         def flatten_links():
@@ -2082,13 +2430,16 @@ def _module_ultima():
             return sorted(a for a, m in ALT_OF.items() if m == main)
 
         def link_text(k):
-            """Return 'alt of Main', 'alts: A, B' or '' for a Foe list name key."""
+            """Return 'alt of Main', 'alts: A, B' or '' for a Foe list name key.
+
+            The names are shown through nm, so they are veiled in streamer mode.
+            """
             m = ALT_OF.get(k)
             if m is not None:
-                return "alt of " + FOES.get(m, m)
+                return "alt of " + nm(FOES.get(m, m))
             alts = alts_of(k)
             if alts:
-                return "alts: " + ", ".join(FOES.get(a, a) for a in alts)
+                return "alts: " + ", ".join(nm(FOES.get(a, a)) for a in alts)
             return ""
 
         def link_foes(a, b):
@@ -2208,13 +2559,8 @@ def _module_ultima():
                 return bool(k) and k in FOES
             return False
 
-        NPC_CACHE = {}
-        SEEN_PLAYER = set()
-        PLAYER_NAMES = {}
         PLAYER_VER = [0]
         PLAYER_TEXT = [None, None]
-        TITLED_NPCS = set()
-        TITLE_CACHE = {}
         KARMA_TAG_RE = re.compile(r"^\s*\[[^\]]+\]\s*$")
 
         def trim_players(limit=None):
@@ -2243,11 +2589,6 @@ def _module_ultima():
             PLAYER_VER[0] += 1
             NPC_CACHE.clear()
             st["dirty_save"] = True
-
-        def capped(cache):
-            """Empty a per-mobile cache once it has grown past CACHE_CAP entries."""
-            if len(cache) > CACHE_CAP:
-                cache.clear()
 
         # Journal readers are made on first use; the journal is looked at once a second.
         JOURNAL_NEXT = [0.0]
@@ -2289,140 +2630,6 @@ def _module_ultima():
                 elif text.lower().startswith(low + " the "):
                     capped(TITLED_NPCS)
                     TITLED_NPCS.add(low)
-
-        # Friends-list answers are kept for FRIEND_Q_SECONDS and cleared by the scan, so each player is
-        # asked of the client once a second at most.
-        FRIEND_Q = {}
-        FRIEND_Q_SECONDS = 1.0
-        FRIEND_Q_AT = [0.0]
-
-        def is_friend(serial):
-            """Return True when the player is on TazUO's friends list (cached for a second)."""
-            v = FRIEND_Q.get(serial)
-            if v is None:
-                v = bool(API.IsFriend(serial))
-                if len(FRIEND_Q) > 500:
-                    FRIEND_Q.clear()
-                FRIEND_Q[serial] = v
-            return v
-
-        def mflag(m, attr):
-            """Return a mobile's on/off property, False when it cannot be read."""
-            try:
-                return bool(getattr(m, attr))
-            except Exception:
-                return False
-
-        def acts_like_player(mob, serial, name, low):
-            """Return True for things town NPCs do not do: carry a Lord or Lady title, be on the Foe list, be
-            a known player name or in your party, run, ride, go to war mode, or be on your friends list.
-            """
-            # The pure-Python tests come first, then the client's flags, and the friends list last: the same
-            # answer in the same order of cost.
-            if low.startswith(TITLE_PREFIXES) or name_key(name) in FOES or low in PLAYER_NAMES or serial in st["party"]:
-                return True
-            if mflag(mob, "IsRunning") or mflag(mob, "IsMounted") or mflag(mob, "InWarMode"):
-                return True
-            return is_friend(serial)
-
-        def is_npc(mob, serial, name):
-            """Return True for a blue town NPC.
-
-            Blue town NPCs are recognised by a job title in the name line ("Bob the guard", when the shard
-            sends titles) or by a plain first name from the server's NPC name lists ("Candra", "Thierry").
-            Anything seen acting like a player is remembered as a player for the rest of the session.
-            `serial` and `name` are as the caller read them.
-            """
-            if serial in SEEN_PLAYER:
-                return False
-            low = name.strip().lower()
-            if acts_like_player(mob, serial, name, low):
-                capped(SEEN_PLAYER)
-                SEEN_PLAYER.add(serial)
-                NPC_CACHE.pop(serial, None)
-                return False
-            # The name lists and the titles learned from the journal answer without a client call.
-            if low in npc_names() or low in TITLED_NPCS:
-                return True
-            now = time.time()
-            hit = NPC_CACHE.get(serial)
-            # A found NPC stays one; a "no" is asked again after NPC_RECHECK_SECONDS because the title may
-            # arrive late.
-            if hit is not None and (hit[0] or now - hit[1] < NPC_RECHECK_SECONDS):
-                return hit[0]
-            text = name_props(mob)
-            npc = bool(NPC_TITLE_RE.search(text.split("\n")[0] + " " + name))
-            capped(NPC_CACHE)
-            NPC_CACHE[serial] = (npc, now)
-            return npc
-
-        def name_props(mob):
-            """Return the mobile's name-and-title line ("Bob the guard") as the client has it, or ''.
-
-            It reads what the client already holds and never waits for the server.
-            """
-            try:
-                return str(mob.NameAndProps(False) or "")
-            except Exception:
-                return ""
-
-        def titled_npc(mob, serial, name):
-            """Return True for a red, grey or orange human that is an NPC by its title.
-
-            Brigands, executioners and the shard's grey wandering healers: the name was announced as
-            "<name> the <job>" on a single-click (TITLED_NPCS), or the client's name line shows such a title
-            after the name. Never by a plain first name, war mode or running: a real red player must never
-            be hidden from the Foes tracker and its alert, and a known player (Foe list, party, friends, a
-            karma tag seen, acted like a player) never is.
-            """
-            if serial in SEEN_PLAYER:
-                return False
-            low = name.strip().lower()
-            if not low:
-                return False
-            npc = low in TITLED_NPCS
-            if not npc:
-                now = time.time()
-                hit = TITLE_CACHE.get(serial)
-                if hit is not None and (hit[0] or now - hit[1] < NPC_RECHECK_SECONDS):
-                    npc = hit[0]
-                else:
-                    first = name_props(mob).split("\n")[0].strip().lower()
-                    npc = first.startswith(low + " the ")
-                    capped(TITLE_CACHE)
-                    TITLE_CACHE[serial] = (npc, now)
-            if not npc:
-                return False
-            if low in PLAYER_NAMES or name_key(name) in FOES or serial in st["party"] or is_friend(serial):
-                return False
-            return True
-
-        def looks_like_player(mob, serial):
-            """Return (notoriety, dead, name) when the mobile looks like a player, else None.
-
-            The cheap body test comes first: a monster or an animal costs three reads, and only a human,
-            gargoyle or ghost reaches the NPC tests. The name is str(mob.Name or "").
-            """
-            dead = mflag(mob, "IsDead")
-            if not dead and not (mflag(mob, "IsHuman") or mflag(mob, "IsGargoyle")):
-                return None
-            # Renamable mobiles are pets.
-            if mflag(mob, "IsRenamable"):
-                return None
-            noto = Kit.noto_name(mob)
-            if noto == "invulnerable":
-                return None
-            try:
-                name = str(mob.Name or "")
-            except Exception:
-                return None
-            # Blue ones may be town NPCs; red, grey and orange ones only when they carry a title.
-            if noto == "innocent":
-                if is_npc(mob, serial, name):
-                    return None
-            elif not dead and titled_npc(mob, serial, name):
-                return None
-            return (noto, dead, name)
 
         def classify(serial, name, noto, party):
             """Return (category, tag) for a player: "friend", "foe" or "neutral".
@@ -2473,17 +2680,22 @@ def _module_ultima():
             """
             return HOST.mobiles(max(settings["range"], MAX_RANGE))
 
-        def mnum(m, attr):
-            """Return a number of a mobile (hits and so on), 0 when it cannot be read."""
-            try:
-                return getattr(m, attr) or 0
-            except Exception:
-                return 0
-
         def _by_name(e):
             """Sort key of a row: the lower-case name."""
             return e["name"].lower()
 
+        def _by_dist(e):
+            """Sort key: nearest first, then by name."""
+            return e["dist"], e["name"].lower()
+
+        def _by_hp(e):
+            """Sort key: lowest hit-point fraction first, then by name.
+
+            A player whose maximum is unknown counts as full health, so those come last.
+            """
+            return (e["hits"] / float(e["hmax"]) if e["hmax"] > 0 else 2.0), e["name"].lower()
+
+        SORT_KEYS = (_by_name, _by_dist, _by_hp)
         SCANNED = {}
         SCANNED_PASS = [None]
 
@@ -2497,20 +2709,20 @@ def _module_ultima():
             return SCANNED.get(serial)
 
         def scan():
-            """Scan the mobiles in range and return the players per category, sorted by name.
+            """Scan the mobiles in range and return the players per category, sorted by the Sort setting
+            (name, distance or HP).
 
             For each player it classifies, records the Foe list serial, notes who appeared (the log), who
             is new to the foe alert and which foes are here, then fires those after the loop. Windows that
-            are minimised and locked skip the hit-point reads. Runs on the client thread.
+            are minimised and locked skip the hit-point reads (unless the lists are sorted by HP, which
+            needs them). Also refreshes the party and friend caches that the NPC tests share with the
+            Overview. Runs on the client thread.
             """
             out = {c: [] for c in CATS}
             SCANNED.clear()
             SCANNED_PASS[0] = HOST.pass_id if HOST.in_hop else None
             now = time.time()
-            # The friends cache lives one second from the first ask of the second.
-            if not 0.0 < FRIEND_Q_AT[0] - now <= FRIEND_Q_SECONDS:
-                FRIEND_Q.clear()
-                FRIEND_Q_AT[0] = now + FRIEND_Q_SECONDS
+            friends_fresh(now)
             me = HOST.me()
             # The watch tick reads the player from here instead of asking again.
             WATCH["me"] = me
@@ -2519,7 +2731,8 @@ def _module_ultima():
             rng = settings["range"]
             mobs = mobiles_near()
             party = set(API.GetPartyMemberSerials() or [])
-            st["party"] = party
+            st["party"] = PEOPLE["party"] = party
+            PEOPLE["scan_at"] = now
             learn_from_journal()
             my_serial = me.Serial
             mx, my = int(me.X), int(me.Y)
@@ -2530,10 +2743,11 @@ def _module_ultima():
             log_on = settings["sightings"]
             wins = views["windows"] or {}
             need_hp = {}
+            hp_sort = settings["sort"] == 2
             # A window that is minimised and locked shows only its title: its rows need no hit points.
             for c in CATS:
                 w = wins.get(c)
-                need_hp[c] = w is None or not (w.minimized and LAYOUT[c][5])
+                need_hp[c] = hp_sort or w is None or not (w.minimized and LAYOUT[c][5])
             # Any one mobile that fails to read is skipped; it must not stop the pass.
             for m in mobs:
                 try:
@@ -2592,8 +2806,9 @@ def _module_ultima():
                         "mob": m.raw})
                 except Exception:
                     continue
+            by = SORT_KEYS[settings["sort"]]
             for c in CATS:
-                out[c].sort(key=_by_name)
+                out[c].sort(key=by)
             ALERT_PREV.clear()
             if cands is not None:
                 ALERT_PREV.update(cands)
@@ -2627,7 +2842,8 @@ def _module_ultima():
         def foe_alerts(fresh, now):
             """Raise one alert for each player who just started to count (came into range, or turned red).
 
-            Once per player per alert_minutes.
+            Once per player per alert_minutes. The alert carries the player's name so streamer mode can
+            veil it.
             """
             gap = settings["alert_minutes"] * 60.0
             for serial, name, noto, tag, dist, dx, dy in fresh:
@@ -2635,7 +2851,8 @@ def _module_ultima():
                 if t is not None and now - t < gap:
                     continue
                 ALERTED[serial] = now
-                HOST.alert(ALERT_KEY, foe_alert_text(name, noto, tag, dist, dx, dy), level="warn", who=serial)
+                HOST.alert(ALERT_KEY, foe_alert_text(name, noto, tag, dist, dx, dy), level="warn", who=serial,
+                           name=name)
 
         def foe_alert_text(name, noto, tag, dist, dx, dy):
             """Return the alert line, such as 'Killer: red, 7 tiles NE'.
@@ -2946,11 +3163,15 @@ def _module_ultima():
             set_box_alpha(glow, a)
 
         def hp_text(dead, hits, hmax, poisoned, paralyzed, dist):
-            """Return (text, hits, hits_max) for a bar: "75% PSN PAR  12y", "DEAD  12y" or "--  12y"."""
+            """Return (text, hits, hits_max) for a bar: "75% PSN PAR  12y", "DEAD  12y" or "--  12y".
+
+            In colour-blind mode the status flags are letters from Kit.hp_mark instead of the words.
+            """
             if dead:
                 return "DEAD  %dy" % dist, 0, 1
             if hmax > 0:
-                flags = (" PSN" if poisoned else "") + (" PAR" if paralyzed else "")
+                mk = Kit.hp_mark(poisoned, paralyzed)
+                flags = " " + mk if mk else (" PSN" if poisoned else "") + (" PAR" if paralyzed else "")
                 return "%d%%%s  %dy" % (int(round(100.0 * hits / hmax)), flags, dist), hits, hmax
             return "--  %dy" % dist, 0, 1
 
@@ -3043,11 +3264,15 @@ def _module_ultima():
             but they anchor to other windows. They are used when Character HUD Frames is not available.
             """
             def __init__(self, serial, name, x, y):
-                """Remember the player and where to put the window, then build it."""
+                """Remember the player and where to put the window, then build it.
+
+                shown is the title as displayed (veiled in streamer mode); _refresh keeps it up to date.
+                """
                 self.serial, self.name, self.x, self.y = serial, name, x, y
                 self.gump = None
                 self.locked = self.minimized = self.opacity_open = False
                 self.opacity, self.name_color = settings["opacity"], TEXT_COLOR
+                self.shown = nm(name, serial)
                 self.create()
 
             def create(self):
@@ -3087,7 +3312,10 @@ def _module_ultima():
                 ANCHORS.pending = True
 
             def layout_chrome(self):
-                """Lay out the title strip with its buttons for the current lock, minimise and opacity state."""
+                """Lay out the title strip with its buttons for the current lock, minimise and opacity state.
+
+                The title is the shown name, in the notoriety colour last set.
+                """
                 w, h = self.size
                 mini, oo = self.minimized, self.opacity_open
                 b = [("lock", self.locked, self.toggle_lock, "Unlock (move and resize again)"
@@ -3097,7 +3325,7 @@ def _module_ultima():
                     b.append(("opacity", oo, self.toggle_opacity, "Hide the opacity slider" if oo
                               else "Show the opacity slider (frame and bars stay solid)"))
                 b.append(("close", False, self.close, "Close this bar"))
-                self.chrome.layout(w, h, settings["scale"] / 100.0, self.opacity, self.name, self.name_color, b,
+                self.chrome.layout(w, h, settings["scale"] / 100.0, self.opacity, self.shown, self.name_color, b,
                                    oo and not mini, self.toggle_minimize, lambda: toggle_follow(self.serial),
                                    self.anchor_key)
 
@@ -3214,7 +3442,8 @@ def _module_ultima():
 
                 It takes what this pass's scan read when the player is listed, else reads the mobile itself. A
                 player out of sight shows "out of range". The bar is repainted in place when only the colour
-                changed, and drawn again when the buttons or the category changed.
+                changed, and drawn again when the buttons or the category changed. The title shows the name
+                through who (mark and veil), and a minimised bar adds the percentage after it.
                 """
                 me = HOST.me()
                 hit = scanned(self.serial) if me is not None else None
@@ -3226,6 +3455,7 @@ def _module_ultima():
                 if mob is None or me is None:
                     text, cur, mx, key, ncol = ("out of range", 0, 1, (COL_DEAD, False, False), "#888888")
                     self.low = False
+                    self.shown = nm(self.name, self.serial)
                 else:
                     if hit is not None:
                         name, noto, cat, dead, poisoned, paralyzed, hits, hmax, dist = hit
@@ -3245,17 +3475,17 @@ def _module_ultima():
                     key = (bar_color(cat, poisoned, dead, paralyzed), (settings["magery"], settings["healing"]),
                            cat == "friend")
                     self.low = cat == "friend" and needs_heal(dead, hits, hmax)
-                    ncol = NOTO_COLOR.get(noto, "#DDDDDD")
+                    ncol = noto_col(noto, "#DDDDDD")
+                    self.shown = who(self.name, self.serial, noto)
                     text, cur, mx = hp_text(dead, hits, hmax, poisoned, paralyzed, dist)
                 # The player being auto-followed is marked FOL.
                 if Follow.serial == self.serial:
                     text = "FOL " + text
                 self.name_color = ncol
                 if self.minimized:
-                    # Minimised: the title carries the name and the short status.
-                    self.chrome.set_title("%s  %s" % (self.name, text.split("  ")[0]), ncol)
+                    self.chrome.set_title("%s  %s" % (self.shown, text.split("  ")[0]), ncol)
                     return
-                self.chrome.set_title(self.name, ncol)
+                self.chrome.set_title(self.shown, ncol)
                 if key != self.bar_key:
                     old = self.bar_key
                     if old is not None and old[1:] == key[1:] and self.bar is not None:
@@ -3412,7 +3642,11 @@ def _module_ultima():
                 self.bar = HealthBar(sa, 4, y + geo["bar_dy"], geo["bar_w"], geo["bar_h"], row_color(view.cat, e))
 
             def assign(self, e, geo):
-                """Show player e in this row, changing only what differs."""
+                """Show player e in this row, changing only what differs.
+
+                A new player resets the row's tooltips (with the veiled name) and the Foe list and note tooltip
+                on the row background.
+                """
                 serial, name = e["serial"], e["name"]
                 if serial != self.serial or name != self.name:
                     if serial != self.serial:
@@ -3420,7 +3654,7 @@ def _module_ultima():
                     self.serial, self.name = serial, name
                     self.last = None
                     for c, tip in self.tips:
-                        Kit.with_tip(c, tip % name)
+                        Kit.with_tip(c, tip % nm(name, serial))
                     # The tooltip carries the Foe list link and Social's note: made once per change of player.
                     Kit.with_tip(self.bg, tip_for(TIP_BAR_ROW, name))
                 if not self.shown:
@@ -3475,12 +3709,15 @@ def _module_ultima():
                 self.serial = None
 
         def row_name(e, geo):
-            """Return (text, colour) of a tracker row's name line."""
-            # The name is cut to the room, never drawn smaller.
-            text = cut_text(e["name"], geo["name_px"], geo["name_fs"])
+            """Return (text, colour) of a tracker row's name line.
+
+            The name goes through who (mark and veil), is cut to the row's pixel width and followed by the
+            Foe tag in brackets when there is one; the colour is the notoriety colour.
+            """
+            text = cut_text(who(e["name"], e["serial"], e["noto"]), geo["name_px"], geo["name_fs"])
             if e["tag"]:
                 text += "  [" + e["tag"] + "]"
-            return text, NOTO_COLOR.get(e["noto"], "#DDDDDD")
+            return text, noto_col(e["noto"], "#DDDDDD")
 
         def row_color(cat, e):
             """Return the bar colour of a row for its category."""
@@ -3700,7 +3937,8 @@ def _module_ultima():
             def geometry(self):
                 """Work out where everything of a row goes, scaled, once per layout.
 
-                Returns a dict of pixel sizes and offsets used by the rows.
+                Returns a dict of pixel sizes and offsets used by the rows. The row height is Kit.pitch of
+                ROW_H, so compact mode makes rows shorter, and font sizes go through tsc.
                 """
                 w, h = self.size
                 # Inside the Kit body panel, the margin plus 4 from the window edge.
@@ -3711,7 +3949,7 @@ def _module_ultima():
                 name_fs = tsc(13)
                 g = {"sa": (ix, self.chrome.content_top + sc(4), sa_w,
                             max(20, h - self.chrome.content_top - sc(4) - ix)),
-                     "rw": rw, "row_h": sc(ROW_H), "name_fs": name_fs, "info_fs": tsc(12),
+                     "rw": rw, "row_h": sc(Kit.pitch(ROW_H)), "name_fs": name_fs, "info_fs": tsc(12),
                      # The room cut_text has for the name.
                      "name_px": max(30, int(rw / 1.2)), "name_dy": sc(1), "info_dy": sc(2),
                      "pbw": sc(POP_BTN_W), "nbw": sc(NPC_BTN_W), "npc_dy": sc(3), "npc_fs": tsc(10),
@@ -3827,13 +4065,22 @@ def _module_ultima():
                 p.rebuild()
 
         def redo_look():
-            """Snapshot the windows, rebuild them for a new look, and have the combat window lay out again."""
+            """Snapshot the windows, rebuild them for a new look, and have the combat window lay out again.
+
+            The Foe panel's saved list is drawn again too, and the Sightings and Killer windows are asked
+            to redraw, so every name, colour and mark picks up a change of streamer, colour-blind or
+            compact mode.
+            """
             if views["windows"] is not None:
                 for w in views["windows"].values():
                     w.snapshot()
                 refresh(views["windows"])
             if views["combat"] is not None:
                 views["combat"].relayout = True
+            if views["panel"] is not None:
+                views["panel"].rebuild_foe_list()
+            SIGHT_WIN.ask_redraw()
+            KILLER_WIN.ask_redraw()
 
         def sync_sizes(windows, source):
             """Give every other unlocked tracker the source tracker's size."""
@@ -4270,14 +4517,18 @@ def _module_ultima():
                     API.CancelTarget()
 
         def cb_info_text(serial, hits, hm, psn, par):
-            """Build the text on the right of a bar: FOL, PSN and PAR tags and the health percent."""
+            """Build the text on the right of a bar: FOL, status flags and the health percent.
+
+            In colour-blind mode the flags are the letters from Kit.hp_mark, else PSN and PAR.
+            """
             # A max of 1 or less is a placeholder, so the percent is unknown.
             pct = "?" if not hm or hm <= 1 else str(int(round(hits * 100.0 / hm))) + "%"
             tags = "FOL " if Follow.serial == serial else ""
-            if psn:
-                tags += "PSN "
-            if par:
-                tags += "PAR "
+            mk = Kit.hp_mark(psn, par)
+            if mk:
+                tags += mk + " "
+            else:
+                tags += ("PSN " if psn else "") + ("PAR " if par else "")
             return tags + pct
 
         TIP_CB = "Attack or aim at %s (blue or green in guards: twice). " + ALT_FOLLOW_TIP
@@ -4291,7 +4542,11 @@ def _module_ultima():
             the Magery P and Z buttons.
             """
             def __init__(self, view, i, geo, d):
-                """Build the bar, its texts, the click target and, with Magery on, the spell buttons for mobile d."""
+                """Build the bar, its texts, the click target and, with Magery on, the spell buttons for mobile d.
+
+                d is (serial, name, notoriety, hits, hits max, poisoned, paralysed). Tooltips name the mobile
+                through nm, so they are veiled in streamer mode.
+                """
                 self.win = view
                 g = view.gump
                 serial, name, noto, hits, hmr, psn, par = d
@@ -4303,7 +4558,7 @@ def _module_ultima():
                 self.name_lbl = self.info = self.name_key = self.info_text = self.name_raw = self.info_raw = None
                 self._texts(d, geo)
                 c = catcher(CB_X, ry, geo["bar_w"], geo["rh"], RowClick(self, lambda s, n: cb_make_click(s)),
-                            tip_for(TIP_CB % name, name))
+                            tip_for(TIP_CB % nm(name, serial), name))
                 g.Add(c)
                 self.ctrls.append(c)
                 self.tips.append((c, TIP_CB))
@@ -4315,21 +4570,25 @@ def _module_ultima():
                         # parts collects the button pieces so they can be disposed with the slot.
                         flat_button(g, bx, ry, geo["spell_w"], geo["rh"], txt,
                                     RowClick(self, (lambda sp: lambda s, n: cb_make_spell_click(sp, s))(spell)),
-                                    tip % name, face=col, color="#FFFFFF", font=max(7.0, geo["font"] - 1), store=parts)
+                                    tip % nm(name, serial), face=col, color="#FFFFFF",
+                                    font=max(7.0, geo["font"] - 1), store=parts)
                         self.ctrls.extend(parts)
                         self.tips.append((parts[-1], tip))
                         bx += geo["spell_w"] + 1
 
             def _texts(self, d, geo):
-                """Make the name and health texts if they are missing (made anew so they stay on top of the bar)."""
+                """Make the name and health texts if they are missing (made anew so they stay on top of the bar).
+
+                The name goes through who (mark and veil) and is coloured by notoriety, in the colour-blind
+                palette when that mode is on.
+                """
                 g = self.win.gump
                 serial, name, noto, hits, hmr, psn, par = d
                 font = geo["font"]
                 ty = text_y(self.y, geo["rh"], font)
                 if self.name_lbl is None:
-                    # Cut to fit, never shrunk (rule E12 of the text rules).
-                    text = cut_text(name, geo["name_w"], font, True)
-                    color = NOTO_COLOR.get(noto, "#FFFFFF")
+                    text = cut_text(who(name, serial, noto), geo["name_w"], font, True)
+                    color = noto_col(noto, "#FFFFFF")
                     nl = ttf(text, font, color, applyStroke=True)
                     nl.SetPos(CB_X + 3, ty)
                     g.Add(nl)
@@ -4343,7 +4602,11 @@ def _module_ultima():
                     self.info, self.info_text = info, text
 
             def assign(self, d, geo):
-                """Show mobile d in this slot, changing only what differs."""
+                """Show mobile d in this slot, changing only what differs.
+
+                A new mobile rewrites the tooltips with its veiled name; the name text is rebuilt when the
+                name, notoriety or width changed.
+                """
                 serial, name, noto, hits, hmr, psn, par = d
                 if serial != self.serial or name != self.name:
                     if serial != self.serial:
@@ -4351,7 +4614,7 @@ def _module_ultima():
                     self.serial, self.name = serial, name
                     # The click target's tooltip names the mobile.
                     for i, (c, tip) in enumerate(self.tips):
-                        Kit.with_tip(c, tip_for(tip % name, name) if i == 0 else tip % name)
+                        Kit.with_tip(c, tip_for(tip % nm(name, serial), name) if i == 0 else tip % nm(name, serial))
                 if not self.shown:
                     self.set_shown(True)
                 self.bar.set_color(bar_color("combat", psn, False, par))
@@ -4359,7 +4622,7 @@ def _module_ultima():
                 nr = (name, noto, geo["name_w"], font)
                 # Redraw the name only when it, its colour or its width changed.
                 if self.name_lbl is not None and nr != self.name_raw:
-                    nk = (cut_text(name, geo["name_w"], font, True), NOTO_COLOR.get(noto, "#FFFFFF"))
+                    nk = (cut_text(who(name, serial, noto), geo["name_w"], font, True), noto_col(noto, "#FFFFFF"))
                     if nk != self.name_key:
                         if nk[1] == self.name_key[1]:
                             set_text(self.name_lbl, nk[0])
@@ -5048,7 +5311,11 @@ def _module_ultima():
                 st["dirty_save"] = True
 
             def rebuild_foe_list(self):
-                """Draw the saved foe list, sorted by name, with the link, unlink and remove buttons."""
+                """Draw the saved foe list, sorted by name, with the link, unlink and remove buttons.
+
+                Names shown go through nm, so streamer mode veils them; the saved names themselves are not
+                changed.
+                """
                 if self.gump is None:
                     return
                 Kit.dispose(self.list_sa)
@@ -5075,13 +5342,13 @@ def _module_ultima():
                 sa = self.list_sa
                 for i, (key, name) in enumerate(names):
                     y = i * self.FOE_ROW_H
-                    lb = label(short(name, 24), 13, "#FF9090")
+                    lb = label(short(nm(name), 24), 13, "#FF9090")
                     lbls.append(lb)
                     place(lb, 2, y + 2)
                     sa.Add(lb)
                     bx = rw - 22
                     flat_button(sa, bx, y, 18, 18, "x", self._foe_btn(key, name, self._remove),
-                                "Take %s off your Foe list. %s" % (name, ALT_FOLLOW_TIP))
+                                "Take %s off your Foe list. %s" % (nm(name), ALT_FOLLOW_TIP))
                     bx -= 22
                     picked = LINK_PICK[0] == key
                     flat_button(sa, bx, y, 18, 18, "L*" if picked else "L", self._foe_btn(key, name, self.link_click),
@@ -5187,8 +5454,11 @@ def _module_ultima():
                 self.c, self.nm, self.here = {}, "", None
 
         def make_sight_click(serial, name):
-            """Return the click handler of a sightings row: Alt follows, a plain click filters by that name."""
-            return follow_or(serial, lambda: SIGHT_WIN.filter_name(name))
+            """Return the click handler of a sightings row: Alt follows, a plain click filters by that name.
+
+            The serial goes with the name so the Find box can show the veiled name for that player.
+            """
+            return follow_or(serial, lambda: SIGHT_WIN.filter_name(name, serial))
 
         SIGHT_LIST_H = 26 + SIGHT_ROWS * 22 + 6
         SIGHT_H = 2 * Kit.MARGIN + 30 + 36 + SIGHT_LIST_H + 36 + 3 * Kit.GAP
@@ -5218,12 +5488,10 @@ def _module_ultima():
         class SightingsWindow(object):
             """The Sightings window: the log of players seen, newest first, a page of rows at a time.
 
-            A pool of rows made with the window and only relabelled. Opened from the panel's
-            Sightings button or
-            the Settings page; its X closes it while the module stays on. Minimize gives a
-            small bar; the gold
-            arrow folds it into the Action Bar. Folded it draws nothing, minimized only its status line.
-            Runs on the module tick.
+            A pool of rows made with the window and only relabelled. Opened from the panel's Sightings
+            button or the Settings page; its X closes it while the module stays on. Minimize gives a small
+            bar; the gold arrow folds it into the Action Bar. Folded it draws nothing, minimized only its
+            status line. Runs on the module tick.
             """
             # Its dock key, used by Fold into the Action Bar and the layout zones.
             KEY = "ultima.sightings"
@@ -5234,7 +5502,12 @@ def _module_ultima():
             COLS = (8, 92, 230, 278, 404)
 
             def __init__(self):
-                """Set up the state, the dock hooks and the filters."""
+                """Set up the state, the dock hooks and the filters.
+
+                The Find filter keeps the typed text (flt), the serial of the player a row click filtered by
+                (fser) and the text the box currently shows (fshow), so a veiled name is never mistaken for
+                something the player typed.
+                """
                 self.st = {"minimized": False, "docked": False, "shutting": True}
                 self.win = {"g": None}
                 self.slot, self.want, self.n, self.w = None, False, SIGHT_ROWS, self.W
@@ -5244,6 +5517,7 @@ def _module_ultima():
                 self.hooks = Kit.dock_hooks(self.TITLE, SIGHT_TRAY_ICON, self.st, self.win, self.ask_redraw, self.fit)
                 self.hooks.update(show=self.zone_show, min=(self.W, SIGHT_MIN_H))
                 self.flt = {"text": "", "noto": 0, "time": 0}
+                self.fser, self.fshow = None, ""
                 self.forget()
 
             def fit(self, w, h, mode):
@@ -5337,7 +5611,8 @@ def _module_ultima():
             def build(self):
                 """Build the window whole: frame, filters, row pool, page buttons and status line, then fill it.
 
-                A minimized window is only the small bar with its status.
+                A minimized window is only the small bar with its status. The Find box starts with find_view,
+                the veiled form of the filter in streamer mode.
                 """
                 self.redraw = False
                 old = self.win["g"]
@@ -5371,7 +5646,7 @@ def _module_ultima():
                     yf = M + 30 + GAP
                     Kit.add_section(g, M, yf, IW, 36)
                     Kit.add_label(g, "Find:", M + 10, yf + 9)
-                    c["find"] = Kit.with_tip(Kit.add_textbox(g, self.flt["text"], M + 52, yf + 7, 128, numbers=False),
+                    c["find"] = Kit.with_tip(Kit.add_textbox(g, self.find_view(), M + 52, yf + 7, 128, numbers=False),
                                              "Part of a name: list only that player")
                     c["noto"] = Kit.art_button(g, store, "noto", Kit.ART_PAGE, M + 196, yf + 7,
                                                SIGHT_NOTO_FILTERS[self.flt["noto"]][0],
@@ -5432,13 +5707,27 @@ def _module_ultima():
                     self.page += 1
                     self.dirty = True
 
-            def filter_name(self, name):
-                """A row's click: list only that player, or everyone when that player was already the filter."""
+            def find_view(self):
+                """Return the text the Find box shows for the current filter.
+
+                When a row click set the filter (a serial is known) and streamer mode is on, it is the veiled
+                name for that serial; typed text is shown as typed. Remembers the result in fshow.
+                """
+                text = self.flt["text"]
+                self.fshow = Kit.veil("name", text, self.fser) if text and self.fser else text
+                return self.fshow
+
+            def filter_name(self, name, serial=None):
+                """A row's click: list only that player, or everyone when that player was already the filter.
+
+                serial lets the Find box show the veiled name; the filter itself still matches the real name.
+                """
                 new = "" if self.flt["text"].lower() == name.lower() else name
                 tb = self.c.get("find")
+                self.flt["text"], self.fser = new, (serial if new else None)
+                shown = self.find_view()
                 if tb is not None:
-                    safe(lambda: tb.SetText(new))
-                self.flt["text"] = new
+                    safe(lambda: tb.SetText(shown))
                 self.page, self.dirty = 0, True
 
             def tick(self, now):
@@ -5475,7 +5764,9 @@ def _module_ultima():
             def refresh(self, now, force=False):
                 """Redraw the list when the log or a filter changed, else only the names of players still here.
 
-                Minimized, only the status line is written.
+                Minimized, only the status line is written (count and the last player seen, veiled in streamer
+                mode). Text in the Find box that differs from what was shown is taken as typed by the player and
+                becomes the filter, with no serial.
                 """
                 c = self.c
                 if self.st["minimized"]:
@@ -5486,7 +5777,7 @@ def _module_ultima():
                         text = "%s: %d" % (self.TITLE, n)
                         if n:
                             e = SIGHTS[-1]
-                            text += ", last %s %s" % (e[S_NAME], stamp(e[S_T], today_start(now)))
+                            text += ", last %s %s" % (nm(e[S_NAME], e[S_SERIAL]), stamp(e[S_T], today_start(now)))
                         else:
                             text = "%s: none yet" % self.TITLE
                         Kit.set_text(c["status"], Kit.fit(text, self.MINI_W - 90))
@@ -5494,8 +5785,9 @@ def _module_ultima():
                 tb = c.get("find")
                 if tb is not None:
                     txt = str(tb.Text or "").strip()
-                    if txt != self.flt["text"]:
-                        self.flt["text"] = txt
+                    if txt != self.fshow:
+                        self.flt["text"] = self.fshow = txt
+                        self.fser = None
                         self.page, self.dirty = 0, True
                 # New sightings redraw the list at most once a second.
                 if force or self.dirty or now >= self.full_at or \
@@ -5551,7 +5843,11 @@ def _module_ultima():
                 Kit.set_text(self.c["status"], Kit.fit(text, self.w - 2 * Kit.MARGIN - 236))
 
             def assign(self, r, e, today0):
-                """Show sighting e in row r (None blanks it), changing only what differs."""
+                """Show sighting e in row r (None blanks it), changing only what differs.
+
+                The name goes through who, the notoriety word takes the colour-blind hue, and the place goes
+                through Kit.veil("place"), so streamer mode hides names and places.
+                """
                 c = r.c
                 if e is None:
                     if r.e is not None:
@@ -5565,9 +5861,11 @@ def _module_ultima():
                     if r.serial is not None and r.serial != e[S_SERIAL]:
                         r.prev = (r.serial, r.name, time.time())
                     r.e, r.serial, r.name = e, e[S_SERIAL], e[S_NAME]
-                    r.nm, r.here = Kit.fit(e[S_NAME], 124), None
-                    Kit.set_text(c["o"], noto_word(e[S_NOTO]), NOTO_HUE.get(e[S_NOTO], Kit.HUE_TEXT))
-                    where = place_text(e[S_FACET], e[S_X], e[S_Y])
+                    r.here = None
+                    r.nm = Kit.fit(who(e[S_NAME], e[S_SERIAL], e[S_NOTO]), 124)
+                    Kit.set_text(c["o"], noto_word(e[S_NOTO]),
+                                 Kit.cb_hue(e[S_NOTO], NOTO_HUE.get(e[S_NOTO], Kit.HUE_TEXT)))
+                    where = Kit.veil("place", place_text(e[S_FACET], e[S_X], e[S_Y]))
                     Kit.set_text(c["p"], Kit.fit(where + (" G" if e[S_GUARD] else ""), 118))
                     g = e[S_GUARD]
                     extra = "Seen %s at %s%s" % (stamp(e[S_T], today0), where, ", in a guard zone (G)" if g else
@@ -5673,7 +5971,11 @@ def _module_ultima():
                     self.build()
 
             def build(self):
-                """Build the window: frame, one row per attacker with its Add to foes button, or the mini bar."""
+                """Build the window: frame, one row per attacker with its Add to foes button, or the mini bar.
+
+                Names and tooltips go through nm, and in colour-blind mode a notoriety mark of the attacker
+                goes before the name.
+                """
                 old = self.win["g"]
                 mini = self.st["minimized"]
                 # In a zone the slot's size is used and only the rows that fit are shown.
@@ -5718,12 +6020,16 @@ def _module_ultima():
                     for i, a in enumerate(shown):
                         ry = yb + 8 + i * self.ROW_H
                         on = name_key(a["name"]) in FOES
-                        Kit.add_label(g, Kit.fit(a["name"], bx - M - 30), M + 10, ry + 3, Kit.HUE_BAD)
+                        mark = Kit.noto_mark(Kit.noto_name(HOST.mobile(a["serial"]))) if Kit.cblind and a["serial"] \
+                            else ""
+                        Kit.add_label(g, Kit.fit((mark + " " if mark else "") + nm(a["name"], a["serial"] or 0),
+                                                 bx - M - 30),
+                                      M + 10, ry + 3, Kit.HUE_BAD)
                         Kit.catcher(g, M + 6, ry, bx - M - 14, 22, queue_click(self.make_follow(i)),
                                     tip_for("Alt+click: auto-follow (again to stop)", a["name"]))
                         c["add%d" % i] = Kit.art_button(g, store, "add%d" % i, Kit.ART_OK, bx, ry, "On Foe list" if on
                             else cap, "Put %s on your Foe list. Alt+click: auto-follow (again to stop)"
-                            % a["name"], on_click=queue_click(self.make_add(i)))
+                            % nm(a["name"], a["serial"] or 0), on_click=queue_click(self.make_add(i)))
                     text = "Closes on resurrection." if shown else Kit.fit(
                         "Lists your attackers when you die." if settings["killer"] else "Off (settings page)", IW - 20)
                     Kit.add_label(g, text, M + 10, yb + 8 + len(shown) * self.ROW_H + 2, Kit.HUE_INFO)
@@ -5803,152 +6109,6 @@ def _module_ultima():
 
         SIGHT_WIN = SightingsWindow()
         KILLER_WIN = KillerWindow()
-        # Common NPC given names, packed as digit-prefixed text; npc_names unpacks them
-        # into a set so those
-        # names can be told apart from players.
-        NPC_NAMES_DATA = ("0aaron2sin1ba2bott3y2del3iel2el4la3y2igail3jah3na3ona3ra2ner2ra4h5am4n2sinthe1cacia3nit4tha"
-            "2calia2e3lin2hen3illes2kerley1da3ir3lia3m3ra2di4son2eben3laide4e4ia5ne4le3m3na3res3sina2ie3mina3ran3va2la"
-            "i3er4y2mon2olph3n4cia4ia5s3ra2rian4el5nne1elina2neas1fina2ra3ika2ton1gate4ha2nes2ustin1hara3ve2earn2imsa2"
-            "mik2ren1ida4n2ella2ken3o2la3een3sa2mee4ry2n3a3hoa3sley3tzane2rlia2sling6n2tan3hne2yana1jara3y4i2inora1kak"
-            "o3la3ndo4ke3sma2baar2ela4lo2il4ah4i5na3na2shay1laina3ke3la3manada3n4a4d4i4na4o3qua3ric3stair3vda3zne2ben4"
-            "rt6a3inka2cander3ina3ott2dea4n4r5cy3rick2ec3k4a4sy3nne3ron3ser4ia4sa3thea3x4a5nder7ra8ia9na4is2fred2ger2i"
-            "3a3ce4ia3da3ke3m4a3na3son4tair3ta3x3z4a2laard4n4rd3ele4n3igra4nora4son3yn2ma2odie3nzo3ysia2phonse7o2ston2"
-            "tair3hea3on2ula3mit2vin5a4ta2ysa4sa6nd2zena1ma3bel3deo4i5ka5s4o3ia3la4ia3nda5ine3ra5nde6te4is3ta2bar3er3i"
-            "ka4s3rose2eerah3lia5na3thyst2ie4l5la3na4ta3ssa3ta4y2mon2oke3s2sden2y1nanda3stasia2celin2ders3i3ra5ianna5s"
-            "4e5a5us5w5y4ies4omeda2eida3lla3mone3zka2gela5ica6ne6que5o4ni3us2i3ca3eli3sa3ta2ke4r2n3a4bel7le4marie3e4tt"
-            "e3ikka3ora2oki3rah3ush2sel5me3ley3on3reana2teia3hea4ony3je3oinette4nia6o2war1olani1para2irka2olline5oina3"
-            "ni2ril5le1qua3ene1ra3bella7e3celi3minta3xie2cadia3her4ibald2dath3elia4n3is4th3on2eiela3lla3n3s3tha4ina2gu"
-            "s2i3adne4na3cia5n3el4ne3on3sta5o6tle2kin2len5e4y3in5da3o2man3en3ina5da3on3strong2ne3old4n2on2piar2sen5io2"
-            "temisia3hur2una2ziki1saria2enka2h3a3by3er3ford3lan4eigh5y4in3on3ur2ia3sa2linda2pasia2ta3er5a3ra4ea4id1tal"
-            "anta3ra2enne3ri2halia4n3ena4ron3la2ifa2man2ta1ubrey2da3ny3rey4ianna5c3un2gustin8a6us2ra3e4k4lia3ilia4na3k"
-            "ene3ora2stin2tumn1va3na3sa2ella3na3rill4y2ie3s3va1xel4la1ya3luna3me3na3sha2dee2ela2iana3la3sha3ta2la2nora"
-            "2una1zaleah4ia3rael2era2ha2ilea3na3ze2ora2ura0babette2cia2e2iley3ngana2ka4ri5ne2layna3bo3der4win3e4a4ndin"
-            "3i4a4n5t2mbi2nan3croft3dele3e4lla3ning2ra4n3bara3clay3den4o5n3ika3nabas6y4ett5y3on3rett4y3se3t4h5olomew4o"
-            "n2sha3ia4l4mah3tiaan2takah3hsheba3ya2ul2vol2xter2y3ana5i4rd3lor3o3ta2zyli1ea3can3gan3man3trice6x3u4ina4mo"
-            "nt4regard2cca3k4y2delia2l3ana3don3en3ina5da4ta3lanca4e3ora2m3an2n3edict4n3jamin3nett3son3t4e4ley4on2radin"
-            "e3enger3gren3illa4t3k4eley3nadette5rd4ice3sh3t4hold4on4ram3yl2ss4ine2ta3h4ana6y3ony3ty2ulah2val4n3erly3in"
-            "1ialy3n4ca2lal3lie2na3dy3ti2rdie3kita2shop2talo2xenta1jorn1lade3ine4r4se3ke3nche4da3z2enda2iss2orn2y3the1"
-            "o2den2gart2hdan6a2lton2namy3d3ita3nie4y2oker3ne2rden3gny3is2tan2wie3man2yce3d4en1rad4en4ford4ney4y3ina3m3"
-            "n4d5eis5i5on5y4t3xton3y3z4il2en4cis4da6n5on4na6n4t5an3t4t5a3wster2iac4n5d3ce3dget3e4g4r4tta3git6te3na4ley"
-            "3ona5y3shen3tes4ta6ny2ock3derick4ny4y3nson4t4wyn3oke2uce3no3tus2yan5t3ce3nn3son1ucia3k2d3o2rgess3han3ian3"
-            "ke3l3r3ton1yran3on0cadence4o3or2edmon2ilan3mile3n4e3tlin4rin2la4ndia6ra3der4well3eb4ndonia4y3ida4sta3la5n"
-            "4ia5dora5e3tha3vin3ypso2m3den3elia4ron3ilia5le2nace3dace5n4ida6e4ra3tara4on3ute2oimhe2pri5ce2ra4doc3den3e"
-            "sse4y3i4na5e4ssa4ta3l4a4een5n4in6g4o5s5ta4ton4y3ma4el6ina5n3na4elian3ol5ina7e5yn4n3r4ick5e4ocio5ll3son3te"
-            "r3ver3yn2sey3ilda3per3sandra4ia5dy5us3ta5lia4el2talina4va3erina3herine4leen4y3o4n3riona2van2yla1eara3sar2"
-            "cania3il5ia2dric2landine3este3ia4na3lia2mal2relia1had4wick3im4tra3l4e4mers3nah4da5er5i5ler5ra4e5l5y4na5in"
-            "g4tal3pin4man3ris6sa5ty4les5otte5ton4maine3se4tity3tha3uncy3va4iva3y4a4ton2elsea3n4ey4oa3rica6e5e4yl3sna4"
-            "ter3t3valier2iara3ka4e3lali3mlis3n3po2loe4ris2o2rista7ble6ian7na8e6oph9er7s6y2uck2you1ia3nnait3r2cely4ron"
-            "2ndy2ro1laire3ra4ence4inda5ssa4k3ude6tte5ia6ne3y4ton2ement7ina9e3veland2iantha3fford4ton3nt5on3ve2orinda3"
-            "ver2yde1ochiti2dy2lby3e4ene4man4tte3in3lin3on3ton2man2ndon3nie4or3rad3stance7za4uela3way2ra4lie4zon3bett5"
-            "y4in3coran3deali5ll3etta4y3i4nna4s3liss3nelius3rine3t4ney2ty2urtland1raig3ndall2eighton3scent4sida2ispin2"
-            "osby2ystal1ullen4in3ver2rran3tis1ybele3il2nric3thia2prien2rano3ene3il5la3us2theria0dabria2cey3ia4e4o2e2g3"
-            "an3mar3na2i3ly3sel4y2karai3ota2le3ila5ia3lin3ton3y2mara3ek4n3ian4en4on4tri3on2na3e4tt3ia4el6la4or3nik3te3"
-            "yelle2phene4ne5ie2r3a4lis3by3en3ia4en4o3la4ene3nell3rel6l5n3yl2sha2vene3id4n5e4s4ta2wn2ya3na1eacon3n4a4dr"
-            "a2b3ra2cker2de2e3dee2ianira3ene3rdre2lana5ey5o3bert4in3ia4cia4lia3la5n3more3phina3sin2man3be3i4tria3psey5"
-            "ter2na3by3ice3nis4ys3ton3ver2r3ek3rick4y2va4ki4l3erell3i4n3lin3net3on2wey1iamanta3ne4the2ederik4re3go3lla"
-            "3ter2llian4on4y3ys2mitri2nah2onne2rk2sa2ta3i2xie1obry2die2lores2minic7k6que2na4ld4ta5ien5o3ielle3nelley7y"
-            "5r3ovan2oriya2phina2ra3een3inda4s4thy3on3y2ugie4las7s2v2yle1rake2ew2ina2ucilla1uane2gan3las2lcie5nea2ncan"
-            "3stan2rand3riken2san3tin4y2tch1wayne2ight1yami3n4i3stro2lan2mas3phna2na0eamon2rl4e3tha2ster2ton1bony1cho1"
-            "dan4a2gan4r2ie3son3th2lyn2mund2na2olie2ria4n2ward3in5a1fia1gan1ileen2nar2rene1lad3ine3na2den3roth2ek3ora2"
-            "i3anor4s3jah3na3sa4e4ka4sa3ta3za5beeth2kan3e2la3e4n4ry3iot6t4s3sworth3y2mer3o2odie3ise2sa3ie3ton2ton2wood"
-            "2ynor3se4ia1ma3jane3lia3nuel2ber2elie4yne2il4io4y2ma3ett2o1ndora2gracia2id2och3la2rico4que2ye1phraim1rasm"
-            "a2ek2ianthe3c4a3k3n2lina2nest2ol2rol2skine2wand3in2yx1skarne2merelda2peranza2sien2ta3eban4lle3her3u1tain5"
-            "a3nthe2han2ta1udocia2gene5ia2lalia2stacia1va3csa3dine4ne3n4der4geline4the2e3lyn3rett2ita2onne2zen1yota1ze"
-            "kial2ra0fabienne4o2ifuza3nche3rfax3th3zah2llon2ntine2rha3ima3ley3rah4ell2tin2wne2xon2y3e3ina3me1elcia3ici"
-            "te7y4x2mi2nn3ton2rgus3idwyn3n3onia3ran4is1ielding2lbert3inda3more2na3lay4ey3n4igan3ola2ona3renza2sk2tzger"
-            "ald1lavia2eta4cher2indo4t2ora4ence3yd2ynn1orbes3rest3sythe2ster1rances7ca5ine6s7ca4ek4k5lin3sier3zer4ier2"
-            "ed4a4erica8k3mont3ya2ida3eda3tz1uller3ton2scienne0gabe3riel7la8e2ge2ia3l2latea3en5o3i4na3vin3ya2mble2na3e"
-            "sa3non2reth3field3gan3ner3rett4ick5dan5son5tt3th3vin3y2spar3ton2uri2vin3rie2ye3le4ord3nor1elasia2mma2nevi"
-            "eve2off5rey6y3gia3rge6anne6tta8e5iana2radline4ldine4rd3da3ik3main3ri4y3trude2va1hislaine1iacinta3nina2deo"
-            "n2gi2lana3berto3da3en4s3lian2n3a3ger3ton2selle2tana3ha2von2zane1leda3n4n5a5o5ys1odfrey2lda4ie2rdon4y3man2"
-            "tzone1race4ie3dy3ham3inne3m3nger4t4ville3yson3zia2ear3g4er4or6y3sham3ta4chen4te2iffen5ith1uilhem2nnar3the"
-            "r2s3tave2thrie2y1wen4dolyn4eth2ynne1ytha0hackett2dara4ssa3den3i4ya3ley3rian2gan2idee3ley3mi2l3den4is3e4y3"
-            "i4an4ma3le4ie3sey2milton3lin2na4n3k3nah4e3s2rden4y3ith3lan3man4oni3old3per3riet5son4y3t4ley3vey2sna3san3t"
-            "in6gs2va2ya3den3es3lee3nes2zel1ea3th5er2ctor2i3di2laku3degarde3en5a5e3ki2nka3ning3rietta4y2rbert3man3sche"
-            "l2sper3ter1ilary3da3liard3ton2nda2roshi2sa1obart2gan2lden3ly3t2mes2pe2race3ton2shi2uston2ward3rence2yt1ug"
-            "h3o2mphrey2nter4ley1yacinth2e2man2patia0iain1da2ola3nia1lene2ias2ona1man2ogene1ndia4ra3ra2es3z2ga3mar3ram"
-            "4id1olana5the2na1ra3tze2ena4e2is2ma2vin5g2win1saac3beau5l6la3dora3iah3ura2is2leta2obel3ke2rael2tas1tzak1v"
-            "an4a3r2ory2y0jabari3ir2celyn3inda5the3k3ob5e3ques3son3y2da2el3n2far2gger2imie3one2ke3inda2l3a3eel2mal3es3"
-            "ie4la6h4son2n3a3e4lle4t3ice4s3na4elle2rdena3ed4k3man3on3rod3via5nia5s2smine3on3per2van3ier2y3a3ne1ean4ett"
-            "e4ine2bidiah2d3idiah3rek2ff4rey2lani3ena2na4y3dayi4yose3ica3nettia4ifer3sine2remiah5y3olin4me5y3rilyn3zy2"
-            "sse5e4ica2thro2wel2zebel1ibril2han2llian2n3a3ny3x2ro2vin1oakima3n4ne2bey3ihna2casa3elyn2di3y2el4le5iane2h"
-            "ann6a3n2ia2lan5ta3ene3ie4ne3on2nah4than6on3ina2ra3dan6e4on3gen3vin2seph6ine3hua3ie2tha2y3ce3e1uanita2dd3e"
-            "3ith6a2lia5n6a6e4e5tta4nka4us2ma3oke2n3e3g2stin6e0kaatje2chine3lyn2din2ede3the2i3a3e3kara3li3mi3ros3ya2kr"
-            "a2la4din4ma4nit4re3b3e4a3i4ka4l5a4nda3kin3le4i3man3onice3yca2ma4l5a5i4ria3bo3eko3ilah5ia2nda3e4ne3iel4ka3"
-            "tha3ya2pera2ra4n4yan3dal3el4n3ida4mah4sa3ka3l4a4enne4i4yn3mina3ol3sten3ylin4n2sa3ch3en3ia4nda3par3sia2te4"
-            "b3herine4leen3ja3oka3rien5na2ula2veri3indra2y3a3e3in3la3sa2zia1eane3ra4ney2dar2efe3lan4in4y3nan2fira2gan2"
-            "hinde2i3ko3r3sha3th2lby3da3eman3ia3l4en5y4i5e4y3sey3vin2n3an3dall4ra5ick3elm3ley3nard4edy5th4is3t4on3yang"
-            "i4on2ona2pa2r3ani3by3ensa3n3ry3s4en4tan3win2sare3i4a3sie3ter2turah3zia2vin1halida5l2oury1ichi2efer3le3ran"
-            "4nan2llian2m3berly3mie4y2n3eta3nel3sey3tan2ona2p2ra4n3by3ima3k3sten3ti2sa3ka3met3sa2ta2yoshi1liftin2og1oh"
-            "ana2lina2mor2ntar2ren4ssa1rischan4ten6r1urt1yle4r3y2na3thia2oko0lacey3ie2ethan2ila4ie3rd2keisha2la4sa2mar"
-            "3ont2n3a3ce3der4on4ra3e3g3i2ra4ine4lee3i4ssa3k3ry3s2tika3onia2ura5na4el4ie5nda4yn2veda4rn6e3inia2wler3ren"
-            "ce2zarus1ea3h3la3ndra3r2ba2dah2e2if3gh5ton3ko3la5na2land2n3a3e3non5r5x3or5a5e3sar2o3n4a5rd3ra2ron4y2slie3"
-            "ter2tha3itia2v3ana3i2wis2xine1i2a3dan3m3n4a4e2bby2en2ke2la3ith3lian5e3y2mber2na3coln3da4say5ey3ette3nae4e"
-            "a2onel2sa3ette2tsa2v2za1lewellyn2oyd1ogan2is2kelani2la2ni2ra3e4lei5le4n5zo4tta3i3ne3raine2tus2uis5e2well1"
-            "ucas3ian4lle4ne3retia3y2dia2ela2is4a2ke4ne3ina3yan2lu2na3t2ther1ydia2le2nda4on3elle3n4da4ette2ris2sander3"
-            "el3nadra0mabel2c3aria3er3hi3k4enzie2ddy3elaine5ina7e5on5yn3y2e2gan4ra3dalen8a6ine3ena5ta3gie3nus2hala5ia2"
-            "i3a3da3sie3tane3zah2j2laya3colm3ik4la4na5da3ka3lory3u2mie2nco3da5ra4ek5r4isa4y3fred3gena3ning3on3si4ur3ue"
-            "l3ya2ra3c4ella4ia4os4us4y3den3ek4n3garet6ita4o5t4uirte3ia5h5m6a5n6a6na7e4bel4e5l5tta4ly6n4na4o4s5a5ha5sa3"
-            "jani4eta4orie3k4ham4os3lene4in4o5n3mara3nie5na3sha6l7l4ten3ta4ha4i5n6a6go3vin3y4ann4beth4lou3zia2son2tai4"
-            "na3eo3hea5r3ilda3rika3thew5ias2ud3ra4een4ice5ta2vis2x3ine3well2y3a3nard3on1ead3ra2da3ea2g3an4ra3han2i3ra2"
-            "ka2la4nie5tha3ba3ia5n4na5da4senda5sa3linio3odie5y4sa3va2rcedes5r3edith4le3ill3le3rick5k2sha2ta2yer1ia3kod"
-            "a2cael3hael7a4ele6le2dori2gina3non3on3uel2ka3e3kel3os2les3licent5e3o3ton2n3a3da4el4y3er5va3ka3na4ie2ra4nd"
-            "a3em5ba4ya3iam4elle2ssy3ty2tchell3ena4xi3zi1oira2llie4y2na3ique3roe3te2on2rena3gan6a6ce3ia5h3ley3ris3time"
-            "r4on3ven3z2tega1ukasa2rdoch6k3iel3phy1yles2ra3on0nada3ia4ne3ya2eem2ia3lah3mah2lini3ren2mazzi3i2n3a3cy3ett"
-            "e3tale5n2omi2pea2ra3da3mada2siche3tassia2talie4ne4sha3esa3han6iel2ysa2zirqah1eal4a4e2ci2diva2ely2il2kane2"
-            "lek3l3son2ola3ma3na2ria4ne4ssa3on2stor2tti2va4da4n3ille4n2ysa1icanor3holas3ia3ola5e6tte2gel2ka3ki3olos2ls"
-            "2mah2na2obe3la2ra3velli2ssa2ta4ra2xie1oah2din2e3l4ani4la2lan3ita2na2ra4h3bert3een3i4ko3ma5n3ris3ton1uri1y"
-            "dia2le2rna2ssa0oakes3ley1belia1chen2tavia6us1delia4l3ra3ssa3tta5e2ile3n3on2on1gden1hanna1kelani1laf3the3y"
-            "inka2esia2ga2iana3n4da3ver5tte4ia1mar1na2ida1pal2helia1ralie3ne2dano2en4da2iana5na3el3ole4n2lantha2man5d2"
-            "nidaa2rin2son2ville1scar2good2mond1tis2to1wen0paco2ige2kuna2lmer4iera3oma2mela2ndita4ora3thea4zike3ya4in2"
-            "olo2ris3ker3nell2scal6e2tamon3ia4ence3ricia6k3sy3terson4on2ul4a4ette4in6e2vel3la2xton2yton2zia1earce4l2de"
-            "r2g3gy2lagia2mba4roke2nda3elope3inna3n4y3thea2ony2rcival3dita3ouze3ry3sis2ter3ra2yton1haedra2earcy3dra2il"
-            "ip4lip7pe4omena2oebe4nix2ylis4lis1ia2er4ce4re4son2la4n2per1laton1olly3oma2rche3ter4ia1rentice3scot7t4ton2"
-            "iscilla2udence4y1yrena2thia0qamra1ueena3lla3nby4tin5on2illan3ncy4lan4n4tina3terie0rachel2d3cliffe3ella3in"
-            "ka3man2e2fael3ferty2gnar2i3don3zel2leigh3ph2miro3la3on5a3say4ey3ya2nard3ce3dall4ie4olph3e4e4n3ger3i3kin2o"
-            "ul2phael2quel2shida3ine2tri2ul2ven3i4d2wnie2y3mond3na4ell4or2ziya1eade2ba3ecca2dford3mond2ed3se3ve2gan3in"
-            "a6ld4s2idun2mington3y2na4ldo4ta3dor3e4e3fry3ny2uben2x2yhan1hea3tt2iamon4nne6on2oda5nthe3nda4na2ys4sa1ia3n"
-            "e2ca4rdo3hard4ter3o2der3gley2gby2hana2kki2ley2mon2ngo2o3dan3rdan2sa2ta2va1oanna3rke2bert6a6o3i4n3yn2chell"
-            "e3kwell2d3erick3man3ney3rigo2ger2hanna2i2land3dan3f2na4ld4n2oney2rie3y2sa4lind8a8e7e4nne3coe3e4anne4marie"
-            "7y3s2th2wan3ena3land2xana5ne2y3ce1uben3y2dd3i3yard2fus2mer2nako2skin3s4ell3ty2th4ann4erford3ledge1yan4n5e"
-            "2ba2der2lan2ssa0saba3ina5y4rah3ra4ina2cha4i2de3ira2ffi3iya2gara2hale3en2idah2kari3inah3ti3ura2lihah4m5ah4"
-            "na3ly3oman5e2m3antha4ra3ien4rah3mon3son3uel2ncia3ders4ia4on5r4ra5ine4ya3ford2ra4h4i5d3ee4na3gent3i4sha3ng"
-            "in3ojin2sha4enka2tinka2ul3nders2vanna2wyer2xon1chuyler2otia4t1ean3rlait3son2basten6ian7en2ema2if2la3by3en"
-            "a3ina3ma2mele2non3ta2rafina3gio3ilda2sha2th2ung2verin3ilin2ward2ymour1haine3kira4o3mmara3na5ta4dra5y4e4i4"
-            "ley4na5on4tay5ha3rman4on4ri3shi3wn3yndel2ea3ba3ena3ffield3ila3la4by4don4ley5y3n3ridan4man4ri4win5ood2ika3"
-            "n4a4g3ra4ley2obi3shana2unnar1ibley3ongile3yl2dney3onia3ra2egfried3rra2gourney2ham2las3eas3va4ia2mba3on5e2"
-            "ne4ad2obhan2ran3ena3oun2tara3embile2v3an3e1kip2yler1lade2evin1mith1ofi2lana5ge3edad3ita3omon2ndra3ia3ja3y"
-            "a2phia5e4ronia2rgan2terios1palding2encer4ser2ica1tacey4ia4y3ndford4ley4ton3sio2efan6ia3lla3phan7i8e5en3r4"
-            "ling3sha3van4e5n3wart2ockard3ke3rm3yan2rom2uart1ubrey2katai3i2laiman3lican2mi3mer3ner2n2san5na2therland3t"
-            "on2zanne1ven3tlana1ybil2delle3ney2eira2lvester4ia2na3ia0tab3ari3itha2ci4ta2d3i2ffy2hirah2i3ma3nn3pa3te2jo"
-            "2ka4ra3iyah3oda2lasi3bart4ot3e3ia4tha3lulah3man3os2m3a4ra5y3ma4y2naka3ek3i3ner3o3sy3ya2o2ra3o2te3yana2uri"
-            "n2wnie4y2yce3lor1eague2hya2kla2m3ina2rence5tia4se3rence4ill6yn4y3tia3yn2sia3s4a1haddeus4ea3i4s3lassa4ia3m"
-            "an3n4a4e4os3ra2ea3kla3lma3obald4dore6sia4ne3ra4on2ierry3rza2omas3ra4pe2urston2yra1ia3ra2balt2enette3rnan5"
-            "ey4ra2ffany2lda2mandra3othy2na2ponya2rza2tus2vona1obey3ias3y2d3d2la2mas2ng2r3a3i4n3rance3y2sia2ve2wnsend1"
-            "racey4y3vers4is2easa3main7e3nt3sa3va4or3y2ianon3cia3lby3na4d3sh5a4tan2oy2udy2yne3on3phena1ucker2lly1yee2l"
-            "er2mon2ne2rone0ula3ni2tima1ma1na2dine1pton1rania2iah4n5a2sula1ta0vala3entina4ria6e4ska3onia4ra2n3ce3da3es"
-            "sa3ora3ya2shti2ughn1eda2lika3ma2nesssa2ra3ena3ity3n4on3onica2sta2vila1ictor6ia2donia2ncent3son2olet6ta2rg"
-            "il5nia3idis2to2veka3ian1lad4imir1okes2leta3f1rinda0wade2gner2kanda2lden4o3ker3lace4y3ter2nda3eta2rd3ner3r"
-            "en2tson2ylan6d4on3ne1ebb3ster2ndell4y2sley3ton2ylin1hilhelmina3taker4ney1ijdan2lfen3l4ard4em4iam4ow3ma3on"
-            "a3son2nda3ema3ifred3na3ona3ston3throp1lby1oody1yatt2nee3n3ona0xanthe2veria3ier6a1ena3ia3os2rxes1imen5a1yl"
-            "ia3ona0yachne2kecan2le2ncey3ice2rdley3in3milla2smeen4in1elinda2nene2rik3o3vant2smina2tta2va1okiko2landa3i"
-            "e2nina2rk2vela1usuf1vella3s3tte2onne0zachariah6y3kery2da2hara3irah3ra2id4e2kia2lea3ika3tana2ndra3e3iel3n2"
-            "ra4h3ed4k2za1ehava2ke2lda3enka3ia3la2na4ide3ia3on2rlinda2va3ida1ia3zan2gana2la2na3nia2on2ta2ven1oe2la2na2"
-            "ra4h3da3n2sia1uleika4ma2za4nny")
-        NPC_NAMES = [None]
-
-        def npc_names():
-            """Return the set of common NPC given names, unpacked from NPC_NAMES_DATA on first use."""
-            names = NPC_NAMES[0]
-            if names is None:
-                names, prev = set(), ""
-                # Each entry is a digit (how many leading letters to keep from the previous name)
-                # and the new ending.
-                for d, rest in re.findall(r"(\d)([a-z]*)", NPC_NAMES_DATA):
-                    prev = prev[:int(d)] + rest
-                    names.add(prev)
-                NPC_NAMES[0] = names
-            return names
 
         def layout_signature():
             """A tuple of every window's saved numbers, to spot a layout change between saves."""
@@ -6025,11 +6185,12 @@ def _module_ultima():
         def page_table(w):
             """Return the Settings page layout as a table of sections and controls for Kit.Form.
 
-            Control kinds are slider, check, buttons and gap; the dicts place a control
-            beside the previous one
-            (dx) or keep the row (stay). w is unused.
+            Control kinds are slider, check, buttons and gap; the dicts place a control beside the previous
+            one (dx) or keep the row (stay). w is unused. The Sort button cycles the order of the tracker
+            lists (name, distance, HP).
             """
             right = {"dx": 320, "bdy": 0, "h": 26}
+            sort = "Sort: " + SORT_NAMES[settings["sort"]]
             return (("WINDOWS", (("slider", "scale", "Scale:", "Size of the trackers and pop-out bars (%d-%d)"
                          % (SCALE_MIN, SCALE_MAX), SCALE_MIN, SCALE_MAX, {"unit": "%"}),
                         ("slider", "opacity", "Opacity:", "Background opacity of every window (0-100)",
@@ -6050,7 +6211,9 @@ def _module_ultima():
                         ("check", "magery", "Magery buttons", "P (Poison) and Z (Paralyze) on the combat bars; H "
                          "(Heal) and C (Cure) on friends, Shift+click for the greater spell", {"stay": True}),
                         ("check", "healing", "Bandage button",
-                            "B on friends' bars: bandage when adjacent, else follow them", {"dx": 320}))),
+                            "B on friends' bars: bandage when adjacent, else follow them", {"dx": 320}),
+                        ("buttons", (("sort", Kit.ART_PAGE, sort,
+                                      "Order of the tracker lists (name, distance or HP)"),)))),
                                 ("SIGHTINGS AND DEATHS", (("check", "sightings", "Log players who come into range",
                             "Each non-friend player goes in the Sightings log once per visit (last %d kept)"
                             % SIGHT_CAP, {"stay": True}),
@@ -6081,13 +6244,11 @@ def _module_ultima():
                          "stable": 0, "seen": {k: settings[k] for k in INT_ORDER}})
 
         def poll_config():
-            """Mother hook: read the Settings page controls and apply changes (client tick, as
-            the page is open).
+            """Mother hook: read the Settings page controls and apply changes (client tick, as the page is open).
 
-            Scale waits until the slider has settled; opacity applies at once; range and
-            alert minutes are used
-            by the next scan; checks go through the loop at the end. Every change is saved
-            through page_save.
+            Scale waits until the slider has settled; opacity applies at once; range and alert minutes are
+            used by the next scan; the Sort button steps the sort order and refreshes the page; checks go
+            through the loop at the end. Every change is saved through page_save.
             """
             f = page["f"]
             if f is None:
@@ -6150,6 +6311,11 @@ def _module_ultima():
                 page_save()
                 if k == "alert_minutes":
                     Kit.set_text(f.c["alert_minutes_lbl"], "%d min" % new[k])
+            if Kit.was_clicked(store, "sort"):
+                settings["sort"] = (settings["sort"] + 1) % len(SORT_NAMES)
+                page_save()
+                HOST.refresh_settings("ultima")
+                return
             if Kit.was_clicked(store, "sightings"):
                 if views["windows"] is not None:
                     # The Sightings window is opened by the module's next tick.
@@ -6529,30 +6695,16 @@ def _module_ultima():
     def _part_lookout():
         """Build the Lookout part: a second client keeps watch for you. Returns its hooks for the PartSet.
 
-        The shard allows a second client. Park a character of it hidden and still on the
-        approach to where
-        you farm, and tick Lookout in both clients.
-        Watch (the lookout's client): several times a second it looks at the players in
-        range. Anyone who
-        is not you, your party, friends, guild or alliance (green) or ignored counts.
-        Each one is reported
-        once per appearance, not again until they were out of range for GONE_SECONDS.
-        With Map Pings on, a
-          danger ping goes on the spot too.
-        Listen (your main client): each report raises an alarm at once (banner, sound,
-        journal line). The
-        window lists the last few; a click gives a tracking arrow, Alt+click follows a
-        player in view.
-          Listen also warns when the lookout goes quiet.
-        One client can tick both: it then hears the other clients' lookouts, never its own.
+        The shard allows a second client. Park a character of it hidden and still on the approach to
+        where you farm, and tick Lookout in both clients.
 
-        The link is a small feed file made in the settings folder: both clients run from the same TazUO
-        folder. The lookout appends one line per report and a heartbeat; the listener
-        reads only what is
-        new, on the script thread. With Ultima Tracker on, players are classed exactly
-        as the trackers do
-        (town NPCs, pets and the ignore list left out); without it a simpler check of its own is used.
-        The lookout never moves, attacks or casts: display and alert only.
+        Watch (the lookout's client): several times a second it looks at the players in range. Anyone
+        who is not you, your party, friends, guild or alliance (green) or ignored counts. Each one is
+        reported once per appearance, not again until they were out of range for GONE_SECONDS. With Map
+        Pings on, a danger ping goes on the spot too.
+
+        Listen (your main client): each report raises an alarm at once (banner, sound, journal line).
+        Names and coordinates in the texts go through nm, who and Kit.veil, so streamer mode hides them.
         """
         KEY = "lookout"
         TITLE = "Lookout"
@@ -6665,12 +6817,15 @@ def _module_ultima():
             return str(text or "").replace("|", "/").replace("\n", " ").replace("\r", " ").strip()
 
         def where_text(ev, short=False):
-            """Where a sighting was, relative to the lookout: 25 tiles NE of the lookout
-            (short: 25 NE), or its spot.
+            """Where a sighting was, relative to the lookout: 25 tiles NE of the lookout (short: 25 NE), or
+            its spot.
+
+            When the report has no lookout position the spot is shown as bare coordinates through
+            Kit.veil("xy"), hidden in streamer mode.
             """
             lx, ly = ev["lx"], ev["ly"]
             if not (lx or ly):
-                return "at %d,%d" % (ev["x"], ev["y"])
+                return "at " + Kit.veil("xy", "%d,%d" % (ev["x"], ev["y"]))
             dx, dy = ev["x"] - lx, ev["y"] - ly
             d = max(abs(dx), abs(dy))
             if d == 0:
@@ -7031,21 +7186,40 @@ def _module_ultima():
             w["told"] = ev["noto"] != "watch" or not -5.0 <= now - ev["t"] <= LOST_SECONDS
             st["dirty"] = True
 
-        def raise_alarm(ev):
-            """Raise the alarm for a report: alert, journal line and, if the lookout could not, a map ping."""
+        def alarm_text(ev, name, here):
+            """Return the alarm line for a report: name, notoriety, how many players, where, and the facet
+            when it is not the one you are on.
+
+            name is passed in so the caller decides whether it is veiled; here is your facet (negative when
+            unknown).
+            """
             noto = ev["noto"]
-            text = "%s (%s)%s, %s" % (ev["name"], NOTO_WORD.get(noto, noto),
+            text = "%s (%s)%s, %s" % (name, NOTO_WORD.get(noto, noto),
                                        (", %d players" % ev["count"]) if ev["count"] > 1 else "", where_text(ev))
-            # A report from another facet says which one.
-            if ev["facet"] != st["facet"] and st["facet"] >= 0:
+            if ev["facet"] != here and here >= 0:
                 text += " in " + Kit.facet_name(ev["facet"])
+            return text
+
+        def own_text(a):
+            """Return the alarm line of your own client's last alarm, with the name veiled for streamer mode.
+
+            a is the (report, time, facet) kept in own_alarm.
+            """
+            return alarm_text(a[0], nm(a[0]["name"], a[0]["serial"]), a[2])
+
+        def raise_alarm(ev):
+            """Raise the alarm for a report: alert, journal line and, if the lookout could not, a map ping.
+
+            The alert gets the player's name and serial so the shared banner and log can veil them.
+            """
+            text = alarm_text(ev, ev["name"], st["facet"])
             ping = None
             # The lookout could not ping, so this client does.
             if settings["ping"] and not ev["pinged"] and ev["facet"] == st["facet"] and \
                     HOST.services.get("pings.send") is not None:
                 ping = (ev["x"], ev["y"])
-            HOST.alert(ALERT_ALARM, text, level="alarm", ping=ping, who=ev["serial"])
-            st["own_alarm"] = (text, time.time())
+            HOST.alert(ALERT_ALARM, text, level="alarm", ping=ping, who=ev["serial"], name=ev["name"])
+            st["own_alarm"] = (ev, time.time(), st["facet"])
             ev["src"] = "lookout"
             remember(ev)
 
@@ -7150,7 +7324,10 @@ def _module_ultima():
             return "%d tiles, all clear" % settings["range"], Kit.HUE_GOOD
 
         def listen_text(now):
-            """Return the Listen line text and colour from the newest lookout heard."""
+            """Return the Listen line text and colour from the newest lookout heard.
+
+            The position of a lookout that reports players is shown through Kit.veil("xy").
+            """
             if not settings["listen"]:
                 return "off", Kit.HUE_INFO
             best = None
@@ -7167,16 +7344,19 @@ def _module_ultima():
             if not -5.0 <= now - best["t"] <= LOST_SECONDS:
                 return "the lookout has been quiet for %s" % age, Kit.HUE_BAD
             n = best.get("count", 0)
-            where = "%d,%d" % (best.get("x", 0), best.get("y", 0))
+            where = Kit.veil("xy", "%d,%d" % (best.get("x", 0), best.get("y", 0)))
             if n:
                 return "the lookout at %s sees %s" % (where, Kit.count(n, "player")), Kit.HUE_BAD
             return "the lookout at %s, all clear" % where, Kit.HUE_GOOD
 
         def mini_text(now):
-            """Return the minimized bar text and colour: the last alarm, else the Listen or Watch status."""
+            """Return the minimized bar text and colour: the last alarm, else the Listen or Watch status.
+
+            The alarm text is own_text, so a name in it follows streamer mode.
+            """
             a = st["own_alarm"]
             if a is not None and 0 <= now - a[1] <= OWN_ALARM_HOLD:
-                text, hue = a[0], Kit.HUE_BAD
+                text, hue = own_text(a), Kit.HUE_BAD
             elif settings["listen"]:
                 text, hue = listen_text(now)
             else:
@@ -7184,7 +7364,11 @@ def _module_ultima():
             return "%s: %s" % (TITLE, text), hue
 
         def show_row(r, ev, now):
-            """Show report ev in row r, changing only what differs; None hides the row."""
+            """Show report ev in row r, changing only what differs; None hides the row.
+
+            The name goes through who with the notoriety word after it, in the colour-blind hue when that
+            mode is on; the place and the tooltip's coordinates go through Kit.veil.
+            """
             if ev is not r["ev"]:
                 r["prev"], r["ev"], r["at"] = r["ev"], ev, now
             if ev is None:
@@ -7198,21 +7382,26 @@ def _module_ultima():
                 Kit.set(r["hit"], "IsVisible", True)
                 r["shown"] = True
             noto = ev["noto"]
-            Kit.set_text(r["name"], Kit.fit("%s (%s)" % (ev["name"], NOTO_WORD.get(noto, noto)), 172),
-                         NOTO_HUE.get(noto, Kit.HUE_TEXT))
+            Kit.set_text(r["name"], Kit.fit("%s (%s)" % (who(ev["name"], ev["serial"], noto),
+                                                       NOTO_WORD.get(noto, noto)), 172),
+                         Kit.cb_hue(noto, NOTO_HUE.get(noto, Kit.HUE_TEXT)))
             src = "lookout" if ev.get("src") == "lookout" else "here"
-            where = where_text(ev, True) if src == "lookout" else "%d,%d" % (ev["x"], ev["y"])
+            where = Kit.veil("place", where_text(ev, True) if src == "lookout" else "%d,%d" % (ev["x"], ev["y"]))
             Kit.set_text(r["info"], Kit.fit("%s, %s ago (%s)" % (where, Kit.ago(now - ev["t"], Kit.AGO_SHORT), src),
                                             win["c"]["info_w"]))
-            tip = "%s (%s), seen %s at %d,%d%s. %s" % (
-                ev["name"], NOTO_WORD.get(noto, noto), "by the lookout" if src == "lookout" else "here",
-                ev["x"], ev["y"], "" if ev["facet"] == st["facet"] else " in " + Kit.facet_name(ev["facet"]), ROW_TIP)
+            tip = "%s (%s), seen %s at %s%s. %s" % (
+                nm(ev["name"], ev["serial"]), NOTO_WORD.get(noto, noto),
+                "by the lookout" if src == "lookout" else "here", Kit.veil("xy", "%d,%d" % (ev["x"], ev["y"])),
+                "" if ev["facet"] == st["facet"] else " in " + Kit.facet_name(ev["facet"]), ROW_TIP)
             if tip != r["tip"]:
                 r["tip"] = tip
                 Kit.with_tip(r["hit"], tip)
 
         def refresh(now):
-            """Draw what changed: the status lines and rows, or only the status when minimized."""
+            """Draw what changed: the status lines and rows, or only the status when minimized.
+
+            While one of your own alarms is recent (OWN_ALARM_HOLD) it replaces the Listen line.
+            """
             g = win["g"]
             # Nothing is drawn while folded into the Action Bar.
             if g is None or (st["minimized"] and st["docked"]):
@@ -7228,7 +7417,7 @@ def _module_ultima():
             text, hue = listen_text(now)
             a = st["own_alarm"]
             if a is not None and 0 <= now - a[1] <= OWN_ALARM_HOLD:
-                text, hue = a[0], Kit.HUE_BAD
+                text, hue = own_text(a), Kit.HUE_BAD
             else:
                 text = "Listen: " + text
             Kit.set_text(c["listen"], Kit.fit(text, tw[1]), hue)
@@ -7392,8 +7581,401 @@ def _module_ultima():
                 "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
                 "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
 
-    # Part key, builder, tick interval and the old module key it answers to.
-    PARTS = (("tracker", _part_tracker, 0.05, "ultima"), ("lookout", _part_lookout, 0.1, "lookout"),)
+    def _part_overview():
+        """Build the Overview part and return its hooks.
+
+        A window of four tabs for what is in range: Players, Monsters, Pets and Corpses, each a list of
+        rows with name, health, a small bar and distance, sorted by distance, HP or name (corpses by
+        distance or name). Alt+click on a row follows that mobile. Shared tests (looks_like_player,
+        mnum, mflag, friends_fresh) come from the module level, so the Overview sorts out players and
+        NPCs the same way the Tracker does. Saved keys: UltimaTracker_overview (settings),
+        UltimaTracker_overview_pos and UltimaTracker_overview_min. Client tick only.
+        """
+        KEY = "ultima.overview"
+        TITLE = "Overview"
+        SETTINGS_KEY = "UltimaTracker_overview"
+        POS_KEY = "UltimaTracker_overview_pos"
+        MIN_KEY = "UltimaTracker_overview_min"
+        W = 390
+        MINI = (260, 46)
+        TRAY_ICON = 0x14F5
+        ROW_H = 24
+        HEAD_H = 66
+        CAP = 60
+        EVERY = 0.5
+        STALE = 1.0
+        CORPSE_EVERY = 1.0
+        CORPSE = 0x2006
+        BAR_W = 50
+        BAR_FILL = "#3AB04A"
+        BAR_BACK = "#202020"
+        ROW_TIP = "Alt+click: auto-follow (again to stop)"
+        TABS = (("players", "Players", "player"), ("monsters", "Monsters", "monster"), ("pets", "Pets", "pet"),
+                ("corpses", "Corpses", "corpse"))
+        SORTS = ("distance", "HP", "name")
+        CORPSE_SORTS = ("distance", "name")
+        LIMITS = {"tab": (0, 3), "players": (0, 2), "monsters": (0, 2), "pets": (0, 2), "corpses": (0, 1),
+                  "range": (4, 24), "rows": (3, 20)}
+        settings = {"tab": 0, "players": 0, "monsters": 0, "pets": 0, "corpses": 0, "range": 18, "rows": 8}
+        DEFAULTS = dict(settings)
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "lists": {}, "data_at": 0.0,
+              "corpse_at": 0.0, "corpses": []}
+        win = {"g": None, "c": {}, "store": ({}, {}), "rows": []}
+        cleanup, queue, say = Kit.basics(st, TITLE)
+
+        def load_settings():
+            """Read the settings (tab, one sort per tab, range, rows) from the saved key."""
+            Kit.kv_load(SETTINGS_KEY, "|", settings, LIMITS)
+
+        def save_settings():
+            """Save the settings to the saved key."""
+            Kit.kv_save(SETTINGS_KEY, "|", settings, sorted(DEFAULTS), LIMITS)
+
+        def sort_names(tab):
+            """Return the sort names a tab can cycle through: distance and name for corpses, else distance, HP
+            and name.
+            """
+            return CORPSE_SORTS if tab == 3 else SORTS
+
+        def sort_of(tab):
+            """Return the name of the sort now used on a tab.
+
+            The saved number is clamped to the tab's list, so an old save with a larger number is safe.
+            """
+            o = sort_names(tab)
+            return o[min(settings[TABS[tab][0]], len(o) - 1)]
+
+        def row_h():
+            """Return the height of one list row in pixels (compact mode makes it a little less)."""
+            return Kit.pitch(ROW_H)
+
+        def fixed_h():
+            """Return the height of everything in the window except its list rows."""
+            return Kit.MARGIN + 30 + Kit.GAP + HEAD_H + Kit.GAP + 16 + Kit.MARGIN
+
+        def min_size():
+            """Return the smallest size the window can have: its width and the fixed part plus one row."""
+            return W, fixed_h() + row_h()
+
+        def row_handler(i):
+            """Return the click handler for row i of the list."""
+            def handler(*args):
+                """Follow the mobile on row i when Alt is held.
+
+                A click soon after the row changed to another mobile (the list re-sorted under the cursor)
+                acts on the one the row showed before, as the player aimed at it. Corpse rows cannot be
+                followed.
+                """
+                rows = win["rows"]
+                if i >= len(rows) or not Follow.alt_held():
+                    return
+                r = rows[i]
+                v = r["prev"] if r["prev"] and time.time() - r["changed"] < Kit.TWICE else r["val"]
+                if v and v[1]:
+                    queue(("follow", v[0]))()
+
+            return handler
+
+        def build_window():
+            """Build the window: tab buttons, sort button, count, and a pool of list rows.
+
+            In a zone the slot sets the number of rows, else the Rows setting does. A minimised window is
+            only the bar. Each row has a name, a health text, a small bar made of two boxes, a distance and a
+            click catcher; the controls are made once and only their text changes.
+            """
+            rh, fh = row_h(), fixed_h()
+            z = wnd.zone_slot(*min_size())
+            n = wnd.rows(rh, fh, settings["rows"]) if z else settings["rows"]
+            w, h = z if z else (W, fh + n * rh)
+            g, store, c = wnd.begin(w, h)
+            rows = []
+            if not st["minimized"]:
+                wnd.frame(g)
+                M = Kit.MARGIN
+                IW = w - 2 * M
+                y = M + 30 + Kit.GAP
+                tab = settings["tab"]
+                Kit.add_section(g, M, y, IW, HEAD_H)
+                Kit.buttons(g, store, M + 8, y + 6, [("tab%d" % i, Kit.ART_PAGE, t[1],
+                            "Show %s in range" % t[1].lower(), queue(("tab", i)), Kit.HUE_TITLE if i == tab else None)
+                            for i, t in enumerate(TABS)], 6)
+                c["sort"] = Kit.art_button(g, store, "sort", Kit.ART_PAGE, M + 8, y + 36, "Sort: " + sort_of(tab),
+                                           "Order of this list (again for the next)", on_click=queue("sort"))
+                c["count"] = Kit.add_label(g, "", M + IW - 12 - Kit.text_w("60 in range"), y + 40, Kit.HUE_INFO)
+                yl = y + HEAD_H + Kit.GAP
+                Kit.add_section(g, M, yl, IW, h - yl - M)
+                xd = M + IW - 10 - Kit.text_w("24 tiles")
+                xb = xd - 8 - BAR_W
+                xh = xb - 6 - Kit.text_w("100%")
+                c["nw"] = xh - 6 - (M + 10)
+                for i in range(n):
+                    ry = yl + 8 + i * rh
+                    ty = ry + max(2, (rh - 16) // 2)
+                    by = ry + rh // 2 - 3
+                    r = {"name": Kit.add_label(g, "", M + 10, ty, Kit.HUE_TEXT),
+                         "hp": Kit.add_label(g, "", xh, ty, Kit.HUE_INFO),
+                         "back": Kit.inert(G.CreateGumpColorBox(0.8, BAR_BACK)),
+                         "fill": Kit.inert(G.CreateGumpColorBox(0.95, BAR_FILL)),
+                         "dist": Kit.add_label(g, "", xd, ty, Kit.HUE_INFO), "val": None, "prev": None, "changed": 0.0,
+                         "fw": -1, "bar": True, "on": True}
+                    r["back"].SetRect(xb, by, BAR_W, 6)
+                    r["fill"].SetRect(xb, by, 0, 6)
+                    g.Add(r["back"])
+                    g.Add(r["fill"])
+                    r["hit"] = Kit.catcher(g, M + 6, ry, IW - 12, rh, row_handler(i), ROW_TIP)
+                    rows.append(r)
+            wnd.end(g, {"rows": rows})
+            refresh()
+
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (W, 300), MINI, TRAY_ICON, cleanup,
+                         clear={"rows": []})
+
+        def refresh():
+            """Write the lists into the window: the count text and each row, or the status line when minimised."""
+            c = win["c"]
+            tab = settings["tab"]
+            if "status" in c:
+                Kit.set_text(c["status"], "%s: %s" % (TITLE, TABS[tab][1]))
+                return
+            if "count" not in c:
+                return
+            data = st["lists"].get(TABS[tab][0], ())
+            word = TABS[tab][2]
+            text = "%s in range" % Kit.count(len(data), word)
+            Kit.set_text(c["count"], text)
+            rows = win["rows"]
+            now = time.time()
+            nw = c["nw"]
+            for i, r in enumerate(rows):
+                blank = "" if i or data else "No %ss in range." % word
+                show_row(r, data[i] if i < len(data) else None, tab, nw, now, blank)
+
+        def set_bar(r, pct):
+            """Set the width of a row's health bar for pct percent; a negative pct hides the bar.
+
+            The client is only touched when the visibility or the width changed.
+            """
+            on = pct >= 0
+            if on != r["bar"]:
+                r["bar"] = on
+                Kit.set(r["back"], "IsVisible", on)
+                Kit.set(r["fill"], "IsVisible", on)
+            fw = int(round(BAR_W * min(100, pct) / 100.0)) if on else 0
+            if fw != r["fw"]:
+                r["fw"] = fw
+                r["fill"].SetWidth(fw)
+
+        def show_row(r, e, tab, nw, now, blank):
+            """Show list entry e in row r (None clears it, with blank as the text of the first row).
+
+            e is (serial, name, notoriety, distance, health percent, poisoned, paralysed, mortally wounded,
+            dead). Player names are veiled in streamer mode and corpses are shown as Corpse then. Notoriety
+            marks and the letters from Kit.hp_mark show in colour-blind mode, and the name takes the
+            colour-blind hue. Corpse rows have no health and cannot be followed.
+            """
+            Kit.row_set(r, (e[0], tab != 3) if e else None, now)
+            hit = e is not None and tab != 3
+            if hit != r["on"]:
+                r["on"] = hit
+                Kit.set(r["hit"], "IsVisible", hit)
+            if e is None:
+                Kit.set_text(r["name"], blank, Kit.HUE_INFO)
+                Kit.set_text(r["hp"], "")
+                Kit.set_text(r["dist"], "")
+                set_bar(r, -1)
+                return
+            serial, name, noto, dist, pct, psn, par, mortal, dead = e
+            if tab == 0:
+                name = Kit.veil("name", name, serial)
+            elif tab == 3 and Kit.streamer:
+                name = "Corpse"
+            mark = Kit.noto_mark(noto) if tab < 3 else ""
+            hpm = Kit.hp_mark(psn, par, mortal) if tab < 3 else ""
+            text = (mark + " " if mark else "") + name + ("  " + hpm if hpm else "")
+            hue = Kit.cb_hue(noto, NOTO_HUE.get(noto, Kit.HUE_TEXT)) if tab < 3 else Kit.HUE_TEXT
+            Kit.set_text(r["name"], Kit.fit(text, nw), hue)
+            Kit.set_text(r["hp"], "" if tab == 3 else ("dead" if dead else ("--" if pct is None else "%d%%" % pct)))
+            Kit.set_text(r["dist"], Kit.count(dist, "tile"))
+            set_bar(r, -1 if tab == 3 or pct is None or dead else pct)
+
+        def by_distance(e):
+            """Sort key: nearest first, then by name."""
+            return e[3], e[1].lower()
+
+        def by_hp(e):
+            """Sort key: lowest health percent first (unknown last), then by name."""
+            return (101 if e[4] is None else e[4]), e[1].lower()
+
+        def by_name(e):
+            """Sort key: by name, then by distance."""
+            return e[1].lower(), e[3]
+
+        SORT_KEYS = {"distance": by_distance, "HP": by_hp, "name": by_name}
+
+        def gather(now):
+            """Read the mobiles in range and make the Players, Monsters and Pets lists.
+
+            Skipped on the Corpses tab. The party and the friends are refreshed when the Tracker's scan has
+            not done it in the last STALE seconds. A mobile is a pet when the pets service names it, else
+            when it is renamable; the rest are players when looks_like_player says so (ignored names are
+            left out) and monsters otherwise. Invulnerable monsters are left out. Each list is sorted by
+            its tab's sort and cut to CAP rows. Client tick.
+            """
+            me = HOST.me()
+            if me is None or settings["tab"] == 3:
+                st["lists"] = {"corpses": st["corpses"]}
+                return
+            if not 0.0 <= now - PEOPLE["scan_at"] <= STALE:
+                PEOPLE["party"] = set(API.GetPartyMemberSerials() or ())
+            friends_fresh(now)
+            rng = settings["range"]
+            mine = me.Serial
+            pets = None
+            out = {"players": [], "monsters": [], "pets": []}
+            svc = HOST.services.get("pets.list")
+            if svc is not None:
+                try:
+                    got = svc(distance=rng)
+                    if got is not None:
+                        pets = set(int(s) for s in got)
+                except Exception:
+                    pets = None
+            for m in HOST.mobiles(rng):
+                try:
+                    serial = m.Serial
+                    if serial == mine:
+                        continue
+                    hits, hmax = mnum(m, "Hits"), mnum(m, "HitsMax")
+                    dead = mflag(m, "IsDead")
+                    if mflag(m, "IsRenamable") if pets is None else int(serial) in pets:
+                        kind, noto, name = "pets", Kit.noto_name(m), str(m.Name or "")
+                    else:
+                        seen = looks_like_player(m, serial)
+                        if seen is not None:
+                            noto, dead, name = seen
+                            kind = "players"
+                            if name and name.lower() in IGNORE:
+                                continue
+                        else:
+                            noto = Kit.noto_name(m)
+                            if noto == "invulnerable":
+                                continue
+                            kind, name = "monsters", str(m.Name or "")
+                    out[kind].append((serial, name or "(unknown)", noto, int(m.Distance),
+                                      int(round(100.0 * hits / hmax)) if hmax > 0 else None, mflag(m, "IsPoisoned"),
+                                      mflag(m, "IsParalyzed"), mflag(m, "IsYellowHits") and not dead, dead))
+                except Exception:
+                    continue
+            for i, t in enumerate(TABS[:3]):
+                lst = out[t[0]]
+                lst.sort(key=SORT_KEYS[sort_of(i)])
+                del lst[CAP:]
+            out["corpses"] = st["corpses"]
+            st["lists"] = out
+
+        def corpse_scan(now):
+            """Read the corpses on the ground within range into the Corpses list (sorted, cut to CAP rows).
+
+            Corpses have no health or notoriety, so those fields are empty.
+            """
+            st["corpse_at"] = now
+            out = []
+            try:
+                items = API.GetItemsOnGround(settings["range"], CORPSE) or ()
+            except Exception:
+                items = ()
+            for it in items:
+                try:
+                    out.append((int(it.Serial), str(it.Name or "") or "a corpse", None, int(it.Distance), None, False,
+                                False, False, False))
+                except Exception:
+                    continue
+            out.sort(key=SORT_KEYS[sort_of(3)])
+            del out[CAP:]
+            st["corpses"] = out
+
+        def pick_tab(action):
+            """Switch to the tab in action[1]: save it, ask for fresh data and rebuild the window."""
+            if action[1] == settings["tab"]:
+                return
+            settings["tab"] = action[1]
+            save_settings()
+            st["data_at"] = st["corpse_at"] = 0.0
+            build_window()
+
+        def next_sort(action):
+            """Step the current tab's sort to the next one, save it and relabel the sort button."""
+            tab = settings["tab"]
+            k = TABS[tab][0]
+            o = sort_names(tab)
+            settings[k] = (min(settings[k], len(o) - 1) + 1) % len(o)
+            save_settings()
+            st["data_at"] = 0.0
+            if tab == 3:
+                st["corpse_at"] = 0.0
+            if "sort" in win["c"]:
+                Kit.set_text(win["c"]["sort"], "Sort: " + sort_of(tab))
+
+        ACTIONS = {"tab": pick_tab, "sort": next_sort, "follow": lambda action: Follow.toggle(action[1], TITLE)}
+
+        def page_table(w):
+            """Return the Settings page layout for Kit.Page: the range slider and the rows number. w is unused."""
+            return (("LIST", (("slider", "range", "Range:", "Overview range in tiles (4-24)", 4, 24, {"unit": "tiles"}),
+                              ("num", "rows", "Rows:", "Rows shown outside a zone (3-20)", None, 3, 20))),)
+
+        def on_change(old, new):
+            """Settings page hook: ask for fresh data, and redraw when the number of rows changed."""
+            st["data_at"] = st["corpse_at"] = 0.0
+            if new["rows"] != old["rows"] and win["g"] is not None:
+                queue.add("redraw")
+
+        cfg = Kit.Page(settings, page_table, save_settings, on_change)
+
+        def _start():
+            """Part hook: reset the state, load the settings, build the window and register it for docking."""
+            st.update({"shutting": False, "docked": False, "queue": [], "lists": {}, "data_at": 0.0, "corpse_at": 0.0,
+                       "corpses": [], "minimized": wnd.start_min()})
+            load_settings()
+            build_window()
+            wnd.dock(fit=True, min=min_size)
+
+        def _tick():
+            """Part hook (client tick): run the queued clicks, then refresh the lists at the poll rate.
+
+            The Corpses tab scans the ground once a second. The other lists are gathered at most every
+            EVERY seconds, and a pass is also skipped when the last gather is under STALE seconds old and the
+            host's shared mobile list is recent but was made in an earlier pass. Nothing runs while the
+            window is closed, minimised or folded into the Action Bar.
+            """
+            q = st["queue"]
+            while q:
+                action = q.pop(0)
+                if not wnd.action(action):
+                    ACTIONS[action[0] if isinstance(action, tuple) else action](action)
+            if win["g"] is None or Kit.closed(win) or st["minimized"] or st["docked"]:
+                return
+            now = time.time()
+            if settings["tab"] == 3 and not 0.0 <= now - st["corpse_at"] < CORPSE_EVERY:
+                corpse_scan(now)
+            age = now - st["data_at"]
+            if 0.0 <= age < EVERY or (0.0 <= age < STALE and HOST._mob_pid != HOST.pass_id
+                                      and 0.0 <= now - HOST._mob_at < EVERY):
+                return
+            st["data_at"] = now
+            gather(now)
+            refresh()
+
+        def _stop():
+            """Part hook: mark the part shutting down, save the settings and close the window."""
+            st["shutting"] = True
+            save_settings()
+            cleanup.close()
+
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
+
+    PARTS = (("tracker", _part_tracker, 0.05, "ultima"), ("lookout", _part_lookout, 0.1, "lookout"),
+             ("overview", _part_overview, 0.1))
     return PartSet(KEY, TITLE, PARTS).hooks()
 
 
@@ -7403,5 +7985,6 @@ if "HOST" not in globals():
 HOST.add("ultima", "Ultima Tracker", "Friends, foes and neutrals near you",
          _module_ultima, 0.05, category="The world", parts=(("tracker", "Tracker",
               "Trackers and combat bars", True, ("ultima",)), ("lookout", "Lookout",
-              "A second client keeps watch", False, ("lookout",)),),
+              "A second client keeps watch", False, ("lookout",)), ("overview", "Overview",
+              "Players, monsters, pets and corpses in tabs", False, (), True),),
          aliases=('Combat Bars', 'Lookout', 'foe', 'sightings', 'trackers', 'second client'))

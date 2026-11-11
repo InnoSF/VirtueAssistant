@@ -409,6 +409,16 @@ def _module_hud():
         """
         return max(Kit.text_w(w) for w in READOUT_WORDS)
 
+    def who_name(name, serial, noto=None, me=False):
+        """Return a person's name as the HUD shows it: a colour-blind mark for their notoriety when that
+        option is on, then the name (veiled in streamer mode).
+
+        name and serial describe the mobile; noto is its notoriety, if known; me is True for your own
+        character, whose name streamer mode replaces with a fixed word.
+        """
+        mark = Kit.noto_mark(noto) if noto else ""
+        return (mark + " " if mark else "") + (Kit.veil("me", name) if me else Kit.veil("name", name, serial))
+
     def skill_value(name, default=0.0):
         """A skill's current value as a float (for example 80.5), or `default` when it cannot be read."""
         try:
@@ -1204,9 +1214,9 @@ def _module_hud():
             """The scales (fractions of 1) the settings ask for: the frame scale, the party scale when it is on,
             and every scale a zone fit sets (fitst).
             """
-            out = set([settings["scale"] / 100.0])
+            out = set([size_pct(settings["scale"]) / 100.0])
             if settings["pscale_on"]:
-                out.add(settings["pscale"] / 100.0)
+                out.add(size_pct(settings["pscale"]) / 100.0)
             for v in fitst.values():
                 if v is not None:
                     out.add(v / 100.0)
@@ -1793,6 +1803,13 @@ def _module_hud():
         # Stone round the black of a zone window, plus 2 px inside it.
         ZONE_PAD = Kit.MARGIN + 2
 
+        def size_pct(v):
+            """Return v, a size percentage, adjusted for the client's text scale and compact mode and clamped to
+            the scale limits. Zone fits and the frame sizes all go through it.
+            """
+            k = Kit.tscale * (0.85 if Kit.compact else 1.0)
+            return v if k == 1.0 else max(SCALE_MIN, min(SCALE_MAX, int(round(v * k))))
+
         def frame_scale(key):
             """Scale (a fraction of 1) of frame `key`: its zone's fit when it has one, the party scale for party
             members when that is on, else the frame scale.
@@ -1801,8 +1818,8 @@ def _module_hud():
             if fit is not None:
                 return fit / 100.0
             if settings["pscale_on"] and key[:1] == "m" and key[1:].isdigit() and int(key[1:]) in st["party"]:
-                return settings["pscale"] / 100.0
-            return settings["scale"] / 100.0
+                return size_pct(settings["pscale"]) / 100.0
+            return size_pct(settings["scale"]) / 100.0
 
         def frame_fit(key):
             """The layout's fit hook for frame `key` (see the mother's Kit.dock_hooks).
@@ -2656,13 +2673,16 @@ def _module_hud():
                     name, vals = "", ("", "", "")
                     portrait_text = "No target"
                 else:
-                    name, vals = st["names"].get(serial) or "Unknown", ("Out of range", "", "")
+                    name = who_name(st["names"].get(serial) or "Unknown", serial, None, is_self)
+                    vals = ("Out of range", "", "")
             else:
                 dead = d[M_DEAD]
-                name = d[M_NAME] or st["names"].get(serial) or "Unknown"
+                hm = Kit.hp_mark(d[M_POISON], d[M_PARA], d[M_YELLOW])
+                name = who_name(d[M_NAME] or st["names"].get(serial) or "Unknown", serial, None if dead else d[M_NOTO],
+                                is_self) + ("  " + hm if hm else "")
                 variant = "poison" if d[M_POISON] else ("yellow" if d[M_YELLOW] else "hits")
                 bars = ((d[M_HITS], d[M_HMAX]), (d[M_MANA], d[M_MMAX]), (d[M_STAM], d[M_SMAX]))
-                noto = NO_NOTO if dead else NOTO_COLOR.get(d[M_NOTO], NOTO_COLOR["gray"])
+                noto = NO_NOTO if dead else Kit.cb_rgb(d[M_NOTO], NOTO_COLOR.get(d[M_NOTO], NOTO_COLOR["gray"]))
                 status = "DEAD" if dead else ("PARA" if d[M_PARA] else "")
                 if snap.get("creature"):
                     portrait_text = "No picture"
@@ -2731,9 +2751,7 @@ def _module_hud():
                     close_frame(key)
             for key in want:
                 fr = frames.get(key)
-                # Rebuilt when new, closed, or its size changed; with pictures, only once its art is drawn
-                # (thread_tick draws it, an old-size frame stays up meanwhile).
-                if (fr is None or not Kit.is_open(fr.get("g")) or fr.get("s") != frame_scale(key)
+                if (fr is None or not Kit.is_open(fr.get("g")) or fr.get("s") != frame_scale(key) or fr.get("redo")
                         or fr.get("slot") != fitbox.get(key)
                         or (fr.get("slot") and fr.get("rides") != rides_inside(key))) \
                         and (not st["art"] or want_art(frame_scale(key)) is not None):
@@ -3114,14 +3132,15 @@ def _module_hud():
                 ry = yl + i * 24
                 tag = "(party)" if t["auto"] else ""
                 room = w - 24 - rm_w - 6 - (Kit.text_w(tag) + 8 if tag else 0)
-                shown = Kit.fit(t["name"], room)
+                nm = who_name(t["name"], t["serial"])
+                shown = Kit.fit(nm, room)
                 Kit.add_label(g, shown, x + 12, ry + 3)
                 Kit.catcher(g, x + 12, ry, room + 8, 20, follow_or(t["serial"]),
                             "Alt+click: auto-follow (again to stop)")
                 if tag:
                     Kit.add_label(g, tag, x + 12 + Kit.text_w(shown) + 8, ry + 3, Kit.HUE_INFO)
                 Kit.art_button(g, store, "rm%d" % i, Kit.ART_CLOSE, x + w - 12 - rm_w, ry,
-                               None, "Remove %s's frame. Alt+click: auto-follow (again to stop)" % t["name"],
+                               None, "Remove %s's frame. Alt+click: auto-follow (again to stop)" % nm,
                                on_click=follow_or(t["serial"], ("rm", t["serial"])))
 
         def build_preview(f, x, y):
@@ -3290,6 +3309,7 @@ def _module_hud():
             wnd.dock()
             # Other modules (Ultima Tracker) can ask for a frame of someone.
             cleanup.service("unitframes.add", lambda serial: queue(("add_ext", int(serial)))())
+            cleanup.service("look.hud", restyled)
             fitst["player"] = fitst["target"] = None
             fitbox["player"] = fitbox["target"] = None
             # The layout can slot the two frames and fits each to its zone. "exact": the frame draws itself at
@@ -3303,6 +3323,13 @@ def _module_hud():
                 cleanup.add(HOST.layout_remove, KEY + "." + fk)
                 cleanup.add(pieces_anchor, fk, None)
             PIECES_TARGET["fn"] = lambda: st["target"]
+
+        def restyled():
+            """Mark every frame to be redrawn, used when the host reports a change of look (colours, scale and
+            so on).
+            """
+            for fr in frames.values():
+                fr["redo"] = True
 
         def last_target():
             """The serial of the frame's target, else the last target you set."""
@@ -3833,7 +3860,7 @@ def _module_hud():
         def text_key(r):
             """Every field that display_name and tip_of read; the texts are made again only when this changes."""
             return (r["sid"], r.get("label"), r["delta"], r["level"], r["who"], r["name"],
-                    r["end"] is None, "stat" in r["srcs"])
+                    r["end"] is None, "stat" in r["srcs"], Kit.streamer)
 
         def display_name(r):
             """The row's title: spell name or icon title, with its stat step, poison level and, for someone
@@ -3846,7 +3873,7 @@ def _module_hud():
             if r["level"] and sid == "poison":
                 name = "%s (%s)" % (name, POISON_NAMES[max(1, min(5, r["level"]))])
             if r["who"]:
-                name = "%s: %s" % (name, r["name"] or "someone")
+                name = "%s: %s" % (name, who_name(r["name"], r["who"]) if r["name"] else "someone")
             return name
 
         def skills(now, force=False):
@@ -4497,7 +4524,7 @@ def _module_hud():
 
         def min_size():
             """Smallest size the window can have."""
-            return WIN_W, 2 * Kit.MARGIN + 30 + Kit.GAP + ROW_H + 12
+            return WIN_W, 2 * Kit.MARGIN + 30 + Kit.GAP + Kit.pitch(ROW_H) + 12
 
         def build_window():
             """Build the window: a section with the empty-state label and the rows (as many as the zone allows)."""
@@ -4505,17 +4532,18 @@ def _module_hud():
             top = 2 * Kit.MARGIN + 30 + Kit.GAP + 12
             w = zs[0] if zs else WIN_W
             slots = []
-            n = wnd.rows(ROW_H, top, settings["rows"]) if zs else settings["rows"]
-            g, store, c = wnd.begin(w, zs[1] if zs else top + n * ROW_H)
+            rh = Kit.pitch(ROW_H)
+            n = wnd.rows(rh, top, settings["rows"]) if zs else settings["rows"]
+            g, store, c = wnd.begin(w, zs[1] if zs else top + n * rh)
             if not st["minimized"]:
                 M = Kit.MARGIN
                 IW = w - 2 * M
                 wnd.frame(g)
                 yb = M + 30 + Kit.GAP
-                Kit.add_section(g, M, yb, IW, (zs[1] - M - yb) if zs else n * ROW_H + 12)
+                Kit.add_section(g, M, yb, IW, (zs[1] - M - yb) if zs else n * rh + 12)
                 c["empty"] = Kit.add_label(g, "", M + 12, yb + 10, Kit.HUE_INFO)
                 for i in range(n):
-                    slots.append(make_slot(g, i, M, yb + 6 + i * ROW_H, IW))
+                    slots.append(make_slot(g, i, M, yb + 6 + i * rh, IW, rh))
             wnd.end(g, {"slots": slots, "nrows": n})
             st["redraw"] = True
             refresh(time.time())
@@ -4540,7 +4568,7 @@ def _module_hud():
             s["pic"].SetWidth(px)
             s["pic"].SetHeight(px)
 
-        def make_slot(g, i, sx, ry, IW):
+        def make_slot(g, i, sx, ry, IW, rh):
             """Make one row slot of the window: icon, name, time, bar and a click catcher."""
             s = {"row": None, "prev": (None, 0.0), "vis": True, "icon_g": None,
                  "tip": None, "tx": None, "fw": -1, "col": None, "x": sx, "y": ry, "iw": IW}
@@ -4549,9 +4577,9 @@ def _module_hud():
             s["time"] = Kit.add_label(g, "", sx + IW - 50, ry + 1, Kit.HUE_INFO)
             bw = IW - 34 - 10
             s["bw"] = bw
-            s["bg"] = Kit.add_box(g, sx + 34, ry + 19, bw, 5, 0.9, "#202020")
-            s["fill"] = Kit.add_box(g, sx + 34, ry + 19, bw, 5, 1.0, "#2f9a3c")
-            s["hit"] = Kit.catcher(g, sx, ry, IW, ROW_H - 2, row_click(lambda: win["slots"], i), "")
+            s["bg"] = Kit.add_box(g, sx + 34, ry + rh - 9, bw, 5, 0.9, "#202020")
+            s["fill"] = Kit.add_box(g, sx + 34, ry + rh - 9, bw, 5, 1.0, "#2f9a3c")
+            s["hit"] = Kit.catcher(g, sx, ry, IW, rh - 2, row_click(lambda: win["slots"], i), "")
             set_vis(s, False)
             return s
 
@@ -4640,7 +4668,7 @@ def _module_hud():
             """Tooltip text for a row."""
             if r["who"]:
                 return ("%s on %s, cast by you. Click: clear this row. Alt+click: auto-follow (again to stop)"
-                        % (SPELL_OF.get(r["sid"], r["sid"]), r["name"] or "them"))
+                        % (SPELL_OF.get(r["sid"], r["sid"]), who_name(r["name"], r["who"]) if r["name"] else "them"))
             if "stat" in r["srcs"] and r["end"] is None:
                 return "From a stat step; ends when it steps back. Click: clear this row."
             if r["end"] is None and r["sid"] in ("reactivearmor", "magicreflection"):
@@ -5007,6 +5035,7 @@ def _module_hud():
                 build_window()
                 wnd.dock(fit=True, min=min_size)
             HOST.services["spelltimers.list"] = svc_list
+            cleanup.service("look.hud.timers", lambda: queue.add("redraw"))
 
         def _tick():
             """Client tick: form, queued actions, icons, sampling of your flags and stats, journal, pending
@@ -5026,6 +5055,13 @@ def _module_hud():
                 if action == "redraw":
                     if not row_mode():
                         build_window()
+                    else:
+                        for side in SIDES:
+                            ui = rowui[side]
+                            if ui["g"] is not None:
+                                build_row(side, ui["w"] or 200, max(0, ui["lines"]))
+                        st["redraw"] = True
+                        PIECES["dirty"] = True
                 elif wnd.action(action):
                     pass
                 elif kind in ACTIONS:
@@ -5070,6 +5106,7 @@ def _module_hud():
             wnd.close()
             save_settings()
             save_active()
+            cleanup.close()
 
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed}
@@ -5967,7 +6004,7 @@ def _module_hud():
         def save_position():
             """Save the window's place, unless it rides inside a frame."""
             g = win["c"].get("gump")
-            if Kit.is_open(g) and not pieces_on(KEY):
+            if Kit.is_open(g) and not pieces_on(KEY) and g.GetX() > TAB_X // 2:
                 save_var("swingtimer_x", g.GetX())
                 save_var("swingtimer_y", g.GetY())
 
@@ -6062,6 +6099,7 @@ def _module_hud():
             kite["steps"].clear()
             kite["xy"], kite["stat0"], kite["swing0"] = None, None, None
             build_window()
+            cleanup.service("look.hud.swing", lambda: win.update({"redo": True}))
             # No zone window: it rides on the target frame; with Frames off it is a free window.
             pieces_add(KEY, "target", 0, lambda: win["c"].get("gump"))
             register_hotkeys(True)
@@ -6079,6 +6117,10 @@ def _module_hud():
             if not is_open():
                 loop["fast"] = False
                 return
+            if win.pop("redo", False):
+                g = win["c"]["gump"]
+                build_window(g.GetX(), g.GetY())
+                PIECES["dirty"] = True
             t = now_ms()
             # Read once a tick, in the client frame: no waits. Reads only.
             p = HOST.me()
@@ -6115,7 +6157,7 @@ def _module_hud():
                 # The target's name and assumed skill: read here with the target, not on every tick.
                 nm = (mob.Name or "") if mob is not None else ""
                 loop["mob_skill"] = enemy_skill(mob, None, nm)
-                loop["mob_name"] = (nm or "target") if mob is not None else ""
+                loop["mob_name"] = (who_name(nm, mob.Serial) if nm else "target") if mob is not None else ""
                 # Your weapon skill: once a second, and at once when the weapon's skill changes.
                 if loop["weapon"][2] != loop.get("skill_of") or t - loop.get("skill_clock", 0.0) >= 1000:
                     loop["skill_of"], loop["skill_clock"] = loop["weapon"][2], t
@@ -6238,6 +6280,7 @@ def _module_hud():
             g = win["c"].get("gump")
             win["c"].clear()
             Kit.dispose(g)
+            cleanup.close()
 
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                 "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
@@ -6663,9 +6706,18 @@ def _module_hud():
 
         def describe(m):
             """The patient record of mobile m: serial, full name and a short name for the bar."""
-            name = str(m.Name or "") or "them"
-            short = name if len(name) <= OTHER_NAME_CHARS else name[:OTHER_NAME_CHARS - 1] + "."
-            return {"serial": int(m.Serial), "name": name, "short": short}
+            return named(str(m.Name or "") or "them", int(m.Serial))
+
+        def named(name, serial):
+            """Build the patient record for a name and serial: the full name, a short form for the bar and
+            whether streamer mode veiled it.
+
+            The short name goes through who_name, so streamer mode and the colour-blind notoriety mark apply,
+            and is cut to OTHER_NAME_CHARS with a full stop. Used for a pet or anyone else a bandage is aimed at.
+            """
+            shown = who_name(name, serial)
+            short = shown if len(shown) <= OTHER_NAME_CHARS else shown[:OTHER_NAME_CHARS - 1] + "."
+            return {"serial": serial, "name": name, "short": short, "veil": Kit.streamer}
 
         def start_bandage(p, now, target):
             """Use one bandage; its cursor is aimed at target (None means you) on the next ticks. One press got
@@ -6954,6 +7006,7 @@ def _module_hud():
             build_window()
             # No zone window: it rides on the player frame; with Frames off it is a free window.
             pieces_add(KEY, "player", 0, lambda: win["g"])
+            cleanup.service("look.hud.bandage", lambda: st.update({"rebuild": True, "redo": True}))
             say("on (%s s on you, %s s on others)." % (num_text(st["band_time"]), num_text(st["other_time"])),
                 Kit.HUE_GOOD)
 
@@ -6970,7 +7023,8 @@ def _module_hud():
             if st["queue"] or st["rebuild"]:
                 if st["rebuild"]:
                     st["rebuild"] = False
-                    if win["g"] is not None and win["wide"] != settings["others"]:
+                    redo = st.pop("redo", False)
+                    if win["g"] is not None and (redo or win["wide"] != settings["others"]):
                         build_window()
                 while st["queue"]:
                     action = st["queue"].pop(0)
@@ -7015,6 +7069,8 @@ def _module_hud():
                     left = "%.1fs" % max(0.0, band_time - elapsed)
                     # Room for the name.
                     if o is not None and win["wide"]:
+                        if o["veil"] != Kit.streamer:
+                            o.update(named(o["name"], o["serial"]))
                         left = "%s %s" % (o["short"], left)
                     set_bar(elapsed / band_time, left, Kit.HUE_TEXT)
                 return
@@ -7068,6 +7124,7 @@ def _module_hud():
             g, win["g"] = win["g"], None
             win["c"]["label"] = win["c"]["count"] = None
             Kit.dispose(g)
+            cleanup.close()
 
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": lambda w: CFG_H,
                 "build_config": build_config, "poll_config": poll_config, "config_closed": config_closed,
@@ -7194,7 +7251,7 @@ def _module_hud():
             st["seq"] += 1
             r = {"serial": serial, "name": name, "seq": st["seq"], "seen": 0.0, "where": "gone",
                  "pct": None, "stam": None, "dist": 0, "dir": "", "dead": False, "poison": False,
-                 "low": False, "manual": manual, "alive": False}
+                 "low": False, "manual": manual, "alive": False, "noto": None}
             pets[serial] = r
             st["order"] = []
             return r
@@ -7212,6 +7269,7 @@ def _module_hud():
             if r["manual"] and r.get("own"):
                 r["own"] = bool(m.IsRenamable)
             name = str(m.Name or "")
+            r["noto"] = Kit.noto_name(m) if Kit.cblind else None
             if name:
                 r["name"] = name
             hits, hmax, sta, smax = int(m.Hits or 0), int(m.HitsMax or 0), int(m.Stamina or 0), int(m.StaminaMax or 0)
@@ -7226,7 +7284,8 @@ def _module_hud():
             r["seen"] = now
             # Seen alive, now a ghost (bonded): alert once.
             if dead and not r["dead"] and r["alive"]:
-                alert(DEAD_ALERT, "%s died" % (r["name"] or "A pet"), r["serial"])
+                alert(DEAD_ALERT, "%s died" % (who_name(r["name"], r["serial"]) if r["name"] else "A pet"), r["serial"],
+                      r["name"])
             r["dead"] = dead
             if dead:
                 # No low-HP alert for a ghost.
@@ -7238,14 +7297,15 @@ def _module_hud():
             if pct is not None:
                 if low > 0 and pct <= low and not r["low"]:
                     r["low"] = True
-                    alert(LOW_ALERT, "%s at %d%% HP (%s)" % (r["name"] or "A pet", pct, "here" if r["dist"] == 0 else
-                          "%s %s" % (tiles(r["dist"]), r["dir"])), r["serial"])
+                    alert(LOW_ALERT, "%s at %d%% HP (%s)" % (who_name(r["name"], r["serial"]) if r["name"] else "A pet",
+                                                           pct, "here" if r["dist"] == 0 else
+                          "%s %s" % (tiles(r["dist"]), r["dir"])), r["serial"], r["name"])
                 elif r["low"] and (low <= 0 or pct >= low + 10):
                     r["low"] = False
 
-        def alert(key, text, serial):
+        def alert(key, text, serial, name=""):
             """Raise a HUD alert about a pet, tagged with its serial."""
-            HOST.alert(key, text, "warn", who=serial)
+            HOST.alert(key, text, "warn", who=serial, name=name)
 
         def scan(p, now):
             """One look at your pets: those in the list range from one list of the mobiles near you, the others
@@ -7507,7 +7567,8 @@ def _module_hud():
                    and r["pct"] is not None]
             if low:
                 r = min(low, key=lambda r: r["pct"])
-                return "%s: %s %d%% HP" % (TITLE, Kit.fit(r["name"] or "pet", 80), r["pct"]), Kit.HUE_BAD
+                nm = who_name(r["name"], r["serial"]) if r["name"] else "pet"
+                return "%s: %s %d%% HP" % (TITLE, Kit.fit(nm, 80), r["pct"]), Kit.HUE_BAD
             near = len([r for r in pets.values() if r["where"] != "gone"])
             if not pets:
                 return "%s: none in view" % TITLE, Kit.HUE_INFO
@@ -7554,7 +7615,9 @@ def _module_hud():
                     hue = Kit.HUE_GOOD
                 else:
                     hue = Kit.HUE_TEXT
-                Kit.set_text(row["name_lbl"], Kit.fit(r["name"] or "(no name yet)", NAME_W), hue)
+                hm = Kit.hp_mark(r["poison"])
+                nm = who_name(r["name"], r["serial"], r["noto"]) if r["name"] else "(no name yet)"
+                Kit.set_text(row["name_lbl"], Kit.fit(nm + ("  " + hm if hm else ""), NAME_W), hue)
                 bar = None
                 if where == "near" and not r["dead"]:
                     bar = "poison" if r["poison"] else "hits"
@@ -7616,7 +7679,7 @@ def _module_hud():
             note("That reveals you: click again to do it.", Kit.HUE_TITLE, CONFIRM_SECS)
             return False
 
-        def speak(text, now):
+        def speak(text, now, shown):
             """Say a command out loud, at most once per 0.6 s for the same text."""
             last = st["cmd_at"].get(text)
             if last is not None and 0 <= now - last < 0.6:
@@ -7625,7 +7688,7 @@ def _module_hud():
                 st["cmd_at"].clear()
             st["cmd_at"][text] = now
             API.Msg(text)
-            note("Said \"%s\"." % text)
+            note("Said \"%s\"." % shown)
 
         def pet_name(serial):
             """The name of a pet for a command, or None (with a note) when it has none yet."""
@@ -7660,7 +7723,7 @@ def _module_hud():
             gate. It is used now and its cursor is aimed at the pet on a later tick (heal_tick).
             """
             r = pets.get(serial)
-            name = (r and r["name"]) or "that pet"
+            name = (r and r["name"] and who_name(r["name"], serial)) or "that pet"
             if st["heal"] is not None:
                 note("A heal is already on its way.", Kit.HUE_TITLE)
                 return
@@ -7774,7 +7837,7 @@ def _module_hud():
             update(r, m, int(p.X), int(p.Y), now, True)
             if r["dist"] > settings["range"]:
                 r["where"] = "far"
-            note("%s is listed for this session." % (r["name"] or "It"), Kit.HUE_GOOD)
+            note("%s is listed for this session." % (who_name(r["name"], serial) if r["name"] else "It"), Kit.HUE_GOOD)
 
         def pick_pet(action, p, now):
             """Raise a cursor to pick the pet to list."""
@@ -7787,12 +7850,13 @@ def _module_hud():
             if (action[1] == "kill" if kind == "all" else kind == "pet_kill") and not settings["kill"]:
                 return
             if kind == "all":
-                text = ALL_KILL if action[1] == "kill" else ALL_SAY.get(action[1])
+                text = shown = ALL_KILL if action[1] == "kill" else ALL_SAY.get(action[1])
             else:
-                text = pet_name(action[1])
-                text = text and PET_SAY[kind] % text
+                name = pet_name(action[1])
+                text = name and PET_SAY[kind] % name
+                shown = name and PET_SAY[kind] % who_name(name, action[1])
             if text and not dead_now(p) and gate(action, p, now):
-                speak(text, now)
+                speak(text, now, shown)
 
         def dead_now(p):
             """True (with a note) when you are dead and your pets cannot hear you."""

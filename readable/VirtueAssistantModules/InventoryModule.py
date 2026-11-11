@@ -6,10 +6,10 @@
 # The module is made of parts that each keep the saved keys, window places and files of the module
 # they came from: Bags (every bag in one window: a grid, filters, sorting, a canvas), Paperdoll
 # (what you wear and your stats), Storage (what the containers you opened hold), Restock (tops
-# supplies up from a chest or the bank, on a press) and Supplies. Each part has its own box under
-# the module's row and runs only while it is ticked; the mother's PartSet runs the ticked parts
-# side by side. Bags starts before Paperdoll (the paperdoll joins the bag window through the bag.*
-# services) and stops after it.
+# supplies up from a chest or the bank, on a press), Supplies and Bag Sections (what you carry,
+# grouped by kind). Each part has its own box under the module's row and runs only while it is
+# ticked; the mother's PartSet runs the ticked parts side by side. Bags starts before Paperdoll
+# (the paperdoll joins the bag window through the bag.* services) and stops after it.
 def _module_inventory():
     """Build the Inventory module from its parts and return its hooks for the mother script.
 
@@ -80,6 +80,84 @@ def _module_inventory():
         g.SetPos(int(slot[0]), int(slot[1]))
         Kit.note_rect(g, slot[0], slot[1])
         Kit.moved_by_code(g)
+
+    SORT_KINDS = (("reagents", "Reagents", (0x0F7A, 0x0F7B, 0x0F84, 0x0F85, 0x0F86, 0x0F88, 0x0F8C, 0x0F8D)
+         + (0x0F78, 0x0F7D, 0x0F8A, 0x0F8E, 0x0F8F)), ("gems", "Gems", tuple(range(0x0F0F, 0x0F31))),
+        ("potions", "Potions", tuple(range(0x0F06, 0x0F0E))),
+        ("scrolls", "Scrolls", tuple(range(0x1F2D, 0x1F6D)) + (0x0EF3,)),
+        ("gold", "Gold", (0x0EED, 0x0EEE, 0x0EEF)), ("bandages", "Bandages", (0x0E21, 0x0EE9)),)
+    PRESETS = (("reagents", "Reagents"), ("potions", "Potions"), ("bandages", "Bandages"),
+               ("gold", "Gold and gems"), ("scrolls", "Scrolls"), ("maps", "Treasure maps"),
+               ("ores", "Ores and ingots"), ("wood", "Wood"), ("hides", "Hides and cloth"),
+               ("food", "Food"), ("weapons", "Weapons"), ("armour", "Armour"),
+               ("jewellery", "Jewellery"), ("keys", "Keys and tools"))
+    CAT_WORDS = {"maps": ("treasure map", "tattered map", "map"), "ores": (" ore", "ingot"), "wood": ("log", "board"),
+                 "hides": ("hide", "leather", "cloth", "wool", "cotton", "flax", "yarn", "thread", "bolt of"),
+                 "food": ("bread", "cake", "muffin", "pie", "apple", "pear", "peach", "grape",
+                          "fish steak", "ham", "bacon", "sausage", "ribs", "cheese", "carrot",
+                          "lettuce", "cabbage", "turnip", "onion", "melon", "squash", "gourd",
+                          "lemon", "lime", "banana", "date", "coconut", "chicken", "bird",
+                          "egg", "cookie", "wedge", "corn", "pumpkin", "meat", "jar of honey"),
+                 "keys": ("key", "tongs", "hammer", "saw", "scissors", "pickaxe", "shovel",
+                          "lockpick", "sewing", "tinker", "mortar", "fletcher", "dovetail",
+                          "skillet", "rolling pin", "scorp", "plane", "inshave", "fishing pole", "hatchet", "smith")}
+    LAYER_JEWEL = (0x06 + 2, 0x0A, 0x0E, 0x12)
+    FLAG_ARMOUR = 0x08000000
+    cats = {"data": None, "wanted": False}
+
+    def build_cats(field):
+        """Work out which graphics belong to each preset category from the client's tile data, and store the
+        result in cats["data"] as a dict of category key to frozenset of graphics.
+
+        field is the reflection handle of the client's static tile array (None when it cannot be reached,
+        in which case only the fixed SORT_KINDS lists count). Gems count towards "gold". Weapons,
+        armour and jewellery come from the tile's flags and layer; the rest are matched by words in the
+        tile name (CAT_WORDS), skipping impassable tiles, containers and the like. Slow, so it runs on
+        the script thread (once, when a category is wanted), never on the client tick.
+        """
+        arr = field.GetValue(None) if field is not None else None
+        out = dict((k, set()) for k, _c in PRESETS)
+        for k, _c, gs in SORT_KINDS:
+            if k == "gems":
+                out["gold"].update(gs)
+            elif k in out:
+                out[k].update(gs)
+        if arr is not None:
+            for gr in range(min(int(arr.Length), 0x10000)):
+                # Tile data is read tile by tile; one bad tile must not stop the rest.
+                try:
+                    t = arr[gr]
+                    name = str(t.Name or "").lower()
+                    if not name:
+                        continue
+                    fl = int(t.Flags)
+                    if bool(t.IsImpassable):
+                        continue
+                    if bool(t.IsWeapon):
+                        out["weapons"].add(gr)
+                    if fl & FLAG_ARMOUR:
+                        out["armour"].add(gr)
+                    if bool(t.IsWearable) and int(t.Layer) in LAYER_JEWEL:
+                        out["jewellery"].add(gr)
+                    if fl & 0x00200000 or bool(t.IsContainer):
+                        continue
+                    padded = " " + name
+                    for k, words in CAT_WORDS.items():
+                        for w in words:
+                            if w in padded:
+                                out[k].add(gr)
+                                break
+                except Exception:
+                    continue
+        cats["data"] = dict((k, frozenset(v)) for k, v in out.items())
+
+    def category_of(graphic):
+        """The first preset category holding a graphic, or None."""
+        data = cats["data"] or {}
+        for k, _c in PRESETS:
+            if graphic in data.get(k, ()):
+                return k
+        return None
 
     def _part_bags():
         """Build the Bags part (every bag in one window) and return its hooks.
@@ -199,14 +277,6 @@ def _module_inventory():
         BAG_MAX_ITEMS = 125
         J_FULL = ["cannot hold more"]
         J_WAIT = ["must wait to perform another action"]
-        # What a slot's bag can hold: (key saved in the file, caption, graphics). The graphics are classic
-        # tile ids; the reagent row is the eight of Kit.REAGENTS plus bat wing, daemon blood, pig iron,
-        # nox crystal and grave dust.
-        SORT_KINDS = (("reagents", "Reagents", (0x0F7A, 0x0F7B, 0x0F84, 0x0F85, 0x0F86, 0x0F88, 0x0F8C, 0x0F8D)
-             + (0x0F78, 0x0F7D, 0x0F8A, 0x0F8E, 0x0F8F)), ("gems", "Gems", tuple(range(0x0F0F, 0x0F31))),
-            ("potions", "Potions", tuple(range(0x0F06, 0x0F0E))),
-            ("scrolls", "Scrolls", tuple(range(0x1F2D, 0x1F6D)) + (0x0EF3,)),
-            ("gold", "Gold", (0x0EED, 0x0EEE, 0x0EEF)), ("bandages", "Bandages", (0x0E21, 0x0EE9)),)
         SORT_KIND_KEYS = tuple(k[0] for k in SORT_KINDS)
         # Stone-grey lines between slots.
         C_SEAM = "#5C544A"
@@ -250,7 +320,7 @@ def _module_inventory():
               "flt_x": 260, "flt_y": 120, "rules": {}, "sort": None, "srt_x": 240, "srt_y": 160, "srt_min": False,
               "open_srt": False, "want_srt": False, "dirty_srt": False, "layout": (),
               "geom": (1, BACKPACK_INTERIOR[0], BACKPACK_INTERIOR[1], 0), "bar_raw": None, "grid_raw": None,
-              "grid_info": (None, False), "slot_raws": ()}
+              "grid_info": (None, False), "slot_raws": (), "cats_seen": None}
         # Windows this part owns, by name, and their button registries.
         win = {"g": None, "c": {}, "store": ({}, {}), "side_status": None, "bar": None, "grid": None, "mgr": None,
                "trp": None, "trap_checks": [], "srt": None, "rule_checks": [], "search_box": None, "counts": [],
@@ -5230,77 +5300,6 @@ def _module_inventory():
         FILTERS_CAP = 40
         BROAD = ("exact", "kind", "category")
         BROAD_CAP = {"exact": "this exact item", "kind": "this kind", "category": "its category"}
-        PRESETS = (("reagents", "Reagents"), ("potions", "Potions"), ("bandages", "Bandages"),
-                   ("gold", "Gold and gems"), ("scrolls", "Scrolls"), ("maps", "Treasure maps"),
-                   ("ores", "Ores and ingots"), ("wood", "Wood"), ("hides", "Hides and cloth"),
-                   ("food", "Food"), ("weapons", "Weapons"), ("armour", "Armour"),
-                   ("jewellery", "Jewellery"), ("keys", "Keys and tools"))
-        CAT_WORDS = {"maps": ("treasure map", "tattered map", "map"),
-                     "ores": (" ore", "ingot"), "wood": ("log", "board"),
-                     "hides": ("hide", "leather", "cloth", "wool", "cotton", "flax", "yarn", "thread", "bolt of"),
-                     "food": ("bread", "cake", "muffin", "pie", "apple", "pear", "peach", "grape",
-                              "fish steak", "ham", "bacon", "sausage", "ribs", "cheese", "carrot",
-                              "lettuce", "cabbage", "turnip", "onion", "melon", "squash", "gourd",
-                              "lemon", "lime", "banana", "date", "coconut", "chicken", "bird",
-                              "egg", "cookie", "wedge", "corn", "pumpkin", "meat", "jar of honey"),
-                     "keys": ("key", "tongs", "hammer", "saw", "scissors", "pickaxe", "shovel",
-                              "lockpick", "sewing", "tinker", "mortar", "fletcher", "dovetail",
-                              "skillet", "rolling pin", "scorp", "plane", "inshave", "fishing pole",
-                              "hatchet", "smith")}
-        LAYER_JEWEL = (0x06 + 2, 0x0A, 0x0E, 0x12)
-        FLAG_ARMOUR = 0x08000000
-        cats = {"data": None, "wanted": False}
-
-        def build_cats():
-            """Read the client's tile data once and build the filter categories (weapons, armour, food and so
-            on) from it. Runs on the script thread, once, when a category is first wanted.
-            """
-            arr = R.f_tiles.GetValue(None) if R.f_tiles is not None else None
-            out = dict((k, set()) for k, _c in PRESETS)
-            for k, _c, gs in SORT_KINDS:
-                if k == "gems":
-                    out["gold"].update(gs)
-                elif k in out:
-                    out[k].update(gs)
-            if arr is not None:
-                for gr in range(min(int(arr.Length), 0x10000)):
-                    try:
-                        t = arr[gr]
-                        name = str(t.Name or "").lower()
-                        if not name:
-                            continue
-                        fl = int(t.Flags)
-                        # Not something that can be carried.
-                        if bool(t.IsImpassable):
-                            continue
-                        if bool(t.IsWeapon):
-                            out["weapons"].add(gr)
-                        if fl & FLAG_ARMOUR:
-                            out["armour"].add(gr)
-                        if bool(t.IsWearable) and int(t.Layer) in LAYER_JEWEL:
-                            out["jewellery"].add(gr)
-                        # Containers, doors and the like are not sortable items.
-                        if fl & 0x00200000 or bool(t.IsContainer):
-                            continue
-                        # Padded so a word matches at its start only.
-                        padded = " " + name
-                        for k, words in CAT_WORDS.items():
-                            for w in words:
-                                if w in padded:
-                                    out[k].add(gr)
-                                    break
-                    except Exception:
-                        continue
-            cats["data"] = dict((k, frozenset(v)) for k, v in out.items())
-            st["dirty_flt"] = st["open_flt"]
-
-        def category_of(graphic):
-            """The first preset category holding a graphic, or None."""
-            data = cats["data"] or {}
-            for k, _c in PRESETS:
-                if graphic in data.get(k, ()):
-                    return k
-            return None
 
         def load_filters():
             """Load the saved filters.
@@ -5793,6 +5792,10 @@ def _module_inventory():
             """Keep the sub windows up to date each client tick: rebuild a dirty one, notice one the player
             closed, poll the filter boxes and save the rule ticks within a second or so.
             """
+            if cats["data"] is not st["cats_seen"]:
+                st["cats_seen"] = cats["data"]
+                filter_sets()
+                st["dirty_flt"] = st["open_flt"]
             if st["open_flt"]:
                 if st["dirty_flt"]:
                     st["dirty_flt"] = False
@@ -5943,6 +5946,7 @@ def _module_inventory():
             canvas_leave()
             # Filters are kept per character.
             load_filters()
+            filter_sets()
             st["canvas"] = None
             JR["rd"] = Journal.reader()
             H.meas.clear()
@@ -5996,7 +6000,8 @@ def _module_inventory():
             for name, fn in (("bag.attach", attach_to), ("bag.grid_size", lambda: st["grid_wh"]),
                              ("bag.fit", paperdoll_fit), ("bag.cell", bag_cell), ("bag.shrink", bag_shrink),
                              ("bag.pack", bag_pack), ("bag.open_manager", act("open_win", "mgr")),
-                             ("bag.open_traps", act("open_win", "trp"))):
+                             ("bag.open_traps", act("open_win", "trp")),
+                             ("look.bags", lambda: st.update(dirty_frame=True))):
                 cleanup.service(name, fn)
             Kit.hook_once(CV, "hooked", ("OnItemUpdated", on_bag_item))
             API.SysMsg(TITLE + ": on, %s." % Kit.count(st["slots"], "slot"), HUE_OK)
@@ -6105,7 +6110,7 @@ def _module_inventory():
             if cats["wanted"] and cats["data"] is None:
                 cats["wanted"] = False
                 try:
-                    build_cats()
+                    build_cats(R.f_tiles)
                 except Exception:
                     cats["data"] = {}
             write_saved()
@@ -8297,14 +8302,12 @@ def _module_inventory():
         # every change bumps (caches key on it), and the file bookkeeping (path, mtime, unread flag).
         idx = {"recs": {}, "tombs": {}, "ver": 0, "dirty": False, "dirty_at": 0.0,
                "loaded": False, "path": None, "mtime": None, "err": "", "unread": False}
-        # The summary the window searches: item key to places holding it, and one entry per place. Built on
-        # the script thread whenever the index version moves.
-        summ = {"ver": -1, "keys": {}, "places": {}, "items": 0, "chars": 0}
+        summ = {"ver": -1, "keys": {}, "places": {}, "items": 0, "chars": 0, "veil": False}
         view = {"query": "", "seen_text": None, "changed_at": 0.0, "page": 0, "rows": [],
                 "sel": None, "naming": None, "forget_arm": (None, 0.0), "status": "",
                 "status_hue": Kit.HUE_INFO, "status_at": 0.0, "dirty": True, "built_for": None,
                 "live": {}, "live_at": 0.0, "live_ver": 0, "live_sig": None, "data": [], "prev": [],
-                "last_read": ("", 0.0), "iw": IW}
+                "last_read": ("", 0.0, ""), "iw": IW}
         # Containers being watched while open: serial -> [opened at, next read, step].
         watching = {}
         # Results of container reads, handed from the client thread to the script thread in order.
@@ -8962,7 +8965,7 @@ def _module_inventory():
             # The caps hold at every moment.
             prune()
             mark_dirty()
-            view["last_read"] = (res["label"], now)
+            view["last_read"] = (res["label"], now, res["kind"])
 
         def on_open(*args):
             """API.Events.OnOpenContainer handler (script thread): only notes the serial; the tick reads it."""
@@ -9093,7 +9096,8 @@ def _module_inventory():
                     src = rr if rr is not None else r
                     label = src["custom"] or src["label"] or r["plabel"] or "A container"
                     p = places[root] = {"label": label, "seen": 0.0, "kind": src["kind"],
-                                        "mob": src["mob"], "cname": src["cname"],
+                                        "mob": src["mob"], "cname": src["cname"], "raw": label,
+                                        "cs": src["cs"], "custom": bool(src["custom"]),
                                         "facet": src["facet"], "x": src["x"], "y": src["y"]}
                 if r["seen"] > p["seen"]:
                     p["seen"] = r["seen"]
@@ -9106,7 +9110,39 @@ def _module_inventory():
                         k = keys[key] = [e[0], {}]
                     k[1][root] = k[1].get(root, 0) + e[1]
             summ.update({"ver": idx["ver"], "keys": keys, "places": places, "items": n, "chars": len(chars)})
+            veil_places(places, sorted(set(r["cs"] for r in recs.values() if r["cname"])))
             view["dirty"] = True
+
+        def chest_label(label):
+            """Return a chest place label with its map position hidden ("at x, y" becomes the streamer veil), so
+            the position of a ground chest is not shown on stream.
+            """
+            return re.sub(r" at \d+, \d+$", " at " + Kit.veil("xy", ""), label)
+
+        def veil_places(places, css):
+            """Veil the places of the storage summary in streamer mode; does nothing otherwise.
+
+            places is the summary's place table, css the sorted serials of the characters seen. Sets
+            summ["veil"] to the streamer flag, then rewrites character names (yours becomes the "me" veil,
+            others "Character N") and the labels of banks and ground chests, leaving custom names alone.
+            """
+            summ["veil"] = Kit.streamer
+            if not Kit.streamer:
+                return
+            me = HOST.me()
+            mine = int(me.Serial) if me is not None else 0
+            others = [cs for cs in css if cs != mine]
+            for p in places.values():
+                cs, cname = p["cs"], p["cname"]
+                if cname:
+                    p["cname"] = Kit.veil("me", cname) if cs == mine else "Character %d" % (
+                    others.index(cs) + 2 if cs in others else len(others) + 2)
+                if p["custom"]:
+                    continue
+                if p["kind"] == "bank":
+                    p["label"] = ("Bank box (%s)" % p["cname"]) if cname else "Bank box"
+                elif p["kind"] == "chest":
+                    p["label"] = chest_label(p["label"])
 
         def fav_stored():
             """[(total, {place: amount})] for each favourite in the stored places, cached on the summary version
@@ -9236,8 +9272,12 @@ def _module_inventory():
                 return "Reading the index"
             if idx["err"]:
                 return "Index file: %s" % idx["err"]
-            label, t = view["last_read"]
+            label, t, kind = view["last_read"]
             s = "%s noted" % Kit.count(n, "place")
+            if Kit.streamer and kind == "bank":
+                label = "Bank box (%s)" % Kit.veil("me", "")
+            elif Kit.streamer and kind == "chest":
+                label = chest_label(label)
             if summ["chars"] > 1:
                 s += " on %d characters" % summ["chars"]
             if label:
@@ -9249,7 +9289,7 @@ def _module_inventory():
             follow hint for a pack animal.
             """
             where = ""
-            if p["kind"] == "chest":
+            if p["kind"] == "chest" and not Kit.streamer:
                 where = " (facet %d, %d, %d)" % (p["facet"], p["x"], p["y"])
             who = (" by %s" % p["cname"]) if p["cname"] else ""
             tip = "%s\nSeen%s %s%s\nClick to pick it (then Name or Forget)" % (
@@ -9315,7 +9355,7 @@ def _module_inventory():
             # Lines that did not fit under the cap, counted for the last row.
             left = 0
             if mine:
-                me_name = str(safe(lambda: API.Player.Name, "") or "")
+                me_name = Kit.veil("me", str(safe(lambda: API.Player.Name, "") or ""))
                 rows.append(("Backpack%s" % ((" (%s)" % me_name) if me_name else ""), "on you now",
                              Kit.HUE_TITLE, 0, "Your backpack and the bags in it, right now", None))
                 lst = sorted(mine.items(), key=lambda kv: -kv[1][1])
@@ -9593,7 +9633,7 @@ def _module_inventory():
                 set_status("Click a place in the list first, then Name.", Kit.HUE_BAD)
             else:
                 view["naming"] = sel
-                set_box(p["label"])
+                set_box(p.get("raw", p["label"]))
                 set_status("Type its new name in the Find box, then click Name again "
                            "(empty: its own name).", Kit.HUE_TITLE)
 
@@ -9787,7 +9827,7 @@ def _module_inventory():
             elif now >= st["merge_at"] or st["merge_at"] - now > MERGE_CHECK:
                 st["merge_at"] = now + MERGE_CHECK
                 check_others()
-            if summ["ver"] != idx["ver"]:
+            if summ["ver"] != idx["ver"] or summ["veil"] != Kit.streamer:
                 build_summary()
                 # Worked out here, off the game's thread.
                 fav_stored()
@@ -9800,7 +9840,7 @@ def _module_inventory():
             """
             if st["shutting"]:
                 return False
-            if not idx["loaded"] or has_unread() or summ["ver"] != idx["ver"]:
+            if not idx["loaded"] or has_unread() or summ["ver"] != idx["ver"] or summ["veil"] != Kit.streamer:
                 return True
             now = time.time()
             if idx["dirty"] and (now - idx["dirty_at"] >= SAVE_DELAY or now < idx["dirty_at"]):
@@ -11042,12 +11082,12 @@ def _module_inventory():
             slot = table_slot()
             held = HOST.layout_holds(KEY)
             follow = follows()
-            pitch = SUPPLY_ROW
+            pitch = Kit.pitch(SUPPLY_ROW)
             groups, heights, h = table_plan(rows, pitch)
             w = SUPPLY_W if slot is None else slot[0]
             if slot is not None:
                 n = sum(len(grows) for _grp, grows in groups) or 2
-                pitch = max(SUPPLY_ROW_MIN, min(2 * SUPPLY_ROW, SUPPLY_ROW + (slot[1] - h) // n))
+                pitch = max(SUPPLY_ROW_MIN, min(2 * SUPPLY_ROW, pitch + (slot[1] - h) // n))
                 groups, heights, h = table_plan(rows, pitch)
                 if h < slot[1]:
                     heights[-1] += slot[1] - h
@@ -11459,7 +11499,7 @@ def _module_inventory():
             wnd.dock()
             HOST.dock_add(KEY, {"title": TITLE, "state": lambda: "open" if Kit.is_open(sup["g"]) else None,
                                 "show": open_table, "gump": lambda: sup["g"], "fit": table_fit, "min": table_min,
-                                "untitled": True})
+                                "untitled": True, "redraw": lambda: sup.update(drawn=False)})
             cleanup.add(HOST.dock_remove, KEY)
 
         def _tick():
@@ -11496,9 +11536,470 @@ def _module_inventory():
         return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
                   "build_config": build_config, "poll_config": cfg.poll, "config_closed": config_closed}
 
+    def _part_sections():
+        """Build the Bag Sections part and return its hooks.
+
+        Bag Sections groups what is in your backpack into sections by kind (reagents, potions, gold and
+        so on, then Other), one picture with an amount per item type. Double-click a picture to use that
+        item. The sections are the ticked presets plus up to MAX_SECTIONS - ticked custom sections, each
+        made from one item you target. Item kinds come from cats["data"], read once from the client's
+        tile data on the script thread.
+
+        Saved key, per character: UnifiedBag_sections (ticked preset keys, "c~<graphic hex>~<name>" for
+        each custom section, and "other" or "-other"); window place and folded state in
+        UnifiedBag_sections_pos and UnifiedBag_sections_min.
+        """
+        KEY = "inventory.sections"
+        TITLE = "Bag Sections"
+        SETTINGS_KEY = "UnifiedBag_sections"
+        POS_KEY = "UnifiedBag_sections_pos"
+        MIN_KEY = "UnifiedBag_sections_min"
+        W = 330
+        MINI = (260, 46)
+        TRAY_ICON = 0x0E75
+        CELL_W = 46
+        CELL_H = 54
+        PIC = 36
+        HEAD = 30
+        SEC_PAD = 6
+        EVERY = 2.0
+        AFTER_USE = 0.5
+        MIN_GAP = 0.25
+        REBUILD_GAP = 1.0
+        MAX_SECTIONS = 12
+        CELL_CAP = 240
+        NAME_MAX = 24
+        PICK_TIMEOUT = 15
+        DEFAULT_ON = ("reagents", "potions", "bandages", "gold", "scrolls", "maps")
+        settings = {"other": True}
+        settings.update(("p_" + k, k in DEFAULT_ON) for k, _c in PRESETS)
+        DEFAULTS = dict(settings)
+        st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "groups": [], "sig": None,
+              "ver": -1, "at": 0.0, "kinds": 0, "loaded": False, "built": 0.0, "due": 0.0}
+        win = {"g": None, "c": {}, "store": ({}, {}), "cells": []}
+        cleanup, queue, say = Kit.basics(st, TITLE)
+        customs = []
+
+        def ticked(vals):
+            """Return how many preset sections are ticked in vals (a settings dict)."""
+            return sum(1 for k, _c in PRESETS if vals["p_" + k])
+
+        def load_settings():
+            """Load the saved sections var into settings and customs, falling back to the defaults when nothing
+            is saved.
+
+            Bad tokens are skipped. If more sections are saved than MAX_SECTIONS allows, the last presets are
+            switched off to fit.
+            """
+            raw = str(Kit.get_var(SETTINGS_KEY, "") or "")
+            settings.update(DEFAULTS)
+            del customs[:]
+            st["loaded"] = True
+            if not raw:
+                return
+            for k, _c in PRESETS:
+                settings["p_" + k] = False
+            for tok in raw.split(";"):
+                if tok in ("other", "-other"):
+                    settings["other"] = tok == "other"
+                elif tok.startswith("c~"):
+                    p = tok.split("~", 2)
+                    try:
+                        gr = int(p[1], 16)
+                    except (IndexError, ValueError):
+                        continue
+                    if len(p) > 2 and len(customs) < MAX_SECTIONS and all(cu[0] != gr for cu in customs):
+                        customs.append((gr, p[2][:NAME_MAX] or "Item"))
+                elif ("p_" + tok) in settings:
+                    settings["p_" + tok] = True
+            for k, _c in reversed(PRESETS):
+                if len(customs) + ticked(settings) <= MAX_SECTIONS:
+                    break
+                settings["p_" + k] = False
+
+        def save_settings():
+            """Save the ticked presets, the custom sections and the Other switch to the sections var."""
+            toks = ["c~%04X~%s" % cu for cu in customs] + [k for k, _c in PRESETS if settings["p_" + k]]
+            Kit.put_var(SETTINGS_KEY, ";".join(toks + ["other" if settings["other"] else "-other"]))
+
+        def item_label(it, gr):
+            """Return a clean display name for an item: its name without a leading count and without the
+            characters the saved format uses, capitalised, or "Item 0x..." from the graphic when it has no
+            name. it is the item and gr its graphic.
+            """
+            try:
+                name = re.sub(r"^[\d,]+\s+", "", str(it.Name or "").strip())
+            except Exception:
+                name = ""
+            name = re.sub(r"[;~|]", " ", name).strip()
+            return name[:1].upper() + name[1:] if name else "Item 0x%04X" % gr
+
+        def amount_text(n):
+            """Format an amount for a cell: with thousands separators below 10000, as 12k above."""
+            return commas(n) if n < 10000 else "%dk" % (n // 1000)
+
+        def cols_for(w):
+            """Return how many cells fit in a row of a window w pixels wide (at least one)."""
+            return max(1, (w - 2 * Kit.MARGIN - 16) // CELL_W)
+
+        def group_h(n, cols):
+            """Return the height of a section holding n cells laid out in cols columns: its heading, the rows
+            and the padding.
+            """
+            return HEAD + max(1, (n + cols - 1) // cols) * CELL_H + SEC_PAD
+
+        def fixed_h():
+            """Return the height of the window outside its sections: margins, title bar and gap."""
+            return 2 * Kit.MARGIN + 30 + Kit.GAP
+
+        def min_size():
+            """Return the smallest window size: three cells wide and one section with one row high."""
+            return 2 * Kit.MARGIN + 16 + 3 * CELL_W, fixed_h() + HEAD + CELL_H + SEC_PAD
+
+        def empty_text():
+            """Return the text shown when there are no sections: a reading message until the item kinds are
+            known, then "Nothing to show.".
+            """
+            return "Reading item kinds." if cats["data"] is None else "Nothing to show."
+
+        def use_cell(i):
+            """Return a double-click handler for cell number i that queues using the item the cell shows."""
+            def handler(*args):
+                """Double-click handler (the picture control passes its own arguments, which are ignored): queue
+                using the item in the cell now at position i, when it still has one.
+                """
+                cells = win["cells"]
+                if i < len(cells) and cells[i]["serial"]:
+                    queue(("use", cells[i]["serial"]))()
+
+            return handler
+
+        def build_window():
+            """Draw the window: a section per group of items with a picture and an amount for each item type.
+
+            In a zone the window takes the zone's slot, shows as many rows as fit and drops the rest. When
+            folded to its small form only the title is drawn. Each cell's double click is hooked to use its
+            item, and the cells' records are kept for refresh.
+            """
+            z = wnd.zone_slot(*min_size())
+            w = z[0] if z else W
+            cols = cols_for(w)
+            groups = st["groups"]
+            body = sum(group_h(len(cl), cols) + Kit.GAP for _t, cl in groups) - Kit.GAP if groups else HEAD + 20
+            h = z[1] if z else fixed_h() + body
+            g, store, c = wnd.begin(w, h)
+            cells = []
+            if not st["minimized"]:
+                wnd.frame(g)
+                M = Kit.MARGIN
+                IW = w - 2 * M
+                y = M + 30 + Kit.GAP
+                bottom = h - M
+                if not groups:
+                    Kit.add_section(g, M, y, IW, bottom - y)
+                    c["empty"] = Kit.add_label(g, empty_text(), M + 12, y + 10, Kit.HUE_INFO)
+                for gi, (title, cl) in enumerate(groups):
+                    rows = max(1, (len(cl) + cols - 1) // cols)
+                    if z:
+                        rows = min(rows, (bottom - y - HEAD - SEC_PAD) // CELL_H)
+                    if rows < 1:
+                        break
+                    gh = HEAD + rows * CELL_H + SEC_PAD
+                    Kit.add_section(g, M, y, IW, gh, "%s  (%d)" % (title.upper(), len(cl)))
+                    for ci, (key, v) in enumerate(cl[:rows * cols]):
+                        cx = M + 8 + (ci % cols) * CELL_W
+                        cy = y + HEAD + (ci // cols) * CELL_H
+                        pic = G.CreateGumpItemPic(key[0], PIC, PIC)
+                        pic.SetRect(cx + (CELL_W - PIC) // 2, cy, PIC, PIC)
+                        if key[1]:
+                            pic.Hue = key[1]
+                        pic.DrawBorder = False
+                        Kit.with_tip(pic, v[0])
+                        Kit.hook_double(pic, use_cell(len(cells)))
+                        g.Add(pic)
+                        text = amount_text(v[1])
+                        ty = cy + PIC + 1
+                        amt = Kit.add_label(g, text, cx + (CELL_W - Kit.text_w(text)) // 2, ty, Kit.HUE_TEXT)
+                        cells.append({"gi": gi, "ci": ci, "serial": v[2], "amt": amt, "x": cx, "y": ty})
+                    y += gh + Kit.GAP
+            wnd.end(g, {"cells": cells})
+            refresh()
+
+        wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, (W, 300), MINI, TRAY_ICON, cleanup,
+                         clear={"cells": []})
+
+        def refresh():
+            """Update the window in place without redrawing: the folded form's count, the empty-state text, and
+            each cell's item serial and amount (moving the amount label when its width changed).
+            """
+            c = win["c"]
+            groups = st["groups"]
+            if "status" in c:
+                Kit.set_text(c["status"], "%s: %s" % (TITLE, Kit.count(st["kinds"], "kind")))
+                return
+            if "empty" in c:
+                Kit.set_text(c["empty"], empty_text())
+            for cell in win["cells"]:
+                try:
+                    v = groups[cell["gi"]][1][cell["ci"]][1]
+                except IndexError:
+                    continue
+                cell["serial"] = v[2]
+                text = amount_text(v[1])
+                if Kit.set_text(cell["amt"], text):
+                    cell["amt"].SetPos(cell["x"] + (CELL_W - Kit.text_w(text)) // 2, cell["y"])
+
+        def rules():
+            """Return the section rules in order: the custom sections first (each one graphic), then the ticked
+            presets, as (title, frozenset of graphics) pairs.
+            """
+            data = cats["data"] or {}
+            out = [(nm, frozenset((gr,))) for gr, nm in customs]
+            return out + [(cap, data.get(k, frozenset())) for k, cap in PRESETS if settings["p_" + k]]
+
+        def by_name(kv):
+            """Sort key for a (key, value) cell: the item name in lower case, then the (graphic, hue) key, so
+            the order is stable.
+            """
+            return kv[1][0].lower(), kv[0]
+
+        def gather():
+            """Group the items in your backpack into sections by the rules and return them for drawing.
+
+            Items are added up by (graphic, hue) within the first section whose graphic set holds them, else
+            in Other when it is on. At most CELL_CAP different cells are kept. Returns a list of
+            (section title, sorted [((graphic, hue), [name, amount, serial])]) for each section that has any.
+            """
+            rs = rules()
+            n_rs = len(rs)
+            found = [{} for _i in range(n_rs + 1)]
+            n = 0
+            other = settings["other"]
+            for it in HOST.pack_items():
+                try:
+                    gr, hue, amt, serial = int(it.Graphic), int(it.Hue), max(1, int(it.Amount or 1)), int(it.Serial)
+                except Exception:
+                    continue
+                at = n_rs
+                for i, (_nm, gs) in enumerate(rs):
+                    if gr in gs:
+                        at = i
+                        break
+                if at == n_rs and not other:
+                    continue
+                cell = found[at].get((gr, hue))
+                if cell is not None:
+                    cell[1] += amt
+                elif n < CELL_CAP:
+                    n += 1
+                    found[at][(gr, hue)] = [item_label(it, gr), amt, serial]
+            names = [nm for nm, _gs in rs] + ["Other"]
+            return [(names[i], sorted(f.items(), key=by_name)) for i, f in enumerate(found) if f]
+
+        def walk(now, burst=False):
+            """Look at the backpack and redraw if needed.
+
+            Redraws the whole window only when the set of cells changed (and not twice within REBUILD_GAP
+            when burst is True, a re-look after a backpack change), otherwise just refreshes the amounts.
+            now is the current time.
+            """
+            st["ver"], st["at"], st["due"] = HOST.pack_ver(), now, 0.0
+            groups = gather()
+            sig = tuple((t, tuple(k for k, _v in cl)) for t, cl in groups)
+            if burst and sig != st["sig"] and 0.0 <= now - st["built"] < REBUILD_GAP:
+                st["due"] = st["built"] + REBUILD_GAP
+                return
+            st["groups"] = groups
+            st["kinds"] = sum(len(cl) for _t, cl in groups)
+            if sig != st["sig"]:
+                st["sig"], st["built"] = sig, now
+                build_window()
+            else:
+                refresh()
+
+        def use_item(action):
+            """Use the item of a queued "use" action, saying so when it has left your backpack.
+
+            The look at the backpack is brought forward to just after AFTER_USE seconds so the amount shows
+            the change.
+            """
+            serial = action[1]
+            if not Kit.in_pack(serial):
+                say("that is no longer in your backpack.", Kit.HUE_BAD)
+                return
+            Kit.once(lambda: API.UseObject(serial), (KEY, serial))()
+            st["at"] = time.time() - EVERY + AFTER_USE
+
+        def full():
+            """Return True when no more sections can be added (and say so), else False."""
+            if len(customs) + ticked(settings) < MAX_SECTIONS:
+                return False
+            say("%d sections at most." % MAX_SECTIONS, Kit.HUE_BAD)
+            return True
+
+        def ask_add(action):
+            """Start adding a custom section: ask for a target and queue the chosen item.
+
+            Does nothing but say so when the sections are full.
+            """
+            if full():
+                return
+            say("target an item for its own section.")
+
+            def done(serial):
+                """Target callback: queue the serial the player picked (zero when none) for the module's tick."""
+                queue(("picked", int(serial or 0)))()
+
+            HOST.pick_target(PICK_TIMEOUT, done, KEY)
+
+        def picked(action):
+            """Add a custom section for the item the player targeted, unless it is gone, already has a section
+            or the sections are full. Saves and refreshes the settings page.
+            """
+            serial = action[1]
+            it = API.FindItem(serial) if serial else None
+            if it is None:
+                return
+            gr = int(it.Graphic)
+            name = item_label(it, gr)[:NAME_MAX]
+            if any(cu[0] == gr for cu in customs):
+                say("%s already has a section." % name, Kit.HUE_BAD)
+                return
+            if full():
+                return
+            customs.append((gr, name))
+            save_settings()
+            st["at"] = 0.0
+            HOST.refresh_settings(KEY)
+            say("added a %s section." % name, Kit.HUE_GOOD)
+
+        def remove(action):
+            """Remove the custom section with the index in the action, save, and refresh the page."""
+            if 0 <= action[1] < len(customs):
+                customs.pop(action[1])
+                save_settings()
+                st["at"] = 0.0
+                HOST.refresh_settings(KEY)
+
+        ACTIONS = {"use": use_item, "add": ask_add, "picked": picked, "remove": remove}
+
+        def page_table(w):
+            """Return the settings page layout for width w: a tick for each preset section and Show Other, then
+            the custom sections each with a Remove button and an Add from target button.
+            """
+            half = (w - 24) // 2
+            ticks = [("check", "p_" + k, cap, "A section for %s" % cap.lower(),
+                      {"dx": 12 + (i % 2) * half, "stay": i % 2 == 0}) for i, (k, cap) in enumerate(PRESETS)]
+            mine = []
+            for i, (_gr, nm) in enumerate(customs):
+                mine += [("note", Kit.fit(nm, w - 80 - Kit.text_w("Remove")),
+                          {"stay": True, "ndy": 4, "hue": Kit.HUE_TEXT}),
+                         ("buttons", (("rm%d" % i, Kit.ART_CLOSE, "Remove", "Remove the %s section" % nm),),
+                          {"dx": w - 48 - Kit.text_w("Remove")})]
+            if not mine:
+                mine = [("note", "None yet: add one from a target.")]
+            return (("SECTIONS  (%d at most, in this order)" % MAX_SECTIONS,
+                     ticks + [("check", "other", "Show Other", "Everything the sections leave, in a last section")]),
+                    ("YOUR SECTIONS  (checked first)", mine + [("buttons", (("add", Kit.ART_PLAY, "Add from target...",
+                                      "Target an item for a section of its own"),))]))
+
+        def on_change(old, new):
+            """Settings changed: ask for a fresh look at the backpack on the next tick."""
+            st["at"] = 0.0
+
+        def cap_ticks(f, new):
+            """Untick the newest presets that went over MAX_SECTIONS in new (the new values), clear their
+            checkboxes on page f and say so.
+            """
+            over = len(customs) + ticked(new) - MAX_SECTIONS
+            cut = False
+            for k, _c in reversed(PRESETS):
+                if over <= 0:
+                    break
+                if new["p_" + k] and not settings["p_" + k]:
+                    new["p_" + k] = False
+                    over -= 1
+                    cut = True
+                    Kit.set(f.c["p_" + k], "IsChecked", False)
+            if cut:
+                say("%d sections at most." % MAX_SECTIONS, Kit.HUE_BAD)
+
+        def page_clicks(f):
+            """Handle the settings page buttons: queue Add from target or the removal of a custom section."""
+            if Kit.was_clicked(f.store, "add"):
+                queue("add")()
+            for i in range(len(customs)):
+                if Kit.was_clicked(f.store, "rm%d" % i):
+                    queue(("remove", i))()
+                    break
+
+        cfg = Kit.Page(settings, page_table, save_settings, on_change, adjust=cap_ticks, clicks=page_clicks)
+
+        def _start():
+            """Module start: reset the state, load the settings, draw the window and register it with the
+            host's dock registry.
+            Called by the host on the client thread.
+            """
+            st.update({"shutting": False, "docked": False, "queue": [], "groups": [], "sig": None, "ver": -1, "at": 0.0,
+                       "kinds": 0, "loaded": False, "minimized": wnd.start_min(), "built": 0.0, "due": 0.0})
+            load_settings()
+            build_window()
+            wnd.dock(fit=True, min=min_size)
+
+        def _tick():
+            """Client tick: run the queued actions, then look at the backpack when it is due.
+
+            Looks again every EVERY seconds, or sooner (but not under MIN_GAP seconds) when the backpack's
+            version changed. Nothing is looked at while the window is folded, docked or not drawn, or until
+            the item kinds are known.
+            """
+            q = st["queue"]
+            while q:
+                action = q.pop(0)
+                if not wnd.action(action):
+                    ACTIONS[action[0] if isinstance(action, tuple) else action](action)
+            if win["g"] is None or Kit.closed(win) or st["minimized"] or st["docked"] or cats["data"] is None:
+                return
+            now = time.time()
+            age = now - st["at"]
+            if not 0.0 <= age < EVERY or 0.0 < st["due"] <= now:
+                walk(now)
+            elif age >= MIN_GAP and HOST.pack_ver() != st["ver"]:
+                walk(now, True)
+
+        def _thread_tick():
+            """Script thread tick: read the item kinds from the client's tile data, once. An error leaves the
+            kinds empty so it is not tried again.
+            """
+            if cats["data"] is not None:
+                return
+            try:
+                field = tile_field()
+            except Exception:
+                field = None
+            try:
+                build_cats(field)
+            except Exception:
+                cats["data"] = {}
+
+        def _thread_wanted():
+            """Return True while the item kinds are still unread, which keeps the script thread tick running."""
+            return cats["data"] is None and not st["shutting"]
+
+        def _stop():
+            """Module stop: save the settings if they were loaded and close the window."""
+            st["shutting"] = True
+            if st["loaded"]:
+                save_settings()
+            cleanup.close()
+
+        return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,
+                "build_config": cfg.build, "poll_config": cfg.poll, "config_closed": cfg.closed,
+                "thread_tick": _thread_tick, "thread_wanted": _thread_wanted}
+
     PARTS = (("bags", _part_bags, 0.1, "bag"), ("paperdoll", _part_paperdoll, 0.1, "character"),
         ("storage", _part_storage, 0.1, "storage"), ("restock", _part_restock, 0.1, "restock"),
-        ("supplies", _part_supplies, 0.1, "supplies"),)
+        ("supplies", _part_supplies, 0.1, "supplies"), ("sections", _part_sections, 0.1))
     return PartSet(KEY, TITLE, PARTS).hooks()
 
 
@@ -11511,6 +12012,7 @@ HOST.add("inventory", "Inventory", "Bags, paperdoll, storage, restock, supplies"
               "What you wear, and your stats", True, ("character",)),
              ("storage", "Storage", "What the containers you opened hold", False, ("storage",)), ("restock", "Restock",
               "Refills from a chest or bank, on a press", False, ("restock",)),
-             ("supplies", "Supplies", "Pack supplies, low counts marked", True, (), True),),
+             ("supplies", "Supplies", "Pack supplies, low counts marked", True, (), True),
+             ("sections", "Bag Sections", "What you carry, grouped by kind", False, (), True),),
          aliases=('Character', 'Unified Bag', 'Storage Index', 'Restock', 'paperdoll', 'bank',
-                  'chest', 'find', 'sort', 'supplies', 'supplies table'))
+                  'chest', 'find', 'sort', 'supplies', 'supplies table', 'sections'))

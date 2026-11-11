@@ -8,33 +8,33 @@ def _module_skills():
 				API.SysMsg("%s: %s written to %s."%(title,what,a),o)
 			except Exception as d:API.SysMsg("%s: couldn't write %s (%s)."%(title,a,d),u)
 	def ax():
-		aw="skills";aE="Skills";bs="Skills_settings";bt="Skills_pos";bu="Skills_marks";bv="Skills_locksets";bw="Skills_session";cj=6;ck=7000;cl=("StandardSkillsGump","SkillGumpAdvanced");cm=5091;ax=22;a7=110;bx=56;cn=120;co=.35;cp=380;a8=60;by=("bar","gain","cap","real");bz=80;bA=2;bB=2;aR="Real values added up, against the total cap (settings page)";bC=(("all_up","All up","Set every listed skill to go up"),("all_down","All down","Set every listed skill to go down (click twice)"),("all_locked","All locked","Lock every listed skill"),("lock_capped","Lock capped","Lock every skill at its cap"));bD,cq=280,46;cr={"use":(P,"Use","Use this skill","use"),"button":(U,"Make button","Make its floating client button (or double-click it in the list)","mkbutton"),"pin":(J,"Pin","Keep it at the top of the list (again to unpin)","pin"),"nextgrp":(U,"Next group","Move it to the next skill group","nextgrp")};aS=200;bE=10;aX=(2103,2104,2104);ay=(2435,2437,2092);a9,ba=2086,2087;cs=2056;ct=946;bF=946;cu,cv="#D8B048",.16;cw,cx="#FFFFFF",.07;cy=4.;bG=1.;bH=["Alchemy","Anatomy","Animal Lore","Item Identification","Arms Lore","Parrying","Begging","Blacksmithy","Bowcraft/Fletching","Peacemaking","Camping","Carpentry","Cartography","Cooking","Detecting Hidden","Discordance","Evaluating Intelligence","Healing","Fishing","Forensic Evaluation","Herding","Hiding","Provocation","Inscription","Lockpicking","Magery","Resisting Spells","Tactics","Snooping","Musicianship","Poisoning","Archery","Spirit Speak","Stealing","Tailoring","Animal Taming","Taste Identification","Tinkering","Tracking","Veterinary","Swordsmanship","Mace Fighting","Fencing","Wrestling","Lumberjacking","Mining","Meditation","Stealth","Remove Trap","Necromancy","Focus","Chivalry","Bushido","Ninjitsu","Spellweaving","Mysticism","Imbuing","Throwing"];cz={"Alchemy":[(30,"NPC alchemists teach the first points for gold"),(50,"Heal and Agility potions"),(70,"Cure and Greater Agility potions"),(90,"Greater Strength and Greater Heal potions"),(100,"Greater Cure and Greater Explosion potions")],"Anatomy":[(100,"Use it on any creature or player; bandaging checks it too")],"Animal Lore":[(100,"Use it on tamed or tameable animals")],"Item Identification":[(100,"Use it on any item")],"Arms Lore":[(100,"Use it on weapons and armour")],"Parrying":[(100,"Fight with a shield on (only shields parry pre-AoS)")],"Begging":[(100,"Beg from town NPCs")],"Blacksmithy":[(30,"NPC blacksmiths teach the first points for gold"),(50,"Maces, then cutlasses"),(65,"Scimitars, then broadswords and kryss"),(80,"Katanas, then short spears and spears"),(100,"Plate gorgets and gloves, then plate legs and tunics")],"Bowcraft/Fletching":[(40,"Shafts and arrows"),(65,"Bows"),(85,"Crossbows"),(100,"Heavy crossbows")],"Peacemaking":[(100,"Use it near creatures; tougher ones as it rises")],"Camping":[(100,"Light kindling over and over (a blade on a tree gives some)")],"Carpentry":[(30,"NPC carpenters teach the first points for gold"),(50,"Medium crates"),(65,"Large crates, then wooden shields"),(85,"Fishing poles and quarter staves"),(100,"Gnarled and black staves")],"Cartography":[(30,"NPC mapmakers teach the first points for gold"),(50,"Local maps"),(65,"City maps"),(100,"Sea charts, then world maps")],"Cooking":[(30,"NPC cooks teach the first points for gold"),(100,"Cook over and over (fish steaks and ribs are cheap)")],"Detecting Hidden":[(100,"Use it often, best near someone hidden")],"Discordance":[(100,"Use it on creatures; tougher ones as it rises")],"Evaluating Intelligence":[(100,"Use it on any player or creature")],"Healing":[(30,"NPC healers teach the first points; bandage yourself when hurt"),(60,"Bandage yourself or friends while hurt"),(80,"Keep bandaging; curing poison needs 60 Healing and 60 Anatomy"),(100,"Keep bandaging; resurrecting needs 80 Healing and 80 Anatomy")],"Fishing":[(100,"Fish over and over, in any water")],"Forensic Evaluation":[(100,"Use it on corpses")],"Herding":[(100,"Herd animals with a shepherd's crook")],"Hiding":[(100,"Use it over and over")],"Provocation":[(100,"Make creatures fight each other; tougher ones as it rises")],"Inscription":[(30,"NPC scribes teach the first points for gold"),(100,"Scribe scrolls of a circle you sometimes fail (spell in your book)")],"Lockpicking":[(30,"NPC thieves and tinkers teach the first points"),(100,"Pick locked boxes just above your level")],"Magery":[(30,"NPC mages teach the first points; then 2nd circle spells"),(45,"3rd circle: Bless, Teleport"),(55,"4th circle: Greater Heal, Mana Drain"),(65,"5th circle: Paralyze, Mind Blast"),(75,"6th circle: Invisibility, Mark"),(90,"7th circle: Flamestrike, Mana Vampire"),(100,"8th circle: Earthquake, summons")],"Resisting Spells":[(100,"Rises when spells hit you: a friend's low curses work")],"Tactics":[(100,"Rises as you fight with any weapon")],"Snooping":[(100,"Look into others' packs (a friend's pack animal is safe)")],"Musicianship":[(100,"Play an instrument; the other bard skills train it too")],"Poisoning":[(30,"Lesser poison on a weapon or food"),(60,"Regular poison"),(100,"Greater, then deadly poison")],"Archery":[(30,"An archery butte or an NPC trainer for the first points"),(100,"Shoot creatures a little tougher than you as it rises")],"Spirit Speak":[(100,"Use it over and over")],"Stealing":[(100,"Steal light items from a friend's pack; heavier is harder")],"Tailoring":[(30,"NPC tailors teach the first points for gold"),(45,"Short pants and fancy shirts"),(55,"Cloaks"),(70,"Robes, then leather gorgets and sleeves"),(85,"Leather leggings and tunics"),(100,"Studded gloves, then studded sleeves and leggings")],"Animal Taming":[(30,"NPC animal trainers teach the first points for gold"),(50,"Horses, ostards, llamas, black and polar bears"),(70,"Panthers, grey wolves, grizzly bears, great harts"),(85,"White wolves, bulls, frenzied ostards"),(100,"Drakes and hell hounds, then dragons")],"Taste Identification":[(100,"Use it on food and potions")],"Tinkering":[(30,"NPC tinkers teach the first points for gold"),(60,"Tools and clock parts"),(80,"Lockpicks"),(100,"Spyglasses or jewellery")],"Tracking":[(100,"Use it over and over")],"Veterinary":[(30,"NPC veterinarians teach the first points"),(60,"Bandage hurt animals and pets"),(80,"Keep bandaging; curing needs 60 Veterinary, 60 Animal Lore"),(100,"Keep bandaging; resurrecting needs 80 and 80")],"Swordsmanship":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Mace Fighting":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Fencing":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Wrestling":[(30,"NPC trainers or a training dummy, empty-handed"),(100,"Fight empty-handed; tougher creatures as it rises")],"Lumberjacking":[(100,"Chop trees with an axe over and over")],"Mining":[(30,"NPC miners teach the first points for gold"),(65,"Mine iron ore in mountains and caves"),(100,"Keep mining: the coloured ores come from 65 up")],"Meditation":[(100,"Spend mana, then meditate; metal armour blocks it")],"Stealth":[(100,"Needs 80 Hiding: hide, then move with Stealth (light armour)")],"Remove Trap":[(100,"Use it on trapped boxes (tinkers can trap some to practise on)")],};bI="Skills_stat_targets";bb=250;aT=("up","down","locked");bJ=("Going up","Going down","Locked");cA=("Set it to go up","Set it to go down","Lock it");aD=[("all","All skills"),("trained","Trained (above 0)"),("gaining","Gaining now"),("session","Gained this session"),("up","Set to go up"),("down","Set to go down"),("locked","Locked"),("below","Below cap"),("pinned","Pinned")];cB=("name","real","value","cap","gain","lock");p={"replace":True,"x_hides":True,"bars":True,"col_cap":True,"col_gain":True,"journal":False,"lock_at_cap":False,"lock_at_target":True,"cap_warn":True,"rows":12,"total_cap":ck,"hl_secs":30,"rate_min":30,"sec_summary":True,"sec_stats":True,"sec_locks":True,"sec_detail":True,"sec_log":False,"log_lines":5,"sort":"name","asc":True,"filter":0,"groups":False,"minimized":False,"width":0,"tips":True,"lock_stat_target":True};cC=dict(p);aJ={"rows":(4,40),"total_cap":(100,72000),"hl_secs":(0,600),"rate_min":(5,240),"log_lines":(2,15),"filter":(0,len(aD)-1),"width":(0,4000)};cD=("bars","col_cap","col_gain","rows","sec_summary","sec_stats","sec_locks","sec_detail","sec_log","log_lines","tips","x_hides","replace");cE=1.;aP=("Strength","Dexterity","Intelligence")
-		def cF():
+		aw="skills";aE="Skills";bs="Skills_settings";bt="Skills_pos";bu="Skills_marks";bv="Skills_locksets";bw="Skills_session";cj=6;ck=7000;cl=("StandardSkillsGump","SkillGumpAdvanced");cm=5091;cn=22;a7=110;bx=56;co=120;cp=.35;cq=380;a8=60;by=("bar","gain","cap","real");bz=80;bA=2;bB=2;aR="Real values added up, against the total cap (settings page)";bC=(("all_up","All up","Set every listed skill to go up"),("all_down","All down","Set every listed skill to go down (click twice)"),("all_locked","All locked","Lock every listed skill"),("lock_capped","Lock capped","Lock every skill at its cap"));bD,cr=280,46;cs={"use":(P,"Use","Use this skill","use"),"button":(U,"Make button","Make its floating client button (or double-click it in the list)","mkbutton"),"pin":(J,"Pin","Keep it at the top of the list (again to unpin)","pin"),"nextgrp":(U,"Next group","Move it to the next skill group","nextgrp")};aS=200;bE=10;aX=(2103,2104,2104);ax=(2435,2437,2092);a9,ba=2086,2087;ct=2056;cu=946;bF=946;cv,cw="#D8B048",.16;cx,cy="#FFFFFF",.07;cz=4.;bG=1.;bH=["Alchemy","Anatomy","Animal Lore","Item Identification","Arms Lore","Parrying","Begging","Blacksmithy","Bowcraft/Fletching","Peacemaking","Camping","Carpentry","Cartography","Cooking","Detecting Hidden","Discordance","Evaluating Intelligence","Healing","Fishing","Forensic Evaluation","Herding","Hiding","Provocation","Inscription","Lockpicking","Magery","Resisting Spells","Tactics","Snooping","Musicianship","Poisoning","Archery","Spirit Speak","Stealing","Tailoring","Animal Taming","Taste Identification","Tinkering","Tracking","Veterinary","Swordsmanship","Mace Fighting","Fencing","Wrestling","Lumberjacking","Mining","Meditation","Stealth","Remove Trap","Necromancy","Focus","Chivalry","Bushido","Ninjitsu","Spellweaving","Mysticism","Imbuing","Throwing"];cA={"Alchemy":[(30,"NPC alchemists teach the first points for gold"),(50,"Heal and Agility potions"),(70,"Cure and Greater Agility potions"),(90,"Greater Strength and Greater Heal potions"),(100,"Greater Cure and Greater Explosion potions")],"Anatomy":[(100,"Use it on any creature or player; bandaging checks it too")],"Animal Lore":[(100,"Use it on tamed or tameable animals")],"Item Identification":[(100,"Use it on any item")],"Arms Lore":[(100,"Use it on weapons and armour")],"Parrying":[(100,"Fight with a shield on (only shields parry pre-AoS)")],"Begging":[(100,"Beg from town NPCs")],"Blacksmithy":[(30,"NPC blacksmiths teach the first points for gold"),(50,"Maces, then cutlasses"),(65,"Scimitars, then broadswords and kryss"),(80,"Katanas, then short spears and spears"),(100,"Plate gorgets and gloves, then plate legs and tunics")],"Bowcraft/Fletching":[(40,"Shafts and arrows"),(65,"Bows"),(85,"Crossbows"),(100,"Heavy crossbows")],"Peacemaking":[(100,"Use it near creatures; tougher ones as it rises")],"Camping":[(100,"Light kindling over and over (a blade on a tree gives some)")],"Carpentry":[(30,"NPC carpenters teach the first points for gold"),(50,"Medium crates"),(65,"Large crates, then wooden shields"),(85,"Fishing poles and quarter staves"),(100,"Gnarled and black staves")],"Cartography":[(30,"NPC mapmakers teach the first points for gold"),(50,"Local maps"),(65,"City maps"),(100,"Sea charts, then world maps")],"Cooking":[(30,"NPC cooks teach the first points for gold"),(100,"Cook over and over (fish steaks and ribs are cheap)")],"Detecting Hidden":[(100,"Use it often, best near someone hidden")],"Discordance":[(100,"Use it on creatures; tougher ones as it rises")],"Evaluating Intelligence":[(100,"Use it on any player or creature")],"Healing":[(30,"NPC healers teach the first points; bandage yourself when hurt"),(60,"Bandage yourself or friends while hurt"),(80,"Keep bandaging; curing poison needs 60 Healing and 60 Anatomy"),(100,"Keep bandaging; resurrecting needs 80 Healing and 80 Anatomy")],"Fishing":[(100,"Fish over and over, in any water")],"Forensic Evaluation":[(100,"Use it on corpses")],"Herding":[(100,"Herd animals with a shepherd's crook")],"Hiding":[(100,"Use it over and over")],"Provocation":[(100,"Make creatures fight each other; tougher ones as it rises")],"Inscription":[(30,"NPC scribes teach the first points for gold"),(100,"Scribe scrolls of a circle you sometimes fail (spell in your book)")],"Lockpicking":[(30,"NPC thieves and tinkers teach the first points"),(100,"Pick locked boxes just above your level")],"Magery":[(30,"NPC mages teach the first points; then 2nd circle spells"),(45,"3rd circle: Bless, Teleport"),(55,"4th circle: Greater Heal, Mana Drain"),(65,"5th circle: Paralyze, Mind Blast"),(75,"6th circle: Invisibility, Mark"),(90,"7th circle: Flamestrike, Mana Vampire"),(100,"8th circle: Earthquake, summons")],"Resisting Spells":[(100,"Rises when spells hit you: a friend's low curses work")],"Tactics":[(100,"Rises as you fight with any weapon")],"Snooping":[(100,"Look into others' packs (a friend's pack animal is safe)")],"Musicianship":[(100,"Play an instrument; the other bard skills train it too")],"Poisoning":[(30,"Lesser poison on a weapon or food"),(60,"Regular poison"),(100,"Greater, then deadly poison")],"Archery":[(30,"An archery butte or an NPC trainer for the first points"),(100,"Shoot creatures a little tougher than you as it rises")],"Spirit Speak":[(100,"Use it over and over")],"Stealing":[(100,"Steal light items from a friend's pack; heavier is harder")],"Tailoring":[(30,"NPC tailors teach the first points for gold"),(45,"Short pants and fancy shirts"),(55,"Cloaks"),(70,"Robes, then leather gorgets and sleeves"),(85,"Leather leggings and tunics"),(100,"Studded gloves, then studded sleeves and leggings")],"Animal Taming":[(30,"NPC animal trainers teach the first points for gold"),(50,"Horses, ostards, llamas, black and polar bears"),(70,"Panthers, grey wolves, grizzly bears, great harts"),(85,"White wolves, bulls, frenzied ostards"),(100,"Drakes and hell hounds, then dragons")],"Taste Identification":[(100,"Use it on food and potions")],"Tinkering":[(30,"NPC tinkers teach the first points for gold"),(60,"Tools and clock parts"),(80,"Lockpicks"),(100,"Spyglasses or jewellery")],"Tracking":[(100,"Use it over and over")],"Veterinary":[(30,"NPC veterinarians teach the first points"),(60,"Bandage hurt animals and pets"),(80,"Keep bandaging; curing needs 60 Veterinary, 60 Animal Lore"),(100,"Keep bandaging; resurrecting needs 80 and 80")],"Swordsmanship":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Mace Fighting":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Fencing":[(30,"NPC trainers or a training dummy for the first points"),(100,"Fight creatures a little tougher than you as it rises")],"Wrestling":[(30,"NPC trainers or a training dummy, empty-handed"),(100,"Fight empty-handed; tougher creatures as it rises")],"Lumberjacking":[(100,"Chop trees with an axe over and over")],"Mining":[(30,"NPC miners teach the first points for gold"),(65,"Mine iron ore in mountains and caves"),(100,"Keep mining: the coloured ores come from 65 up")],"Meditation":[(100,"Spend mana, then meditate; metal armour blocks it")],"Stealth":[(100,"Needs 80 Hiding: hide, then move with Stealth (light armour)")],"Remove Trap":[(100,"Use it on trapped boxes (tinkers can trap some to practise on)")],};bI="Skills_stat_targets";bb=250;aT=("up","down","locked");bJ=("Going up","Going down","Locked");cB=("Set it to go up","Set it to go down","Lock it");aD=[("all","All skills"),("trained","Trained (above 0)"),("gaining","Gaining now"),("session","Gained this session"),("up","Set to go up"),("down","Set to go down"),("locked","Locked"),("below","Below cap"),("pinned","Pinned")];cC=("name","real","value","cap","gain","lock");p={"replace":True,"x_hides":True,"bars":True,"col_cap":True,"col_gain":True,"journal":False,"lock_at_cap":False,"lock_at_target":True,"cap_warn":True,"rows":12,"total_cap":ck,"hl_secs":30,"rate_min":30,"sec_summary":True,"sec_stats":True,"sec_locks":True,"sec_detail":True,"sec_log":False,"log_lines":5,"sort":"name","asc":True,"filter":0,"groups":False,"minimized":False,"width":0,"tips":True,"lock_stat_target":True};cD=dict(p);aJ={"rows":(4,40),"total_cap":(100,72000),"hl_secs":(0,600),"rate_min":(5,240),"log_lines":(2,15),"filter":(0,len(aD)-1),"width":(0,4000)};cE=("bars","col_cap","col_gain","rows","sec_summary","sec_stats","sec_locks","sec_detail","sec_log","log_lines","tips","x_hides","replace");cF=1.;aP=("Strength","Dexterity","Intelligence")
+		def cG():
 			b={}
-			for e,f in cz.items():
+			for e,f in cA.items():
 				c,d=[],0
 				for a,g in f:c.append((a*10,"%g-%g"%(d/10.,a),g));d=a*10
 				b[e.lower()]=c
 			return b
-		cG=cF();ao={"pins":set(),"targets":{}};aA=[];aB=[0,0,0];j={"minimized":False,"shutting":False,"docked":False,"queue":[],"sel":None,"last_click":(None,0.),"arm":{},"search":"","pc":{},"save_at":0.,"to_write":[],"ver":0,"preview":False};t={"g":None,"c":{},"store":({},{}),"rows":[],"rowmap":{}};aN={"sync":False,"skip":False};cH,ak,af=ae(j,aE);aU={};aF={"world":None,"player":None,"how":""};q={"objs":[],"names":[],"click":[],"collide":[],"n":0,"cur":[],"low":[],"full":True,"rr":0};X={"cur":[0,0,0],"locks":[0,0,0],"cap":0,"prev":[0,0,0]};O={"list":[],"ok":False,"ver":0,"sig":None,"of":{}};VG={"gumps":None,"sig":None,"full_at":0.}
+		cH=cG();ao={"pins":set(),"targets":{}};aA=[];aB=[0,0,0];j={"minimized":False,"shutting":False,"docked":False,"queue":[],"sel":None,"last_click":(None,0.),"arm":{},"search":"","pc":{},"save_at":0.,"to_write":[],"ver":0,"preview":False};t={"g":None,"c":{},"store":({},{}),"rows":[],"rowmap":{}};aN={"sync":False,"skip":False};cI,ak,af=ae(j,aE);aU={};aF={"world":None,"player":None,"how":""};q={"objs":[],"names":[],"click":[],"collide":[],"n":0,"cur":[],"low":[],"full":True,"rr":0};X={"cur":[0,0,0],"locks":[0,0,0],"cap":0,"prev":[0,0,0]};O={"list":[],"ok":False,"ver":0,"sig":None,"of":{}};VG={"gumps":None,"sig":None,"full_at":0.}
 		def aK():j["ver"]+=1;j["dirty"]=True
-		cI=.5;cJ=1.;cK=5.
-		def cL():
+		cJ=.5;cK=1.;cL=5.
+		def cM():
 			j["dirty"]=True
 			if(p["sort"]!="name"or aD[p["filter"]][0]not in("all","pinned")):j["ver"]+=1
 		al={"width":None,"rows":None,"slot":None,"k":1.,"full":None}
 		def bK():return al["width"]if al["width"]is not None else p["width"]
-		def cM(w,h,mode):
+		def cN(w,h,mode):
 			a=(int(w),int(h))if(w and h)else None
 			if a==al["slot"]and not(mode=="again"and a is not None):return
 			al["slot"]=a;al["width"]=a[0]if a is not None else None;al["rows"]=None;j["m"]=None;j["rebuild"]="window";aK()
-		def cN():return al["k"],al["full"]
+		def cO():return al["k"],al["full"]
 		ah={"start":0.,"base":{},"stats":None,"seen":0.}
 		def bL():
 			Kit.kv_load(bs,";",p,aJ,("sort",))
-			if p["sort"]not in cB:p["sort"]="name"
-		def aH():Kit.kv_save(bs,";",p,cC,aJ,("sort",))
-		def cO():
+			if p["sort"]not in cC:p["sort"]="name"
+		def aH():Kit.kv_save(bs,";",p,cD,aJ,("sort",))
+		def cP():
 			ao["pins"],ao["targets"]=set(),{}
 			for b in R(bu).split(";"):
 				p=b.split(":")
@@ -44,7 +44,7 @@ def _module_skills():
 				if c:ao["pins"].add(i)
 				if a>0:ao["targets"][i]=a
 		def bM():a=sorted(ao["pins"]|set(ao["targets"]));S(bu,";".join("%d:%s:%d"%(c,"1"if c in ao["pins"]else "0",ao["targets"].get(c,0))for c in a))
-		def cP():
+		def cQ():
 			del aA[:]
 			for a in R(bv).split("|"):
 				if "="in a:
@@ -56,7 +56,7 @@ def _module_skills():
 			for k in range(3):
 				try:aB[k]=max(0,min(bb,int(p[k])))
 				except(IndexError,ValueError):aB[k]=0
-		def cQ():
+		def cR():
 			p=R(bw).split("|");a=time.time();ah.update({"start":a,"base":{},"stats":None,"seen":a})
 			if len(p)<4:return
 			try:b,f=float(p[0]),float(p[3])
@@ -72,7 +72,7 @@ def _module_skills():
 			except ValueError:pass
 			ah.update({"start":b,"base":c,"stats":e,"seen":a})
 		def aY():ah["seen"]=time.time();b=",".join("%d:%d"%(a,c)for a,c in sorted(ah["base"].items()));s=",".join(str(d)for d in ah["stats"])if ah["stats"]else "";S(bw,"%d|%s|%s|%d"%(ah["start"],b,s,ah["seen"]))
-		def cR():
+		def cS():
 			ah.update({"start":time.time(),"base":{},"stats":None})
 			for i in range(q["n"]):ah["base"][i]=q["cur"][i][0]
 			if any(X["cur"]):ah["stats"]=list(X["cur"])
@@ -134,14 +134,14 @@ def _module_skills():
 			X["prev"]=X["cur"];X["cur"],X["locks"],X["cap"]=b,a,c;return True
 		def bU():return any(a[2]>0 for a in q["cur"])
 		def aV():w=aF["world"]or aZ();return Typing._get(w,"SkillsGroupManager")if w is not None else None
-		def cS():
+		def cT():
 			if aM.f is not None:return True
 			if t["g"]is None or not t["c"]or j["minimized"]or j["docked"]:return False
 			return p["groups"]or(j["sel"]is not None and p["sec_detail"])
 		def aI(force=False):
 			c=time.time()
-			if not force and(c<j["grp_at"]or not cS()):return
-			j["grp_at"]=c+(1. if aM.f is not None or p["groups"]else cT);d=aV();b=Typing._get(d,"Groups")if d is not None else None;a=[]
+			if not force and(c<j["grp_at"]or not cT()):return
+			j["grp_at"]=c+(1. if aM.f is not None or p["groups"]else cU);d=aV();b=Typing._get(d,"Groups")if d is not None else None;a=[]
 			if b is not None:
 				for g in list(b):
 					try:n=int(g.Count);i=[int(g.GetSkill(r))for r in range(n)];a.append({"obj":g,"name":str(g.Name or ""),"members":[s for s in i if s<q["n"]],"max":bool(g.IsMaximized)})
@@ -152,7 +152,7 @@ def _module_skills():
 			for h in range(len(a)-1,-1,-1):
 				for k in a[h]["members"]:f[k]=h
 			O["list"],O["ok"],O["of"]=a,b is not None,f
-		cT=3.
+		cU=3.
 		def bd(i):return O["of"].get(i)
 		def aO():
 			a=aV()
@@ -165,7 +165,7 @@ def _module_skills():
 			else:
 				with Kit.quiet:import System;be("ChangeSkillLockStatus",[System.UInt16(i),System.Byte(v)]);a=Tz.T("ClassicUO.Game.Data.Lock");Tz.put(q["objs"][i],"Lock",System.Enum.ToObject(a,v))
 			q["cur"][i][3]=v
-		def cU(i):
+		def cV(i):
 			if i is None or i>=q["n"]:return
 			if not q["click"][i]:af("%s can't be used directly."%q["names"][i],b);return
 			if not q["collide"][i]:API.UseSkill(q["names"][i]);return
@@ -196,13 +196,13 @@ def _module_skills():
 			if secs>=3600:return "%dh %02dm"%(secs//3600,(secs%3600)//60)
 			if secs>=60:return "%dm"%(secs//60)
 			return "%ds"%secs
-		def cV(i,now,a=None):
+		def cW(i,now,a=None):
 			b,e,c,e=q["cur"][i]
 			if b>=c:return "at cap"
 			f,d=a if a is not None else bZ(i,now);r=d if d>0 else f
 			if r<=0:return "--"
 			return "~"+bi((c-b)/r*3600)
-		def cW(changed,now):
+		def cX(changed,now):
 			g=False
 			for i,e in changed.items():
 				a=q["cur"][i];d=a[0]-e[0]
@@ -223,16 +223,16 @@ def _module_skills():
 						else:af("%s reached %s."%(b,c),o)
 			if g and time.time()>=j["save_at"]:j["save_at"]=time.time()+15.;aY()
 		def bj():return sum(a[0]for a in q["cur"])
-		def cX():
+		def cY():
 			if bj()<p["total_cap"]:return False
 			a=any(d[3]==0 and d[0]<d[2]for d in q["cur"]);b=any(f[3]==1 and f[0]>0 for f in q["cur"]);return a and not b
-		def cY():
+		def cZ():
 			if not p["cap_warn"]:j["warned_cap"]=False;return
-			a=cX()
+			a=cY()
 			if a and not j["warned_cap"]:af("at the total skill cap (%s) and no skill set to go down: nothing can rise."%f1(p["total_cap"]),u)
 			j["warned_cap"]=a
 		def a_(k):a=ah["stats"];return X["cur"][k]-a[k]if a else 0
-		def cZ():
+		def c_():
 			a,b=X["prev"],X["cur"]
 			for k in range(3):
 				t=aB[k]
@@ -241,10 +241,10 @@ def _module_skills():
 				if c is None:continue
 				if p["lock_stat_target"]and X["locks"][k]==c:bf(k,2);af("%s reached its target %d and was locked."%(aP[k],t),o)
 				else:af("%s reached its target %d."%(aP[k],t),o)
-		def c_(k):
+		def c0(k):
 			t,v=aB[k],X["cur"][k]
 			if t and v==t and p["lock_stat_target"]and X["locks"][k]!=2:bf(k,2);af("%s is at its target %d and was locked."%(aP[k],t),o)
-		def c0(k,b):
+		def c1(k,b):
 			v=X["cur"][k];a=["%s %d"%(aP[k],v)]
 			if ah["stats"]:d=a_(k);a[0]+=": %+d this session (%.1f / hour)"%(d,d/b)
 			t=aB[k]
@@ -254,13 +254,13 @@ def _module_skills():
 			return "\n".join(a)
 		def b_(i):
 			if i is None or i>=q["n"]:return
-			a=cG.get(q["names"][i].lower())
+			a=cH.get(q["names"][i].lower())
 			if a:
 				b=q["cur"][i][0]
 				for c,d,e in a:
 					if b<c:return d,e
 			return
-		def c1(i,now):
+		def c2(i,now):
 			f=aD[p["filter"]][0];a,e,c,d=q["cur"][i];b=j["search"]
 			if b and b not in q["low"][i]:return False
 			if f=="trained":return a>0
@@ -276,8 +276,8 @@ def _module_skills():
 			else:c={"real":0,"value":1,"cap":2,"lock":3}.get(s);d=aG if c is None else(lambda i:q["cur"][i][c]);a=sorted(sorted(idx,key=b),key=d)
 			if not p["asc"]:a.reverse()
 			return a
-		def c2(now):
-			b=[r for r in range(q["n"])if c1(r,now)];i=set(b);d=[s for s in b if s in ao["pins"]];k=bool(j["search"])or p["filter"]!=0;a=[]
+		def c3(now):
+			b=[r for r in range(q["n"])if c2(r,now)];i=set(b);d=[s for s in b if s in ao["pins"]];k=bool(j["search"])or p["filter"]!=0;a=[]
 			if not p["groups"]or not O["ok"]:
 				if aD[p["filter"]][0]=="pinned":return[("s",v)for v in aQ(b)]
 				l=[w for w in b if w not in ao["pins"]];return[("s",x)for x in aQ(d)+aQ(l)]
@@ -295,14 +295,14 @@ def _module_skills():
 				c=j["pc"].get("other",False);a.append(("g","other",c))
 				if not c:a+=[("s",dy)for dy in aQ(h)]
 			return a
-		def c3(i):
+		def c4(i):
 			def a(*c):
 				a=time.time();b,t=j["last_click"]
 				if b==i and a-t<=.6:j["last_click"]=(None,0.);ak.add(("button",i),dup=True)
 				else:j["last_click"]=(i,a);ak.add(("pick",i),dup=True)
 			return a
-		c4=Kit.disposer("skills.window",j,t)
-		def c5():j["rebuild"]="window"
+		c5=Kit.disposer("skills.window",j,t)
+		def c6():j["rebuild"]="window"
 		def av(ctrl,b,value):
 			if ctrl is None:return
 			k=(ctrl,b)
@@ -334,7 +334,7 @@ def _module_skills():
 				m["drop"]=tuple(c)
 			m["zone"]=zone;d=max(0,IW-(m["sa_w"]+16))if IW else 0
 			if d:
-				b=min(cn,d*2//5)if m["bar_x"]is not None else 0
+				b=min(co,d*2//5)if m["bar_x"]is not None else 0
 				if b:
 					m["bar_w"]+=b
 					for a in("gain_x","lock_x"):
@@ -347,7 +347,7 @@ def _module_skills():
 				if m[a]is not None:m[a]+=d
 			m["row_w"]=m["lock_x"]+m["lock_w"]+6;m["sa_w"]=m["row_w"]+16
 		def a0(drop=()):
-			m={"cut":False,"drop":()};d=q["names"]or bH;a=I(ay[0])[0]or 10;m["arrow_w"]=a;m["lock_w"]=max(a,I(ay[2])[0]or 12);f=I(aX[0])[0]or 11;m["name_x"]=4+f+6;m["name_w"]=(max([e(k)for k in d]+[e("Skill")+a+4])+10);b=max(e("120.0"),e("Value")+a+3)+10;g=max(e("+120.0"),e("Gain")+a+3)+8
+			m={"cut":False,"drop":()};d=q["names"]or bH;a=I(ax[0])[0]or 10;m["arrow_w"]=a;m["lock_w"]=max(a,I(ax[2])[0]or 12);f=I(aX[0])[0]or 11;m["name_x"]=4+f+6;m["name_w"]=(max([e(k)for k in d]+[e("Skill")+a+4])+10);b=max(e("120.0"),e("Value")+a+3)+10;g=max(e("+120.0"),e("Gain")+a+3)+8
 			if "real"in drop:m["real_x"]=None;m["val_x"]=x=m["name_x"]+m["name_w"]
 			else:m["real_x"]=m["name_x"]+m["name_w"];m["val_x"]=x=m["real_x"]+b
 			x+=b;m["bar_h"]=max(4,min(11,I(Kit.LINE_BLUE)[1]or 9));m["bar_w"]=bx
@@ -355,24 +355,25 @@ def _module_skills():
 				m[h]=x if c else None
 				if c:x+=i
 			m["lock_x"]=x;m["row_w"]=x+m["lock_w"]+6;m["sa_w"]=m["row_w"]+16;return m
+		def ay():return Kit.pitch(cn)
 		def b2():return 6 if p["tips"]else 5
-		def c6():
-			M,d=E,F;m=a0();k,f=Kit.screen();o=12+e("Find:")+6+a7+14+aj(max((v[1]for v in aD),key=e))+12+24+e("Groups")+12;q=12+sum(aj(w)for w in a1)+3*10+12;r=12+aj("Use")+12+aj("Make button")+12+aj("Next group")+12;s=I(ay[2])[0]or 12;t=12+3*(e("Int 125 (+25)")+8+s+14)+e("Stats 225 / 225")+12 if p["sec_stats"]else 0;a=max(m["sa_w"]+16,o,q,r,t,cp);g=a+2*M
+		def c7():
+			M,d=E,F;m=a0();k,f=Kit.screen();o=12+e("Find:")+6+a7+14+aj(max((v[1]for v in aD),key=e))+12+24+e("Groups")+12;q=12+sum(aj(w)for w in a1)+3*10+12;r=12+aj("Use")+12+aj("Make button")+12+aj("Next group")+12;s=I(ax[2])[0]or 12;t=12+3*(e("Int 125 (+25)")+8+s+14)+e("Stats 225 / 225")+12 if p["sec_stats"]else 0;a=max(m["sa_w"]+16,o,q,r,t,cq);g=a+2*M
 			if bK()>g:a=bK()-2*M
 			if k:a=max(g-2*M,min(a,k-2*M-10))
 			m=aL(a);L={"IW":a,"W":a+2*M,"min_w":g};y=M+30+d;l=(2 if p["sec_summary"]else 0)+(1 if p["sec_stats"]else 0);b=p["rows"]if al["rows"]is None else al["rows"]
-			for c,u,n in(("sum",l,6+24*l+4),("tool",True,36),("list",True,26+b*ax+6),("locks",p["sec_locks"],36),("detail",p["sec_detail"],6+24*b2()+4),("log",p["sec_log"],26+20*p["log_lines"]+4)):
+			for c,u,n in(("sum",l,6+24*l+4),("tool",True,36),("list",True,26+b*ay()+6),("locks",p["sec_locks"],36),("detail",p["sec_detail"],6+24*b2()+4),("log",p["sec_log"],26+20*p["log_lines"]+4)):
 				if u:L[c]=(y,n);y+=n+d
-			L["H"]=y-d+M;L["fixed_h"]=L["H"]-b*ax;h=aJ["rows"][0];L["min_h"]=L["fixed_h"]+h*ax
+			L["H"]=y-d+M;L["fixed_h"]=L["H"]-b*ay();h=aJ["rows"][0];L["min_h"]=L["fixed_h"]+h*ay()
 			if f and L["H"]>f-10 and b>h:
-				i=max(h,(f-10-L["fixed_h"])//ax)
+				i=max(h,(f-10-L["fixed_h"])//ay())
 				if i<b:
-					j=(b-i)*ax;L["list"]=(L["list"][0],L["list"][1]-j)
+					j=(b-i)*ay();L["list"]=(L["list"][0],L["list"][1]-j)
 					for c in("locks","detail","log"):
 						if c in L:L[c]=(L[c][0]-j,L[c][1])
 					L["H"]-=j;L["rows"]=i;return L
 			L["rows"]=b;return L
-		a1=tuple(dW[1]for dW in bC)
+		a1=tuple(dX[1]for dX in bC)
 		def bk(widths,gap,IW):
 			b,x,a=[],12,0
 			for c in widths:
@@ -382,15 +383,15 @@ def _module_skills():
 		def b3():
 			b=a0(by);a=[b["sa_w"]-max(0,b["name_w"]-a8)+16,12+e("Find:")+6+bz+2+12,12+aj(max((d[1]for d in aD),key=e))+12,12+24+e("Groups")+12]
 			if p["sec_summary"]:a+=[12+e("Session +99.9")+12,12+aj("Reset")+12]
-			if p["sec_stats"]:a.append(12+e("Int 125 (+25)")+8+(I(ay[2])[0]or 12)+4)
+			if p["sec_stats"]:a.append(12+e("Int 125 (+25)")+8+(I(ax[2])[0]or 12)+4)
 			if p["sec_locks"]:a.append(12+max(aj(f)for f in a1)+12)
-			if p["sec_detail"]:c=max(I(g)[0]for g in ay)or 12;a+=[12+a8+8+3*(c+10)+12,12+e("Target:")+8+56+12+e("none set")+4,12+max(aj("Make button"),aj("Next group"))+12]
+			if p["sec_detail"]:c=max(I(g)[0]for g in ax)or 12;a+=[12+a8+8+3*(c+10)+12,12+e("Target:")+8+56+12+e("none set")+4,12+max(aj("Make button"),aj("Next group"))+12]
 			return max(a)+2*E
 		def b4(w,h):
 			M,j=E,F;a=w-2*M;Z={"IW":a,"W":w,"H":h};c=[];l=0
 			if p["sec_summary"]:m=f1(p["total_cap"]);G="Total %s / %s   (%s free)   with bonuses %s"%(m,m,m,m);Z["total2"]=e(G)>a-24;H=a-12-aj("Reset");Z["sess_own"]=H-12-6<e("Session +99.9");l+=(2 if Z["total2"]else 1)+(2 if Z["sess_own"]else 1)
 			if p["sec_stats"]:
-				z=e("Int 125 (+25)")+8;A=I(ay[2])[0]or 12;k,b,f=[],12,0
+				z=e("Int 125 (+25)")+8;A=I(ax[2])[0]or 12;k,b,f=[],12,0
 				for N in range(3):
 					if b>12 and b+z+A>a-4:b,f=12,f+1
 					k.append((b,f));b+=z+A+14
@@ -404,9 +405,9 @@ def _module_skills():
 				if 12+B+12+o+12<=a:T["groups"],n=(a-12-o,1),2
 				else:T["groups"],n=(12,2),3
 			T["tx"]=g;Z["T"]=T;c.append(("tool",36+28*(n-1)));c.append(("list",None))
-			if p["sec_locks"]:Z["locks_p"],n=bk([aj(dW)for dW in a1],10,a);c.append(("locks",36+26*(n-1)))
+			if p["sec_locks"]:Z["locks_p"],n=bk([aj(dX)for dX in a1],10,a);c.append(("locks",36+26*(n-1)))
 			if p["sec_detail"]:
-				g=12+e("Target:")+8;t=g+56+12;u=a-12-aj("Unpin");v=u-t-6>=e("none set");C=["use","button"]+([]if v else["pin"])+["nextgrp"];J={"use":"Use","button":"Make button","pin":"Unpin","nextgrp":"Next group"};k,D=bk([aj(J[dX])for dX in C],12,a)
+				g=12+e("Target:")+8;t=g+56+12;u=a-12-aj("Unpin");v=u-t-6>=e("none set");C=["use","button"]+([]if v else["pin"])+["nextgrp"];J={"use":"Use","button":"Make button","pin":"Unpin","nextgrp":"Next group"};k,D=bk([aj(J[dY])for dY in C],12,a)
 				if D==1:k[-1]=(a-12-aj("Next group"),0)
 				Z["D"]={"tx":g,"tgt_x":t,"pin_here":v,"pin_x":u,"tgt_w":(u-6 if v else a-4)-t,"btns":list(zip(C,k))};c.append(("detail",6+24*(b2()+D)+4))
 			d=p["log_lines"]if p["sec_log"]else 0
@@ -414,19 +415,19 @@ def _module_skills():
 			def q(rows,d):
 				y=M+30+j
 				for b,a in c:
-					if b=="list":a=26+rows*ax+6
+					if b=="list":a=26+rows*ay()+6
 					elif b=="log":a=26+20*d+4
 					y+=a+j
 				return y-j+M
-			K=aJ["rows"][0];i=(h-q(0,d))//ax
-			while i<K and d>bB:d-=1;i=(h-q(0,d))//ax
-			Z["need"]=q(bA,min(d,bB)if p["sec_log"]else 0);Z["short"]=i<bA;i=max(1,i);Z["rows"],Z["log_n"]=i,d;L=max(26+i*ax+6,h-q(0,d)+32);y=M+30+j
+			K=aJ["rows"][0];i=(h-q(0,d))//ay()
+			while i<K and d>bB:d-=1;i=(h-q(0,d))//ay()
+			Z["need"]=q(bA,min(d,bB)if p["sec_log"]else 0);Z["short"]=i<bA;i=max(1,i);Z["rows"],Z["log_n"]=i,d;L=max(26+i*ay()+6,h-q(0,d)+32);y=M+30+j
 			for x,r in c:
 				if x=="list":r=L
 				elif x=="log":r=26+20*d+4
 				Z[x]=(y,r);y+=r+j
 			Z["H"]=y-j+M;return Z
-		def c7(w,h):
+		def c8(w,h):
 			a=b3();k=1. if w>=a else w/float(a);b,c,Z=w,h,None
 			for d in range(4):
 				b=w if k==1. else max(a,int(round(w/k)));c=h if k==1. else int(round(h/k));Z=b4(b,c)
@@ -442,7 +443,7 @@ def _module_skills():
 			if f is None:return
 			a=base or ""if e==txt else(("%s. %s"%(txt,base))if base else txt)
 			if a!=c.get(key+"_tip"):c[key+"_tip"]=a;safe(lambda:f.SetTooltip(a))
-		def c8(L):b=L["IW"];Z=dict(L,total2=False,sess_own=False,log_n=p["log_lines"]);c=e("Int 125 (+25)")+8+(I(ay[2])[0]or 12)+14;Z["stats"]=([(12+f*c,0)for f in range(3)],(12+3*c,0));a=12+e("Find:")+6;Z["T"]={"tx":a,"field":a7,"filter":(a+a7+14,0),"groups":(b-12-24-e("Groups"),0)};Z["locks_p"]=bk([aj(g)for g in a1],10,b)[0];a=12+e("Target:")+8;d=b-12-aj("Unpin");Z["D"]={"tx":a,"tgt_x":a+68,"pin_here":True,"pin_x":d,"tgt_w":d-6-(a+68),"btns":[("use",(12,0)),("button",(24+aj("Use"),0)),("nextgrp",(b-12-aj("Next group"),0))]};return Z
+		def c9(L):b=L["IW"];Z=dict(L,total2=False,sess_own=False,log_n=p["log_lines"]);c=e("Int 125 (+25)")+8+(I(ax[2])[0]or 12)+14;Z["stats"]=([(12+f*c,0)for f in range(3)],(12+3*c,0));a=12+e("Find:")+6;Z["T"]={"tx":a,"field":a7,"filter":(a+a7+14,0),"groups":(b-12-24-e("Groups"),0)};Z["locks_p"]=bk([aj(g)for g in a1],10,b)[0];a=12+e("Target:")+8;d=b-12-aj("Unpin");Z["D"]={"tx":a,"tgt_x":a+68,"pin_here":True,"pin_x":d,"tgt_w":d-6-(a+68),"btns":[("use",(12,0)),("button",(24+aj("Use"),0)),("nextgrp",(b-12-aj("Next group"),0))]};return Z
 		def b5(g,store,c,Z,k,zone=True):
 			aa=E;i=Z["IW"];a=aa;aL(i,zone=zone)
 			def n(key,x,y,w,hue=None,h=22,dy=0):
@@ -462,25 +463,25 @@ def _module_skills():
 				if p["sec_stats"]:
 					P=e("Int 125 (+25)")+8;ac,(R,tl)=Z["stats"];c["stats"]=[];c["stat_cats"],c["stat_tips"]=[],[None,None,None]
 					for o,nm in enumerate(("Str","Dex","Int")):
-						u,r=ac[o];C=d+24*r;ad=l(g,"",a+u,C+3);c["stat_cats"].append(K(g,a+u-2,C,P-4,22,ak("settings"),aP[o]));s=V(g,ay[0],a+u+P,C+5)
+						u,r=ac[o];C=d+24*r;ad=l(g,"",a+u,C+3);c["stat_cats"].append(K(g,a+u-2,C,P-4,22,ak("settings"),aP[o]));s=V(g,ax[0],a+u+P,C+5)
 						if s is not None:W(s,ak(("stat",o),dup=True));z(s,"Click: %s up, down or locked"%nm)
 						c["stats"].append((ad,s))
 					c["stat_total_w"]=i-4-R;c["stat_total"]=n("stat_total",a+R,d+24*tl+3,c["stat_total_w"],b)
-			f,m=Z["tool"];T=Z["T"];H(g,a,f,i,m);l(g,"Find:",a+12,f+10);c["search"]=z(N(g,j["search"],a+T["tx"],f+7,T["field"],numbers=False,font=max(8,int(round(16*k)))),"Type part of a skill name");c["search"].SetPlaceholder("search");fx,fl=T["filter"];c["filter"]=A(g,store,"filter",U,a+fx,f+7+28*fl,aD[p["filter"]][1],"Which skills to list (click: next)",on_click=ak("filter"));gx,gl=T["groups"];c["groups"]=Y(g,"Groups",a+gx,f+9+28*gl,p["groups"],"Show the client's skill groups (click one to fold it)");dc(g,c,a,Z["list"][0],i,Z["list"][1],Z["rows"])
+			f,m=Z["tool"];T=Z["T"];H(g,a,f,i,m);l(g,"Find:",a+12,f+10);c["search"]=z(N(g,j["search"],a+T["tx"],f+7,T["field"],numbers=False,font=max(8,int(round(16*k)))),"Type part of a skill name");c["search"].SetPlaceholder("search");fx,fl=T["filter"];c["filter"]=A(g,store,"filter",U,a+fx,f+7+28*fl,aD[p["filter"]][1],"Which skills to list (click: next)",on_click=ak("filter"));gx,gl=T["groups"];c["groups"]=Y(g,"Groups",a+gx,f+9+28*gl,p["groups"],"Show the client's skill groups (click one to fold it)");dd(g,c,a,Z["list"][0],i,Z["list"][1],Z["rows"])
 			if "locks"in Z:
 				f,m=Z["locks"];H(g,a,f,i,m)
 				for(q,F,G),(L,r)in zip(bC,Z["locks_p"]):A(g,store,q,J,a+L,f+7+26*r,F,G,on_click=ak(q))
 			if "detail"in Z:
-				f,m=Z["detail"];D=Z["D"];H(g,a,f,i,m);d=f+6;S=max(I(dW)[0]for dW in ay)or 12;X=a+i-12-3*(S+10);c["d_name_w"]=X-a-12-8;c["d_locks"]=[];c["d_name"]=n("d_name",a+12,d+3,c["d_name_w"],Q)
+				f,m=Z["detail"];D=Z["D"];H(g,a,f,i,m);d=f+6;S=max(I(dX)[0]for dX in ax)or 12;X=a+i-12-3*(S+10);c["d_name_w"]=X-a-12-8;c["d_locks"]=[];c["d_name"]=n("d_name",a+12,d+3,c["d_name_w"],Q)
 				for v in range(3):
-					t=V(g,ay[v],X+v*(S+10),d+5)
-					if t is not None:W(t,ak(("dlock",v),dup=True));z(t,cA[v])
+					t=V(g,ax[v],X+v*(S+10),d+5)
+					if t is not None:W(t,ak(("dlock",v),dup=True));z(t,cB[v])
 					c["d_locks"].append(t)
 				d+=24;c["d_lw"]=i-28;c["d_l1"]=n("d_l1",a+12,d+3,c["d_lw"]);d+=24;c["d_l2"]=n("d_l2",a+12,d+3,c["d_lw"],b);d+=24
 				if p["tips"]:c["d_tip"]=l(g,"",a+12,d+3,B);c["d_tip_cat"]=K(g,a+8,d,i-16,22,lambda:None,"Training tip for this skill's range");c["d_tip_full"]=None;d+=24
 				l(g,"Target:",a+12,d+3);c["target"]=z(N(g,"",a+D["tx"],d,56,numbers=False,font=max(8,int(round(16*k)))),"Real value to stop at (empty = none)");c["target"].SetPlaceholder("none");c["d_tgt_w"]=D["tgt_w"];c["d_tgt"]=n("d_tgt",a+D["tgt_x"],d+3,D["tgt_w"],b);d+=24
 				for q,(L,r)in([("pin",(D["pin_x"],-1))]if D["pin_here"]else[])+D["btns"]:
-					ae,F,G,af=cr[q];ag=A(g,store,q,ae,a+L,d-1+24*r,F,G,on_click=ak(af))
+					ae,F,G,af=cs[q];ag=A(g,store,q,ae,a+L,d-1+24*r,F,G,on_click=ak(af))
 					if q=="pin":c["pin"]=ag
 			if "log"in Z:
 				f,m=Z["log"];H(g,a,f,i,m,"RECENT GAINS");c["log"]=[];c["log_w"]=i-28
@@ -492,12 +493,12 @@ def _module_skills():
 			c,t["g"]=t["g"],None;aU.clear();j["desc"]=None;j["rebuild"]=None
 			if j["hidden"]:t.update({"c":{},"rows":[],"rowmap":{},"store":({},{})});ab(c);return
 			a=({},{});d={};j["resize_at"],j["preview"]=0.,False;t["L"]=None;L,Z=None,None;al["k"],al["full"]=1.,None
-			if j["minimized"]or j["docked"]:w,h=bD,cq
-			elif al["slot"]is not None:w,h=al["slot"];e,l,k,Z=c7(w,h)
-			else:L=c6();w,h=L["W"],L["H"];t["L"]=L
+			if j["minimized"]or j["docked"]:w,h=bD,cr
+			elif al["slot"]is not None:w,h=al["slot"];e,l,k,Z=c8(w,h)
+			else:L=c7();w,h=L["W"],L["H"];t["L"]=L
 			x,y=Kit.load_pos(bt,(160,120),(w,h))
 			if T(c):x,y=c.GetX(),c.GetY()
-			b=LAYOUT.placed.get(aw)if HOST.layout_holds(aw)else None
+			b=LAYOUT.spot(aw)if HOST.layout_holds(aw)else None
 			if b is not None:x,y=int(b[0]),int(b[1])
 			if Z is not None:
 				g=G.CreateGump(True,True);ad(g,e,l);ar(g,a,e,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,Z,k)
@@ -505,33 +506,33 @@ def _module_skills():
 			elif L is None:g=G.CreateGump(True,True);d["mini"]=Kit.mini_bar(g,a,w,h,aE,aw,ak("toggle_min"),close_tip=bl())
 			else:
 				if b is None:x,y=Kit.clamp(x,y,w,h)
-				g=G.CreateModernGump(x,y,w,h,True,L["min_w"],L["min_h"],da);g.SetAlpha(0);ad(g,w,h,mouse=False);ar(g,a,w,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,c8(L),1.,False)
-			i=Kit.show_window(g,x,y,w,h,aw,j["docked"],c4(g),bc,t,{"g":g,"c":d,"store":a,"rows":[],"rowmap":{},"w":e if Z is not None else w})
+				g=G.CreateModernGump(x,y,w,h,True,L["min_w"],L["min_h"],db);g.SetAlpha(0);ad(g,w,h,mouse=False);ar(g,a,w,aE,aw,ak("toggle_min"),ak("to_bar"),ak("settings"),close_tip=bl());b5(g,a,d,c9(L),1.,False)
+			i=Kit.show_window(g,x,y,w,h,aw,j["docked"],c5(g),bc,t,{"g":g,"c":d,"store":a,"rows":[],"rowmap":{},"w":e if Z is not None else w})
 			if b is not None and i is not None and tuple(i)!=(x,y):g.SetPos(x,y);Kit.note_rect(g,x,y);Kit.moved_by_code(g)
 			if b is not None:LAYOUT.fit_now(aw,g)
 			if p["minimized"]!=j["minimized"]:p["minimized"]=j["minimized"];aH()
 			bp();aI();bm(time.time());bo(time.time());ab(c)
-		dV=None;c9=Kit.dock_hooks(aE,cm,j,t,c5)
-		def da(*a):
+		dW=None;da=Kit.dock_hooks(aE,cm,j,t,c6)
+		def db(*a):
 			j["resize_at"]=time.time();g=t["g"];L=t.get("L")
 			if j["preview"]or L is None or not T(g)or j["minimized"]or j["docked"]:return
 			if al["width"]is None and(int(g.GetWidth()),int(g.GetHeight()))!=(L["W"],L["H"]):j["preview"]=True;g.SetAlpha(.55)
-		def db():
+		def dc():
 			g=t["g"];L=t.get("L");j["preview"]=False
 			if L is None or not T(g)or j["minimized"]or j["docked"]:return
 			if al["width"]is not None:g.SetAlpha(0);return
-			w,h=int(g.GetWidth()),int(g.GetHeight());c,d=aJ["rows"];a=max(c,min(d,(h-L["fixed_h"]+ax//2)//ax));b=w if w>L["min_w"]else 0
+			w,h=int(g.GetWidth()),int(g.GetHeight());c,d=aJ["rows"];a=max(c,min(d,(h-L["fixed_h"]+ay()//2)//ay()));b=w if w>L["min_w"]else 0
 			if a==L["rows"]and b==p["width"]and(w,h)==(L["W"],L["H"]):g.SetAlpha(0);return
 			if a!=p["rows"]or b!=p["width"]:p["rows"],p["width"]=a,b;aH();aN["sync"]=True
 			j["m"]=None;j["rebuild"]="window";aK()
-		def dc(g,c,j,a,IW,h,rows):
+		def dd(g,c,j,a,IW,h,rows):
 			m=aL();H(g,j,a,IW,h);d=j+8;c["hdr"]={};k=[("name","Skill",m["name_x"],"Sort by name"),("real","Real",m["real_x"],"Sort by real value without item bonuses"),("value","Value",m["val_x"],"Sort by value with bonuses"),("cap","Cap",m["cap_x"],"Sort by cap"),("gain","Gain",m["gain_x"],"Sort by gain this session")];n={"name":m["real_x"]or m["val_x"],"real":m["val_x"],"value":m["cap_x"]or m["bar_x"]or m["gain_x"]or m["lock_x"],"cap":m["bar_x"]or m["gain_x"]or m["lock_x"],"gain":m["lock_x"]}
 			for i,o,e,p in k:
 				if e is None:continue
 				c["hdr"][i]=l(g,o,d+e,a+6,b);K(g,d+e-2,a+3,(n[i]or e+40)-e-2,20,ak(("sort",i),dup=True),p+" (again to reverse)")
-			f=V(g,ay[2],d+m["lock_x"],a+7)
+			f=V(g,ax[2],d+m["lock_x"],a+7)
 			if f is not None:W(f,ak(("sort","lock"),dup=True));z(f,"Sort by lock (again to reverse)")
-			c["hdr"]["lock_pic"]=f;c["arrow"]=V(g,ay[1],d,a+8,mouse=False);c["sa"]=G.CreateGumpScrollArea(d,a+26,m["sa_w"],rows*ax);g.Add(c["sa"]);c["sa_xy"]=(d,a+26)
+			c["hdr"]["lock_pic"]=f;c["arrow"]=V(g,ax[1],d,a+8,mouse=False);c["sa"]=G.CreateGumpScrollArea(d,a+26,m["sa_w"],rows*ay());g.Add(c["sa"]);c["sa_xy"]=(d,a+26)
 		def b6(r,y):
 			if r["y"]==y:return
 			r["y"]=y;a=al["k"]
@@ -553,17 +554,17 @@ def _module_skills():
 			if "sa_xy"not in c:return
 			i=(j["ver"],O["ver"],int(now)if aD[p["filter"]][0]=="gaining"else 0)
 			if j["desc"]is not None and i==j["desc_key"]:return
-			j["desc_key"]=i;a=c2(now)
+			j["desc_key"]=i;a=c3(now)
 			if a==j["desc"]:return
 			j["desc"]=a;m=aL();e=c["sa"];v=len(t["rowmap"])+(0 if "selbox"in c else 1)+(0 if c.get("empty")else 1)
-			if "selbox"not in c:c["selbox"]=an(e,0,0,m["row_w"],ax-1,cv,cu);av(c["selbox"],"IsVisible",False)
+			if "selbox"not in c:c["selbox"]=an(e,0,0,m["row_w"],ay()-1,cw,cv);av(c["selbox"],"IsVisible",False)
 			f=""if a else("No skill matches; change the search or the filter."if q["n"]else "Waiting for the server to send your skills.")
 			if c.get("empty")is None and f:c["empty"]=l(e,f,m["name_x"],3,b)
 			if c.get("empty")is not None:n(c["empty"],f);av(c["empty"],"IsVisible",bool(f))
-			g=t["rowmap"];o,s,u=[],set(),{}
-			for w,d in enumerate(a):
-				h=w*ax;k=(d[0],d[1]);u[k]=x=u.get(k,-1)+1;k=(d[0],d[1],x);r=g.get(k)
-				if r is None:r=dd(e,h,d,m)if d[0]=="g"else de(e,h,d[1],m);g[k]=r
+			g=t["rowmap"];o,s,u=[],set(),{};w=ay()
+			for x,d in enumerate(a):
+				h=x*w;k=(d[0],d[1]);u[k]=y=u.get(k,-1)+1;k=(d[0],d[1],y);r=g.get(k)
+				if r is None:r=de(e,h,d,m)if d[0]=="g"else df(e,h,d[1],m);g[k]=r
 				else:b6(r,h);b7(r,True)
 				if d[0]=="g":av(r["arrow"],"Graphic",ba if d[2]else a9)
 				s.add(k);o.append(r)
@@ -575,18 +576,18 @@ def _module_skills():
 		def az(r,a,x,dy):
 			if a is not None:r["parts"].append((a,x,dy))
 			return a
-		def dd(tgt,a,d,m):c,e=d[1],d[2];r={"kind":"g","key":c,"y":a,"hidden":False,"parts":[],"sig":None};az(r,an(tgt,0,a+1,m["row_w"],ax-2,cx,cw),0,1);r["arrow"]=az(r,V(tgt,ba if e else a9,4,a+5,mouse=False),4,5);b0(r["arrow"],"Graphic",ba if e else a9);r["lbl"]=az(r,l(tgt,"",m["name_x"],a+3,Q),m["name_x"],3);r["real"]=az(r,l(tgt,"",m["real_x"],a+3,b),m["real_x"],3)if m["real_x"]is not None else None;r["val"]=az(r,l(tgt,"",m["val_x"],a+3,b),m["val_x"],3);r["gain"]=az(r,l(tgt,"",m["gain_x"],a+3,b),m["gain_x"],3)if m["gain_x"]is not None else None;az(r,K(tgt,0,a,m["row_w"],ax-1,ak(("fold",c),dup=True),"Fold or unfold this group"),0,0);return r
-		def de(tgt,a,i,m):
+		def de(tgt,a,d,m):c,e=d[1],d[2];r={"kind":"g","key":c,"y":a,"hidden":False,"parts":[],"sig":None};az(r,an(tgt,0,a+1,m["row_w"],ay()-2,cy,cx),0,1);r["arrow"]=az(r,V(tgt,ba if e else a9,4,a+5,mouse=False),4,5);b0(r["arrow"],"Graphic",ba if e else a9);r["lbl"]=az(r,l(tgt,"",m["name_x"],a+3,Q),m["name_x"],3);r["real"]=az(r,l(tgt,"",m["real_x"],a+3,b),m["real_x"],3)if m["real_x"]is not None else None;r["val"]=az(r,l(tgt,"",m["val_x"],a+3,b),m["val_x"],3);r["gain"]=az(r,l(tgt,"",m["gain_x"],a+3,b),m["gain_x"],3)if m["gain_x"]is not None else None;az(r,K(tgt,0,a,m["row_w"],ay()-1,ak(("fold",c),dup=True),"Fold or unfold this group"),0,0);return r
+		def df(tgt,a,i,m):
 			r={"kind":"s","i":i,"y":a,"hidden":False,"parts":[],"sig":None};r["name"]=az(r,l(tgt,b8(i,m),m["name_x"],a+3),m["name_x"],3);r["real"]=az(r,l(tgt,"",m["real_x"],a+3),m["real_x"],3)if m["real_x"]is not None else None;r["val"]=az(r,l(tgt,"",m["val_x"],a+3),m["val_x"],3);r["cap"]=az(r,l(tgt,"",m["cap_x"],a+3,b),m["cap_x"],3)if m["cap_x"]is not None else None;r["gain"]=az(r,l(tgt,"",m["gain_x"],a+3,o),m["gain_x"],3)if m["gain_x"]is not None else None;r["bar"]=None
 			if m["bar_x"]is not None:
-				d=(ax-m["bar_h"])//2;e=a+d
-				if I(Kit.LINE_RED)[0]>0:az(r,ac(tgt,Kit.LINE_RED,m["bar_x"],e,m["bar_w"],m["bar_h"],hue=ct),m["bar_x"],d)
+				d=(ay()-m["bar_h"])//2;e=a+d
+				if I(Kit.LINE_RED)[0]>0:az(r,ac(tgt,Kit.LINE_RED,m["bar_x"],e,m["bar_w"],m["bar_h"],hue=cu),m["bar_x"],d)
 				else:az(r,ac(tgt,Kit.SECTION_TILE,m["bar_x"],e,m["bar_w"],m["bar_h"],1.),m["bar_x"],d)
 				r["bar"]=az(r,ac(tgt,Kit.LINE_BLUE,m["bar_x"],e,1,m["bar_h"]),m["bar_x"],d)
-			f="Click: pick it (details below); double-click: its floating button"if q["click"][i]else "Click: pick it (details below)";r["cat"]=az(r,K(tgt,m["name_x"]-2,a,m["lock_x"]-m["name_x"]-2,ax-1,c3(i),f),m["name_x"]-2,0);r["tip0"]=r["cat_tip"]=f;r["use"]=None
+			f="Click: pick it (details below); double-click: its floating button"if q["click"][i]else "Click: pick it (details below)";r["cat"]=az(r,K(tgt,m["name_x"]-2,a,m["lock_x"]-m["name_x"]-2,ay()-1,c4(i),f),m["name_x"]-2,0);r["tip0"]=r["cat_tip"]=f;r["use"]=None
 			if q["click"][i]:c=G.CreateGumpButton("",B,aX[0],aX[1],aX[2]);c.SetPos(4,a+6);tgt.Add(c);W(c,ak(("use",i),dup=True));z(c,"Use "+q["names"][i]);r["use"]=az(r,c,4,6)
-			r["lock"]=az(r,V(tgt,ay[0],m["lock_x"],a+4),m["lock_x"],4);r["tip"]=None
-			if r["lock"]is not None:W(r["lock"],ak(("lock",i),dup=True));b0(r["lock"],"Graphic",ay[0])
+			r["lock"]=az(r,V(tgt,ax[0],m["lock_x"],a+4),m["lock_x"],4);r["tip"]=None
+			if r["lock"]is not None:W(r["lock"],ak(("lock",i),dup=True));b0(r["lock"],"Graphic",ax[0])
 			return r
 		def b8(i,m=None):
 			a=q["names"][i]if i<q["n"]else "?";m=m or aL()
@@ -601,17 +602,17 @@ def _module_skills():
 					if r["kind"]=="s"and r["i"]==b:y=r["y"];break
 			if y is None:av(a,"IsVisible",False)
 			else:av(a,"Pos",(0,y));av(a,"IsVisible",True)
-		def df(i,now):
+		def dg(i,now):
 			if j["hl"].get(i,0)>now:return o
 			if i in ao["pins"]:return Q
 			return B
-		def dg(now):
+		def dh(now):
 			s=q["cur"];v=q["n"];w=p["col_gain"];x=p["tips"];y=aL()["bar_w"]
 			for r in t["rows"]:
-				if r["kind"]=="g":di(r);continue
+				if r["kind"]=="g":dj(r);continue
 				i=r["i"]
 				if i>=v:continue
-				b,c,a,d=s[i];j=df(i,now);k=(b,c,a,d,aG(i)if w else 0,j)
+				b,c,a,d=s[i];j=dg(i,now);k=(b,c,a,d,aG(i)if w else 0,j)
 				if k==r["sig"]:continue
 				r["sig"]=k;n(r["name"],b8(i),j)
 				if r["real"]is not None:n(r["real"],f1(b),o if a and b>=a else B)
@@ -619,22 +620,22 @@ def _module_skills():
 				if r["cap"]is not None:n(r["cap"],f1(a))
 				if r["gain"]is not None:e=aG(i);n(r["gain"],("%+.1f"%(e/10.))if e else "",o if e>0 else u)
 				if r["lock"]is not None:
-					av(r["lock"],"Graphic",ay[d]);f="%s (click: %s)"%(bJ[d],bJ[(d+1)%3].lower())
+					av(r["lock"],"Graphic",ax[d]);f="%s (click: %s)"%(bJ[d],bJ[(d+1)%3].lower())
 					if r.get("tip")!=f:r["tip"]=f;z(r["lock"],f)
 				if x:
 					g=b_(i);h=r["tip0"]if g is None else "%s\n%s %s: %s"%(r["tip0"],q["names"][i],g[0],g[1])
 					if h!=r["cat_tip"]:r["cat_tip"]=h;z(r["cat"],h)
-				if r["bar"]is not None:m=int(y*min(1.,float(c)/a))if a>0 else 0;av(r["bar"],"Width",max(1,m));av(r["bar"],"IsVisible",m>0);av(r["bar"],"Graphic",cs if a and b>=a else Kit.LINE_BLUE)
+				if r["bar"]is not None:m=int(y*min(1.,float(c)/a))if a>0 else 0;av(r["bar"],"Width",max(1,m));av(r["bar"],"IsVisible",m>0);av(r["bar"],"Graphic",ct if a and b>=a else Kit.LINE_BLUE)
 		a3={"list":None,"n":-1,"mem":[]}
-		def dh(key):
+		def di(key):
 			if key=="pin":return "Pinned",[c for c in range(q["n"])if c in ao["pins"]]
 			if key=="other":
 				if a3["list"]is not O["list"]or a3["n"]!=q["n"]:a=O["of"];a3.update({"list":O["list"],"n":q["n"],"mem":[d for d in range(q["n"])if d not in a]})
 				return "Other",a3["mem"]
 			if isinstance(key,int)and key<len(O["list"]):g=O["list"][key];return g["name"]or "(no name)",g["members"]
 			return "?",[]
-		def di(r):
-			e,b=dh(r["key"]);m=aL();j=q["n"];k=q["cur"];c=d=a=0
+		def dj(r):
+			e,b=di(r["key"]);m=aL();j=q["n"];k=q["cur"];c=d=a=0
 			for i in b:
 				if i<j:
 					f=k[i];c+=f[0];d+=f[1]
@@ -645,7 +646,7 @@ def _module_skills():
 			if r["real"]is not None:n(r["real"],f1(c))
 			n(r["val"],f1(d))
 			if r["gain"]is not None:n(r["gain"],("%+.1f"%(a/10.))if a else "")
-		def dj():
+		def dk():
 			c=t["c"];h=c.get("hdr")
 			if not h:return
 			m=aL();s=p["sort"];i=(s,p["asc"],m);d=c.get("hdr_k")
@@ -659,7 +660,7 @@ def _module_skills():
 			if s=="lock":k=j+m["lock_x"]-m["arrow_w"]-3
 			elif f.get(s,(None,None))[1]is not None:o,q=f[s];k=j+q+e(o)+3
 			else:av(a,"IsVisible",False);return
-			r=c["sa_xy"][1]-26;av(a,"Pos",(k,r+8));av(a,"Graphic",ay[0]if p["asc"]else ay[1]);av(a,"IsVisible",True)
+			r=c["sa_xy"][1]-26;av(a,"Pos",(k,r+8));av(a,"Graphic",ax[0]if p["asc"]else ax[1]);av(a,"IsVisible",True)
 		a4={}
 		def bo(now):
 			c=t["c"]
@@ -670,7 +671,7 @@ def _module_skills():
 				a="%s: %s / %s %+.1f"%(aE,f1(g),f1(p["total_cap"]),bg()/10.)
 				if not j["ready"]:a="%s: waiting for your skills"%aE
 				n(c["mini"],C(a,bD-90),u if p["cap_warn"]and j["warned_cap"]else b);return
-			dj();dg(now);bn();w=t.get("w",400)-2*E-24
+			dk();dh(now);bn();w=t.get("w",400)-2*E-24
 			if c.get("total")is not None:
 				K=sum(Z[1]for Z in q["cur"]);L=p["total_cap"]-g
 				if j["warned_cap"]:h="Total %s / %s: at the cap"%(f1(g),f1(p["total_cap"]));i,A="set a skill to go down",", ";l=u
@@ -684,16 +685,16 @@ def _module_skills():
 			if c.get("stats"):
 				M=ah["stats"]or X["cur"];m=bh();G,H=c.get("stat_cats")or(),c.get("stat_tips")
 				for k,(r,N)in enumerate(c["stats"]):
-					I=X["cur"][k];f=I-M[k]if ah["stats"]else 0;n(r,"%s %d%s"%(("Str","Dex","Int")[k],I,(" (%+d)"%f)if f else ""),o if f>0 else B);av(N,"Graphic",ay[X["locks"][k]])
+					I=X["cur"][k];f=I-M[k]if ah["stats"]else 0;n(r,"%s %d%s"%(("Str","Dex","Int")[k],I,(" (%+d)"%f)if f else ""),o if f>0 else B);av(N,"Graphic",ax[X["locks"][k]])
 					if k<len(G):
-						d=c0(k,m)
+						d=c1(k,m)
 						if d!=H[k]:H[k]=d;z(G[k],d)
 				x=sum(X["cur"]);s=X["cap"];a=("Stats %d / %d"%(x,s))if s else("Stats %d"%x);e=(a_(0)+a_(1)+a_(2))if ah["stats"]else 0
 				if e:
 					J="%s   %+d (%.1f / hour)"%(a,e,e/m)
 					if Kit.text_px(J)<=c["stat_total_w"]:a=J
 				aC(c,"stat_total",a,c["stat_total_w"],o if s and x>=s else b)
-			dk(now)
+			dl(now)
 			if c.get("log")is not None:
 				y=j["log"][-len(c["log"]):][::-1]
 				for k,r in enumerate(c["log"]):
@@ -705,7 +706,7 @@ def _module_skills():
 							a4[v]=a
 						aC(c,"log%d"%k,a,c["log_w"],o if f>0 else u,lbl=r)
 					else:aC(c,"log%d"%k,"No gains yet this session."if k==0 and not y else "",c["log_w"],b,lbl=r)
-		def dk(now):
+		def dl(now):
 			c=t["c"]
 			if c.get("d_name")is None:return
 			i=j["sel"]
@@ -718,7 +719,7 @@ def _module_skills():
 				return
 			a,l,g,w=q["cur"][i];m=bd(i);r=O["list"][m]["name"]if m is not None else "";aC(c,"d_name",q["names"][i]+("   (%s)"%r if r else ""),c["d_name_w"],Q)
 			for x,f in enumerate(c["d_locks"]):av(f,"Hue",0 if x==w else bF)
-			s=l-a;y="Real %s   Value %s%s   Cap %s   %s"%(f1(a),f1(l),(" (%+.1f)"%(s/10.))if s else "",f1(g),("To cap %s"%f1(g-a))if a<g else "At cap");aC(c,"d_l1",y,c["d_lw"],B);u=bZ(i,now);A,D=u;E="Session %+.1f   %.1f / hour   last %d min %.1f / hour   cap %s"%(aG(i)/10.,A/10.,p["rate_min"],D/10.,cV(i,now,u));aC(c,"d_l2",E,c["d_lw"],b)
+			s=l-a;y="Real %s   Value %s%s   Cap %s   %s"%(f1(a),f1(l),(" (%+.1f)"%(s/10.))if s else "",f1(g),("To cap %s"%f1(g-a))if a<g else "At cap");aC(c,"d_l1",y,c["d_lw"],B);u=bZ(i,now);A,D=u;E="Session %+.1f   %.1f / hour   last %d min %.1f / hour   cap %s"%(aG(i)/10.,A/10.,p["rate_min"],D/10.,cW(i,now,u));aC(c,"d_l2",E,c["d_lw"],b)
 			if c.get("d_tip")is not None:
 				v=b_(i)
 				if v is not None:e,d="Tip %s: %s"%v,B
@@ -736,7 +737,7 @@ def _module_skills():
 			c=t["c"];a=c.get("target")
 			if a is None:j["tgt_shown"]=None;return
 			i=j["sel"];b=f1(ao["targets"][i])if i is not None and i in ao["targets"]else "";a.SetText(b);j["tgt_shown"]=(i,b)
-		def dl(now):
+		def dm(now):
 			d=t["c"];b=False;e=d.get("search")
 			if e is not None:
 				try:q=str(e.Text or "").strip().lower()
@@ -765,18 +766,18 @@ def _module_skills():
 					if c:aI(True)
 					b=True
 			return b
-		def dm():
+		def dn():
 			try:
 				a=VG["gumps"]
 				if a is None:a=VG["gumps"]=Tz.get(None,"Gumps",Tz.T("ClassicUO.Game.Managers.UIManager"))
 				return(int(a.Count),a.First)
 			except Exception:VG["gumps"]=None;return
-		dn=3.
+		do=3.
 		def bq():
 			if not p["replace"]and time.time()>j["swallow_until"]:return
-			b=time.time();a=dm()
+			b=time.time();a=dn()
 			if a is not None and a==VG["sig"]and b<VG["full_at"]:return
-			VG["sig"],VG["full_at"]=a,b+dn;VG["gumps"]=None;c=safe(lambda:Tz.windows(cl),[])or[]
+			VG["sig"],VG["full_at"]=a,b+do;VG["gumps"]=None;c=safe(lambda:Tz.windows(cl),[])or[]
 			if not c:return
 			VG["sig"]=None
 			for d in c:d.Dispose()
@@ -789,7 +790,7 @@ def _module_skills():
 				if a is not None:Tz.call(None,"MakeTopMostGump",[a],Tz.T("ClassicUO.Game.Managers.UIManager"))
 		def b9(key,text):
 			a=time.time()
-			if a-j["arm"].get(key,0.)<=cy:j["arm"].pop(key,None);return True
+			if a-j["arm"].get(key,0.)<=cz:j["arm"].pop(key,None);return True
 			j["arm"][key]=a;af(text,b);return False
 		def a5(v,a=False):
 			n=0
@@ -798,14 +799,14 @@ def _module_skills():
 				if a and not(c and d>=c):continue
 				if e!=v:aW(i,v);n+=1
 			af("%s %s."%(aa(n,"skill"),("set to go up","set to go down","locked")[v]),o if n else b)
-		def do(k):
+		def dp(k):
 			if k>=len(aA):return
 			a,b=aA[k];n=0
 			for i,c in enumerate(b[:q["n"]]):
 				v="udl".find(c)
 				if v>=0 and q["cur"][i][3]!=v:aW(i,v);n+=1
 			af("lock set \"%s\" put on (%d change%s)."%(a,n,""if n==1 else "s"),o)
-		def dp(name):
+		def dq(name):
 			name=re.sub(r"[|=;]","",name or "").strip()[:24]
 			if not name:name="Set %d"%(len(aA)+1)
 			a="".join("udl"[d[3]]for d in q["cur"])
@@ -815,7 +816,7 @@ def _module_skills():
 				if len(aA)>=bE:af("at most %d lock sets: delete one first."%bE,u);return
 				aA.append((name,a))
 			bN();af("lock set \"%s\" saved."%name,o)
-		def dq(i):
+		def dr(i):
 			aI(True)
 			if i is None or not O["list"]:af("couldn't move the skill (the client's skill groups can't be read).",u);return
 			a=bd(i);b=0 if a is None else(a+1)%len(O["list"])
@@ -824,25 +825,25 @@ def _module_skills():
 				if a is not None:O["list"][a]["obj"].Remove(System.Byte(i))
 				O["list"][b]["obj"].Add(System.Byte(i));aO();af("%s moved to %s."%(q["names"][i],O["list"][bd(i)or 0]["name"]),o)
 			except Exception as c:af("couldn't move it (%s)."%Tz.why(c),u)
-		def dr():
+		def ds():
 			a=aV()
 			try:import System;g=System.Activator.CreateInstance(Tz.T("ClassicUO.Game.Managers.SkillsGroup"));g.Name="New group";g.IsMaximized=True;a.Add(g);aO()
 			except Exception as b:af("couldn't add a group (%s)."%Tz.why(b),u)
-		def ds(gi):
+		def dt(gi):
 			aI(True)
 			if gi<=0 or gi>=len(O["list"]):return
 			a=aV();b=O["list"][gi]["name"]
 			if safe(lambda:a.Remove(O["list"][gi]["obj"]),False):aO();af("group \"%s\" deleted; its skills went to \"%s\"."%(b,O["list"][0]["name"]if O["list"]else "the first group"),o)
-		def dt():
+		def du():
 			a=aV()
 			try:a.MakeDefault();aO();af("skill groups reset to the default ones.",o)
 			except Exception as b:af("couldn't reset the groups (%s)."%Tz.why(b),u)
-		def du():
+		def dv():
 			b=API.Player;f=ap("Skills_%08X.txt"%int(b.Serial));c=time.time();d=["Skill sheet - %s - %s"%(b.Name or "",time.strftime("%Y-%m-%d %H:%M",time.localtime(c))),"Total %s / %s   (with bonuses %s)"%(f1(bj()),f1(p["total_cap"]),f1(sum(m[1]for m in q["cur"]))),"Str %d  Dex %d  Int %d   (stat cap %d)"%(X["cur"][0],X["cur"][1],X["cur"][2],X["cap"]),"Session %+.1f in %s"%(bg()/10.,bi(c-ah["start"])),"","%-26s %7s %7s %7s %8s  %s"%("Skill","Real","Value","Cap","Session","Lock")]
 			for a in sorted(range(q["n"]),key=lambda i:q["names"][i].lower()):g,v,h,k=q["cur"][a];e=aG(a);d.append("%-26s %7s %7s %7s %8s  %s"%(q["names"][a],f1(g),f1(v),f1(h),("%+.1f"%(e/10.))if e else "",aT[k]))
 			j["to_write"].append((f,"\n".join(d)+"\n"))
 		def ca():au(j["to_write"],aE,"skill sheet")
-		def dv():return bool(j["to_write"])
+		def dw():return bool(j["to_write"])
 		def cb(i):
 			if j["sel"]!=i:
 				j["sel"]=i;bp()
@@ -854,33 +855,33 @@ def _module_skills():
 		def cc(a):
 			if not isinstance(a,tuple):return a,None
 			return a[0],a[1]if len(a)>1 else None
-		def dw(a):j["minimized"]=not(j["minimized"]or j["docked"]);j["docked"]=False;safe(lambda:HOST.dock_forget(aw));p["minimized"]=j["minimized"];aH();j["rebuild"]="window"
-		def dx(b):
+		def dx(a):j["minimized"]=not(j["minimized"]or j["docked"]);j["docked"]=False;safe(lambda:HOST.dock_forget(aw));p["minimized"]=j["minimized"];aH();j["rebuild"]="window"
+		def dz(b):
 			p["filter"]=(p["filter"]+1)%len(aD);aH();a=t["c"].get("filter")
 			if a is not None:n(a,aD[p["filter"]][1])
-		def dz(a):
+		def dA(a):
 			if p["sort"]==a:p["asc"]=not p["asc"]
 			else:p["sort"]=a;p["asc"]=a=="name"
 			aH()
-		def dA(a):
-			i=a if a is not None else j["sel"]
-			if a6(i):cU(i)
 		def dB(a):
+			i=a if a is not None else j["sel"]
+			if a6(i):cV(i)
+		def dC(a):
 			if not isinstance(a,int):j["pc"][a]=not j["pc"].get(a,False)
 			elif a<len(O["list"]):g=O["list"][a];g["obj"].IsMaximized=g["max"]=not g["max"]
-		def dC(b):
+		def dD(b):
 			a=j["sel"]
 			if a6(a):ao["pins"]^={a};bM()
-		def dD(a):
+		def dE(a):
 			if bW():af("asked the server for your skills.",b)
 			else:af("couldn't ask the server (the client's skills call failed).",u)
-		def dE(a):
+		def dF(a):
 			if a<len(aA):n=aA.pop(a)[0];bN();af("lock set \"%s\" deleted."%n,b)
 			D(aw)
-		def dF(a):
-			if b9("grp_reset","click Reset groups again for the default groups."):dt();D(aw)
-		cd={"settings":lambda a:am(aw),"to_bar":lambda a:HOST.dock_to_bar(aw,aE),"pick":cb,"stat":lambda a:bf(a,(X["locks"][a]+1)%3),"all_up":lambda a:a5(0),"all_locked":lambda a:a5(2),"lock_capped":lambda a:a5(2,True),"export":lambda a:du(),"ls_save":lambda a:(dp(a),D(aw)),"ls_apply":do,"grp_new":lambda a:(dr(),D(aw)),"grp_del":lambda a:(ds(a),D(aw)),"grp_save":lambda a:aO(),"toggle_min":dw,"filter":dx,"sort":dz,"button":lambda a:(cb(a),bV(a)),"mkbutton":lambda a:a6(j["sel"])and bV(j["sel"]),"use":dA,"lock":lambda a:a is not None and a<q["n"]and aW(a,(q["cur"][a][3]+1)%3),"dlock":lambda a:j["sel"]is not None and aW(j["sel"],a),"fold":dB,"pin":dC,"nextgrp":lambda a:a6(j["sel"])and dq(j["sel"]),"all_down":lambda a:b9("all_down","click All down again to set every listed skill to go down.")and a5(1),"newsess":lambda a:(cR(),af("new session; gains count from now.",o)),"ask":dD,"ls_del":dE,"grp_reset":dF};dG=[("replace","Replace the client's skills window","The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),("x_hides","Close only hides it","Off: Close turns Skills off"),("bars","Progress bar per skill (value / cap)","Filled to value / cap; green at the cap"),("col_cap","Cap column","Each skill's cap"),("col_gain","Session gain column","What each skill gained this session"),("journal","Journal line for each gain or loss","The client may print its own line too (its Options)"),("lock_at_cap","Lock a skill when it reaches its cap","A rising skill locks the moment it hits its cap"),("lock_at_target","Lock a skill when it reaches its target","Set targets in the window's details"),("cap_warn","Warn at the total cap when no skill is set to go down","Journal warning and a red total when nothing can rise"),("tips","Training tips in the details and row tooltips","Classic-era advice for the skill's range")];ce=[("rows","Rows in the list:",False,"Skills shown at once (or drag a window corner)"),("total_cap","Total skill cap:",True,"The shard's total skill cap (check it in game)"),("hl_secs","Green name after a gain (s):",False,"Seconds a name stays green after a gain (0 = never)"),("rate_min","Recent pace over (minutes):",False,"Minutes the recent rate and time to cap look back")];dH=[("sec_summary","Totals and session","Total skill points and the session line"),("sec_stats","Str / Dex / Int","Stats, lock arrows and the stat cap"),("sec_locks","Lock buttons","All up, All down, All locked and Lock capped"),("sec_detail","Picked skill details","Rates, target, pin and the Use button"),("sec_log","Recent gains","The last gains, newest first")];dI="Export writes a text file to the VirtueAssistantSettings folder.";dJ="Drag a window corner: height sets the rows, width spreads the columns.";dK=("A stat set to go up locks when it rises to its target, one set to go down when it falls to it. The window's stat tooltips show gains per hour.")
-		def dL(w):
+		def dG(a):
+			if b9("grp_reset","click Reset groups again for the default groups."):du();D(aw)
+		cd={"settings":lambda a:am(aw),"to_bar":lambda a:HOST.dock_to_bar(aw,aE),"pick":cb,"stat":lambda a:bf(a,(X["locks"][a]+1)%3),"all_up":lambda a:a5(0),"all_locked":lambda a:a5(2),"lock_capped":lambda a:a5(2,True),"export":lambda a:dv(),"ls_save":lambda a:(dq(a),D(aw)),"ls_apply":dp,"grp_new":lambda a:(ds(),D(aw)),"grp_del":lambda a:(dt(a),D(aw)),"grp_save":lambda a:aO(),"toggle_min":dx,"filter":dz,"sort":dA,"button":lambda a:(cb(a),bV(a)),"mkbutton":lambda a:a6(j["sel"])and bV(j["sel"]),"use":dB,"lock":lambda a:a is not None and a<q["n"]and aW(a,(q["cur"][a][3]+1)%3),"dlock":lambda a:j["sel"]is not None and aW(j["sel"],a),"fold":dC,"pin":dD,"nextgrp":lambda a:a6(j["sel"])and dr(j["sel"]),"all_down":lambda a:b9("all_down","click All down again to set every listed skill to go down.")and a5(1),"newsess":lambda a:(cS(),af("new session; gains count from now.",o)),"ask":dE,"ls_del":dF,"grp_reset":dG};dH=[("replace","Replace the client's skills window","The paperdoll's Skills button, the Skills macro and the Action Bar open this one"),("x_hides","Close only hides it","Off: Close turns Skills off"),("bars","Progress bar per skill (value / cap)","Filled to value / cap; green at the cap"),("col_cap","Cap column","Each skill's cap"),("col_gain","Session gain column","What each skill gained this session"),("journal","Journal line for each gain or loss","The client may print its own line too (its Options)"),("lock_at_cap","Lock a skill when it reaches its cap","A rising skill locks the moment it hits its cap"),("lock_at_target","Lock a skill when it reaches its target","Set targets in the window's details"),("cap_warn","Warn at the total cap when no skill is set to go down","Journal warning and a red total when nothing can rise"),("tips","Training tips in the details and row tooltips","Classic-era advice for the skill's range")];ce=[("rows","Rows in the list:",False,"Skills shown at once (or drag a window corner)"),("total_cap","Total skill cap:",True,"The shard's total skill cap (check it in game)"),("hl_secs","Green name after a gain (s):",False,"Seconds a name stays green after a gain (0 = never)"),("rate_min","Recent pace over (minutes):",False,"Minutes the recent rate and time to cap look back")];dI=[("sec_summary","Totals and session","Total skill points and the session line"),("sec_stats","Str / Dex / Int","Stats, lock arrows and the stat cap"),("sec_locks","Lock buttons","All up, All down, All locked and Lock capped"),("sec_detail","Picked skill details","Rates, target, pin and the Use button"),("sec_log","Recent gains","The last gains, newest first")];dJ="Export writes a text file to the VirtueAssistantSettings folder.";dK="Drag a window corner: height sets the rows, width spreads the columns.";dL=("A stat set to go up locks when it rises to its target, one set to go down when it falls to it. The window's stat tooltips show gains per hour.")
+		def dM(w):
 			aI(O["sig"]is None);h=len(O["list"])if O["ok"]else 1;i=(w-24)//2
 			def c(text,dy):return[("note",f,{"ndy":dy,"h":18})for f in Kit.wrap(text,w-24)]
 			def j(k,text,dec,tip):
@@ -906,16 +907,16 @@ def _module_skills():
 					f.c["grp"].append((i,d,e["name"]));a+=28
 				if O["ok"]and not O["list"]:a+=28
 				A(g,c,"grp_new",J,x+12,a-1,"New group","Add an empty group (Next group in the window moves skills in)");A(g,c,"grp_reset",M,x+12+aj("New group")+16,a-1,"Reset groups","Put back the client's default groups (click twice)")
-			d,g=aJ["log_lines"];a={"ch":24,"pad":6};return(("WINDOW",[("check",)+v for v in dG]+[j(*y)for y in ce]+c(dJ,2),a),("SECTIONS  (what the window shows)",[("check",)+L+({"stay":G%2==0 and G<4,"dx":12+(G%2)*i},)for G,L in enumerate(dH)]+[("num","log_lines","Recent gains lines:","Lines the Recent gains part shows (%d-%d)"%(d,g),None,d,g)],a),("STAT TARGETS",[("custom",28,m),("check","lock_stat_target","Lock a stat when it reaches its target","Off: only a journal line when it gets there")]+c(dK,2),a),("LOCK SETS  (saved locks)",(("custom",28+max(1,len(aA))*26,n),),a),("GROUPS  (the client's skill groups)",(("custom",max(1,h)*28+28,o),),a),("TOOLS",[("buttons",(("export",P,"Export sheet","Write every skill's values to a file in the VirtueAssistantSettings folder"),("ask",P,"Ask server","Ask the server for fresh skill values"),("newsess",P,"New session","Start a new session: gains count from now")))]+c(dI,0),dict(a,bdy=-1,bgap=16)))
+			d,g=aJ["log_lines"];a={"ch":24,"pad":6};return(("WINDOW",[("check",)+v for v in dH]+[j(*y)for y in ce]+c(dK,2),a),("SECTIONS  (what the window shows)",[("check",)+L+({"stay":G%2==0 and G<4,"dx":12+(G%2)*i},)for G,L in enumerate(dI)]+[("num","log_lines","Recent gains lines:","Lines the Recent gains part shows (%d-%d)"%(d,g),None,d,g)],a),("STAT TARGETS",[("custom",28,m),("check","lock_stat_target","Lock a stat when it reaches its target","Off: only a journal line when it gets there")]+c(dL,2),a),("LOCK SETS  (saved locks)",(("custom",28+max(1,len(aA))*26,n),),a),("GROUPS  (the client's skill groups)",(("custom",max(1,h)*28+28,o),),a),("TOOLS",[("buttons",(("export",P,"Export sheet","Write every skill's values to a file in the VirtueAssistantSettings folder"),("ask",P,"Ask server","Ask the server for fresh skill values"),("newsess",P,"New session","Start a new session: gains count from now")))]+c(dJ,0),dict(a,bdy=-1,bgap=16)))
 		def cf():
 			if p["width"]:return "Width: %d px (drag a corner)"%p["width"]
 			return "Width: natural (drag a corner)"
-		def dM(ctrl,default,lo,hi,dec):
+		def dN(ctrl,default,lo,hi,dec):
 			try:a=str(ctrl.Text or "").strip()
 			except Exception:a=""
 			try:v=int(round(float(a.replace(",","."))*10))if dec else int(a);return max(lo,min(hi,v))
 			except(ValueError,OverflowError):return default
-		def dN(f):
+		def dO(f):
 			c=f.c;aN["skip"]=aN["sync"]
 			if aN["sync"]:
 				aN["sync"]=False;b=c["num"].get("rows")
@@ -934,14 +935,14 @@ def _module_skills():
 				elif a.startswith(("ls_apply_","ls_del_","grp_del_")):i,l,k=a.rpartition("_");ak.add((i,int(k)),dup=True)
 				else:ak.add((a,),dup=True)
 				HOST.poke()
-		def dO(f,new):
+		def dP(f,new):
 			if aN["skip"]:new.update(p);return
-			for k,a in f.c["num"].items():b,c=aJ[k];new[k]=dM(a,p[k],b,c,k=="total_cap")
-		def dP(a,new):
+			for k,a in f.c["num"].items():b,c=aJ[k];new[k]=dN(a,p[k],b,c,k=="total_cap")
+		def dQ(a,new):
 			aK()
-			if any(new[c]!=a[c]for c in cD):j["m"]=None;j["rebuild"]="window"
+			if any(new[c]!=a[c]for c in cE):j["m"]=None;j["rebuild"]="window"
 			j["warned_cap"]=False;j["cap_at"]=0.
-		aM=Kit.Page(p,dL,aH,dP,adjust=dO,clicks=dN);dQ=.8
+		aM=Kit.Page(p,dM,aH,dQ,adjust=dP,clicks=dO);dR=.8
 		def cg(c,final):
 			b=time.time()
 			for k,e in enumerate(c.get("stat_tgt")or()):
@@ -950,12 +951,12 @@ def _module_skills():
 					try:a=str(e[0].Text or "").strip()
 					except Exception:continue
 					if a!=e[2]:e[2],e[3]=a,b;continue
-				if a==e[1]or(not final and b-e[3]<dQ):continue
+				if a==e[1]or(not final and b-e[3]<dR):continue
 				e[1]=a
 				if a and not a.isdigit():continue
 				v=max(0,min(bb,int(a)))if a else 0
-				if v!=aB[k]:aB[k]=v;S(bI,",".join(str(d)for d in aB));aK();c_(k)
-		def dR():
+				if v!=aB[k]:aB[k]=v;S(bI,",".join(str(d)for d in aB));aK();c0(k)
+		def dS():
 			if aM.f is not None:cg(aM.f.c,True)
 			aM.closed();aN["sync"]=False
 			if j.get("grp_dirty_at"):j["grp_dirty_at"]=0.;ak.add(("grp_save",),dup=True)
@@ -965,18 +966,18 @@ def _module_skills():
 			if ah["stats"]is None and any(X["cur"]):ah["stats"]=list(X["cur"])
 		def ci():g,t["g"]=t["g"],None;t.update({"c":{},"rows":[],"rowmap":{}});aU.clear();ab(g)
 		bL();bO()
-		def dS():
-			j.update({"shutting":False,"docked":False,"hidden":False,"queue":[],"rebuild":None,"desc":None,"m":None,"ready":False,"asked":0.,"swallow_until":0.,"warned_cap":False,"hl":{},"log":[],"gains":{},"started":time.time(),"ref_at":0.,"grp_at":0.,"tgt_shown":None,"stat_pending":{},"dirty":True,"redraw_at":0.,"desc_key":None,"cap_at":0.,"resize_at":0.,"grp_dirty_at":0.,"read_at":0.,"stats_at":0.});VG.update({"gumps":None,"sig":None,"full_at":0.});bL();cO();cP();bO();cQ();j["minimized"]=p["minimized"]or HOST.dock_wanted(aw);bQ(True);bS();bT();aI(True)
-			if bU():ch()
-			al.update({"width":None,"rows":None,"slot":None,"k":1.,"full":None});a2();bp();HOST.dock_add(aw,dict(c9,on=br,show=br,fit=cM,exact=True,verify=True,drawn_at=cN))
-			if p["replace"]:bq()
 		def dT():
+			j.update({"shutting":False,"docked":False,"hidden":False,"queue":[],"rebuild":None,"desc":None,"m":None,"ready":False,"asked":0.,"swallow_until":0.,"warned_cap":False,"hl":{},"log":[],"gains":{},"started":time.time(),"ref_at":0.,"grp_at":0.,"tgt_shown":None,"stat_pending":{},"dirty":True,"redraw_at":0.,"desc_key":None,"cap_at":0.,"resize_at":0.,"grp_dirty_at":0.,"read_at":0.,"stats_at":0.});VG.update({"gumps":None,"sig":None,"full_at":0.});bL();cP();cQ();bO();cR();j["minimized"]=p["minimized"]or HOST.dock_wanted(aw);bQ(True);bS();bT();aI(True)
+			if bU():ch()
+			al.update({"width":None,"rows":None,"slot":None,"k":1.,"full":None});a2();bp();HOST.dock_add(aw,dict(da,on=br,show=br,fit=cN,exact=True,verify=True,drawn_at=cO))
+			if p["replace"]:bq()
+		def dU():
 			a=time.time()
 			if t["g"]is not None and at(t["store"],"close"):
 				if p["x_hides"]:j["hidden"]=True;bc();ci();af("hidden; %s brings it back."%("the client's or the Action Bar's Skills button"if p["replace"]else "the Action Bar's Skills button (or Skills off and on in the Modules tab)"),b)
 				else:ab(t["g"]);return
-			if j["resize_at"]and a-j["resize_at"]>=co and not safe(lambda:SNAP.pressed(),False):j["resize_at"]=0.;db()
-			if j["grp_dirty_at"]and a-j["grp_dirty_at"]>=cE:j["grp_dirty_at"]=0.;aO()
+			if j["resize_at"]and a-j["resize_at"]>=cp and not safe(lambda:SNAP.pressed(),False):j["resize_at"]=0.;dc()
+			if j["grp_dirty_at"]and a-j["grp_dirty_at"]>=cF:j["grp_dirty_at"]=0.;aO()
 			i=q["n"]
 			if not bQ():
 				while j["queue"]:
@@ -989,15 +990,15 @@ def _module_skills():
 			if q["n"]!=i:j["rebuild"]="window"
 			d,g={},False
 			if not(j["ready"]and(t["g"]is None or not t["c"]or j["minimized"]or j["docked"])and a<j["read_at"]):
-				j["read_at"]=a+cI;d=bS(not j["ready"])
-				if j["stat_pending"]or a>=j["stats_at"]or not j["ready"]:j["stats_at"]=a+cJ;g=bT()
-			if d:cL()
+				j["read_at"]=a+cJ;d=bS(not j["ready"])
+				if j["stat_pending"]or a>=j["stats_at"]or not j["ready"]:j["stats_at"]=a+cK;g=bT()
+			if d:cM()
 			elif g:j["dirty"]=True
 			if not j["ready"]:
 				if bU():ch();aY();j["rebuild"]=j["rebuild"]or "rows"
 				elif a-j["started"]>3. and not j["asked"]:bW()
-			elif d:cW(d,a)
-			if g and j["ready"]and(aB[0]or aB[1]or aB[2]):cZ()
+			elif d:cX(d,a)
+			if g and j["ready"]and(aB[0]or aB[1]or aB[2]):c_()
 			if j["ready"]and ah["stats"]is None and any(X["cur"]):ah["stats"]=list(X["cur"])
 			aI();h=bool(j["queue"])
 			if h:aK()
@@ -1005,23 +1006,23 @@ def _module_skills():
 				e,f=cc(j["queue"].pop(0));c=cd.get(e)
 				if c is not None:c(f)
 			if d or h or a>=j["cap_at"]:
-				j["cap_at"]=a+cK;k=j["warned_cap"];cY()
+				j["cap_at"]=a+cL;k=j["warned_cap"];cZ()
 				if k!=j["warned_cap"]:aK()
 			bq()
 			if j["rebuild"]=="window":a2();j["dirty"],j["redraw_at"]=False,a+bG;return
 			if t["g"]is None or not t["c"]:return
-			if not(j["minimized"]or j["docked"])and dl(a):aK()
+			if not(j["minimized"]or j["docked"])and dm(a):aK()
 			if not j["dirty"]and a<j["redraw_at"]:return
 			j["dirty"],j["redraw_at"]=False,a+bG
 			if j["minimized"]or j["docked"]:bo(a);return
 			bm(a);bo(a)
-		def dU():
+		def dV():
 			j["shutting"]=True
 			if j.get("grp_dirty_at"):j["grp_dirty_at"]=0.;safe(lambda:Kit.on_client(aO))
 			ca();bc();aH()
 			if j["ready"]:aY()
-			HOST.dock_remove(aw);ci();cH.close()
-		return{"start":dS,"tick":dT,"stop":dU,"client_tick":True,"config_height":aM.height,"build_config":aM.build,"poll_config":aM.poll,"config_closed":dR,"thread_tick":ca,"thread_wanted":dv}
+			HOST.dock_remove(aw);ci();cI.close()
+		return{"start":dT,"tick":dU,"stop":dV,"client_tick":True,"config_height":aM.height,"build_config":aM.build,"poll_config":aM.poll,"config_closed":dS,"thread_tick":ca,"thread_wanted":dw}
 	def ay():
 		W="attention";m="Training Alarm";Y="Attention_settings";aB="Attention_pos";aC="Attention_min";Z=400;x,aa=300,46;aD=7186;ab=.25;ac=1.;y=18;aE=2.;ad=60.;af=.25;z=1.5;aF=5.;aG=60.;aH=("GM, Counselor, Seer, Admin, Administrator, Developer, Staff, Game Master");aI="";ag=("whisper","8");aJ,G=5,120;aK,q=0,600;ah=8;aj=60;ak=.5;aL=500;am=60;aM=30;aN=5.;an=(("gump","attention.gump","Gump nobody asked for",775),("staff","attention.staff","Staff in view",775),("name","attention.name","Someone says your name",824),("whisper","attention.whisper","A whisper to you",824),("hit","attention.hit","Hit while not fighting",497),("test","attention.test","Training Alarm test",775));ap=dict((bg,bh)for bg,bh,bi,bi in an);aq=("gump","staff","name","words","whisper","hit");c={"gump":True,"staff":True,"name":True,"words":True,"whisper":True,"hit":False,"markers":aH,"ignore":aI,"repeat":aJ,"hold":aK,"anyalarm":True};bf=dict(c);a={"minimized":False,"shutting":False,"docked":False,"queue":[],"open_ids":{},"last_gid":0,"me":0,"my_name":"","name_re":None,"words_re":None,"seq":0};h={"g":None,"c":{},"store":({},{})};I={"skip":False};aO={"done":False};L,r,N=ae(a,m);s={"looked":False,"get":None};d={"markers":None,"text":None,"ignore":frozenset(),"ignore_text":None}
 		def t(text):return str(text or "").replace(";",",").replace("="," ").strip()
@@ -1049,7 +1050,7 @@ def _module_skills():
 				d["ignore"]=frozenset(b);d["ignore_text"]=a
 			return d["ignore"]
 		def aQ(kind):
-			if ALERTS.mute:return 0
+			if ALERTS.quiet_on()or ALERTS.mute:return 0
 			a,b=ALERTS.setting(ap[kind]);return b if a else 0
 		def au():return bool(ALERTS.shown and ALERTS.alarm)
 		def av():
@@ -1057,7 +1058,7 @@ def _module_skills():
 			b=a["resume_at"]
 			if b and 0<b-time.time()<=q+1:return True
 			return bool(c["anyalarm"]and HOST.alarm_up())
-		def i(kind,text,who=None,serial=0,gid=0,said=None):
+		def i(kind,text,who=None,serial=0,gid=0,said=None,nm=""):
 			b=not a["alarm"];d=False
 			for r in a["alarm"]:
 				if r["who"]==who:
@@ -1065,12 +1066,12 @@ def _module_skills():
 					d=True
 			e=time.time()
 			if b:a["seq"]+=1
-			a["alarm"].append({"kind":kind,"text":text,"who":who,"serial":int(serial or 0),"gid":int(gid or 0),"at":e,"said":said})
+			a["alarm"].append({"kind":kind,"text":text,"who":who,"serial":int(serial or 0),"gid":int(gid or 0),"at":e,"said":said,"nm":nm})
 			if len(a["alarm"])>ah:del a["alarm"][:-ah]
 			a["resume_at"]=0.
 			if b:a["banner_seen"]=False;f=c["repeat"];a["next_sound"]=e+f if f>0 else 0.
 			if d:k();return True
-			HOST.alert(ap[kind],text,"alarm",who="%s#%d"%(who or text,a["seq"]));k();return True
+			HOST.alert(ap[kind],text,"alarm",who="%s#%d"%(who or text,a["seq"]),name=nm,serial=serial);k();return True
 		def Q(how):
 			if not a["alarm"]:return
 			d=a["alarm"][-1];a["alarm"]=[];b=c["hold"];a["resume_at"]=time.time()+b if b>0 else 0.
@@ -1167,7 +1168,7 @@ def _module_skills():
 					b=(bool(d.search(g)),now,(b[2]if b else 0)+1,f);e[s]=b
 				if not b[0]:continue
 				j=c.get(s);c[s]=now
-				if j is None or not 0<=now-j<=ad:i("staff","Staff in view: %s"%(b[3]or "someone"),"staff %X"%s,serial=s)
+				if j is None or not 0<=now-j<=ad:i("staff","Staff in view: %s"%(b[3]or "someone"),"staff %X"%s,serial=s,nm=b[3])
 			if len(c)>50:
 				for n in[p for p,w in c.items()if not 0<=now-w<=ad]:del c[n]
 		def aw(name):
@@ -1193,14 +1194,14 @@ def _module_skills():
 					if 0<=now-a["typed_at"]<=aF:a["asked_at"]=now
 					continue
 				if not c["name"]or h is None:continue
-				if h.search(d)or(j is not None and j.search(d)):i("name",'%s said your name: "%s"'%(b,ax(d)),b,serial=aw(b),said=d)
+				if h.search(d)or(j is not None and j.search(d)):i("name",'%s said your name: "%s"'%(b,ax(d)),b,serial=aw(b),said=d,nm=b)
 		def a_():
 			q=a["heard"]
 			if not q:return
 			a["heard"]=[];d=a["my_name"].lower()
 			for e,b,f in q:
 				if not b or b.lower()=="system"or(d and b.lower()==d):continue
-				if f in ag and c["whisper"]:i("whisper",'%s whispers to you: "%s"'%(b,ax(e)),b,serial=aw(b),said=e)
+				if f in ag and c["whisper"]:i("whisper",'%s whispers to you: "%s"'%(b,ax(e)),b,serial=aw(b),said=e,nm=b)
 		def a0(*b):
 			if a["active"]:a["used_at"]=time.time()
 		U={}
@@ -1251,21 +1252,26 @@ def _module_skills():
 			if a["minimized"]:return "%s: %s"%(m,("watching "+", ".join(b))if b else "nothing ticked in settings")
 			return("Watching: "+", ".join(b))if b else "Nothing ticked in settings"
 		def k():
-			r=h["g"]
-			if r is None or(a["minimized"]and a["docked"]):return
-			c=h["c"];g=c.get("line_w",200);d=a["alarm"]
-			if d:s=d[-1];e=("%s: "%m if a["minimized"]else "ALARM: ")+s["text"];i=u if a["flash_on"]else B;j=("+%d more. "%(len(d)-1)if len(d)>1 else "")+"Skill loops paused: click here or I'm here"
-			else:k=a["resume_at"]-time.time()if a["resume_at"]else 0;e,i=a5(),b;j=("Skill loops go on in %d s"%int(k+.99))if 0<k<=q+1 else "All quiet"
-			l=(e,i,j,g)
-			if l==a["drawn"]:return
-			a["drawn"]=l;e=C(e,g);n(c["status"],e,i)
-			if "line2"in c:n(c["line2"],C(j,g),b)
-			o=c.get("ignore")
-			if o is not None:
-				f=bool(d)and d[-1]["kind"]=="gump"
-				if c.get("ignore_on")!=f:
-					c["ignore_on"]=f;o.IsVisible=f;p=h["store"][0].get("ignore")
-					if p is not None:p.IsVisible=f
+			t=h["g"]
+			if t is None or(a["minimized"]and a["docked"]):return
+			c=h["c"];i=c.get("line_w",200);d=a["alarm"]
+			if d:
+				r=d[-1];e=r["text"]
+				if Kit.streamer:
+					if r["nm"]:e=e.replace(r["nm"],Kit.veil("name",r["nm"],r["serial"]))
+					if a["name_re"]is not None:e=a["name_re"].sub(Kit.veil("me",""),e)
+				f=("%s: "%m if a["minimized"]else "ALARM: ")+e;j=u if a["flash_on"]else B;k=("+%d more. "%(len(d)-1)if len(d)>1 else "")+"Skill loops paused: click here or I'm here"
+			else:l=a["resume_at"]-time.time()if a["resume_at"]else 0;f,j=a5(),b;k=("Skill loops go on in %d s"%int(l+.99))if 0<l<=q+1 else "All quiet"
+			o=(f,j,k,i)
+			if o==a["drawn"]:return
+			a["drawn"]=o;f=C(f,i);n(c["status"],f,j)
+			if "line2"in c:n(c["line2"],C(k,i),b)
+			p=c.get("ignore")
+			if p is not None:
+				g=bool(d)and d[-1]["kind"]=="gump"
+				if c.get("ignore_on")!=g:
+					c["ignore_on"]=g;p.IsVisible=g;s=h["store"][0].get("ignore")
+					if s is not None:s.IsVisible=g
 		def V(f):
 			d=0
 			if f:

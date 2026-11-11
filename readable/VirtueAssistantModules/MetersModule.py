@@ -243,6 +243,7 @@ def _module_meters():
     data = {}
     wins = []
     page = {}
+    humans = {}
     # The damage hook's hand-over: its queue, handler and event, and a text for the Settings page.
     feed = {"q": None, "handler": None, "event": None, "kind": "not hooked"}
     # Reflection handles for TargetManager.LastAttack, looked up once on first use.
@@ -700,7 +701,7 @@ def _module_meters():
         if mid == "big":
             big = seg["big"] if limit is None else seg["big"][:limit]
             rows = [(name, amt, fmt_num(amt), ser, None) for amt, name, ser in big]
-            head = (["Biggest %s on %s" % (fmt_num(seg["big"][0][0]), seg["big"][0][1])]
+            head = (["Biggest %s on %s" % (fmt_num(seg["big"][0][0]), shown(seg["big"][0][1], seg["big"][0][2]))]
                     if seg["big"] else ["No hits yet."])
             return (head + [dur], rows)
         d = seg["d"].get(mid, {})
@@ -958,7 +959,8 @@ def _module_meters():
         friends (party, pets, friends when looked at), and lt / la (last target, last attack).
         """
         now = time.time()
-        out = {"me": None, "dmg": [], "info": {}, "fhp": {}, "wst": {}, "used": [], "pack": None, "friends": None}
+        out = {"me": None, "dmg": [], "info": {}, "fhp": {}, "wst": {}, "used": [], "pack": None, "friends": None,
+               "hum": []}
         p = HOST.me()
         if p is None:
             return out
@@ -989,6 +991,8 @@ def _module_meters():
             if ser not in mobs and ser not in info and ser != me["ser"]:
                 m = find_mob(ser)
                 info[ser] = str(m.Name or "") if m is not None else ""
+                if m is not None and m.IsHuman:
+                    out["hum"].append(ser)
         out["lt"] = int(API.LastTargetSerial or 0)
         out["la"] = last_attack()
         for sers in (st["engaged"], (out["lt"], out["la"])):
@@ -997,6 +1001,8 @@ def _module_meters():
                     m = find_mob(ser)
                     if m is not None:
                         info[ser] = str(m.Name or "")
+                        if m.IsHuman:
+                            out["hum"].append(ser)
         # The friends look: party, pets and friends list are costly, so they are polled only every
         # FRIENDS_EVERY. In between, only the friends the client had at the last look are read.
         if now >= st["next_friends"]:
@@ -1135,6 +1141,25 @@ def _module_meters():
             return me["name"] or "You"
         return st["mobs"].get(ser) or "Unknown"
 
+    def shown(name, ser=None):
+        """Return name as the meters should show it, veiled in streamer mode when it is a player's name.
+
+        Without streamer mode, or for an empty name, the name comes back unchanged. Your own name is
+        replaced by the "me" veil, and the names in the humans table (players, party, friends) by the
+        "name" veil; creature names are left alone. A trailing percent marker ("(%)" rows) is kept.
+        ser is the mobile's serial when known, else the veil is keyed on the name.
+        """
+        if not Kit.streamer or not name:
+            return name
+        base = name[:-4] if pct_row(name) else name
+        me = st["me"]
+        if me is not None and base == me["name"]:
+            return Kit.veil("me", base) + name[len(base):]
+        if base.lower() not in humans:
+            return name
+        return Kit.veil("name", base, ser if is_mobile(ser) else Kit.checksum(base.lower().encode("utf-8"))) + \
+            name[len(base):]
+
     def engaged(ser, now):
         """True when you targeted or attacked this mobile within the Your targets setting."""
         t = st["engaged"].get(ser)
@@ -1177,6 +1202,21 @@ def _module_meters():
                 return
         st["orph"].append((now, kind, ser, name, amt))
 
+    def keep_humans():
+        """Trim the humans table to the names still used by a segment, a recap row or a big hit, keeping at
+        most half of MOBS_MAX of them (the newest). Called when the table has grown past MOBS_MAX.
+        """
+        used = set()
+        for seg in segs():
+            for d in seg["d"].values():
+                used.update((k[:-4] if pct_row(k) else k).lower() for k in d)
+            used.update(str(b[1]).lower() for b in seg["big"])
+        if st["recap"] is not None:
+            used.update(str(r[2]).lower() for r in st["recap"]["rows"])
+        kept = [k for k in humans if k in used][-(MOBS_MAX // 2):]
+        humans.clear()
+        humans.update((k, True) for k in kept)
+
     def process(s, now):
         """Turn one sample into numbers: the main bookkeeping of a tick.
 
@@ -1193,10 +1233,16 @@ def _module_meters():
         mobs = st["mobs"]
         if len(mobs) > MOBS_MAX:
             mobs.clear()
+        if len(humans) > MOBS_MAX:
+            mobs.clear()
+            keep_humans()
         # Names of mobiles first seen this tick; the table is cleared when it grows past MOBS_MAX.
         for ser, name in s["info"].items():
             if name:
                 mobs[ser] = name
+        for ser in s["hum"]:
+            if mobs.get(ser):
+                humans[mobs[ser].lower()] = True
         # Lists are only rebuilt when they hold something, so an idle tick makes none.
         if st["pend"]:
             st["pend"] = [p for p in st["pend"] if p[0] >= now]
@@ -1209,6 +1255,10 @@ def _module_meters():
             for kind, sers in (("friend", friends), ("pet", pets), ("party", party)):
                 for ser in sers:
                     fr[ser] = kind
+            for ser in friends + party:
+                nm = s["fhp"][ser][4] if ser in s["fhp"] else mobs.get(ser)
+                if nm:
+                    humans[nm.lower()] = True
             fr.pop(me["ser"], None)
             st["friendly"] = fr
         # Who you are fighting: your last attack in war mode, and your last target when it changed or
@@ -2207,7 +2257,7 @@ def _module_meters():
         for i, (t, dmg, who, ser, hits, hmax) in enumerate(rows):
             ry = yr + i * 20
             Kit.add_label(g, "-%.1fs" % max(0.0, rc["t"] - t), M + 10, ry, Kit.HUE_INFO)
-            Kit.add_label(g, Kit.fit(who, who_w), who_x, ry, Kit.HUE_TEXT)
+            Kit.add_label(g, Kit.fit(shown(who, ser), who_w), who_x, ry, Kit.HUE_TEXT)
             amt = "-%s" % fmt_num(dmg)
             Kit.add_label(g, amt, M + IW - 64 - Kit.text_w(amt), ry, Kit.HUE_BAD)
             Kit.add_label(g, "HP %d" % hits, M + IW - 58, ry, Kit.HUE_INFO)
@@ -2270,7 +2320,8 @@ def _module_meters():
         for i, slot in enumerate(w["slots"]):
             if i < len(rows):
                 name, val, text, ser, _ = rows[i]
-                label = ("%d. %s" % (i + 1, name)) if settings["rank"] else name
+                who = shown(name, ser)
+                label = ("%d. %s" % (i + 1, who)) if settings["rank"] else who
                 hue = Kit.HUE_TITLE if (my_name and name == my_name) else Kit.HUE_TEXT
                 Kit.set_text(slot["name"], fit_once(slot, "_fn", label, slot["nw"]), hue)
                 Kit.set_text(slot["val"], fit_once(slot, "_fv", text, slot.get("vw", VAL_W)))
@@ -2295,7 +2346,8 @@ def _module_meters():
         mid, key = w["detail_metric"], w["detail_row"]
         seg = seg_for(w)
         r = seg["d"].get(mid, {}).get(key) if (seg is not None and mid) else None
-        Kit.set_text(c["name"], Kit.fit("%s (%s)" % (key or "", METRIC.get(mid, ("",))[0]),
+        ser = seg["serial"].get((mid, key)) if seg is not None and mid else None
+        Kit.set_text(c["name"], Kit.fit("%s (%s)" % (shown(key, ser) or "", METRIC.get(mid, ("",))[0]),
                                       DETAIL_W - 2 * Kit.MARGIN - 20))
         vals = dict((t, "") for t in DETAIL_LINES)
         if r is not None:

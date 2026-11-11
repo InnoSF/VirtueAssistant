@@ -59,7 +59,7 @@ import time
 # The app name shown in titles and journal lines, and the version the patch notes and the
 # What's new window go by. The script file is named after the version.
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.7.0.34"
+APP_VERSION = "2.7.0.35"
 # The folder of module files, beside this script.
 MODULE_DIR = "VirtueAssistantModules"
 # The folder every saved file goes in, beside this script (Kit.data_dir).
@@ -940,11 +940,13 @@ class Follow(object):
 class Kit(object):
     """The shared native look and the helpers every window of every module is built from.
 
-    Stone frame of the crafting gump, translucent black sections, the UO font in client hues,
-    client checkboxes and gump-art buttons, plus the windowing rules (below), saved per-character
-    values, text measuring, gump parsing, data files and the settings-page and window builders
-    (Form, Page, Cleanup, Window). Everything is a static method on the class, so a module calls
-    Kit.something with no setup.
+    Stone frame of the crafting gump, translucent sections, the UO font in client hues, client
+    checkboxes and gump-art buttons, plus the windowing rules (below), saved per-character values,
+    text measuring, gump parsing, data files and the settings-page and window builders (Form, Page,
+    Cleanup, Window). The look (classic, dark, parchment or high contrast; Kit.LOOKS, Kit.set_look),
+    the text scale (Kit.tscale) and the compact rows flag (Kit.compact) are class values the host
+    sets from the saved interface choices. Everything is a static method on the class, so a module
+    calls Kit.something with no setup.
 
     The window rules every window of every module and of this script follows:
     1. A window is always wholly on screen: place it with Kit.place, never a bare SetRect. The keeper
@@ -971,19 +973,35 @@ class Kit(object):
     ART_PLAY    = (4005, 4007, 4006)
     # X / cancel.
     ART_CLOSE   = (4017, 4019, 4018)
-    # Hue of the frame art, hue of the corner knots and section alpha in the dark look (Kit.set_dark).
+    # Hue of the frame art, hue of the corner knots and section alpha in the dark look (Kit.set_look).
     DARK_HUE = 1899
     DARK_CORNER_HUE = 2305
     DARK_SECTION_ALPHA = 0.95
     LIGHT_SECTION_ALPHA = 0.8
+    PARCH_HUE = 2960
+    PARCH_CORNER_HUE = 1260
+    PARCH_SECTION_HUE = 1845
+    PARCH_SECTION_ALPHA = 0.9
+    CONTRAST_HUE = 1175
+    CONTRAST_SECTION_ALPHA = 1.0
+    LOOKS = {"classic": (0, 0, 0, LIGHT_SECTION_ALPHA), "dark": (DARK_HUE, DARK_CORNER_HUE, 0, DARK_SECTION_ALPHA),
+             "parchment": (PARCH_HUE, PARCH_CORNER_HUE, PARCH_SECTION_HUE, PARCH_SECTION_ALPHA),
+             "contrast": (CONTRAST_HUE, CONTRAST_HUE, 0, CONTRAST_SECTION_ALPHA)}
+    LOOK_ORDER = ("classic", "dark", "parchment", "contrast")
+    LOOK_NAMES = {"classic": "Classic", "dark": "Dark", "parchment": "Parchment", "contrast": "High contrast"}
+    TEXT_SIZES = (100, 115, 130, 150)
+    SECTION_HUE = 0
+    tscale = 1.0
+    compact = cblind = streamer = False
     # Art ids of the gold edge pieces (horizontal, vertical) and its thickness in pixels (gold_box).
     GOLD_H = 2700
     GOLD_V = 2701
     GOLD_T = 3
-    # Art id to hue for the dark look; empty in the light look.
-    _dark = {}
+    _hues = {}
+    _look = "classic"
     # Window key to its Kit.Window, for the windows that use it.
     _wins = {}
+    _behind = set()
     # Check mark.
     ART_OK      = (4023, 4025, 4024)
     # Page / scroll.
@@ -1230,12 +1248,13 @@ class Kit(object):
 
     @staticmethod
     def _place_raw(g, x, y, w, h, head=None, max_h=None):
-        """Kit.place without the zone fit (Fill places with this).
+        """Kit.place without the zone fit (Fill places with this). Returns the (x, y) the window was set at.
 
         A window taller than the screen (or than max_h) is not shown half off it: it is cut to that height
         and its body scrolls, with a scrollbar down its right side and the title row staying put
         (Kit.scroll_fit). head is the height of that fixed top part in the window's pixels (default: the
-        standard title section).
+        standard title section). A window parked at the screen's left tab keeps that parked x. The size
+        set here is pinned, so the keeper does not undo it.
         """
         w, h = int(w or 0), int(h or 0)
         H = Kit.screen()[1]
@@ -1246,7 +1265,10 @@ class Kit(object):
             fit = Kit.scroll_fit(g, w, h, head, int(max_h) if max_h else None)
             if fit is not None:
                 w, h = fit
+        off = g in Kit._behind or int(x or 0) <= TAB_X // 2
         x, y = Kit.clamp(x, y, w, h)
+        if off:
+            x = TAB_X
         g.SetRect(x, y, w, h)
         # Read back as asked until it lands.
         Kit.note_rect(g, x, y, w, h)
@@ -1647,6 +1669,8 @@ class Kit(object):
                         info = Kit._scrolled.get(g) or info
                         info["lim"] = lim
                         x, y = Kit.clamp(int(g.GetX()), int(g.GetY()), fit[0], fit[1])
+                        if g in Kit._behind:
+                            x = TAB_X
                         g.SetRect(x, y, fit[0], fit[1])
                         Kit.moved_by_code(g)
                 except Exception:
@@ -1847,20 +1871,42 @@ class Kit(object):
 
     @staticmethod
     def dark():
-        """True when the dark look is on."""
-        return bool(Kit._dark)
+        """True when the current look is a dark one (dark or high contrast)."""
+        return Kit._look in ("dark", "contrast")
 
     @staticmethod
-    def set_dark(on):
-        """Turn the dark look on or off: tint the frame art and set the section alpha to match."""
-        art = [(Kit.WINDOW_BG + i, Kit.DARK_HUE) for i in range(9)] + [(Kit.CORNER_ART, Kit.DARK_CORNER_HUE)]
-        Kit._dark = dict(art) if on else {}
-        Kit.SECTION_ALPHA = Kit.DARK_SECTION_ALPHA if on else Kit.LIGHT_SECTION_ALPHA
+    def look():
+        """The name of the current look."""
+        return Kit._look
+
+    @staticmethod
+    def set_look(name):
+        """Switch the shared look by name (an unknown name gives classic).
+
+        Sets the frame piece hues and the section hue and alpha from Kit.LOOKS. It only changes the
+        values; Kit.retint repaints frames already drawn.
+        """
+        name = name if name in Kit.LOOKS else "classic"
+        fh, kh, sh, sa = Kit.LOOKS[name]
+        art = [(Kit.WINDOW_BG + i, fh) for i in range(9)] + [(Kit.CORNER_ART, kh), (Kit.SECTION_TILE, sh)]
+        Kit._hues = dict(p for p in art if p[1])
+        Kit._look, Kit.SECTION_HUE, Kit.SECTION_ALPHA = name, sh, sa
+
+    @staticmethod
+    def tsize(px):
+        """A pixel size scaled by the interface text size (Kit.tscale), as a whole number."""
+        return int(round(px * Kit.tscale))
+
+    @staticmethod
+    def pitch(h):
+        """A row height in pixels, trimmed by 4 (never under 20) when compact rows are on."""
+        # Rows of 20 or less are left alone so they never become too small to click.
+        return max(20, h - 4) if Kit.compact and h > 20 else h
 
     @staticmethod
     def look_hue(graphic, hue=0):
-        """The hue for an art id: the given hue, else the dark look's tint, else 0."""
-        return hue or Kit._dark.get(graphic, 0)
+        """The hue for an art id: the given hue, else the current look's tint, else 0."""
+        return hue or Kit._hues.get(graphic, 0)
 
     @staticmethod
     def retint():
@@ -1869,17 +1915,17 @@ class Kit(object):
             for p in parts:
                 # Quiet: a disposed piece is skipped.
                 with Kit.quiet:
-                    p.Hue = Kit._dark.get(int(p.Graphic), 0)
+                    p.Hue = Kit._hues.get(int(p.Graphic), 0)
 
     @staticmethod
     def add_pic(g, graphic, x, y, hue=0, mouse=True):
         """Add a gump picture to window g at (x, y) and return it, or None on failure.
 
-        With mouse False clicks go through to the window under it. The dark look's hue is applied unless a
-        hue is given.
+        With mouse False clicks go through to the window under it. The current look's hue is applied unless
+        a hue is given.
         """
         try:
-            hue = hue or Kit._dark.get(graphic, 0)
+            hue = hue or Kit._hues.get(graphic, 0)
             p = G.CreateGumpPic(graphic, x, y, hue) if hue else G.CreateGumpPic(graphic, x, y)
             p.SetPos(x, y)
             # Clicks go through to the window under it.
@@ -1894,11 +1940,12 @@ class Kit(object):
     def add_tiled(g, graphic, x, y, w, h, alpha=None, fallback="#101010", hue=0):
         """Add a tiled picture w x h to window g and return it (None when w or h is not positive).
 
-        Falls back to a flat colour box when the art cannot be made. Never takes the mouse.
+        The look's hue is applied unless a hue is given. Falls back to a flat colour box when the art
+        cannot be made. Never takes the mouse.
         """
         if w <= 0 or h <= 0:
             return None
-        hue = hue or Kit._dark.get(graphic, 0)
+        hue = hue or Kit._hues.get(graphic, 0)
         try:
             t = (G.CreateTiledGumpPic(graphic, w, h, hue) if hue else G.CreateTiledGumpPic(graphic, w, h))
         except Exception:
@@ -3196,8 +3243,10 @@ class Kit(object):
 
     @staticmethod
     def save_pos(key, g):
-        """Save window g's place under key, unless g is closed or held by the layout in a zone."""
-        if Kit.is_open(g) and g not in LAYOUT.held:
+        """Save window g's place under key as "x,y", unless g is closed, held by the layout in a zone, or
+        parked at the screen's left tab (a parked window keeps its last real place).
+        """
+        if Kit.is_open(g) and g not in LAYOUT.held and g.GetX() > TAB_X // 2:
             Kit.put_var(key, "%d,%d" % (g.GetX(), g.GetY()))
 
     @staticmethod
@@ -3531,6 +3580,34 @@ class Kit(object):
         return skip, area
 
     @staticmethod
+    def walk(g, fn, root=None):
+        """Call fn on every control inside window g, depth first, starting under root (default: the
+        window's own client control).
+
+        fn(control) may return False to skip that control's children. Returns True when the walk ran,
+        False when the window has no client control or the tree could not be read. Client thread.
+        """
+        root = Kit.client_control(g) if root is None else root
+        if root is None:
+            return False
+
+        def tree(c):
+            """Visit one control, then its children (unless fn said to skip them)."""
+            if fn(c) is False:
+                return
+            kids = c.Children
+            for i in range(kids.Count):
+                tree(kids[i])
+
+        try:
+            kids = root.Children
+            for i in range(kids.Count):
+                tree(kids[i])
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
     def scale_window(g, scale):
         """Draw everything in window g at scale (1.0 is as built), using the client's own control scaling
         (the one its paperdoll and skills windows use) on every control and what is inside it.
@@ -3548,26 +3625,17 @@ class Kit(object):
         skip, area = Kit._scroll_skip(g)
         same = Kit._same()
 
-        def tree(c):
-            """Scale one control and its children, skipping the pieces to leave alone."""
+        def one(c):
+            """Scale one control: skip the scroll conversion's own pieces and its scroll area, scale the rest."""
             if skip and any(same(c, k) for k in skip):
-                return
+                return False
             if area is None or not same(c, area):
+                # Tiled pictures must scale their texture too, or the tile pattern stays at the old size.
                 if str(c.GetType().Name) == "GumpPicTiled":
-                    # The tile scales too.
                     Kit.set(c, "ScaleTiledTexture", True)
                 c.ApplyScale(scale, True, True, False)
-            kids = c.Children
-            for i in range(kids.Count):
-                tree(kids[i])
 
-        try:
-            kids = root.Children
-            for i in range(kids.Count):
-                tree(kids[i])
-            return True
-        except Exception:
-            return False
+        return Kit.walk(g, one, root)
 
     @staticmethod
     def ui_pos(c, x, y):
@@ -3829,6 +3897,41 @@ class Kit(object):
                 out[k.strip()] = v.strip()
         return out
 
+    B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    B64_REV = dict((ch, i) for i, ch in enumerate(B64))
+
+    @staticmethod
+    def b64(data):
+        """Encode a list of byte values (a multiple of 3 long) as URL-safe base64 text without padding
+        characters (alphabet Kit.B64). Used for the layout share code.
+        """
+        out = []
+        B64 = Kit.B64
+        for i in range(0, len(data), 3):
+            n = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2]
+            out += [B64[(n >> 18) & 63], B64[(n >> 12) & 63], B64[(n >> 6) & 63], B64[n & 63]]
+        return "".join(out)
+
+    @staticmethod
+    def unb64(s):
+        """Decode Kit.b64 text (a multiple of 4 long) back to a list of byte values."""
+        data = []
+        B64_REV = Kit.B64_REV
+        for i in range(0, len(s), 4):
+            n = 0
+            for ch in s[i:i + 4]:
+                n = (n << 6) | B64_REV[ch]
+            data += [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+        return data
+
+    @staticmethod
+    def checksum(data):
+        """A 16-bit checksum of a list of byte values, used to catch a mistyped layout share code."""
+        s = 7
+        for i, b in enumerate(data):
+            s = (s * 31 + b + i) & 0xFFFF
+        return s
+
     @staticmethod
     def kv_load(key, sep, into, nums=None, strs=()):
         """Load a saved "k=v" list (parts split by sep, from the per-character value key) into the dict into.
@@ -4009,7 +4112,8 @@ class Kit(object):
         label, tip), ("slider", key, label, tip, low, high), ("note", text), ("buttons", [buttons]),
         ("custom", height, fn(form, x, y)) and ("gap", height); a dict as a row's last item overrides the
         options for that row. Created without a gump (g None) it only measures its height. read() takes the
-        values back from the controls.
+        values back from the controls. A row whose setting is new in this release, or the one the settings
+        search found, gets a small tag drawn after it (Form._tag).
         """
         # Default spacing and sizes: title row, bottom padding, row heights for check, field, note and
         # buttons, left inset, label offset, label-to-field gap, field-to-unit gap, number field width,
@@ -4018,8 +4122,13 @@ class Kit(object):
                 "ugap": 8, "fw": 50, "sw": 140, "sdy": 2, "ndy": 0, "bdy": -2, "bgap": 20, "fmt": "%d"}
         # Which option holds the row height of each row kind.
         STEP = {"check": "ch", "note": "nh", "buttons": "bh", "num": "fh", "text": "fh", "slider": "fh"}
+        COMPACT = {"ch": 22, "fh": 24, "bh": 26, "top": 28, "pad": 6}
         # Row kinds that have a label and a field.
         FIELDS = ("num", "text", "slider")
+        sink = mark = fresh = page = None
+        BOX_W = 20
+        FOUND = "<- found"
+        NEW = "new"
 
         def __init__(self, g, x, y, w, vals, page=(), store=None, **opts):
             """Lay out the page's sections at (x, y) width w, starting from the saved values vals."""
@@ -4039,10 +4148,12 @@ class Kit(object):
             return Kit.Form(None, 0, 0, w, {}, page, **opts).h
 
         def _o(self, sec, r=None):
-            """The options for a section or one of its rows: defaults, then the form's, then the section's, then
-            the row's own dict.
+            """The options for a section or one of its rows: the defaults, the compact set when compact rows are
+            on, then the form's, then the section's, then the row's own dict.
             """
             o = dict(Kit.Form.OPTS)
+            if Kit.compact:
+                o.update(Kit.Form.COMPACT)
             o.update(self.opts)
             o.update(sec)
             if r and type(r[-1]) is dict:
@@ -4062,8 +4173,11 @@ class Kit(object):
             """Draw one section (a black block with its title) and its rows, and move y below it.
 
             A fixed section height can be given as sh; otherwise it is the title row, the rows and the padding.
-            Field labels line up on the widest label when the section asks for align.
+            Field labels line up on the widest label when the section asks for align. When the settings
+            search is collecting rows (Form.sink), the section is also recorded with the part that draws it.
             """
+            if Kit.Form.sink is not None:
+                Kit.Form.sink.append((HOST.cur_part, title, rows))
             sec = sec or {}
             so, opts = self._o(sec), [self._o(sec, r) for r in rows]
             sh = sec.get("sh") or so["top"] + sum(Kit.Form._step(r, o) for r, o in zip(rows, opts)) + so["pad"]
@@ -4078,19 +4192,42 @@ class Kit(object):
                 self._row(g, r, o, x, ry, o.get("lw", lw if o.get("align") else None))
                 ry += Kit.Form._step(r, o)
 
+        @staticmethod
+        def _tag(r):
+            """The small tag for a row: "<- found" for the row the settings search jumped to, "new" for a
+            setting added in this release that the player has not looked at yet, else None.
+
+            Gaps and custom rows never carry a tag; notes can only be marked as found. r is the row tuple.
+            """
+            F = Kit.Form
+            if F.page is None or r[0] in ("gap", "custom"):
+                return None
+            pk = HOST.cur_part
+            keys = [b[0] for b in r[1]] if r[0] == "buttons" else [r[1]]
+            if F.mark is not None and F.mark[0] == pk and F.mark[1] in keys:
+                return F.FOUND
+            pre = F.page + "." + (pk + "." if pk else "")
+            if r[0] != "note" and F.fresh and any(pre + str(k) in F.fresh for k in keys):
+                return F.NEW
+            return None
+
         def _row(self, g, r, o, sx, y, lw):
-            """Draw one row of a section."""
+            """Draw one row of a section, and the row's tag (Form._tag) after its last control when it has one."""
             kind, c, x = r[0], self.c, sx + o["dx"]
             k = r[1] if kind in Kit.Form.FIELDS or kind == "check" else None
+            tag = Kit.Form._tag(r)
+            end = None
             if kind == "check":
                 c[k] = Kit.add_check(g, r[2], x, y, self.vals[k], r[3])
                 self.specs.append((r, o))
+                end = x + Kit.Form.BOX_W + (Kit.text_w(r[2]) if tag else 0)
             elif kind == "note":
                 lbl = Kit.add_label(g, r[1], x, y + o["ndy"], o.get("hue", Kit.HUE_INFO))
                 if o.get("key"):
                     c[o["key"]] = lbl
+                end = x + (Kit.text_w(r[1]) if tag else 0)
             elif kind == "buttons":
-                Kit.buttons(g, self.store, x, y + o["bdy"], [b[:5] for b in r[1]], o["bgap"])
+                end = Kit.buttons(g, self.store, x, y + o["bdy"], [b[:5] for b in r[1]], o["bgap"]) - o["bgap"]
             elif kind == "custom":
                 r[2](self, sx, y)
             elif kind in Kit.Form.FIELDS:
@@ -4101,20 +4238,28 @@ class Kit(object):
                     if tip and not tip.endswith(")"):
                         tip += " (%d-%d)" % (r[5], r[6])
                     c[k] = Kit.add_textbox(g, o["fmt"] % self.vals[k], fx, y, o["fw"])
+                    end = fx + o["fw"]
                     if r[4]:
                         Kit.add_label(g, r[4], fx + o["fw"] + o["ugap"], y + o["ldy"], Kit.HUE_INFO)
+                        end += o["ugap"] + (Kit.text_w(r[4]) if tag else 0)
                 elif kind == "text":
-                    tw = o.get("tw") or self.w - (fx - sx) - 16
+                    tw = (o.get("tw") or self.w - (fx - sx) - 16) - (Kit.text_w(tag) + 6 if tag else 0)
                     c[k] = Kit.add_textbox(g, self.vals[k], fx, y, tw, numbers=False)
+                    end = fx + tw
                 else:
                     c[k] = Kit.add_slider(g, fx, y + o["sdy"], o["sw"], r[4], r[5], self.vals[k])
+                    end = fx + o["sw"]
                     if o.get("vfmt") or o.get("unit"):
-                        c[k + "_lbl"] = Kit.add_label(g, o["vfmt"] % self.vals[k] if o.get("vfmt") else o["unit"],
-                                                      fx + o["sw"] + o["ugap"], y + o["ldy"], Kit.HUE_INFO)
+                        lt = o["vfmt"] % self.vals[k] if o.get("vfmt") else o["unit"]
+                        c[k + "_lbl"] = Kit.add_label(g, lt, fx + o["sw"] + o["ugap"], y + o["ldy"], Kit.HUE_INFO)
+                        end += o["ugap"] + (Kit.text_w(lt) if tag else 0)
                 Kit.with_tip(c[k], tip)
                 if o.get("ltip"):
                     Kit.with_tip(lbl, tip)
                 self.specs.append((r, o))
+            if tag and end is not None:
+                dy = {"check": 2, "note": o["ndy"], "buttons": o["bdy"] + 3}.get(kind, o["ldy"])
+                Kit.add_label(g, tag, min(end + 6, sx + self.w - 4 - Kit.text_w(tag)), y + dy, Kit.HUE_TITLE)
 
         def read(self, strict=False, empty=None):
             """Read the controls back into a copy of the values.
@@ -4271,7 +4416,7 @@ class Kit(object):
             self.clear, self.docked_min, self.slot, self.held, self.old = clear or {}, docked_min, None, False, None
             self.queue = Kit.queuer(st) if st is not None else None
             self.x = self.y = self.w = self.h = 0
-            self.c, self.store = {}, ({}, {})
+            self.c, self.store, self.fade = {}, ({}, {}), True
 
         def minimized(self):
             """True when the module's state says the window is minimized."""
@@ -4324,7 +4469,8 @@ class Kit(object):
 
             The window is placed and registered through Kit.show_window; a window the layout holds in a zone
             is moved to its slot and fitted at once. parts are added to the window dict with the controls and
-            the button store under the names given.
+            the button store under the names given. The fade service is woken so a faded window comes back
+            when it is rebuilt.
             """
             st, parts = self.st, dict(parts or {})
             parts[self.gkey] = g
@@ -4333,8 +4479,7 @@ class Kit(object):
             xy = Kit.show_window(g, self.x, self.y, self.w if w is None else w, self.h if h is None else h,
                                  self.key if self.lock else None, st is not None and st["minimized"] and st["docked"],
                                  self.disposed(g), self.save_pos, self.win, parts, max_h)
-            # A window in a zone, drawn where the layout will put it, so it does not flash elsewhere.
-            slot = LAYOUT.placed.get(self.key) if LAYOUT.seamless and LAYOUT.holds(self.key) else None
+            slot = LAYOUT.spot(self.key) if LAYOUT.seamless and LAYOUT.holds(self.key) else None
             if slot is not None and xy is not None and (xy[0], xy[1]) != (slot[0], slot[1]):
                 g.SetPos(int(slot[0]), int(slot[1]))
                 Kit.note_rect(g, slot[0], slot[1])
@@ -4342,6 +4487,8 @@ class Kit(object):
                 xy = (slot[0], slot[1])
             if slot is not None and xy is not None:
                 LAYOUT.fit_now(self.key, g)
+            if FADE.on:
+                FADE.wake(self.key)
             old, self.old = self.old, None
             Kit.dispose(old)
             return xy
@@ -4437,6 +4584,14 @@ class Kit(object):
 
     quiet = _Quiet()
     _notos = {}
+    NOTO_ORDER = ("unknown", "innocent", "ally", "gray", "criminal", "enemy", "murderer", "invulnerable")
+    CB_RGB = {"innocent": (0, 114, 178), "ally": (86, 180, 233), "gray": (153, 153, 153), "criminal": (153, 153, 153),
+              "enemy": (230, 159, 0), "murderer": (213, 94, 0), "invulnerable": (240, 228, 66)}
+    CB_HUE = {"innocent": 1266, "ally": 1060, "gray": 2958, "criminal": 2958, "enemy": 1174, "murderer": 1100,
+              "invulnerable": 1568}
+    NOTO_MARKS = {"murderer": "R", "criminal": "C", "gray": "C", "enemy": "O", "ally": "A", "invulnerable": "I"}
+    VEILS = {"me": "You", "guild": "(hidden)", "xy": "(hidden)", "place": "(hidden)"}
+    B36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     @staticmethod
     def noto_name(mob):
@@ -4461,6 +4616,75 @@ class Kit(object):
             return str(v).split(".")[-1].lower()
         n = Kit._notos[v] = str(v).split(".")[-1].lower()
         return n
+
+    @staticmethod
+    def _noto_key(noto):
+        """Turn a notoriety (a client number, a key string or a client enum value) into one of the keys of
+        Kit.NOTO_ORDER; "unknown" for a number out of range.
+        """
+        if type(noto) is int:
+            return Kit.NOTO_ORDER[noto] if 0 <= noto < len(Kit.NOTO_ORDER) else "unknown"
+        return noto if isinstance(noto, str) else Kit.noto_of(noto)
+
+    @staticmethod
+    def cb_rgb(noto, default=None):
+        """The colour-blind safe (r, g, b) of a notoriety, or default when colour-blind marks are off or the
+        notoriety has none.
+        """
+        return Kit.CB_RGB.get(Kit._noto_key(noto), default) if Kit.cblind else default
+
+    @staticmethod
+    def cb_hex(noto, default=None):
+        """Kit.cb_rgb as a "#RRGGBB" string, or default when there is no colour-blind colour."""
+        c = Kit.cb_rgb(noto)
+        return default if c is None else "#%02X%02X%02X" % c
+
+    @staticmethod
+    def cb_hue(noto, default=0):
+        """The colour-blind safe client hue for a notoriety, or default when the marks are off."""
+        return Kit.CB_HUE.get(Kit._noto_key(noto), default) if Kit.cblind else default
+
+    @staticmethod
+    def noto_mark(noto):
+        """The one-letter mark for a notoriety (shown beside a name so colour is not the only cue), or an
+        empty string when colour-blind marks are off or the notoriety has none.
+        """
+        return Kit.NOTO_MARKS.get(Kit._noto_key(noto), "") if Kit.cblind else ""
+
+    @staticmethod
+    def hp_mark(poisoned=False, paralysed=False, mortal=False):
+        """Letters for a health bar's state when colour-blind marks are on: P poisoned, Z paralysed, M mortal.
+        Empty text when the marks are off.
+        """
+        if not Kit.cblind:
+            return ""
+        return ("P" if poisoned else "") + ("Z" if paralysed else "") + ("M" if mortal else "")
+
+    @staticmethod
+    def veil(kind, text, serial=0):
+        """Hide private text while streamer mode is on, and give it back unchanged otherwise.
+
+        kind says what the text is: "name" becomes "Player" and three base 36 digits of the serial, so
+        the same person keeps the same stand-in; any other kind becomes its fixed word from Kit.VEILS, or
+        "(hidden)". Never raises.
+        """
+        if not Kit.streamer:
+            return text
+        if kind != "name":
+            return Kit.VEILS.get(kind, "(hidden)")
+        try:
+            s = int(serial or 0)
+        except (TypeError, ValueError):
+            s = 0
+        if s <= 0:
+            return "Player"
+        d = ""
+        for _ in range(3):
+            d = Kit.B36[s % 36] + d
+            s //= 36
+            if not s:
+                break
+        return "Player " + d
 
     @staticmethod
     def set(obj, attr, value):
@@ -4989,8 +5213,8 @@ class Fill(object):
                 Fill._anchor(e, rec["bgs"])
             Fill._apply(rec, new)
         r = Snap.rect(g)
-        # Already in the right place and nothing new appeared: nothing to do this tick.
-        if r is not None and (r[0], r[1], r[2], r[3]) == (x, y, W, H) and not new and rec["placed"] is not None:
+        if r is not None and (r[0], r[1], r[2], r[3]) == (TAB_X if g in Kit._behind else x, y, W, H) and not new \
+                and rec["placed"] is not None:
             return False
         if scroll or conv:
             head = int(round(rec["head0"] * k))
@@ -5159,16 +5383,23 @@ class PageCanvas(object):
 class Alerts(object):
     """The shared alert centre: one list of alert kinds, a banner, sounds and map pings for every module.
 
-    Modules register a kind and raise alerts. Each alert goes to the system message line, to a sound
-    queue, to a banner window and optionally to a map ping. The player's choices (mute, banner, per-
-    kind
-    on/off and sound) are saved under KEY. Runs on the client tick; tick does the timed work.
+    Modules register a kind and raise alerts. Each alert goes to the system message line, to the alert
+    history, to a sound queue, to a banner window and optionally to a map ping. The player's choices
+    (mute, banner, quiet time, per-kind on/off and sound) are saved under KEY and the history under
+    LOG_KEY. While quiet time is on, alerts are kept in the history only: no sound and no banner.
+    Runs on the client tick; tick does the timed work.
     """
     KEY = "VirtueAssistant_alerts"
     POS_KEY = "VirtueAssistant_alert_pos"
     W, H = 420, 46
     LEVELS = {"info": Kit.HUE_INFO, "warn": Kit.HUE_TITLE, "alarm": Kit.HUE_BAD}
     TEST_KEY = "va.test"
+    LOG_KEY = "VirtueAssistant_alert_log"
+    LOG_CAP = 50
+    LOG_EVERY = 60.0
+    LOG_CUT = 160
+    QUIET_MAX = 1440
+    QUIET_ALARM = 30.0
 
     def __init__(self):
         """Create the empty tables and flags; nothing is loaded until the first use."""
@@ -5188,17 +5419,38 @@ class Alerts(object):
         self.hue = Kit.HUE_TITLE
         self.line = ""
         self.tw = self.W - 36
+        self.scale = 1.0
+        self.log = []
+        self.log_ver = 0
+        self.log_due = False
+        self.log_at = 0.0
+        self.quiet_until = 0
+        self.bw = 30
+        self.store = ({}, {})
+        self.alarm_until = 0.0
+        self.line_who = ("", 0)
 
     def load(self):
-        """Read the saved choices from KEY: mute, banner and one kind.<key>=on,sound entry per kind."""
+        """Read the saved choices and the history.
+
+        KEY holds mute, banner, quiet (the time quiet ends) and one kind.<key>=on,sound entry per kind.
+        LOG_KEY holds one history line per row, fields separated by a tilde: time, level, quiet flag, text,
+        name and serial. Rows that do not parse are dropped and only the newest LOG_CAP are kept.
+        """
         self.loaded = True
         self.choice = {}
         self.mute, self.banner_on = False, True
+        self.quiet_until = 0
         for k, v in Kit.codec_load(Kit.get_var(self.KEY)).items():
             if k == "mute":
                 self.mute = v == "1"
             elif k == "banner":
                 self.banner_on = v != "0"
+            elif k == "quiet":
+                try:
+                    self.quiet_until = int(v)
+                except ValueError:
+                    self.quiet_until = 0
             elif k.startswith("kind."):
                 bits = v.split(",")
                 try:
@@ -5206,14 +5458,111 @@ class Alerts(object):
                 except ValueError:
                     snd = None
                 self.choice[k[5:]] = [bits[0] != "0", snd]
+        log = []
+        for ln in Kit.get_var(self.LOG_KEY).split("\n"):
+            b = ln.split("~", 5)
+            if len(b) < 4:
+                continue
+            try:
+                t, ser = float(b[0]), int(b[5]) if len(b) > 5 and b[5] else 0
+            except ValueError:
+                continue
+            log.append((t, b[1], b[3], "", b[2] == "q", b[4] if len(b) > 4 else "", ser))
+        self.log = log[-self.LOG_CAP:]
+        self.log_ver += 1
+        self.log_due = False
 
     def save(self):
-        """Write mute, banner and every per-kind choice back to KEY as one semicolon list."""
+        """Write mute, banner, every per-kind choice and the quiet end time back to KEY as one semicolon list."""
         parts = ["mute=%d" % (1 if self.mute else 0), "banner=%d" % (1 if self.banner_on else 0)]
         for k in sorted(self.choice):
             on, snd = self.choice[k]
             parts.append("kind.%s=%d,%s" % (k, 1 if on else 0, "" if snd is None else int(snd)))
+        parts.append("quiet=%d" % int(self.quiet_until))
         Kit.put_var(self.KEY, ";".join(parts))
+
+    @staticmethod
+    def _clip(s, n):
+        """Make text safe for one history field: the tilde and line breaks become spaces, cut to n characters."""
+        return re.sub(r"[~\r\n]", " ", str(s))[:n]
+
+    @staticmethod
+    def veiled(line, name, serial=0):
+        """Replace the name in an alert line with its streamer mode stand-in (Kit.veil) when streamer mode is
+        on. Only whole words match, so a name inside a longer word is left alone.
+        """
+        if not Kit.streamer or not name or name not in line:
+            return line
+        v = Kit.veil("name", name, serial)
+        return re.sub(r"(?<!\w)%s(?!\w)" % re.escape(name), lambda m: v, line)
+
+    @staticmethod
+    def with_quiet(text, mine):
+        """Join two saved alert lists for a profile: everything in text except its quiet entry, plus the quiet
+        entry of mine (the one this character has now), so loading a profile never changes quiet time.
+        """
+        keep = [p for p in str(text or "").split(";") if p.strip() and not p.strip().startswith("quiet=")]
+        return ";".join(keep + [p for p in str(mine or "").split(";") if p.strip().startswith("quiet=")][-1:])
+
+    def shown_line(self):
+        """The banner line as it is shown, with streamer mode applied."""
+        return Alerts.veiled(self.line, *self.line_who)
+
+    def save_log(self, now):
+        """Write the alert history to LOG_KEY, one row per alert, and schedule the next save LOG_EVERY seconds
+        on. Fields are cut to keep the saved value small.
+        """
+        self.log_due = False
+        self.log_at = now + self.LOG_EVERY
+        c = Alerts._clip
+        rows = ("%d~%s~%s~%s~%s~%d" % (int(t), c(lv, 8), "q" if q else "", c(line, self.LOG_CUT), c(who, 40), ser)
+                for t, lv, line, _k, q, who, ser in list(self.log))
+        Kit.put_var(self.LOG_KEY, "\n".join(rows))
+
+    def quiet_on(self, now=None):
+        """True while quiet time is on: an end time in the future that is no more than QUIET_MAX minutes
+        away (a clock that jumped is not trusted). now defaults to the current time.
+        """
+        if not self.loaded:
+            self.load()
+        left = self.quiet_until - (time.time() if now is None else now)
+        return 0 < left <= 60 * self.QUIET_MAX
+
+    def quiet(self, minutes=30):
+        """Start quiet time for the given minutes (1 to QUIET_MAX): drop queued sounds and banners, save,
+        refresh the settings page and say when it ends in the system line.
+        """
+        if not self.loaded:
+            self.load()
+        m = max(1, min(self.QUIET_MAX, int(minutes)))
+        self.quiet_until = int(time.time() + 60 * m)
+        self.sounds, self.pending = [], []
+        self.save()
+        HOST.refresh_settings(ALERTS_PAGE)
+        API.SysMsg("Alerts: quiet until %s." % time.strftime("%H:%M", time.localtime(self.quiet_until)), Kit.HUE_INFO)
+
+    def resume(self):
+        """End quiet time at once, save, refresh the settings page and say so in the system line."""
+        if not self.loaded:
+            self.load()
+        self.quiet_until = 0
+        self.save()
+        HOST.refresh_settings(ALERTS_PAGE)
+        API.SysMsg("Alerts: back on.", Kit.HUE_INFO)
+
+    def quiet_alarm(self, now=None):
+        """True for QUIET_ALARM seconds after an alarm came in during quiet time, so the host can still show
+        that something urgent happened. now defaults to the current time.
+        """
+        left = self.alarm_until - (time.time() if now is None else now)
+        return 0 < left <= self.QUIET_ALARM
+
+    def toggle_quiet(self):
+        """Start quiet time for 30 minutes, or end it when it is on (the hotkey and launcher action)."""
+        if self.quiet_on():
+            self.resume()
+        else:
+            self.quiet(30)
 
     def setting(self, key):
         """Return (on, sound id) for a kind: the saved choice, else on with the kind's own default sound."""
@@ -5249,19 +5598,20 @@ class Alerts(object):
                 HOST.refresh_settings(ALERTS_PAGE)
         return key
 
-    def raise_(self, key, text, level="warn", sound=None, ping=None, who=None, owner=None):
+    def raise_(self, key, text, level="warn", sound=None, ping=None, who=None, owner=None, name=None, serial=None):
         """Raise an alert and return True, or False when the kind is off or the alert repeats too soon.
 
-        key is the kind, text the message, level one of info, warn or alarm (the colour; alarm also
-        flashes
+        key is the kind, text the message, level one of info, warn or alarm (the colour; alarm also flashes
         the banner until clicked). who tells apart alerts of one kind for the repeat limit (default: the
-        text). The message goes to the system line, a sound is played or queued, a banner is queued and an
-        optional map ping (x, y) is queued for the pings service.
+        text). name and serial say which player the alert is about, for streamer mode. The message goes to
+        the system line and the history; a sound is played or queued and a banner is queued, unless quiet
+        time is on (history only); an optional map ping (x, y) is queued for the pings service.
         """
         if not self.loaded:
             self.load()
         key = str(key)
         k = self.kinds.get(key)
+        # A kind that was never registered is created on the fly, so a module may raise without setup.
         if k is None:
             self.kind(key, key, sound, owner)
             k = self.kinds[key]
@@ -5285,18 +5635,30 @@ class Alerts(object):
         text = str(text)
         # The owner name leads the line unless the text already starts with it.
         line = text if text.startswith(who_t + ":") else "%s: %s" % (who_t, text)
+        nm = str(name) if name else who if isinstance(who, str) and len(who) > 1 else ""
+        try:
+            ser = int((0 if isinstance(who, str) else who) if serial is None else serial) or 0
+        except (TypeError, ValueError):
+            ser = 0
         hue = self.LEVELS.get(level, Kit.HUE_TITLE)
-        API.SysMsg(line, hue)
+        API.SysMsg(Alerts.veiled(line, nm, ser), hue)
+        quiet = self.quiet_on(now)
+        self.log.append((now, str(level), line, key, quiet, nm, ser))
+        if len(self.log) > self.LOG_CAP:
+            del self.log[:-self.LOG_CAP]
+        self.log_ver += 1
+        self.log_due = True
+        if quiet and level == "alarm":
+            self.alarm_until = now + self.QUIET_ALARM
         # A sound given in the call wins over the saved one; a sound of 0 means silent.
         sid = (int(sound) if sound else snd) if snd else 0
-        # At most four queued sounds; they are played one gap apart so they do not run together.
-        if sid and not self.mute and len(self.sounds) < 4:
+        if sid and not self.mute and not quiet and len(self.sounds) < 4:
             if not self.sounds and not 0 <= now - self.sound_at < ALERT_SOUND_GAP:
                 self._play(sid, now)
             else:
                 self.sounds.append(sid)
-        if self.banner_on:
-            self.pending.append((line, hue, level == "alarm"))
+        if self.banner_on and not quiet:
+            self.pending.append((line, hue, level == "alarm", nm, ser))
             if len(self.pending) > 50:
                 del self.pending[:-50]
         if ping is not None and len(self.pings) < 8:
@@ -5312,10 +5674,12 @@ class Alerts(object):
     def tick(self, now):
         """Drive the queued sounds, map pings and banner; client tick, only while there is work (busy).
 
-        Plays the next queued sound once the gap has passed, sends the oldest ping through the pings
-        service (dropping it when sent, expired or the service is missing), shows queued banner lines and
-        watches the banner that is up.
+        Saves the history when it is due. Plays the next queued sound once the gap has passed, sends the
+        oldest ping through the pings service (dropping it when sent, expired or the service is missing),
+        shows queued banner lines and watches the banner that is up.
         """
+        if self.log_due and not 0 <= self.log_at - now <= self.LOG_EVERY:
+            self.save_log(now)
         if not self.busy:
             return
         if self.sounds and not 0 <= now - self.sound_at < ALERT_SOUND_GAP:
@@ -5342,18 +5706,18 @@ class Alerts(object):
         """Show the newest queued line on the banner, counting the others as +N more.
 
         Builds the banner window when it is not open, makes it visible and restarts the hold and flash
-        timers.
+        timers. items are (line, hue, alarm, name, serial) rows.
         """
         if not self.banner_on:
             return
-        line, hue, alarm = items[-1]
+        line, hue, alarm, nm, ser = items[-1]
         if self.shown and Kit.is_open(self.g):
             self.count += len(items)
-            self.alarm = self.alarm or any(a for _, _, a in items)
+            self.alarm = self.alarm or any(it[2] for it in items)
         else:
             self.count = len(items) - 1
-            self.alarm = any(a for _, _, a in items)
-        self.line, self.hue = line, hue
+            self.alarm = any(it[2] for it in items)
+        self.line, self.hue, self.line_who = line, hue, (nm, ser)
         if not Kit.is_open(self.g):
             self._build()
         if self.g is None:
@@ -5369,20 +5733,24 @@ class Alerts(object):
         self.flash_on = True
 
     def _label(self):
-        """Put the banner text on its label, shortened to fit beside the +N more label."""
+        """Put the banner text on its label, shortened to fit beside the +N more label, with streamer mode
+        applied to the line.
+        """
         c = self.c
         more = ("+%d more" % self.count) if self.count > 0 else ""
         mw = Kit.text_px(more) if more else 0
-        tw = self.W - 36 - ((mw + 8) if more else 0)
+        bw = self.bw + 6
+        tw = self.W - 36 - bw - ((mw + 8) if more else 0)
         self.tw = tw
-        Kit.set_text(c["text"], Kit.fit(self.line, tw), self.hue)
+        Kit.set_text(c["text"], Kit.fit(self.shown_line(), tw), self.hue)
         Kit.set_text(c["more"], more, Kit.HUE_INFO)
         if more:
-            c["more"].SetPos(self.W - 18 - mw, 15)
+            s = self.scale
+            c["more"].SetPos(int(round((self.W - 18 - bw - mw) * s)), int(round(15 * s)))
 
     def _watch(self, now):
-        """Keep the banner alive: notice a move or a click, flash an alarm, hide a normal alert after its
-        hold time.
+        """Keep the banner alive: notice a move or a click, flash an alarm, hide a normal alert after its hold
+        time.
         """
         g = self.g
         if not Kit.is_open(g):
@@ -5403,7 +5771,7 @@ class Alerts(object):
             if not 0 < self.flash_at - now <= ALERT_FLASH:
                 self.flash_at = now + ALERT_FLASH
                 self.flash_on = not self.flash_on
-                Kit.set_text(self.c["text"], Kit.fit(self.line, self.tw), Kit.HUE_BAD
+                Kit.set_text(self.c["text"], Kit.fit(self.shown_line(), self.tw), Kit.HUE_BAD
                              if self.flash_on else Kit.HUE_TEXT)
         elif not 0 < self.hide_at - now <= ALERT_HOLD:
             self.dismiss()
@@ -5422,25 +5790,60 @@ class Alerts(object):
 
     def _build(self):
         """Create the banner window (hidden at first) at its saved position, or near the top centre of the
-        screen.
+        screen, at the interface text scale.
 
-        The catcher over the whole window turns clicks into dismiss and lets the window be dragged.
+        The catcher over the whole window turns clicks into dismiss and lets the window be dragged. A
+        button on its right opens the alert history.
         """
-        W, H = self.W, self.H
+        W, H, s = self.W, self.H, Kit.tscale
+        WS, HS = int(round(W * s)), int(round(H * s))
         sw = Kit.screen()[0] or 1024
-        x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - W) // 2), 60), (W, H))
+        x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - WS) // 2), 60), (WS, HS))
         g = G.CreateGump(True, True)
         Kit.add_window_frame(g, W, H, corners=False)
         Kit.add_section(g, 8, 8, W - 16, H - 16)
         c = {"text": Kit.add_label(g, "", 18, 15, Kit.HUE_TITLE),
              "more": Kit.add_label(g, "", W - 60, 15, Kit.HUE_INFO)}
         Kit.catcher(g, 0, 0, W, H, self._click, "Click to dismiss; drag to move", movable=True)
-        Kit.show_window(g, x, y, W, H, None, False, None, lambda: Kit.save_pos(self.POS_KEY, self.g))
+        bw, bh = Kit.pic_size(Kit.ART_PAGE[0])
+        self.bw, bh = bw or 30, bh or 22
+        self.store = ({}, {})
+        Binds.scoped("va.banner", Kit.art_button, g, self.store, "history", Kit.ART_PAGE, W - 12 - self.bw,
+                     (H - bh) // 2, None, "Show the last 50 alerts", None, lambda: HOST.alert_log.open())
+        self.scale = s if Kit.scale_window(g, s) else 1.0
+        if self.scale == 1.0:
+            WS, HS = W, H
+        Kit.show_window(g, x, y, WS, HS, None, False, None, lambda: Kit.save_pos(self.POS_KEY, self.g))
         self.g, self.c = g, c
         self.shown = False
 
+    def rebuild(self):
+        """Draw the banner again after a look or text size change, keeping its place and whether it was
+        showing.
+        """
+        g = self.g
+        up = self.shown and Kit.is_open(g)
+        if g is None:
+            return
+        if Kit.is_open(g):
+            Kit.save_pos(self.POS_KEY, g)
+        self.g = None
+        Kit.dispose(g)
+        self.shown = False
+        if not up:
+            return
+        self._build()
+        if self.g is None:
+            return
+        self._label()
+        Kit.set(self.g, "IsVisible", True)
+        self.shown = True
+        self.pos = Snap.pos(self.g)
+
     def close(self):
-        """Close the banner window, save its place and drop everything still queued."""
+        """Close the banner window, save its place and the history, and drop everything still queued."""
+        if self.log_due:
+            self.save_log(time.time())
         g, self.g = self.g, None
         if Kit.is_open(g):
             Kit.save_pos(self.POS_KEY, g)
@@ -5448,6 +5851,119 @@ class Alerts(object):
         self.shown = False
         self.pending, self.sounds, self.pings = [], [], []
         self.busy = False
+
+
+class AlertLog(object):
+    """The alert history window: the newest 50 alerts as lines coloured by level, newest first, with the
+    time of day. Opened from the banner, the Alerts settings page or the launcher; client tick.
+    """
+    W = 600
+    ROW = 20
+    POS_KEY = "VirtueAssistant_alert_log_pos"
+    EVERY = 1.0
+    TITLE = "ALERT HISTORY"
+
+    def __init__(self):
+        """Start closed."""
+        self.g = None
+        self.store = ({}, {})
+        self.ver = -1
+        self.next = 0.0
+        self.want = 0.0
+
+    def open(self):
+        """Ask for the window to open on the next client tick. Repeated asks within 2 seconds are ignored."""
+        now = time.time()
+        if 0 <= now - self.want < 2.0:
+            return
+        self.want = now
+        Kit.pending.append(self._open)
+        HOST.poke()
+
+    def _open(self):
+        """Open the window on the client tick (or draw it again when it is already up), loading the history
+        first when it has not been read.
+        """
+        self.want = 0.0
+        if not ALERTS.loaded:
+            ALERTS.load()
+        if Kit.is_open(self.g):
+            self.rebuild()
+        else:
+            Binds.scoped("va.alertlog", self._build)
+
+    def rows(self):
+        """Build the window's lines from the history as (text, hue) pairs, newest first. A quiet alert is
+        marked "(quiet)" and drawn in the information colour; names follow streamer mode.
+        """
+        out = []
+        tw = self.W - 2 * Kit.MARGIN - 24
+        for t, level, line, _key, quiet, who, ser in reversed(list(ALERTS.log)):
+            line = Alerts.veiled(line, who, ser)
+            head = time.strftime("%H:%M", time.localtime(t)) + "  "
+            tail = "  (quiet)" if quiet else ""
+            text = head + Kit.fit(line, tw - Kit.text_w(head) - Kit.text_w(tail)) + tail
+            out.append((text, Kit.HUE_INFO if quiet else Alerts.LEVELS.get(level, Kit.HUE_TITLE)))
+        return out
+
+    def _build(self):
+        """Draw the window: title section, close button and one label per history line, scaled to the text
+        size and placed at its saved position (or near the top centre).
+        """
+        M, W, s = Kit.MARGIN, self.W, Kit.tscale
+        rows = self.rows()
+        self.store = ({}, {})
+        self.ver = ALERTS.log_ver
+        self.next = time.time() + self.EVERY
+        h_body = 16 + self.ROW * max(1, len(rows))
+        H = M + 30 + Kit.GAP + h_body + M
+        g = G.CreateGump(True, True)
+        Kit.add_window_frame(g, W, H)
+        Kit.add_section(g, M, M, W - 2 * M, 30)
+        Kit.add_label(g, self.TITLE, M + 30, M + 7, Kit.HUE_TITLE)
+        Kit.art_button(g, self.store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None, "Close")
+        yb = M + 30 + Kit.GAP
+        Kit.add_section(g, M, yb, W - 2 * M, h_body)
+        if not rows:
+            Kit.add_label(g, "No alerts yet.", M + 12, yb + 8, Kit.HUE_INFO)
+        for i, (text, hue) in enumerate(rows):
+            Kit.add_label(g, text, M + 12, yb + 8 + self.ROW * i, hue)
+        sc = s if Kit.scale_window(g, s) else 1.0
+        WS, HS = int(round(W * sc)), int(round(H * sc))
+        sw = Kit.screen()[0] or 1024
+        x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - WS) // 2), 80), (WS, HS))
+        Kit.place(g, x, y, WS, HS, int(round((M + 30 + Kit.GAP) * sc)))
+        G.AddGump(g)
+        Kit.on_moved(g, lambda: Kit.save_pos(self.POS_KEY, self.g))
+        self.g = g
+
+    def rebuild(self):
+        """Close the drawn window (saving its place) and draw it again from the current history."""
+        g, self.g = self.g, None
+        if Kit.is_open(g):
+            Kit.save_pos(self.POS_KEY, g)
+        Kit.dispose(g)
+        Binds.scoped("va.alertlog", self._build)
+
+    def poll(self, now):
+        """Called each UI pass while the window is open: close it when the player closed it or clicked close,
+        and redraw it when the history changed, at most once per EVERY seconds.
+        """
+        g = self.g
+        if g is None:
+            return
+        if not Kit.is_open(g) or Kit.was_clicked(self.store, "close"):
+            self.close()
+            return
+        if self.ver != ALERTS.log_ver and not 0 <= self.next - now <= self.EVERY:
+            self.rebuild()
+
+    def close(self):
+        """Close the window and save its place."""
+        g, self.g = self.g, None
+        if Kit.is_open(g):
+            Kit.save_pos(self.POS_KEY, g)
+        Kit.dispose(g)
 
 
 class Guard(object):
@@ -5579,22 +6095,36 @@ class _Page(object):
 
 
 class AlertsPage(_Page):
-    """Settings page listing every alert kind with its on/off box and sound, plus the mute and banner
-    options.
+    """Settings page listing every alert kind with its on/off box and sound, plus the mute, banner, quiet
+    time and history controls.
     """
     def kinds(self):
         """Alert kinds to list, without the test kind."""
         return [k for k in ALERTS.order if k != Alerts.TEST_KEY]
 
+    QUIET_CAPS = ("Quiet 30 min", "Resume")
+
     def table(self, w):
-        """Return the form table for the page at width w: the global options, then the per-kind section."""
+        """Return the form table for the page at width w: the global options, then the per-kind section.
+
+        The quiet button reads Quiet 30 min or Resume, and a note beside it says when quiet time ends.
+        """
+        q = ALERTS.quiet_on()
+        qx = 12 + 35 + max(Kit.text_w(c) for c in self.QUIET_CAPS) + 20 + 35
+        qx += Kit.text_w("History") + 20
+        note = ("Quiet until %s" % time.strftime("%H:%M", time.localtime(ALERTS.quiet_until))) if q else ""
+        quiet = (("quiet", Kit.ART_PLAY, self.QUIET_CAPS[1], "Turn alert sounds and banners back on") if q else
+                 ("quiet", Kit.ART_PLAY, self.QUIET_CAPS[0], "No alert sounds or banners for 30 minutes; journal "
+                  "lines and the history stay"))
         return (("ALERTS  (every module's warnings)", (("check", "mute", "Mute every alert sound",
                      "No alert sounds; banners and journal lines stay", {"stay": True}),
                     ("check", "banner", "Show the banner", "Show alerts in a banner (click to dismiss, drag to move)",
                      {"dx": 242}), ("buttons", (("test", Kit.ART_PLAY, "Test alert",
                                   "Raise a test alert"),), {"bdy": 4, "stay": True}),
-                    ("note", "The same alert repeats at most every %d s." % int(ALERT_RATE), {"dx": 172, "ndy": 7})),
-                 {"top": 32, "sh": 98}), (Kit.fit("ALERT KINDS  (from modules on this session)", w - 16),
+                    ("note", "The same alert repeats at most every %d s." % int(ALERT_RATE), {"dx": 172, "ndy": 7}),
+                    ("buttons", (quiet, ("history", Kit.ART_PAGE, "History", "Show the last 50 alerts")),
+                     {"bdy": 4, "stay": True}), ("note", note, {"dx": qx, "ndy": 7})),
+                 {"top": 32, "sh": 118}), (Kit.fit("ALERT KINDS  (from modules on this session)", w - 16),
                  (("custom", 0, self._kinds),), {"sh": 40 + 28 * max(1, len(self.kinds()))}))
 
     def height(self, w):
@@ -5602,10 +6132,13 @@ class AlertsPage(_Page):
         return Kit.Form.height(self.table(w), w)
 
     def build(self, g, x, y, w):
-        """Build the page into gump g at x, y, w from the form table; loads the saved choices first."""
+        """Build the page into gump g at x, y, w from the form table; loads the saved choices first and
+        remembers whether quiet time was on, so poll can redraw when it changes.
+        """
         if not ALERTS.loaded:
             ALERTS.load()
         self.store = ({}, {})
+        self.quiet_drawn = ALERTS.quiet_on()
         self.c = Kit.Form(g, x, y, w, {"mute": ALERTS.mute, "banner": ALERTS.banner_on}, self.table(w), self.store).c
 
     def _kinds(self, f, x, y):
@@ -5647,7 +6180,8 @@ class AlertsPage(_Page):
         """Apply what the player changed on the page; called while the page is open.
 
         Writes mute, banner and per-kind boxes and sounds back to the alert centre, plays a sound when its
-        button is clicked, and raises a test alert when the test button is clicked.
+        button is clicked, raises a test alert when the test button is clicked, starts or ends quiet time,
+        opens the history window, and redraws the page when quiet time starts or ends by itself.
         """
         c = self.c
         if c is None:
@@ -5673,6 +6207,14 @@ class AlertsPage(_Page):
             ALERTS.kind(Alerts.TEST_KEY, "Test", 0x1EA, APP_NAME)
             ALERTS.last.pop((Alerts.TEST_KEY, "test"), None)
             ALERTS.raise_(Alerts.TEST_KEY, "This is how an alert looks and sounds.", "warn", who="test")
+        if Kit.was_clicked(self.store, "quiet"):
+            ALERTS.toggle_quiet()
+        if Kit.was_clicked(self.store, "history"):
+            HOST.alert_log.open()
+        q = ALERTS.quiet_on()
+        if q != self.quiet_drawn:
+            self.quiet_drawn = q
+            HOST.refresh_settings(ALERTS_PAGE)
         for n, row in enumerate(c["dd"]):
             key, dd, ids, idx = row
             i = Kit.dd_index(dd, idx)
@@ -5682,6 +6224,268 @@ class AlertsPage(_Page):
                 ALERTS.choose(key, sound=ids[i])
             if Kit.was_clicked(self.store, "play%d" % n) and ids[idx]:
                 API.PlaySound(int(ids[idx]))
+
+
+class BackupPage(_Page):
+    """Settings page for the backups of this character: Back up now, a drop-down of the saved backups and
+    Restore.
+
+    A backup is a folder holding every Virtue Assistant setting of this character, its unified bag
+    layout and an info file. The KEEP newest are kept. One is made by hand, one before a restore and
+    one the first time a new version starts. Restore asks twice (ARM seconds to confirm).
+    """
+    KEEP = 10
+    ARM = 3.0
+    DIR = "Backups"
+    VER_KEY = "VirtueAssistant_backup_ver"
+    AUTO = "before %s"
+    SKIP = ("VirtueAssistant_starting", "VirtueAssistant_backup_ver")
+
+    def __init__(self):
+        """Start with no backup list read, nothing picked and nothing armed."""
+        _Page.__init__(self)
+        self.items = None
+        self.sel = 0
+        self.armed = (None, 0.0)
+        self.pick = None
+
+    def table(self, w):
+        """The form table for the page: one section with the two buttons, the backup drop-down and a note
+        saying where the files are. w is not used.
+        """
+        return (("BACKUPS  (this character)", (
+            ("buttons", (("backup_now", Kit.ART_OK, "Back up now", "Save every Virtue Assistant setting of this "
+                          "character now (the 10 newest are kept)"),
+                         ("restore", Kit.ART_PLAY, "Restore", "Put the picked backup back (press twice; the "
+                          "settings of now are backed up first)"))),
+            ("custom", 30, self._list), ("note", "In the VirtueAssistantSettings folder, Backups")), {}),)
+
+    def height(self, w):
+        """Height of the page at width w."""
+        return Kit.Form.height(self.table(w), w)
+
+    def build(self, g, x, y, w):
+        """Build the page into gump g at x, y, w from the form table."""
+        self.store = ({}, {})
+        self.c = Kit.Form(g, x, y, w, {}, self.table(w), self.store).c
+
+    def _list(self, f, x, y):
+        """Custom row: the drop-down of backups, keeping the picked one selected when the list is redrawn.
+        Shows a waiting or empty line when there is nothing to pick.
+        """
+        items = self.items or []
+        names = [lbl for _, lbl in items]
+        if not names:
+            names = ["Reading the backups" if self.items is None else "No backups yet"]
+        at = [i for i, it in enumerate(items) if it[0] == self.pick]
+        self.sel = at[0] if at else max(0, min(self.sel, len(names) - 1))
+        dd = G.CreateDropDown(min(380, f.w - 24), names, self.sel)
+        dd.SetPos(x + 12, y + 2)
+        f.g.Add(dd)
+        Kit.with_tip(dd, "The backup that Restore puts back")
+        f.c["dd"] = dd
+
+    def poll(self):
+        """Take the drop-down pick, and handle the two buttons; called while the page is open.
+
+        Back up now asks the host for a backup. Restore needs two clicks on the same backup within ARM
+        seconds; the first one only arms it, so a stray click cannot overwrite settings.
+        """
+        c = self.c
+        if c is None:
+            return
+        dd = c.get("dd")
+        items = self.items or []
+        if dd is not None:
+            self.sel = Kit.dd_index(dd, self.sel)
+        if 0 <= self.sel < len(items):
+            self.pick = items[self.sel][0]
+        if Kit.was_clicked(self.store, "backup_now"):
+            self.ask(("backup", "by hand"))
+        if not Kit.was_clicked(self.store, "restore"):
+            return
+        if not items:
+            API.SysMsg("Backups: there is no backup to restore yet.", Kit.HUE_BAD)
+            return
+        name = items[max(0, min(self.sel, len(items) - 1))][0]
+        now = time.time()
+        a = self.armed
+        if a[0] == name and 0 <= a[1] - now <= self.ARM:
+            self.armed = (None, 0.0)
+            self.ask(("restore", name))
+            return
+        self.armed = (name, now + self.ARM)
+        API.SysMsg("Backups: press Restore again to confirm.", Kit.HUE_INFO)
+
+    @staticmethod
+    def ask(req):
+        """Hand a backup or restore request to the host, which does it on the main loop (never inside a
+        module tick). req is ("backup", why) or ("restore", name). Refused with a message while another
+        request is waiting.
+        """
+        if HOST.profile_req is not None:
+            API.SysMsg("Backups: busy saving; try again.", Kit.HUE_BAD)
+            return
+        HOST.profile_req = req
+        HOST.poke()
+
+    @staticmethod
+    def base():
+        """The folder that holds this character's backups: the Backups data folder plus the character serial
+        in hex. Raises when the character is not in the world yet.
+        """
+        serial = safe(lambda: int(API.Player.Serial), 0)
+        if not serial:
+            raise Exception("the character isn't in the world yet")
+        return os.path.join(Kit.data_path(BackupPage.DIR), "%08X" % serial)
+
+    @staticmethod
+    def names():
+        """The backup names of this character, oldest first. A folder still being written (.saving) or
+        without its info file does not count.
+        """
+        base = BackupPage.base()
+        if not os.path.isdir(base):
+            return []
+        return sorted(n for n in os.listdir(base) if not n.endswith(".saving")
+                      and os.path.isfile(os.path.join(base, n, "info.txt")))
+
+    @staticmethod
+    def info(name):
+        """The info file of a backup read as a dict (saved time, version, why)."""
+        text = Kit.read_safe(os.path.join(BackupPage.base(), name, "info.txt"), None) or ""
+        return dict((k.strip(), v.strip()) for k, v in (ln.split("=", 1) for ln in text.splitlines() if "=" in ln))
+
+    @staticmethod
+    def label(name):
+        """The text the drop-down shows for a backup: its date and time of day, taken from the folder name."""
+        return "%s %s" % (name[:10], name[11:16].replace("-", ":"))
+
+    def scan(self):
+        """Read the backups from disk into items as (name, text) pairs, newest first, with the reason in
+        brackets.
+        """
+        out = []
+        for n in reversed(self.names()):
+            why = self.info(n).get("why", "")
+            out.append((n, self.label(n) + ("  (%s)" % why if why else "")))
+        self.items = out
+
+    @staticmethod
+    def snapshot(prefs):
+        """Collect the settings a backup holds, as a dict of key to text.
+
+        Every Virtue Assistant setting of this character, the module settings keys included, except the
+        session only ones and the backup's own bookkeeping. prefs is the host settings text, which is
+        stored under SETTINGS_KEY because the host may not have saved it yet.
+        """
+        found = Profiles.char_vars()
+        mods = set(s.key for s in HOST.slots)
+        extra = tuple(set(k[:-8] for k in found if k.endswith("_settings") and k[:-9].lower() in mods))
+        skip = set(Profiles.SESSION_VARS + BackupPage.SKIP + (PROFILE_STATE_KEY,))
+        va = dict((k, v) for k, v in found.items() if k not in skip and k.startswith(Profiles.VA_KEYS + extra))
+        va[SETTINGS_KEY] = prefs
+        return va
+
+    @staticmethod
+    def _drop(path):
+        """Delete a backup folder and the files in it."""
+        for n in os.listdir(path):
+            os.remove(os.path.join(path, n))
+        os.rmdir(path)
+
+    @staticmethod
+    def read_vars(path):
+        """Read the settings of a backup folder from its va_vars.txt."""
+        return Profiles.parse_vars(Kit.read_safe(os.path.join(path, "va_vars.txt"), None) or "")
+
+    @staticmethod
+    def early():
+        """Take the snapshot for the first start of a new version, before the host and the modules have
+        changed anything, so the backup holds the settings as the older version left them. Returns
+        (settings, bag layout text), or None when this version already made its backup or reading failed.
+        """
+        if Kit.get_var(BackupPage.VER_KEY) == APP_VERSION:
+            return None
+        bag = safe(Profiles.bag_path)
+        return safe(lambda: (BackupPage.snapshot(Kit.get_var(SETTINGS_KEY)), Kit.read_safe(bag, None) if bag else None))
+
+    def make(self, why, prefs, keep=None, early=None):
+        """Write a backup and return (its name, how many settings it holds).
+
+        why goes in the info file. prefs is the host settings text. keep is a backup that must survive the
+        pruning, early is the pair from BackupPage.early (used instead of a fresh snapshot). The files are
+        written into a .saving folder, read back and compared, and only then renamed into place, so a
+        failed write leaves no half backup. Two backups in one second get a -NN suffix. Anything over KEEP
+        is deleted, oldest first. Raises when the read-back differs. Script thread.
+        """
+        base = self.base()
+        t = time.time()
+        stem = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(t))
+        if not os.path.isdir(base):
+            os.makedirs(base)
+        top = -1
+        for n in os.listdir(base):
+            if n.endswith(".saving"):
+                safe(lambda: self._drop(os.path.join(base, n)))
+                continue
+            rest = n[len(stem):] if n.startswith(stem) else None
+            if rest == "":
+                top = max(top, 0)
+            elif rest and rest[0] == "-" and rest[1:].isdigit():
+                top = max(top, int(rest[1:]))
+        name = stem if top < 0 else "%s-%02d" % (stem, top + 1)
+        final = os.path.join(base, name)
+        tmp = final + ".saving"
+        os.makedirs(tmp)
+        va = early[0] if early else self.snapshot(prefs)
+        Profiles._write(os.path.join(tmp, "va_vars.txt"),
+                        "".join("%s\t%s\n" % (Profiles._esc(k), Profiles._esc(va[k])) for k in sorted(va)))
+        bag = Profiles.bag_path()
+        text = early[1] if early else Kit.read_safe(bag, None) if bag else None
+        if text is not None:
+            Profiles._write(os.path.join(tmp, "unified_bag.cfg"), text)
+        Profiles._write(os.path.join(tmp, "info.txt"), "saved=%d\nversion=%s\nwhy=%s\n" % (int(t), APP_VERSION, why))
+        if self.read_vars(tmp) != va:
+            safe(lambda: self._drop(tmp))
+            raise Exception("the backup doesn't read back the same; try again")
+        os.rename(tmp, final)
+        names = self.names()
+        extra = len(names) - self.KEEP
+        for n in names:
+            if extra <= 0:
+                break
+            if n != keep and n != name:
+                safe(lambda: self._drop(os.path.join(base, n)))
+                extra -= 1
+        return name, len(va)
+
+    def read(self, name):
+        """Read a backup: returns (settings dict, bag layout text or None). Raises when the backup is gone."""
+        path = os.path.join(self.base(), name)
+        if not os.path.isfile(os.path.join(path, "info.txt")):
+            raise Exception("that backup is gone")
+        return self.read_vars(path), Kit.read_safe(os.path.join(path, "unified_bag.cfg"), None)
+
+    @staticmethod
+    def apply(va, lay, gone=()):
+        """Put a backup back: write its settings, blank those in gone (settings this character has now that
+        the backup does not hold), wait for them to land and restore the bag layout, keeping the lines
+        that belong to this character only. Returns False when some writes were still pending. Script
+        thread.
+        """
+        for k in sorted(va):
+            Kit.put_var(k, va[k])
+        for k in sorted(set(gone) - set(va)):
+            Kit.put_var(k, "")
+        ok = PROFILES.wait_vars(va)
+        bag = Profiles.bag_path()
+        own = Profiles.BAG_OWN
+        cur = Kit.read_safe(bag) if lay is not None and bag else None
+        if cur is not None:
+            keep = [l for l in lay.splitlines() if l.strip() and not l.startswith(own)]
+            Profiles._write(bag, "\n".join(keep + [l for l in cur.splitlines() if l.startswith(own)]))
+        return ok
 
 
 def _norm_key(k):
@@ -5979,18 +6783,60 @@ class KeysPage(_Page):
             HOST.refresh_settings(KEYS_PAGE)
 
 
-ALERTS_PAGE, KEYS_PAGE = "va.alerts", "va.keys"
+ALERTS_PAGE, KEYS_PAGE, BACKUP_PAGE = "va.alerts", "va.keys", "va.backups"
 
 
 class WhatsNew(object):
-    """The what's-new window: shown once per version, from the text of the patch notes."""
+    """The what's-new window: shown once per version, from the text of the patch notes. It also keeps
+    which new settings of this version the player has already looked at, so the settings pages can
+    mark the ones that are still new.
+    """
     W = 520
+    SEEN_KEY = "VirtueAssistant_new_seen"
+    seen_keys = None
+    NEW_KEYS = ("interface.look", "interface.tsize", "interface.compact", "interface.cblind", "interface.streamer",
+                "va.alerts.quiet", "va.alerts.history", "va.backups.backup_now", "va.backups.restore",
+                "interface.share", "interface.load_code", "interface.code", "interface.situ_on", "interface.fade",
+                "interface.fade_to", "interface.fade_after", "interface.fade_all", "ultima.overview",
+                "ultima.tracker.sort", "ultima.overview.range", "ultima.overview.rows", "inventory.sections",
+                "inventory.sections.p_reagents", "inventory.sections.p_potions", "inventory.sections.p_bandages",
+                "inventory.sections.p_gold", "inventory.sections.p_scrolls", "inventory.sections.p_maps",
+                "inventory.sections.p_ores", "inventory.sections.p_wood", "inventory.sections.p_hides",
+                "inventory.sections.p_food", "inventory.sections.p_weapons", "inventory.sections.p_armour",
+                "inventory.sections.p_jewellery", "inventory.sections.p_keys", "inventory.sections.other",
+                "inventory.sections.add", "actionbar.radial", "actionbar.radial_page")
 
     def __init__(self):
         """Start closed with no text loaded."""
         self.g = None
         self.store = ({}, {})
         self.text = None
+
+    @staticmethod
+    def seen():
+        """The set of new setting keys already seen this version, read from SEEN_KEY on first use (a list
+        saved by another version counts as empty).
+        """
+        if WhatsNew.seen_keys is None:
+            ver, _, keys = Kit.get_var(WhatsNew.SEEN_KEY, "").partition(":")
+            WhatsNew.seen_keys = set(k for k in keys.split(",") if k) if ver == APP_VERSION else set()
+        return WhatsNew.seen_keys
+
+    @staticmethod
+    def unseen(page=None):
+        """The new setting keys not seen yet; with page, only those under that page key."""
+        seen = WhatsNew.seen()
+        pre = None if page is None else page + "."
+        return set(k for k in WhatsNew.NEW_KEYS if k not in seen and (pre is None or k.startswith(pre)))
+
+    @staticmethod
+    def see(keys):
+        """Record these keys as seen and save the list with the version."""
+        seen = WhatsNew.seen()
+        new = set(keys) - seen
+        if new:
+            seen.update(new)
+            Kit.put_var(WhatsNew.SEEN_KEY, "%s:%s" % (APP_VERSION, ",".join(sorted(seen))))
 
     def due(self):
         """True when there is a what's-new text and this account has not yet seen it for this version."""
@@ -6008,6 +6854,18 @@ class WhatsNew(object):
         """Open the window on the client tick when it is due."""
         if self.due():
             Kit.on_client(lambda: Binds.scoped("va.news", self._build))
+
+    def show(self):
+        """Open the window now, whether or not it is due, when there is text. Returns False when there is
+        nothing to show.
+        """
+        if self.text is None:
+            self.text = whats_new()
+        if not self.text:
+            return False
+        if not Kit.is_open(self.g):
+            Kit.on_client(lambda: Binds.scoped("va.news", self._build))
+        return True
 
     def _build(self):
         """Build and show the window: title bar, close button and the wrapped text, centred in the upper part
@@ -6062,7 +6920,8 @@ class ModuleSlot(object):
         not loaded.
 
         load is the module's busy record and part_load maps each of its running parts to theirs: both are
-        lists [decayed ms sum, last time, slowest tick] kept by Host.busy_add.
+        lists [decayed ms sum, last time, slowest tick] kept by Host.busy_add. shipped marks a module that
+        is one of the published files, and folded is whether its parts list is folded in the settings.
         """
         self.key = key
         self.title = title
@@ -6080,6 +6939,7 @@ class ModuleSlot(object):
         self.part_load = {}
         self.start_tok = None
         self.page_err_at = 0.0
+        self.shipped = False
         self.parts = self.aliases = ()
         self.parts_on = {}
         self.parts_running = set()
@@ -6631,17 +7491,20 @@ class Host(object):
     running module its turn; script threads run modules that need them. The host also keeps the caches
     shared by every module (the player, mobiles, backpack), hotkeys, docks and layout, fight and
     cursor guards, services and saved preferences, the start-up timing list, the start mark and the
-    safe-start window, and the check that warns about TazUO settings the shard rules forbid. Modules
-    reach it as HOST.
+    safe-start window, and the check that warns about TazUO settings the shard rules forbid. It also
+    applies the look settings, runs the backups and the alert history window, and sits in front of
+    the profile and backup requests. Modules reach it as HOST.
     """
     def __init__(self):
-        """Create the empty tables, caches and flags, and the built-in Alerts and Hotkeys settings pages.
+        """Create the empty tables, caches and flags, and the built-in Alerts, Hotkeys and Backups settings
+        pages.
 
         boot starts the start-up timing list with the time spent before the host existed. held_on and
         held_parts name the modules and parts that are switched off for this session only but stay saved as
         on. marked says this run set the start mark; ask_g and ask_store belong to the safe-start window.
         tz_at is when the TazUO settings check runs next, tz_off holds its key when a client name it reads
-        is missing, and tz_told the settings already warned about this session.
+        is missing, and tz_told the settings already warned about this session. early_backup holds the
+        snapshot taken before anything loads, for the backup of a new version.
         """
         self.slots = []
         self.by_key = _KeyMap(self)
@@ -6709,11 +7572,18 @@ class Host(object):
         self.tz_at = 0.0
         self.tz_off = set()
         self.tz_told = set()
-        for key, title, page in ((ALERTS_PAGE, "Alerts", AlertsPage()), (KEYS_PAGE, "Hotkeys", KeysPage())):
+        self.backups = BackupPage()
+        self.alert_log = AlertLog()
+        self.launcher = None
+        self.early_backup = None
+        for key, title, page in ((ALERTS_PAGE, "Alerts", AlertsPage()), (KEYS_PAGE, "Hotkeys", KeysPage()),
+                                 (BACKUP_PAGE, "Backups", self.backups)):
             s = ModuleSlot(key, title, "", None, 1.0)
             s.api = page.api()
             self.pages.append(s)
         self.whats_new = WhatsNew()
+        self.services["alerts.history"] = self.alert_log.open
+        self.services["alerts.quiet"] = ALERTS.toggle_quiet
 
     def _tell(self, msg):
         """Show a message in the system line once (the same message is not repeated until the list resets)."""
@@ -6804,12 +7674,15 @@ class Host(object):
         s = self.current()
         return ALERTS.kind(key, label, default_sound, s.title if s is not None else APP_NAME)
 
-    def alert(self, key, text, level="warn", sound=None, ping=None, who=None):
-        """Raise an alert for the module running now; see Alerts.raise_ for the arguments. Returns True when
-        it was raised.
+    def alert(self, key, text, level="warn", sound=None, ping=None, who=None, name=None, serial=None):
+        """Raise an alert for the module running now; see Alerts.raise_ for the arguments. name and serial
+        tell streamer mode whose name is in the text. Wakes the fade service for that module. Returns True
+        when it was raised.
         """
         s = self.current()
-        return ALERTS.raise_(key, text, level, sound, ping, who, s.title if s is not None else APP_NAME)
+        if FADE.on and s is not None:
+            FADE.wake(s.key)
+        return ALERTS.raise_(key, text, level, sound, ping, who, s.title if s is not None else APP_NAME, name, serial)
 
     def guarded(self):
         """True or False when the guard state is known, None when not."""
@@ -7025,8 +7898,10 @@ class Host(object):
         self.refresh_settings(module)
 
     def alarm_up(self):
-        """True while an alarm banner is on screen."""
-        return bool(ALERTS.shown and ALERTS.alarm)
+        """True while an alarm banner is on screen, or for a short while after an alarm came in during quiet
+        time.
+        """
+        return bool(ALERTS.shown and ALERTS.alarm) or ALERTS.quiet_alarm()
 
     def typing(self):
         """True while the player is typing in the client (a chat or other text box has focus)."""
@@ -7052,16 +7927,65 @@ class Host(object):
             self.save_prefs()
         return self.grid_shown()
 
-    def set_dark(self, on):
-        """Switch dark mode on or off: save it, retint every window and redraw docks and windows that are
-        open.
-
-        Look services (names starting look.) are called so that modules can restyle themselves.
+    def set_look(self, name):
+        """Choose the look (classic, dark, parchment or high contrast; an unknown name gives classic), save it
+        and redraw every window in it. Called from the settings page.
         """
-        on = bool(on)
-        self.prefs["dark"] = "1" if on else "0"
+        name = name if name in Kit.LOOKS else "classic"
+        self.prefs["look"] = name
+        self.prefs["dark"] = "1" if name in ("dark", "contrast") else "0"
         self.save_prefs()
-        Kit.set_dark(on)
+        Kit.set_look(name)
+        self.restyle("Look: %s." % Kit.LOOK_NAMES[name])
+
+    SWITCHES = {"compact": "Compact rows", "cblind": "Colour-blind marks", "streamer": "Streamer mode"}
+
+    def set_switch(self, key, value):
+        """Change one interface switch and redraw: key is tsize (text size percent, one of Kit.TEXT_SIZES),
+        compact, cblind or streamer (value is on or off). Saves the choice, sets the matching Kit value,
+        says what changed in the system line and ignores any other key.
+        """
+        if key == "tsize":
+            v = int(value) if int(value) in Kit.TEXT_SIZES else 100
+            self.prefs[key] = str(v)
+            Kit.tscale = v / 100.0
+            note = "Text size: %d%%." % v
+        elif key in self.SWITCHES:
+            on = bool(value)
+            self.prefs[key] = "1" if on else "0"
+            note = "%s %s." % (self.SWITCHES[key], "on" if on else "off")
+            if key == "compact":
+                Kit.compact = on
+            elif key == "cblind":
+                Kit.cblind = on
+            else:
+                Kit.streamer = on
+        else:
+            return
+        self.save_prefs()
+        self.restyle(note)
+
+    def _apply_style(self):
+        """Set Kit's look, text scale and the compact, colour-blind and streamer switches from the saved
+        interface choices, and load the fade settings. A saved look that disagrees with the saved dark flag
+        falls back to dark or classic, which keeps settings saved by an older version meaning the same.
+        """
+        look, dark = self.prefs.get("look", ""), self.pref_int("dark", 0) == 1
+        if look not in Kit.LOOKS or dark != (look in ("dark", "contrast")):
+            look = "dark" if dark else "classic"
+        Kit.set_look(look)
+        ts = self.pref_int("tsize", 100)
+        Kit.tscale = (ts if ts in Kit.TEXT_SIZES else 100) / 100.0
+        Kit.compact, Kit.cblind = self.pref_int("compact", 0) == 1, self.pref_int("cblind", 0) == 1
+        Kit.streamer = self.pref_int("streamer", 0) == 1
+        FADE.load(self)
+
+    def restyle(self, note=None):
+        """Redraw everything in the current look or scale: retint the frames, rebuild every open module window
+        and dock, run the look services of the modules, refresh the settings and layout pages and rebuild
+        the alert banner. note is shown in the system line. Client tick or main loop.
+        """
+        FADE.reset()
         Kit.retint()
         for k, d in list(self.docks):
             try:
@@ -7077,8 +8001,21 @@ class Host(object):
             if name.startswith("look."):
                 safe(fn)
         self.refresh_settings(LAYOUT_OWNER)
+        c = self.config
+        if c is not None and c.mode == "alone":
+            c.refresh()
+        elif c is not None:
+            c.measured.clear()
+            if c.mode == "full":
+                c.prof_redraw = True
+        safe(ALERTS.rebuild)
         self.poke()
-        Kit.say("Dark mode on." if on else "Dark mode off.", Kit.HUE_GOOD)
+        if self.alert_log.g is not None:
+            self.alert_log.open()
+        if self.launcher is not None and self.launcher.g is not None:
+            Kit.pending.append(self.launcher.rebuild)
+        if note:
+            Kit.say(note, Kit.HUE_GOOD)
 
     def dock_wanted(self, key):
         """True when the module window key is wanted in the action bar tray."""
@@ -7189,7 +8126,7 @@ class Host(object):
         key = str(key)
         if not LAYOUT.holds(key):
             return None
-        slot = LAYOUT.placed.get(key)
+        slot = LAYOUT.spot(key)
         return tuple(slot) if slot is not None else None
 
     def layout_holds(self, key):
@@ -7470,11 +8407,14 @@ class Host(object):
         alone, print one journal line with the total and each phase.
 
         Called by run_due once the module load jobs are done. The last phase, first build, is the time
-        since the final mark less the module compile times already listed.
+        since the final mark less the module compile times already listed. This is also the moment the
+        backup list is read and the backup for a new version is requested (backup_start).
         """
         # Setting boot to None above makes this a one-shot, whether or not the line is printed.
         boot, self.boot = self.boot, None
         t = time.time()
+        if self.alone is None:
+            self.backup_start()
         if self.alone is not None or self.pref_int("startup", 0) != 1:
             return
         boot.append(("first build", max(0.0, t - self.boot_at - self.boot_load)))
@@ -8370,8 +9310,8 @@ class Host(object):
             self.ui_busy = False
 
     def ui_tick(self):
-        """Per-pass window work: settings window, shared alive stamp, hub, docks, grid, alerts, guard,
-        what's new and the safe-start window.
+        """Per-pass window work: settings window, shared alive stamp, hub, docks, grid, alerts, alert history,
+        guard, what's new, the launcher and the safe-start window.
 
         Runs at UI_TICK; slows down to UI_IDLE after UI_IDLE_AFTER seconds without input, unless a mouse
         button is held or the layout is arranging. Errors are shown once, never raised.
@@ -8392,6 +9332,11 @@ class Host(object):
                     self.hub.poll()
                 self.dock_tick()
                 SNAP.tick()
+                if FADE.on:
+                    try:
+                        FADE.tick(now)
+                    except Exception as ex:
+                        self._tell("%s: fade error: %s%s" % (APP_NAME, ex, _error_where()))
                 if now - self.input_at > UI_IDLE_AFTER and not (SNAP.down or LAYOUT.arrange):
                     self.ui_next = now + UI_IDLE
                 if self.grid is not None:
@@ -8406,6 +9351,10 @@ class Host(object):
                     self._tell("%s: guard-zone error: %s%s" % (APP_NAME, ex, _error_where()))
                 if self.whats_new.g is not None:
                     self.whats_new.poll()
+                if self.alert_log.g is not None:
+                    self.alert_log.poll(now)
+                if self.launcher is not None and self.launcher.g is not None:
+                    self.launcher.poll(now)
                 if self.ask_g is not None:
                     self.ask_poll()
         except Exception as ex:
@@ -8420,7 +9369,8 @@ class Host(object):
 
         A module that is on by default is switched on once (the seen list). Modules saved as on but not
         loadable are kept in held_on so a missing file does not lose the choice. Held parts from an
-        earlier load are forgotten here; tz_check holds them again when needed. Dark mode is applied.
+        earlier load are forgotten here; tz_check holds them again when needed. The look and interface
+        switches are applied (_apply_style).
         """
         prefs = self.prefs = Kit.codec_load(Kit.get_var(SETTINGS_KEY))
         on = [k for k in prefs.get("modules", "").split(",") if k]
@@ -8440,7 +9390,7 @@ class Host(object):
             if s.enabled:
                 self._parts_fill(s)
         prefs["seen"] = ",".join(sorted(seen))
-        Kit.set_dark(self.pref_int("dark", 0) == 1)
+        self._apply_style()
         if prefs["seen"] != was or changed:
             self.save_prefs()
 
@@ -8568,16 +9518,20 @@ class Host(object):
             self.save_prefs(True)
 
     def profile_job(self, req):
-        """Do a profile request (save, load or fav, with a name) on the main loop; a failure is shown
-        in the system line.
+        """Do a profile or backup request on the main loop; a failure is shown in the system line.
+
+        req is (kind, name): save, load or fav for profiles, backup or restore for backups. The settings
+        window's profile list is refreshed afterwards, except after a load or restore, which rebuild the
+        windows themselves.
         """
         kind, name = req
         try:
             getattr(self, "_profile_" + kind)(name)
         except Exception as ex:
-            what = {"fav": "set the favourite profile"}.get(kind, kind + " the profile")
+            what = {"fav": "set the favourite profile", "backup": "save the backup",
+                    "restore": "restore the backup"}.get(kind, kind + " the profile")
             Kit.say("couldn't %s (%s%s)." % (what, Tz.why(ex), _error_where()), Kit.HUE_BAD)
-        if kind != "load" and self.config is not None and not self.stopping():
+        if kind not in ("load", "restore") and self.config is not None and not self.stopping():
             self.config.refresh_profiles()
             if self.config.mode == "full":
                 self.config.prof_redraw = False
@@ -8610,16 +9564,28 @@ class Host(object):
         """Load a profile: stop the modules, close the windows, replace the saved variables, then start
         again.
 
-        The settings window and hub are rebuilt, key binds, alerts, guard memory and layout are reloaded,
-        each module's api is built again, and every enabled module is started. The client check (tz_check)
-        runs again after the settings are loaded, so a module the client cannot support stays held.
-        Settings saving is frozen meanwhile.
+        The work is done by _reload; the result is reported in the system line.
         """
         if PROFILES.info(name) is None:
             raise Exception('there is no profile "%s"' % name)
         Kit.say('loading profile "%s".' % name, Kit.HUE_INFO)
+        result = self._reload(lambda: PROFILES.apply(name, "fav" if name == PROFILES.favorite() else "pick"), name)
+        PROFILES.report(name, "loaded", *result)
+
+    def _reload(self, apply, sel=None):
+        """Stop everything, run apply (which replaces the saved settings) and start everything again; shared
+        by loading a profile and restoring a backup. Returns what apply returned.
+
+        The pending settings and the alert history are written first, and saving is frozen meanwhile. The
+        settings window and hub are rebuilt, key binds, alerts, guard memory and layout are reloaded, each
+        module's api is built again, and every enabled module is started. The client check (tz_check) runs
+        again after the settings are loaded, so a module the client cannot support stays held. sel is the
+        profile to show picked in the settings window afterwards.
+        """
         self.prefs_flush(True)
         self.prefs_frozen = True
+        if ALERTS.log_due:
+            ALERTS.save_log(time.time())
         try:
             if self.config is not None:
                 safe(self.config.close)
@@ -8629,15 +9595,15 @@ class Host(object):
             if self.hub is not None:
                 safe(self.hub.close)
             Kit._vars.clear()
-            mode = "fav" if name == PROFILES.favorite() else "pick"
-            result = PROFILES.apply(name, mode)
+            result = apply()
             for c in set(Binds.saved.values()) | Binds.hooked:
                 Binds.unhook(c)
             Binds.saved.clear()
             Binds.loaded = False
             self._zone_was_d = None
             Kit._vars.clear()
-            ALERTS.loaded = False
+            ALERTS.load()
+            WhatsNew.seen_keys = None
             GUARD.saved = None
             Kit.read_screen()
             Binds.load()
@@ -8655,7 +9621,8 @@ class Host(object):
         finally:
             self.prefs_frozen = False
             self.config = ConfigWindow(self)
-            self.config.prof_sel = name
+            if sel is not None:
+                self.config.prof_sel = sel
             self.config.open()
             self.hub = HubWindow(self)
             if self.grid is not None:
@@ -8664,7 +9631,55 @@ class Host(object):
                 if s.enabled:
                     self.start(s)
             Kit.note_screen()
-        PROFILES.report(name, "loaded", *result)
+        return result
+
+    def backup_start(self):
+        """Read the backup list for the Backups page, and ask for a backup when this version has not made
+        one yet. Called once when start-up timing ends, and not in the alone mode.
+        """
+        try:
+            self.backups.scan()
+        except Exception:
+            self.backups.items = []
+        self.refresh_settings(BACKUP_PAGE)
+        if Kit.get_var(BackupPage.VER_KEY) != APP_VERSION and self.profile_req is None:
+            self.profile_req = ("backup", BackupPage.AUTO % APP_VERSION)
+
+    def _profile_backup(self, why, keep=None):
+        """Make a backup (request kind backup): save the history and settings, write the backup, remember
+        that this version has its backup when it was the automatic one, refresh the list and say how many
+        settings it holds. keep names a backup to spare from pruning.
+        """
+        if ALERTS.log_due:
+            ALERTS.save_log(time.time())
+        auto = why == BackupPage.AUTO % APP_VERSION
+        name, n = self.backups.make(why, self.save_prefs(True), keep, self.early_backup if auto else None)
+        if auto:
+            Kit.put_var(BackupPage.VER_KEY, APP_VERSION)
+            self.early_backup = None
+        self.backups.scan()
+        self.refresh_settings(BACKUP_PAGE)
+        API.SysMsg("Backups: saved %s (%s)." % (Kit.count(n, "setting"), BackupPage.label(name)), Kit.HUE_GOOD)
+
+    def _profile_restore(self, name):
+        """Restore a backup (request kind restore): back the present settings up first (named so in the
+        list), then put the picked backup back through _reload, refresh the list and report. Raises when
+        the backup is empty. Says so when some settings were still saving.
+        """
+        va, lay = self.backups.read(name)
+        if not va:
+            raise Exception("that backup is empty")
+        self._profile_backup("before restore", name)
+        gone = list(BackupPage.snapshot(""))
+        API.SysMsg("Backups: restoring %s." % BackupPage.label(name), Kit.HUE_INFO)
+        ok = self._reload(lambda: BackupPage.apply(va, lay, gone))
+        self.backups.scan()
+        self.refresh_settings(BACKUP_PAGE)
+        API.SysMsg("Backups: restored %s from %s." % (Kit.count(len(va), "setting"), BackupPage.label(name)),
+                   Kit.HUE_GOOD)
+        if not ok:
+            API.SysMsg("Backups: some settings were still saving; restart Virtue Assistant if a module looks "
+                       "unchanged.", Kit.HUE_BAD)
 
     def _profile_fav(self, name):
         """Make a profile the favourite, or take the star off when it already is; sets the client default
@@ -8888,21 +9903,26 @@ class Host(object):
     def run(self):
         """Start the full suite: find the client, load settings, build the windows, then run the main loop.
 
-        Sets the start mark first and checks the client for missing members (tz_check). Shows a start line
-        naming the modules that are on. Modules are queued to load at once, unless the last start left its
-        mark set, in which case the safe-start window decides. Window build errors are shown, not fatal.
+        Sets the start mark first and checks the client for missing members (tz_check). Takes the early
+        backup snapshot before the settings are loaded. Shows a start line naming the modules that are on.
+        Modules are queued to load at once, unless the last start left its mark set, in which case the
+        safe-start window decides. Window build errors are shown, not fatal.
         """
         ask = self.mark_start()
         Client.find()
         if Client.mouse is None:
             Kit.say("no client mouse timer; double-clicks use the client's own event.", Kit.HUE_INFO)
+        self.early_backup = BackupPage.early()
         self.load_prefs()
+        ALERTS.load()
         self.tz_check()
         Kit.read_screen()
         LAYOUT.load()
         SNAP.on_drop(LAYOUT.dropped)
         API.OnStop(self.shutdown)
         self.grid = Grid(self)
+        self.launcher = Launcher(self)
+        self.services["launcher.open"] = self.launcher.toggle
         try:
             self.config = ConfigWindow(self)
             self.config.open()
@@ -8983,7 +10003,8 @@ class Host(object):
         """Stop everything in order: modules, windows, layout, saved settings, then print the stopped line.
 
         Safe to call twice (it runs once); also registered with the client's stop hook. The start mark is
-        cleared first, and only for a stop the player asked for.
+        cleared first, and only for a stop the player asked for. The alert history is saved with the
+        banner closing.
         """
         if self.shut:
             return
@@ -8995,6 +10016,8 @@ class Host(object):
         if not VA_ALONE:
             safe(lambda: Kit.on_client(LAYOUT.game_view_restore))
             safe(lambda: LAYOUT.set_arrange(False, tell=False))
+            safe(lambda: Kit.on_client(LAYOUT._tabs_off))
+            safe(LAYOUT.situ_park)
             safe(lambda: Kit.on_client(lambda: [cw.free() for cw in list(ClientWin.found.values()) + [
                 LAYOUT.journal_held] if cw is not None]))
         if self.config is not None:
@@ -9011,9 +10034,10 @@ class Host(object):
         self._refresh_active()
         if self.hub is not None:
             safe(self.hub.close)
-        for fn in (ALERTS.close, self.whats_new.close, GUARD.store, Kit.note_screen, lambda: Kit.dispose(self.ask_g),
-                   # Remove the script's own event hooks (the journal's message hook among them).
-                   lambda: Kit.unhook(None)):
+        if self.launcher is not None:
+            safe(self.launcher.close)
+        for fn in (self.alert_log.close, ALERTS.close, self.whats_new.close, GUARD.store, Kit.note_screen,
+                   lambda: Kit.dispose(self.ask_g), lambda: Kit.unhook(None)):
             safe(fn)
         if self.grid is not None:
             safe(self.grid.hide)
@@ -9417,7 +10441,8 @@ class Tz(object):
         ("Game.Managers.EnhancedMap.EnhancedMapManager", "Instance IsConnected Config Reconnect _client",
          "worldmap.pings"), ("Game.SelectedObject", "Object", "worldmap.pings"),
         ("Game.UI.Gumps.WorldViewportGump", "Instance ResizeGameWindow SetGameWindowPosition", "interface"),
-        ("Game.UI.Gumps.SystemChatControl", "IsDisposed ParentX ParentY TextBoxControl", "interface"),)
+        ("Game.UI.Gumps.SystemChatControl", "IsDisposed ParentX ParentY TextBoxControl", "interface"),
+        ("Game.UI.Controls.TTFTextInputField", "EnterPressed", "launcher_Enter_key"),)
 
     @staticmethod
     def missing():
@@ -9608,7 +10633,8 @@ class Profiles(object):
     A profile is a folder under the profile directory holding profile.txt (name, saved stamp, character,
     version), va_vars.txt (tab separated settings, escaped), unified_bag.cfg and a tazuo folder of
     client files. Saving writes to a .saving folder first and swaps it in, so a failed save keeps the
-    old copy. The start mark is never carried.
+    old copy. The start mark is never carried, nor the alert history, the seen list or the backup
+    version, which belong to one character. The quiet time of the alerts is never changed by a profile.
     """
     # Client option names that belong to the character or session and are never copied between characters.
     PROFILE_SKIP = ("Username", "ServerName", "CharacterName", "Serial", "LastLoaded", "FollowingTarget")
@@ -9625,7 +10651,8 @@ class Profiles(object):
     # Settings that hold this character's own lists and history; they stay out of profiles.
     OWN_VARS = ("CorpseRun_corpse", "SkillBags_rules", "SkillBags_done", "UnitFrames_tracked", "Social_names",
                 "TreasureHunter_maps", "Restock_settings", "PropertyButler_visits", "SpellTimers_active",
-                "VirtueAssistant_starting")
+                "VirtueAssistant_starting", "VirtueAssistant_new_seen", "VirtueAssistant_alert_log",
+                "VirtueAssistant_backup_ver")
     # A value no real setting holds, used to tell a missing setting from an empty one.
     MISSING = "\x01VA-missing"
 
@@ -9738,11 +10765,15 @@ class Profiles(object):
 
     def profile_vars(self, found):
         """Returns the part of found (a dict of all settings) that goes into a profile.
-        Modules with a saved settings key count as Virtue Assistant keys.
+        Modules with a saved settings key count as Virtue Assistant keys. The alert settings are kept
+        without their quiet time entry.
         """
         mods = set(s.key for s in HOST.slots)
         extra = tuple(set(k[:-8] for k in found if k.endswith("_settings") and k[:-9].lower() in mods))
-        return dict((k, v) for k, v in found.items() if self.keep_var(k, extra))
+        va = dict((k, v) for k, v in found.items() if self.keep_var(k, extra))
+        if Alerts.KEY in va:
+            va[Alerts.KEY] = Alerts.with_quiet(va[Alerts.KEY], "")
+        return va
 
     @staticmethod
     def char_vars():
@@ -9758,17 +10789,23 @@ class Profiles(object):
                 return dict((str(kv.Key), "" if kv.Value is None else str(kv.Value)) for kv in d)
         raise Exception("can't list this character's saved settings")
 
-    def read_vars(self, name):
-        """Reads the saved settings of profile name from its va_vars.txt and returns those that belong in it."""
-        text = self._read(os.path.join(self.folder(name), "va_vars.txt")) or ""
+    @staticmethod
+    def parse_vars(text):
+        """Reads the text of a va_vars.txt (one setting per line, key and value separated by a tab, both
+        escaped) into a dict. Lines without a tab and empty keys are skipped.
+        """
         out = {}
         for line in text.split("\n"):
             if "\t" in line:
                 k, v = line.split("\t", 1)
-                k = self._unesc(k)
+                k = Profiles._unesc(k)
                 if k:
-                    out[k] = self._unesc(v.rstrip("\r"))
-        return self.profile_vars(out)
+                    out[k] = Profiles._unesc(v.rstrip("\r"))
+        return out
+
+    def read_vars(self, name):
+        """Reads the saved settings of profile name from its va_vars.txt and returns those that belong in it."""
+        return self.profile_vars(self.parse_vars(self._read(os.path.join(self.folder(name), "va_vars.txt")) or ""))
 
     def wait_vars(self, wanted, timeout=5.0):
         """Waits up to timeout seconds until every setting in wanted reads back with its new value.
@@ -10039,13 +11076,16 @@ class Profiles(object):
     def apply(self, name, mode):
         """Applies profile name: writes its settings, waits for them to land, restores the bag layout (keeping
         this character's own lines) and loads the client files. mode is "pick" or "fav" for the state record.
-        Returns (count, all_landed, done, failed). Script thread.
+        The character's own quiet time for the alerts is kept. Returns (count, all_landed, done, failed).
+        Script thread.
         """
         info = self.info(name)
         if info is None:
             raise Exception('there is no profile "%s"' % name)
         folder = self.folder(name)
         va = self.read_vars(name)
+        if Alerts.KEY in va:
+            va[Alerts.KEY] = Alerts.with_quiet(va[Alerts.KEY], Kit.get_var(Alerts.KEY))
         for k in sorted(va):
             Kit.put_var(k, va[k])
         ok = self.wait_vars(va)
@@ -10088,13 +11128,15 @@ class Profiles(object):
 
 
 class ConfigWindow(object):
-    """The main Virtue Assistant window: a title row, the profile row and a body with a Modules tab
-    (tick modules and their parts on or off) and a Settings tab (one page per module).
+    """The main Virtue Assistant window: a title row, the profile row and a body with a Modules tab (tick
+    modules and their parts on or off) and a Settings tab (one page per module, or a search over every
+    option).
 
     It is drawn as a modern gump scaled by the player's chosen percentage, laid out in columns that
     fill the window, and can fold to a small gear icon or dock into the action bar. Everything is
     rebuilt on the client thread; poll() runs on the script thread and reads clicks and ticked boxes
-    that the draw code stored. The action bar talks to it through shared variables (LINK_*).
+    that the draw code stored. The action bar talks to it through shared variables (LINK_*), and the
+    Quick Launcher (Launcher) reads its option index.
     """
     W = 640
     GEAR = 52
@@ -10108,8 +11150,9 @@ class ConfigWindow(object):
     LINK_ENABLE = "VirtueAssistant_enable"
 
     def __init__(self, host):
-        """Reads the saved place, tab, page, size and scale from the host's preferences and clears the
-        shared command variables left over from an earlier run. The window itself opens in open().
+        """Reads the saved place, tab, page, size and scale from the host's preferences, sets up the module
+        search, option search and option index state, and clears the shared command variables left over
+        from an earlier run. The window itself opens in open().
         """
         self.host = host
         self.g = self.mode = self._pp_key = self.shown_page = self.request = self.request_tab = None
@@ -10117,7 +11160,7 @@ class ConfigWindow(object):
         self.link_state = self.prof_sel = self.prof_cache = self.prof_shown = None
         self.loading = self.stale_page = self.search_tb = self.search_text = None
         self.gear_clicked = self.closing = self.docked = self.prof_stale = self.prof_redraw = False
-        self.box_hit = self.redraw_req = self.search_focus = False
+        self.box_hit = self.redraw_req = self.search_focus = self.find_prof = False
         self.gear_look = self.lag_next = self.gear_moved = self.link_next = self.box_next = self.search_at = 0.0
         self.resize_at = 0.0
         self.store = ({}, {})
@@ -10125,6 +11168,13 @@ class ConfigWindow(object):
         self._pp_gate = [0.0]
         self._fld_gate = [0.0]
         self._fld_due = True
+        self.opt_search = ""
+        self.opt_index = {}
+        self.opt_ver = 0
+        self.opt_open = False
+        self.opt_wait = self.opt_mark = self.opt_lbl = self.opt_drawn = self.fresh_view = None
+        self.opt_hits = (None, None)
+        self.hit_keys = []
         # Saved positions are pulled back on screen if the screen is smaller than when they were saved.
         self.x, self.y = Kit.adapt(host.pref_int("cfg_x", 140), host.pref_int("cfg_y", 80), self.W, self.MIN_H)
         self.gx, self.gy = Kit.adapt(host.pref_int("gear_x", self.x),
@@ -10191,7 +11241,8 @@ class ConfigWindow(object):
 
     def _build_profiles(self, g, x, y, w):
         """Draws the profile row into g at x, y with width w: the favourite star, Load and Save buttons and
-        the name box. The drop down itself is added later by _add_profile_list so it sits on top.
+        the name box. When the title row has no room for the Find button it is added at the end of this
+        row instead (find_prof). The drop down itself is added later by _add_profile_list so it sits on top.
         Raises the stored error if the profiles could not be read; the caller shows it as a message.
         """
         data = self.prof_cache
@@ -10223,7 +11274,8 @@ class ConfigWindow(object):
             xb += self._cap_w(art, cap) + gap
         Kit.add_label(g, "as", xb, y + 9, Kit.HUE_INFO)
         xf = xb + Kit.text_w("as") + 8
-        self.prof_tb = Kit.with_tip(Kit.add_textbox(g, "", xf, y + 6, max(60, x + w - 12 - xf), numbers=False),
+        fw = (Kit.pic_size(Kit.ART_PAGE[0])[0] or 30) + 8 if self.find_prof else 0
+        self.prof_tb = Kit.with_tip(Kit.add_textbox(g, "", xf, y + 6, max(60, x + w - 12 - xf - fw), numbers=False),
                                     "New profile name (empty: save over the picked one)")
         items = [n + ("  (favourite)" if n == fav else "") for n in names] or ["(no profiles saved yet)"]
         self.prof_dd_args = (x + 12, y + 7, self.PROF_DD_W, items, names.index(sel) if sel in names else 0)
@@ -10546,8 +11598,8 @@ class ConfigWindow(object):
     def _row_h(r):
         """Returns the pixel height of a module list row."""
         if r[0] in ("mod", "part"):
-            return 26 + 20 * (len(r[3]) - 1)
-        return 24
+            return Kit.pitch(26) + 20 * (len(r[3]) - 1)
+        return Kit.pitch(24)
 
     def _units_modules(self, slots):
         """Returns the layout units of the Modules tab (the list and the help block) and the column width."""
@@ -10607,33 +11659,221 @@ class ConfigWindow(object):
             self.measured.pop(ck, None)
 
     def loaded(self, key):
-        """Called when a lazy page has finished loading: drops its measurement and redraws if it is the one
-        waited for.
+        """Called when a lazy page has finished loading: drops its measurement and its search index entry (the
+        page is indexed again from its real content), and redraws if it is the page being waited for.
         """
         self.forget_measure(key)
+        self._forget_index(key)
+        if self.opt_wait is not None and self.opt_wait.key == key:
+            self.opt_wait = None
         if self.loading is not None and self.loading.key == key:
             self.redraw_req = True
 
+    OPT_TIP = "Type words to find an option on any settings page"
+    OPT_CAP = 4000
+    OPT_MAX = 30
+    READING = "Reading settings: %d of %d pages"
+
     def _pick_unit(self, pages, CW, lit):
-        """Returns the layout unit that holds the page picker: one button per settings page, in rows.
-        lit(s) says which page is current (shown in the title colour).
+        """Returns the layout unit that holds the page picker: one button per settings page, in rows, with a
+        (new) tag beside pages that have settings the player has not seen. The first slice also carries the
+        option Search box. lit(s) says which page is current (shown in the title colour).
         """
         slot = 35 + max([Kit.text_w(s.title) for s in pages] or [80]) + 12
         per = max(1, 1 + (CW - 30 - slot) // 196)
         self.page_keys = [("page_" + s.key, s.key) for s in pages]
         n = (len(pages) + per - 1) // per
+        news = set(s.key for s in pages if WhatsNew.unseen(s.key))
 
         def draw_pick(g, x, y, h, i, j):
-            """Draws the page buttons inside their section."""
-            Kit.add_section(g, x, y, CW, h)
+            """Draws the page buttons and the Search box inside their section; i and j are the first and last row
+            of buttons this slice holds when the picker is split between columns.
+            """
+            Kit.add_section(g, x, y, CW, h, "SETTINGS  (pick a page)" if i == 0 else "SETTINGS  (continued)")
+            if i == 0:
+                self._search_box(g, x + CW - 12 - self.SEARCH_W, y, self.opt_search, self.OPT_TIP)
+            ly = max(((Kit.pic_size(Kit.ART_PAGE[0])[1] or 22) - 16) // 2, 0)
             for k, s in enumerate(pages):
                 r = k // per
-                if i <= r < j:
-                    Kit.art_button(g, self.store, "page_" + s.key, Kit.ART_PAGE, x + 30 + (k % per) * 196,
-                                   y + 6 + (r - i) * 28, s.title, "Show %s settings" % s.title,
-                                   Kit.HUE_TITLE if lit(s) else Kit.HUE_TEXT)
+                bx, by = x + 30 + (k % per) * 196, y + 32 + (r - i) * 28
+                if not i <= r < j:
+                    continue
+                Kit.art_button(g, self.store, "page_" + s.key, Kit.ART_PAGE, bx, by, s.title,
+                               "Show %s settings" % s.title, Kit.HUE_TITLE if lit(s) else Kit.HUE_TEXT)
+                if s.key in news:
+                    Kit.add_label(g, Kit.Form.NEW, bx + self._cap_w(Kit.ART_PAGE, s.title) + 6, by + ly, Kit.HUE_INFO)
 
-        return {"rows": [28] * n, "head": 6, "tail": 4, "draw": draw_pick}
+        return {"rows": [28] * n, "head": 34, "tail": 4, "draw": draw_pick}
+
+    def _search_box(self, g, xs, y, text, tip):
+        """Adds the Search label and text box with its left edge at xs, and forgets the text last read from
+        a box so poll sees the new one fresh.
+        """
+        Kit.add_label(g, "Search", xs - 8 - Kit.text_w("Search"), y + 7, Kit.HUE_INFO)
+        self.search_tb = Kit.with_tip(Kit.add_textbox(g, text, xs, y + 5, self.SEARCH_W, numbers=False), tip)
+        self.search_text = None
+
+    def _forget_index(self, key):
+        """Drops the search index entries of settings page key so the page is read again, and bumps the index
+        version so cached search hits are recomputed.
+        """
+        if self.opt_index.pop(key, None) is not None:
+            self.opt_ver += 1
+
+    def _index_page(self, s):
+        """Builds the search index entries of settings page s: the page, each of its parts and every option the
+        page lists.
+
+        Each entry is (page key, part key or None, section name, kind, caption, tip, key to mark). The
+        options are found by calling the page's config_height hook while Kit.Form.sink collects the form
+        rows it describes, so the page is never drawn. Repeats and options without a caption are left out.
+        """
+        out = [(s.key, None, "", "page", s.title, s.desc or "", None)]
+        out += [(s.key, p[0], "", "part", p[1], p[2] or "", None) for p in s.parts]
+        # Calling config_height makes the form helpers record each section and its rows into Form.sink, so
+        # a page's options are listed without drawing it.
+        sink = Kit.Form.sink = []
+        try:
+            s.api["config_height"](self.COL_W)
+        except Exception:
+            pass
+        finally:
+            Kit.Form.sink = None
+        for pk, title, rows in sink:
+            sec = str(title or "").split("  ")[0]
+            for r in rows:
+                if r[0] == "buttons":
+                    out += [(s.key, pk, sec, "button", str(b[2] or ""), str(b[3] or ""), b[0]) for b in r[1]]
+                elif r[0] == "note":
+                    out.append((s.key, pk, sec, "note", str(r[1]), "", r[1]))
+                elif r[0] == "check" or r[0] in Kit.Form.FIELDS:
+                    out.append((s.key, pk, sec, r[0], str(r[2]), str(r[3] or ""), r[1]))
+        keep, seen = [], set()
+        for e in out:
+            # Entries without a caption are dropped, except the page and its parts.
+            if e not in seen and (e[3] in ("page", "part") or e[4].strip()):
+                seen.add(e)
+                keep.append(e)
+        return keep
+
+    def _index_tick(self):
+        """Script thread, a step of the background reading of every settings page into opt_index: indexes one
+        page that is already loaded, or asks the host to load one lazy page and waits for it. Returns True
+        when a page was indexed. The index as a whole is limited to OPT_CAP entries.
+        """
+        idx = self.opt_index
+        todo = [s for s in self.settings_slots() if s.key not in idx]
+        if not todo:
+            return False
+        s = next((p for p in todo if p.lazy is None), None)
+        if s is None:
+            if self.opt_wait is not todo[0]:
+                self.opt_wait = todo[0]
+                self.host.request_load(todo[0])
+            return False
+        n = sum(len(v) for v in idx.values())
+        # The index is capped so a huge settings tree cannot grow it without limit.
+        idx[s.key] = self._index_page(s)[:max(0, self.OPT_CAP - n)]
+        self.opt_ver += 1
+        return True
+
+    def _opt_hits(self):
+        """Returns the index entries that match the option search words, best first and at most OPT_MAX of
+        them. Every word has to match an entry; the result is cached until the text or the index changes.
+        """
+        ck = (self.opt_search.lower(), self.opt_ver)
+        if self.opt_hits[0] == ck:
+            return self.opt_hits[1]
+        words = ck[0].split()
+        found = []
+        for pi, s in enumerate(self.settings_slots()):
+            for n, e in enumerate(self.opt_index.get(s.key, ())):
+                p = s.part(e[1]) if e[1] else None
+                cap, tip = e[4].lower(), e[5].lower()
+                head = " ".join((e[2], s.title, p[1] if p else "")).lower()
+                score = 0
+                for w in words:
+                    # A word counts most in the caption, less in the page or section head and least in the tip. Every
+                    # word must match somewhere or the entry is left out.
+                    pts = 3 if w in cap else 2 if w in head else 1 if w in tip else 0
+                    if not pts:
+                        score = 0
+                        break
+                    score += pts
+                if score:
+                    found.append((-score, pi, n, e))
+        found.sort(key=lambda f: f[:3])
+        hits = [f[3] for f in found[:self.OPT_MAX]]
+        self.opt_hits = (ck, hits)
+        return hits
+
+    def _poll_index(self):
+        """Script thread: carries on reading pages for the option search and, once all are read and the text
+        has settled, redraws the window with the hits. Returns True when it asked for a redraw.
+        """
+        changed = self._index_tick()
+        pages = self.settings_slots()
+        done = sum(1 for s in pages if s.key in self.opt_index)
+        if not pages:
+            return False
+        if done < len(pages):
+            if changed and self.opt_lbl is not None:
+                Kit.set_text(self.opt_lbl, self.READING % (done, len(pages)))
+            return False
+        # Wait while the player is still typing (search_at is set), and skip the redraw when these hits are
+        # already on screen.
+        if self.search_at or self._opt_hits() == self.opt_drawn:
+            return False
+        self.search_focus = True
+        self.redraw()
+        return True
+
+    def _hit_text(self, e):
+        """Returns the line shown for search hit e: the page title, then the section and the caption."""
+        s = self.host.page_slot(e[0])
+        title = s.title if s is not None else e[0]
+        cap = e[4].rstrip(":")
+        if e[3] == "page":
+            return title
+        if e[3] == "part" or not e[2]:
+            return "%s > %s" % (title, cap)
+        return "%s > %s: %s" % (title, e[2], cap)
+
+    def _found_unit(self, pages, CW):
+        """Returns the layout unit that lists the option search hits (or a reading-progress note while the
+        pages are still being indexed, or a no-match note), one button per hit.
+        """
+        done = sum(1 for s in pages if s.key in self.opt_index)
+        hits = self._opt_hits() if done == len(pages) else None
+        self.opt_drawn = hits
+        rows = hits or [None]
+        note = self.READING % (done, len(pages)) if hits is None else 'No option matches "%s".' % self.opt_search
+
+        def draw_found(g, x, y, h, i, j):
+            """Draws the FOUND section: the progress or no-match note, or one button per hit that opens the
+            option's page with the option marked.
+            """
+            Kit.add_section(g, x, y, CW, h, "FOUND  (click one to open it)" if i == 0 else "FOUND  (continued)")
+            for r in range(i, j):
+                e, ry = rows[r], y + 32 + (r - i) * 28
+                if e is None:
+                    self.opt_lbl = Kit.add_label(g, Kit.fit(note, CW - 24), x + 12, ry + 3, Kit.HUE_INFO)
+                    continue
+                bkey, text = "hit_%d" % r, self._hit_text(e)
+                self.hit_keys.append((bkey, e))
+                Kit.art_button(g, self.store, bkey, Kit.ART_PAGE, x + 30, ry, Kit.fit(text, CW - 77),
+                               e[5] or "Open %s" % text)
+
+        return {"rows": [28] * len(rows), "head": 34, "tail": 4, "draw": draw_found}
+
+    def _fresh(self, key):
+        """Returns the settings of page key that the player has not seen yet (the (new) tags), read once and
+        kept while that page is drawn.
+        """
+        fv = self.fresh_view
+        if fv is None or fv[0] != key:
+            fv = self.fresh_view = (key, WhatsNew.unseen(key))
+        return fv[1]
 
     def _units_loading(self, pages, title):
         """Returns the units shown while a lazy page loads: the picker and a loading note."""
@@ -10710,16 +11950,24 @@ class ConfigWindow(object):
         return bands
 
     def _draw_page(self, g, page, x0, y0, CW, bands, at):
-        """Draws the settings page onto the body canvas, then moves the controls of each band to where
-        the layout placed that band. A page that raises is shown as an unavailable note and reported.
+        """Draws the settings page onto the body canvas, marking the option the player picked from the search
+        and tagging unseen settings as new, then moves the controls of each band to where the layout placed
+        that band. A page that raises is shown as an unavailable note and reported.
         """
         canvas = PageCanvas(g)
+        F = Kit.Form
+        m = self.opt_mark
+        F.page, F.fresh = page.key, self._fresh(page.key)
+        F.mark = (m[1], m[2]) if m is not None and m[0] == page.key and m[3] != "part" else None
         try:
             page.api["build_config"](canvas, x0, y0, CW)
         except Exception as ex:
             self._settings_error(page, "window", ex)
             Kit.add_section(g, x0, y0, CW, 40)
             Kit.add_label(g, "Settings unavailable: %s" % ex, x0 + 12, y0 + 12, Kit.HUE_BAD)
+        finally:
+            F.page = F.fresh = F.mark = None
+        WhatsNew.see(self._fresh(page.key))
         self.shown_page = page.key
         moves = []
         for b, (top, bottom) in enumerate(bands):
@@ -10745,12 +11993,21 @@ class ConfigWindow(object):
     SEARCH_W = 150
 
     def _draw_parts(self, g, x, y, w, h, s):
-        """Draws the PARTS box of a page: one tick box and description per part."""
+        """Draws the PARTS box of a page: one tick box and description per part, with a found marker beside
+        the part the search picked and a (new) tag beside parts the player has not seen.
+        """
         Kit.add_section(g, x, y, w, h, "PARTS  (tick a part to turn it on)")
         ry = y + 32
+        m = self.opt_mark
+        fresh = self._fresh(s.key)
         for p in s.parts:
             self._part_box(g, s, p, x + 12, ry)
-            Kit.add_label(g, Kit.fit(p[2] or "", w - 236), x + 224, ry + 2, Kit.HUE_INFO)
+            hit = m is not None and m[3] == "part" and m[:2] == (s.key, p[0])
+            tag = Kit.Form.FOUND if hit else Kit.Form.NEW if "%s.%s" % (s.key, p[0]) in fresh else None
+            d = Kit.fit(p[2] or "", w - 236 - (Kit.text_w(tag) + 6 if tag else 0))
+            Kit.add_label(g, d, x + 224, ry + 2, Kit.HUE_INFO)
+            if tag:
+                Kit.add_label(g, tag, x + 224 + Kit.text_w(d) + 6, ry + 2, Kit.HUE_TITLE)
             ry += 26
 
     def _part_box(self, g, s, p, x, ry):
@@ -10779,7 +12036,7 @@ class ConfigWindow(object):
 
     FOLD_TIP = "Show its parts"
     UNFOLD_TIP = "Hide its parts"
-    NEW_TAG = "(new)"
+    MOD_TIP = "Type part of a name or feature to list matching modules (old names work)"
 
     def _draw_mods(self, g, x, y, w, h, rows, first):
         """Draws a slice of the module list (the head, the Search box on the first slice and the rows).
@@ -10788,12 +12045,9 @@ class ConfigWindow(object):
         """
         Kit.add_section(g, x, y, w, h, "MODULES  (tick a module to turn it on)" if first else "MODULES  (continued)")
         if first:
-            xs = x + w - 12 - self.SEARCH_W
-            Kit.add_label(g, "Search", xs - 8 - Kit.text_w("Search"), y + 7, Kit.HUE_INFO)
-            self.search_tb = Kit.with_tip(Kit.add_textbox(g, self.mod_search, xs, y + 5, self.SEARCH_W, numbers=False),
-                                          "Type part of a name or feature to list matching modules (old names work)")
-            self.search_text = None
+            self._search_box(g, x + w - 12 - self.SEARCH_W, y, self.mod_search, self.MOD_TIP)
         ry = y + 32
+        news = WhatsNew.unseen()
         for row in rows:
             if row[0] == "part":
                 s, p, lines, hit = row[1], row[2], row[3], row[4]
@@ -10801,7 +12055,7 @@ class ConfigWindow(object):
                 xd = x + 236
                 for k, line in enumerate(lines):
                     Kit.add_label(g, line, xd, ry + 2 + 20 * k, Kit.HUE_INFO)
-                tag = "<- found" if hit else (self.NEW_TAG if not p[4] else "")
+                tag = Kit.Form.FOUND if hit else (Kit.Form.NEW if "%s.%s" % (s.key, p[0]) in news else "")
                 if tag:
                     tw = Kit.text_w(lines[0]) if lines else 0
                     Kit.add_label(g, tag, min(xd + tw + 10, x + w - 12 - Kit.text_w(tag)), ry + 2,
@@ -10889,27 +12143,34 @@ class ConfigWindow(object):
             self.redraw()
 
     def _reset(self):
-        """Clears the per-build state before a rebuild, leaving the shown page first."""
+        """Clears the per-build state before a rebuild, leaving the shown page first: the stored clicks and
+        keys of the old controls, the search box and the profile row's controls.
+        """
         self._leave_page()
         self.search_tb, self.search_text, self.search_at = None, None, 0.0
         self.store = ({}, {})
-        self.page_keys, self.box_list, self.zone_keys = [], [], []
-        self.lag_lbl = None
+        self.page_keys, self.box_list, self.zone_keys, self.hit_keys = [], [], [], []
+        self.lag_lbl = self.opt_lbl = None
         self._prof_reset()
 
     def _plan(self):
         """Works out the layout for the current tab: the page, units, column width, placements and the
-        window's total width and height.
+        window's total width and height. With a search typed on the Settings tab the units are the page
+        picker and the list of hits instead of a page.
         """
         slots, pages, page = self._context()
         M, GAP = Kit.MARGIN, Kit.GAP
         y_body = self._body_y()
-        if self.tab == "settings" and page is not None:
+        if self.tab == "settings" and pages and self.opt_search and not self.opt_open:
+            CW, page, self.fresh_view = self.COL_W, None, None
+            units = [self._pick_unit(pages, CW, lambda s: False), self._found_unit(pages, CW)]
+        elif self.tab == "settings" and page is not None:
             units, CW = self._units_settings(pages, page, M, y_body)
         elif self.tab == "settings" and self.loading is not None and pages:
             units, CW = self._units_loading(pages, self.loading.title)
         else:
             units, CW = self._units_modules(slots)
+            self.fresh_view = None
         placed = self._flow(units, CW)
         n_cols = 1 + max([p[1] for p in placed] or [0])
         W = 2 * M + n_cols * CW + (n_cols - 1) * GAP
@@ -10925,8 +12186,9 @@ class ConfigWindow(object):
         return body
 
     def _build_full(self, x, y):
-        """Builds the full window at x, y: frame, title row with tabs, scale and dock buttons, profile row
-        and body, scaled by the player's percentage. Client thread.
+        """Builds the full window at x, y: frame, title row with tabs, scale, Find and dock buttons, profile
+        row and body, scaled by the player's percentage. A search box that had keyboard focus gets it
+        back so typing is not interrupted. Client thread.
         """
         self._reset()
         self.seen, self.resize_at = {}, 0.0
@@ -10969,11 +12231,26 @@ class ConfigWindow(object):
                        "Minimize to the gear (or double-click the title)")
         Kit.art_button(g, self.store, "close", Kit.ART_CLOSE, W - M - 54, y_title + 6,
                        None, "Close Virtue Assistant (stops every module)")
+        self.find_prof = False
+        lt = self.host.launcher
+        lim = xl - 6 - 16 - 8
+        fw, aw = self._cap_w(Kit.ART_PAGE, "Find"), Kit.pic_size(Kit.ART_PAGE[0])[0] or 30
+        if lt is not None and xt + fw <= lim:
+            Kit.art_button(g, self.store, "find", Kit.ART_PAGE, lim - fw, y_title + 6, "Find", Launcher.TIP,
+                           Kit.HUE_INFO, lt.toggle)
+        elif lt is not None and xt + aw <= lim:
+            Kit.art_button(g, self.store, "find", Kit.ART_PAGE, lim - aw, y_title + 6, None,
+                           Kit.caption_tip("Find", Launcher.TIP), None, lt.toggle)
+        else:
+            self.find_prof = lt is not None
         try:
             self._build_profiles(g, L, y_prof, IW)
         except Exception as ex:
             self.prof_dd_args = None
             Kit.add_label(g, "Profiles unavailable: %s" % ex, L + 12, y_prof + 9, Kit.HUE_BAD)
+        if self.find_prof:
+            Kit.art_button(g, self.store, "find", Kit.ART_PAGE, L + IW - 12 - aw, y_prof + 6, None,
+                           Kit.caption_tip("Find", Launcher.TIP), None, lt.toggle)
         keys = frozenset(self.store[0])
         body = self._draw_body(g, units, CW, placed)
         self._add_profile_list(g)
@@ -10986,7 +12263,7 @@ class ConfigWindow(object):
         self.size = (fit["w2"], fit["hv"]) if fit else (WS, HS)
         self.minimized = False
         self.dirty = None
-        self.body, self.head = body, (g, W, self.tab, Kit.dark(), keys)
+        self.body, self.head = body, (g, W, self.tab, (Kit.look(), Kit.compact), keys)
         # The search box keeps keyboard focus across a rebuild so typing is not interrupted.
         if self.search_focus:
             self.search_focus = False
@@ -10999,6 +12276,7 @@ class ConfigWindow(object):
     def build_gear(self, x, y):
         """Builds the small gear icon window at x, y (the minimised state). Hidden while docked in the bar."""
         self._reset()
+        self.fresh_view = None
         S = self.GEAR
         g = G.CreateGump(True, True)
         Kit.add_window_frame(g, S, S, corners=False)
@@ -11144,8 +12422,8 @@ class ConfigWindow(object):
         done = False
         # A page switch is the hot case when browsing settings, so the frame is kept when it can be.
         if head is not None and head[0] is g and Kit.is_open(g) and self.tab == head[2] == "settings" \
-                and head[3] == Kit.dark() and self.scale == 1.0 and g not in Kit._scrolled and g not in Fill.recs \
-                and not self.resize_at and self.prof_cache is not None \
+                and head[3] == (Kit.look(), Kit.compact) and self.scale == 1.0 and g not in Kit._scrolled \
+                and g not in Fill.recs and not self.resize_at and self.prof_cache is not None \
                 and self._prof_key(self.prof_cache) == self.prof_shown:
             try:
                 done = self._fast_body(g, head[1], head[4])
@@ -11184,8 +12462,11 @@ class ConfigWindow(object):
         self.request = key
 
     def refresh(self, key):
-        """Marks module key's settings page as stale: its cached measure is dropped and the page redraws."""
+        """Marks module key's settings page as stale: its cached measure and search index entry are dropped
+        and, if the page is on show, it redraws.
+        """
         self.forget_measure(key)
+        self._forget_index(key)
         if self.shown_page == key:
             self.dirty = self.stale_page = key
 
@@ -11201,9 +12482,10 @@ class ConfigWindow(object):
     def poll(self):
         """Script thread poll of the window, run every pass.
         Rebuilds the gump if the player closed it, takes action bar commands, handles page and tab
-        requests, then in order: the gear icon, redraw requests, settled resizes, button clicks, search box
-        typing, the lag line, ticked boxes (at most BOX_EVERY apart unless a click was seen) and the shown
-        page's own poll_config. Each step that rebuilds the window ends the pass.
+        requests, then in order: the gear icon, redraw requests, settled resizes, button clicks, the profile
+        row, search box typing, the option index, the lag line, ticked boxes (at most BOX_EVERY apart unless
+        a click was seen) and the shown page's own poll_config. Each step that rebuilds the window ends
+        the pass.
         """
         if self.closing:
             return
@@ -11264,6 +12546,9 @@ class ConfigWindow(object):
         self._poll_profiles()
         if self.search_tb is not None and self._fld_due and self._poll_search():
             return
+        if self.tab == "settings" and self.opt_search and not self.opt_open and self._fld_due:
+            if self._poll_index():
+                return
         # The lag line is refreshed once a second.
         if self.lag_lbl is not None and time.time() >= self.lag_next:
             self.lag_next = time.time() + 1.0
@@ -11296,8 +12581,9 @@ class ConfigWindow(object):
             self.redraw()
 
     def _poll_search(self):
-        """Watches the search box. After the text has settled for SEARCH_SETTLE seconds, filters the module
-        list by it and redraws (keeping focus in the box). Returns True when it redrew.
+        """Watches the search box. After the text has settled for SEARCH_SETTLE seconds it filters the module
+        list (Modules tab) or the option search (Settings tab) by it and redraws, keeping focus in the box.
+        Returns True when it redrew.
         """
         try:
             t = str(self.search_tb.Text or "")
@@ -11311,8 +12597,15 @@ class ConfigWindow(object):
             return False
         if self.search_at and now - self.search_at >= SEARCH_SETTLE:
             self.search_at = 0.0
-            if t.strip().lower() != self.mod_search.strip().lower():
-                self.mod_search = t.strip()
+            q = t.strip()
+            opt = self.tab == "settings"
+            if q.lower() != (self.opt_search if opt else self.mod_search).strip().lower():
+                if not opt:
+                    self.mod_search = q
+                else:
+                    self.opt_search, self.opt_open = q, False
+                if opt and not q:
+                    self.opt_mark = None
                 self.search_focus = True
                 self.redraw()
                 return True
@@ -11349,6 +12642,8 @@ class ConfigWindow(object):
                 seen[sk] = v
                 if pk is not None:
                     self.host.part_set(s.key, pk, v)
+                if pk is not None and v:
+                    WhatsNew.see((sk,))
                 elif v:
                     self.host.enable(s.key)
                 else:
@@ -11361,8 +12656,9 @@ class ConfigWindow(object):
         return False
 
     def _poll_buttons(self):
-        """Handles the stored button clicks: close, minimise, dock, scale, tab, page, fold and zone buttons.
-        Returns True when one was handled and the window changed.
+        """Handles the stored button clicks: close, minimise, dock, scale, tab, page, search hit, fold and
+        zone buttons. A search hit opens its page with the option marked. Returns True when one was
+        handled and the window changed.
         """
         store = self.store
         if Kit.clicks_seen and True not in store[1].values():
@@ -11378,6 +12674,7 @@ class ConfigWindow(object):
         if Kit.was_clicked(store, "tobar"):
             self.fold_to_bar()
             return True
+        Kit.was_clicked(store, "find")
         for key, d in (("scale_down", -1), ("scale_up", 1), ("scale_reset", 0)):
             if Kit.was_clicked(store, key):
                 self._step_scale(d)
@@ -11389,7 +12686,13 @@ class ConfigWindow(object):
                 return True
         for bkey, key in self.page_keys:
             if Kit.was_clicked(store, bkey) and key != self.shown_page:
+                self.opt_open, self.opt_mark = bool(self.opt_search), None
                 self._switch_page(key)
+                return True
+        for bkey, e in self.hit_keys:
+            if Kit.was_clicked(store, bkey):
+                self.opt_open, self.opt_mark = True, (e[0], e[1], e[6] if e[6] is not None else e[4], e[3])
+                self._switch_page(e[0])
                 return True
         for bkey, key in self.fold_keys:
             if Kit.was_clicked(store, bkey):
@@ -11737,7 +13040,7 @@ class HubWindow(object):
                     self._error(key, ex)
                 y += sh + GAP
         if held:
-            xy = LAYOUT.placed.get("hub") or (self.x, self.y)
+            xy = LAYOUT.spot("hub") or (self.x, self.y)
             g.SetPos(int(xy[0]), int(xy[1]))
         else:
             self.x, self.y = Kit.place(g, self.x, self.y, w, h)
@@ -11826,6 +13129,451 @@ class HubWindow(object):
                     hooks["poll"](st_)
                 except Exception as ex:
                     self._error(key, ex)
+
+
+class Launcher(object):
+    """The Quick Launcher: a small window with a text box that finds Grimoire runes, Action Bar cells and
+    outfits, windows, window layouts, settings options and a few commands as the player types, and runs
+    the one picked (Enter runs the top row, a click runs that row).
+
+    The window is built on the client thread and polled from the script thread by the host. Other
+    modules are reached only through the host's services table, so a module that is off simply gives
+    no rows. The last runs of the session are kept in recent.
+    """
+    W = 560
+    ROWS = 8
+    ROW = 28
+    SETTLE = 0.15
+    RECENT = 5
+    POS_KEY = "VirtueAssistant_launcher_pos"
+    ONCE = "va.launcher.run"
+    GAP = 0.6
+    SOON = "too soon after the last run; press again."
+    TITLE = "QUICK LAUNCHER"
+    TIP = "Quick launcher: find a rune, cell, window or option"
+    NAME = "Quick Launcher"
+    ENTER_OFF = "launcher_Enter_key"
+    ORDER = ("rune", "cell", "window", "layout", "option", "command")
+    FIELD_TIP = "Type words to find something; Enter runs the top row"
+    HINT = "Type to find a rune, cell, window, layout, option or command"
+    RUN = "Enter runs the top row; click a row to run it"
+    CLICK = "Click a row to run it"
+
+    def __init__(self, host):
+        """Sets up empty state. toggle and go are debounced entry points (Kit.once), so a repeated hotkey or
+        click inside the short guard time is ignored.
+        """
+        self.host = host
+        self.g = self.tb = self.ver = self.pick = None
+        self.store = ({}, {})
+        self.rows = []
+        self.recent = []
+        self.text = self.shown = self.status = ""
+        self.typed_at = 0.0
+        self.enter = self.hooked = False
+        self.toggle = Kit.once(self._toggle_req, "va.launcher", 0.4)
+        self.go = Kit.once(self._go, self.ONCE, self.GAP)
+
+    def _toggle_req(self):
+        """Called from a hotkey or button on any thread: queues the toggle for the client thread and wakes the
+        host.
+        """
+        Kit.pending.append(self._toggle)
+        self.host.poke()
+
+    def _toggle(self):
+        """Client thread: closes the launcher if it is open, otherwise starts it with an empty box and builds
+        the window.
+        """
+        if Kit.is_open(self.g):
+            self.close()
+            return
+        self.text = self.shown = ""
+        self.typed_at = 0.0
+        self.enter = False
+        self.ver = None
+        self.rows, self.status = self.find("")
+        Binds.scoped("va.launcher", self._build)
+
+    @staticmethod
+    def score(words, text, extra=""):
+        """Returns how well text matches every word in words, or 0 if any word is missing. A word scores 3
+        when a word of the text starts with it, 2 when it is found inside the text and 1 when it is found
+        only in extra. The scores are added.
+        """
+        low = text.lower()
+        starts = low.replace("(", " ").replace(">", " ").split()
+        more = extra.lower()
+        total = 0
+        for w in words:
+            pts = 3 if any(s.startswith(w) for s in starts) else 2 if w in low else 1 if w in more else 0
+            if not pts:
+                return 0
+            total += pts
+        return total
+
+    def zones_on(self):
+        """Returns True when the Interface module (owner of window layouts) is running."""
+        s = dict.get(self.host.by_key, LAYOUT_OWNER)
+        return s is not None and s.running
+
+    def windows(self):
+        """Returns the windows the launcher can show, as ((module key, dock keys), title). A module without
+        parts is one entry; a module with parts gives one entry per part. The dock keys are the names the
+        host's dock records may know the window by, tried in order.
+        """
+        out = []
+        slots = [s for s in self.host.slots if s.api is not None or s.lazy is not None]
+        mine = [p[0] for s in slots for p in s.parts]
+        for s in slots:
+            if not s.parts:
+                out.append(((s.key, (s.key,)), s.title))
+                continue
+            for p in s.parts:
+                key = "%s.%s" % (s.key, p[0])
+                docks = tuple(p[4][:1]) if len(p) > 4 else ()
+                # A part may be known to the dock table by its own key, by the module and part key, or by the bare
+                # part key when no other module uses that name.
+                docks += (key,) + ((p[0],) if mine.count(p[0]) == 1 and p[0] not in self.host.by_key else ())
+                out.append(((key, docks), s.part_title(p[0])))
+        return out
+
+    def commands(self):
+        """Returns the commands the launcher offers as (key, caption) pairs; the quiet command changes its
+        caption while alerts are quiet.
+        """
+        return (("history", "Alert history"),
+                ("quiet", "Resume alerts" if ALERTS.quiet_on() else "Quiet alerts for 30 minutes"),
+                ("backup", "Back up settings now"), ("settings", "Settings"), ("news", "What's new"))
+
+    def options(self, words):
+        """Returns ([(index entry, text)], all pages read) for the options whose page, section, caption or
+        tip contains every word. Reads the window's option index, so it has nothing until the settings
+        pages have been indexed; the flag says whether every page has been.
+        """
+        c = self.host.config
+        if c is None or c.mode == "alone":
+            return [], True
+        pages = c.settings_slots()
+        out = []
+        for s in pages:
+            for e in c.opt_index.get(s.key, ()):
+                hay = " ".join((s.title, e[2], e[4], e[5], "option")).lower()
+                if e[3] != "note" and all(w in hay for w in words):
+                    out.append((e, c._hit_text(e)))
+        return out, all(s.key in c.opt_index for s in pages)
+
+    def ask(self, name, q, n=None):
+        """Calls the host service name with query q and at most n rows (ROWS by default). Returns its list, or
+        an empty tuple when the module is off or the call fails.
+        """
+        fn = self.host.services.get(name)
+        return (safe(lambda: fn(q, n or self.ROWS), None) or ()) if fn is not None else ()
+
+    def find(self, q):
+        """Returns (rows, status line) for the query q. A row is (label, kind, data, tip), at most ROWS of
+        them, best score first, then kind in ORDER, then the order found. An empty query gives the recent
+        runs, or a hint when there are none.
+
+        Runes and cells come from their modules' own search, so they are kept even when the label scores
+        nothing; every other kind must match every word.
+        """
+        words = str(q or "").lower().split()
+        if not words:
+            if self.recent:
+                return list(self.recent), "Your last runs this session"
+            return [], self.HINT
+        found = []
+
+        def add(label, kind, data, tip, extra="", pre=False):
+            """Adds one candidate row when it scores for the words (or when pre is True, the source having matched
+            already).
+            """
+            # A row from a module's own search keeps a score of at least one per word even if its label does not
+            # match.
+            sc = self.score(words, label, extra) or (len(words) if pre else 0)
+            if sc:
+                found.append((-sc, self.ORDER.index(kind), len(found), (label, kind, data, tip)))
+
+        for label, tok in self.ask("grimoire.find", q):
+            add("Rune: " + label, "rune", tok, "Travel to %s" % label, "rune", True)
+        for label, ref, kind in self.ask("actionbar.find", q):
+            head = "Outfit" if kind == "outfit" else "Cell"
+            add("%s: %s" % (head, label), "cell", (ref, label), "Use %s" % label, "cell " + kind, True)
+        for key, title in self.windows():
+            s = self.host.by_key.get(key[0])
+            on = s is not None and s.running
+            add("Window: " + title, "window", key, ("Show %s" if on else "Turn %s on") % title, "window")
+        if self.zones_on():
+            for name in [LAYOUT_DEFAULT, LAYOUT_MIRRORED] + list(LAYOUT.layout_names()):
+                add("Layout: " + name, "layout", name, 'Use the window layout "%s"' % name, "layout")
+        opts, done = self.options(words)
+        for e, text in opts:
+            add("Option: " + text, "option", e, e[5] or "Open %s" % text, e[5] + " option")
+        for key, cap in self.commands():
+            add(cap, "command", key, cap, "command")
+        found.sort(key=lambda f: f[:3])
+        rows = [f[3] for f in found[:self.ROWS]]
+        if not done:
+            return rows, "Still reading settings pages; options appear as they are read"
+        if not rows:
+            return rows, 'Nothing matches "%s"' % str(q).strip()
+        return rows, self.RUN
+
+    def _build(self):
+        """Client thread: builds the launcher window for the current rows and status, replaces the old one in
+        the same place (or centres a new one at the saved or default spot), and puts the text caret back.
+        """
+        M, W, GAP = Kit.MARGIN, self.W, Kit.GAP
+        s = Kit.tscale
+        RH = Kit.pitch(self.ROW)
+        rows = self.rows
+        old = self.g
+        store = ({}, {})
+        yb = M + 30 + GAP
+        yr = yb + 44
+        caret = self._caret()
+        h_body = 44 + RH * len(rows) + 28
+        H = yb + h_body + M
+        g = G.CreateGump(True, True)
+        Kit.add_window_frame(g, W, H)
+        Kit.add_section(g, M, M, W - 2 * M, 30)
+        Kit.add_label(g, self.TITLE, M + 30, M + 7, Kit.HUE_TITLE)
+        Kit.art_button(g, store, "close", Kit.ART_CLOSE, W - M - 54, M + 4, None, "Close")
+        Kit.add_section(g, M, yb, W - 2 * M, h_body)
+        tb = Kit.add_textbox(g, self.text, M + 12, yb + 10, W - 2 * M - 24, numbers=False)
+        self.hooked = self._hook(tb)
+        Kit.with_tip(tb, self.FIELD_TIP if self.hooked else self.FIELD_TIP.split(";")[0])
+        for i, r in enumerate(rows):
+            Kit.art_button(g, store, "run%d" % i, Kit.ART_PLAY, M + 12, yr + RH * i, Kit.fit(r[0], W - 2 * M - 70),
+                           r[3])
+        text = self.status if self.hooked or self.status != self.RUN else self.CLICK
+        Kit.add_label(g, Kit.fit(text, W - 2 * M - 24), M + 12, yr + RH * len(rows) + 4, Kit.HUE_INFO)
+        sc = s if Kit.scale_window(g, s) else 1.0
+        WS, HS = int(round(W * sc)), int(round(H * sc))
+        if Kit.is_open(old):
+            x, y = int(old.GetX()), int(old.GetY())
+        else:
+            sw = Kit.screen()[0] or 1024
+            x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - WS) // 2), 120), (WS, HS))
+        Kit.place(g, x, y, WS, HS, int(round(yb * sc)))
+        G.AddGump(g)
+        Kit.on_moved(g, lambda: Kit.save_pos(self.POS_KEY, self.g))
+        self.g, self.tb, self.store = g, tb, store
+        Kit.dispose(old)
+        safe(tb.SetFocus)
+        self._put_caret(tb, caret)
+
+    def _caret(self):
+        """Returns the caret position of the text box if it can be read, else None."""
+        with Kit.quiet:
+            n = int(self.tb.CaretIndex)
+            if 0 <= n < len(self.text):
+                return n
+        return None
+
+    @staticmethod
+    def _put_caret(tb, n):
+        """Puts the caret of text box tb back at n (nothing when n is None)."""
+        if n is None:
+            return
+        with Kit.quiet:
+            Kit.client_control(tb).TextBox.CaretIndex = n
+
+    def _hook(self, tb):
+        """Hooks the box's Enter key by reflection on the client control, so Enter can run the top row.
+        Returns False if it is switched off for this character or the control has no such event; the
+        status line then tells the player to click a row.
+        """
+        if self.ENTER_OFF in self.host.tz_off:
+            return False
+        try:
+            # The client's text box exposes Enter only as an event on its control, so the handler is attached
+            # by reflection.
+            import clr
+            import System
+            c = Kit.client_control(tb)
+            ev = c.GetType().GetEvent("EnterPressed")
+            h = clr.GetPythonType(ev.EventHandlerType)(self._enter_hit)
+            ev.GetAddMethod(True).Invoke(c, System.Array[object]([h]))
+            return True
+        except Exception:
+            return False
+
+    def _enter_hit(self, sender=None, e=None):
+        """Enter handler: sets the flag poll reads and wakes the host."""
+        self.enter = True
+        self.host.poke()
+
+    def rebuild(self):
+        """Saves the window's place and builds it again, for new rows or a new status line."""
+        if Kit.is_open(self.g):
+            Kit.save_pos(self.POS_KEY, self.g)
+            Binds.scoped("va.launcher", self._build)
+
+    def poll(self, now):
+        """Script thread, every pass while the window is open: closes it when the player did, reads the typed
+        text, runs Enter or a clicked row, and searches again once typing has paused for SETTLE seconds or
+        the option index has grown. The window is rebuilt only when the rows or status changed.
+        """
+        if not Kit.is_open(self.g) or Kit.was_clicked(self.store, "close"):
+            self.close()
+            return
+        try:
+            t = str(self.tb.Text or "")
+        except Exception:
+            t = self.text
+        if t != self.text:
+            self.text, self.typed_at = t, now
+        if self.enter:
+            self.enter = False
+            self.rows, self.status = self.find(self.text)
+            self.shown = self.text
+            if self.rows:
+                self.run(0, True)
+            else:
+                self.rebuild()
+            return
+        for i in range(len(self.rows)):
+            if Kit.was_clicked(self.store, "run%d" % i):
+                self.run(i)
+                return
+        c = self.host.config
+        words = self.text.split()
+        if words and c is not None and c.mode != "alone":
+            safe(c._index_tick)
+        ver = c.opt_ver if c is not None and c.mode != "alone" else 0
+        if (self.text != self.shown and now - self.typed_at >= self.SETTLE) or (words and ver != self.ver):
+            rows, status = self.find(self.text)
+            self.shown, self.ver = self.text, ver
+            if rows != self.rows or status != self.status:
+                self.rows, self.status = rows, status
+                self.rebuild()
+
+    def run(self, i, enter=False):
+        """Runs row i of the list. Refused with a message when the last run was under GAP seconds ago.
+        enter says the row was chosen with Enter. The window closes first, then the run goes through go.
+        """
+        if not 0 <= i < len(self.rows):
+            return
+        # A second run inside GAP seconds is refused (Kit._fired holds the last run's time).
+        if 0.0 <= time.time() - Kit._fired.get(self.ONCE, 0.0) < self.GAP:
+            self.say(self.SOON)
+            return
+        self.pick = (self.rows[i], enter)
+        self.close()
+        self.go()
+
+    def _go(self):
+        """Runs the picked row according to its kind and keeps it in recent when it worked. Returns whether it
+        did. A module that is off, or a cell that has changed since it was listed, is refused with a
+        message.
+        """
+        row, enter = self.pick
+        label, kind, data = row[0], row[1], row[2]
+        sv = self.host.services
+        ok = False
+        if kind == "rune":
+            fn = sv.get("grimoire.go")
+            ok = fn is not None and bool(fn(data))
+            if fn is None:
+                self.say("Grimoire is off.")
+        elif kind == "cell":
+            fn = sv.get("actionbar.use")
+            ref, cap = data
+            name = cap.rsplit("  (", 1)[0]
+            if fn is None:
+                self.say("the Action Bar is off.")
+            # Cells can change while the list is open, so the cell is looked up again by name and refused if it
+            # is gone.
+            elif (cap, ref) not in [r[:2] for r in self.ask("actionbar.find", name, 200)]:
+                self.say("%s is no longer on the Action Bar." % name)
+            else:
+                if enter:
+                    # Enter can only arm the harmful-cursor confirm, never confirm it, so the pending confirm is
+                    # cleared.
+                    self.host.harm_conf = (None, 0, 0.0)
+                ok = bool(fn(ref))
+        elif kind == "window":
+            ok = self._window(data)
+        elif kind == "layout":
+            ok = self.zones_on()
+            if ok:
+                LAYOUT.use_windows(data)
+            else:
+                self.say("window layouts need the Interface module on.")
+        elif kind == "option":
+            ok = self._option(data)
+        else:
+            ok = self._command(data)
+        if ok:
+            self.recent = [row] + [r for r in self.recent if r[1:3] != row[1:3]]
+            del self.recent[self.RECENT:]
+        return ok
+
+    def say(self, text):
+        """Prints one launcher line to the journal in the warning colour."""
+        API.SysMsg("%s: %s" % (self.NAME, text), Kit.HUE_BAD)
+
+    def _window(self, key):
+        """Shows or turns on the window of key = (module key, dock keys). A module that is off is turned on;
+        a window that is closed is shown through its dock record. Returns False when the module is gone.
+        """
+        part, keys = key
+        s = self.host.by_key.get(part)
+        docks = dict(self.host.docks)
+        if s is None:
+            self.say("that window is no longer loaded.")
+            return False
+        dk = next((k for k in keys if k in docks), keys[0])
+        if not s.running:
+            self.host.dock_forget(dk)
+            self.host.enable(part)
+            return True
+        d = docks.get(dk)
+        if d is not None and safe(d.get("state")) != "open":
+            safe(d.get("show"))
+            self.host.dock_forget(dk)
+        return True
+
+    def _option(self, e):
+        """Opens the settings page of option entry e with the option marked, through the main window.
+        Returns False when there is no full window or the page is gone.
+        """
+        c = self.host.config
+        if c is None or c.mode == "alone" or self.host.page_slot(e[0]) is None:
+            return False
+        c.opt_open, c.opt_mark = True, (e[0], e[1], e[6] if e[6] is not None else e[4], e[3])
+        c.show_settings(e[0])
+        return True
+
+    def _command(self, key):
+        """Runs a launcher command: alert history, quiet alerts, a settings backup, the Settings tab or the
+        what's new window. Returns False if it could not run.
+        """
+        h = self.host
+        if key == "history":
+            h.alert_log.open()
+        elif key == "quiet":
+            ALERTS.toggle_quiet()
+        elif key == "backup":
+            BackupPage.ask(("backup", "by hand"))
+        elif key == "settings":
+            if h.config is None:
+                return False
+            h.config.request_tab = "settings"
+        elif key == "news":
+            return h.whats_new.show()
+        return True
+
+    def close(self):
+        """Closes the window, saving where it stood."""
+        g, self.g, self.tb = self.g, None, None
+        self.enter = False
+        if Kit.is_open(g):
+            Kit.save_pos(self.POS_KEY, g)
+        Kit.dispose(g)
+        self.store = ({}, {})
 
 
 SNAP_DIST = 16
@@ -12348,9 +14096,11 @@ class Snap(object):
             self._tell_moved()
 
     def keep_one(self, g):
-        """Clamps gump g and its visible followers as one block onto the screen. Returns True if it moved."""
+        """Clamps gump g and its visible followers as one block onto the screen. Returns True if it moved.
+        A window hidden behind a zone tab is left alone.
+        """
         r = self.rect(g)
-        if r is None:
+        if r is None or (Kit._behind and self.attached.get(g) in Kit._behind):
             return False
         x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
         for f in self.followers(g):
@@ -12519,6 +14269,7 @@ LAYOUT_DEFAULT = "Default"
 LAYOUT_MIRRORED = "Mirrored"
 LAYOUT_MINE = "Default (mine)"
 LAYOUT_GONE = frozenset(("spelltimers", "bandage", "swing"))
+DUNGEON_AREAS = ((0, 5120, 0, 6143, 2303),)
 # Default window assignment to zones: zone id, then the window keys that stack in it.
 WINDOWS_DEFAULT = ("L1=character;L2=bag;C1=unitframes.player;C2=unitframes.target;C4=actionbar;"
                    "R1=worldmap;R2=ultima.friend,ultima.neutral,ultima.foe;R3=meters")
@@ -12540,7 +14291,9 @@ ZONE_MIN_W, ZONE_MIN_H = 96, 64
 # Colours of the zone kinds on the layout editor.
 ZONE_COLORS = {"w": "#3A78C8", "k": "#3AA060", "r": "#C88A3A"}
 ZONE_KINDS = (("w", "window"), ("k", "keep clear"), ("r", "reserved"))
-ZONE_STACKS = (("d", "down"), ("u", "up"), ("r", "right"), ("l", "left"))
+ZONE_STACKS = (("d", "down"), ("u", "up"), ("r", "right"), ("l", "left"), ("t", "tabs"))
+TAB_H = 26
+TAB_X = -20000
 SHRINK_MAX = 6
 # Owner name under which the layout code registers its hooks.
 LAYOUT_OWNER = "interface"
@@ -12594,7 +14347,7 @@ class Zone(object):
         self.rect = tuple(int(v) for v in rect)
         self.pins = "".join(c for c in str(pins or "").upper() if c in "LTRBXY")
         self.min = (int(mins[0]), int(mins[1]))
-        self.stack = stack if stack in ("d", "u", "r", "l") else "d"
+        self.stack = stack if stack in ("d", "u", "r", "l", "t") else "d"
         self.prio = max(0, min(SHRINK_MAX, int(prio)))
         self.fit = fit if fit in ("w", "s", "n") else "w"
         self.hug = bool(hug) and self.kind == "w"
@@ -13640,12 +15393,13 @@ class Layout(object):
     locks and repairs windows to match.
 
     There is one Layout, owned by the mother script. It holds the saved frame sets and window
-    layouts, the window to zone assignments, Arrange mode, and the client's own windows (world map,
+    layouts, the window to zone assignments, Arrange mode, tabbed zones (one window shown at a time
+    under a strip of tabs), layouts by situation, share codes, and the client's own windows (world map,
     journal). Its work runs on the client tick, in short hops.
     """
     def __init__(self):
-        """Set up empty state: windows, assignments, frame sets, caches for placement, Arrange mode and
-        undo.
+        """Sets up empty state: windows, assignments, frame sets, caches for placement, Arrange mode, undo,
+        the situation settings and the tab and tab strip records.
         """
         self.wins = {}
         self.assign = {}
@@ -13702,6 +15456,14 @@ class Layout(object):
         self.bags_swept = False
         self.reclaim_undo = self._vp_fields = self.gv_applied = self.small_said = None
         self._undo_read = self.gv_small_told = self.gv_checked = self.need_due = self.migrating = False
+        self.situ = {"on": False, "base": ""}
+        self.situ_now = self.situ_pend = self.situ_last = self.situ_back = None
+        self.situ_at = 0.0
+        self.situ_busy = False
+        self.situ_bank = (-1e9, 0, 0, -1)
+        self.tabs = {}
+        self.behind = {}
+        self.strips = {}
 
     def _client_getter(self, kind, key):
         """Return a function that finds the client window of this kind for placement key.
@@ -13865,8 +15627,9 @@ class Layout(object):
         self.journal_held = cw
 
     def load(self):
-        """Read the saved layout state into memory: the active frame set and window layout, the options,
-        which window sits in which zone, and whether the layout is switched on.
+        """Reads the saved layout state into memory: the active frame set and window layout, the options,
+        which window sits in which zone, the situation settings, the chosen tab of each tabbed zone and
+        whether the layout is switched on.
 
         Registers the world map as a window that can be zoned. Resets the one-shot told flags and marks
         the layout dirty so the next hop places everything. Rewrites the saved assignment when it still
@@ -13901,6 +15664,8 @@ class Layout(object):
             self.save_assign()
         self.frames = None
         self.dirty = True
+        self.situ_load()
+        self.tabs = self._tabs_parse(Kit.get_var(self.TABS_VAR, ""))
 
     def save_assign(self):
         """Save the window to zone assignment and refresh the remembered homes of the windows."""
@@ -14071,12 +15836,14 @@ class Layout(object):
         HOST.poke()
 
     def _off(self):
-        """Undo everything the layout did: seams, fitted windows, placed sizes, locks and the held client
-        windows.
+        """Undoes everything the layout did: tabs and their strips, seams, fitted windows, placed sizes, locks
+        and the held client windows.
 
         Runs when zones are switched off, so every window is free and the player's own game view comes
         back (restored once).
         """
+        if self.behind or self.strips or Kit._behind:
+            self._tabs_off()
         Seam.undo_all()
         for key in list(self.fitted):
             self._unfit(key)
@@ -14117,12 +15884,13 @@ class Layout(object):
                 out[k] = keys
         return frames, out
 
-    def windows_text(self, frames=None):
+    def windows_text(self, frames=None, assign=None):
         """Return the saved text of the window assignment: the frame set name, then each zone and its
         windows.
         """
+        a = self.assign if assign is None else assign
         return ";".join(["frames=%s" % (frames or self.frames_name)] + [
-            "%s=%s" % (zid, ",".join(self.assign[zid])) for zid in sorted(self.assign) if self.assign[zid]])
+            "%s=%s" % (zid, ",".join(a[zid])) for zid in sorted(a) if a[zid]])
 
     @staticmethod
     def _names(var):
@@ -14269,7 +16037,8 @@ class Layout(object):
         return self.rev.get(key)
 
     def need(self, key, w, h):
-        """Tell the layout a window wants at least w x h pixels (a zero means no wish) in its zone.
+        """Tells the layout a window wants at least w x h pixels (a zero means no wish) in its zone. In a
+        tabbed zone the height is raised by the tab strip.
 
         The wish is kept in the frame set and the zone is grown on the next hop when need_due is set.
         """
@@ -14277,7 +16046,8 @@ class Layout(object):
         zs = self.frames
         if zid is None or zs is None:
             return
-        want = (w, h) if (w or h) else None
+        z = zs.by_id(zid)
+        want = (w, h + TAB_H if h and z is not None and z.stack == "t" else h) if (w or h) else None
         if zs.needs.get(zid) != want:
             if want is None:
                 zs.needs.pop(zid, None)
@@ -14286,7 +16056,9 @@ class Layout(object):
             self.need_due = True
 
     def zone_base(self, key):
-        """Return the (width, height) of the window's zone in pixels, or None when it has no zone."""
+        """Returns the (width, height) of the window's zone in pixels, less the tab strip of a tabbed zone, or
+        None when it has no zone.
+        """
         zid = self.zone_of(str(key))
         zs = self.frames
         z = zs.by_id(zid) if (zid is not None and zs is not None) else None
@@ -14295,7 +16067,8 @@ class Layout(object):
         W, H = zs.screen
         if W <= 0 or H <= 0:
             W, H = Kit.screen()
-        return (max(1, int(W * z.rect[2] / 1000.0)), max(1, int(H * z.rect[3] / 1000.0)))
+        tab = TAB_H if z.stack == "t" else 0
+        return (max(1, int(W * z.rect[2] / 1000.0)), max(1, int(H * z.rect[3] / 1000.0) - tab))
 
     def holds(self, key):
         """True when zones are on and this window is assigned to a zone that exists."""
@@ -14447,11 +16220,14 @@ class Layout(object):
         return None
 
     def _too_small(self, key, z, g=None):
-        """True, and says so in the journal, when the zone z is smaller than the window's minimum."""
+        """Returns True, and says so in the journal, when the body of zone z (below the tab strip, if any) is
+        smaller than the window's minimum.
+        """
         mn = self._min_of(key, g)
         if mn is None or z is None or z.px is None:
             return False
-        if z.px[2] >= mn[0] and z.px[3] >= mn[1]:
+        b = self._body(z)
+        if b[2] >= mn[0] and b[3] >= mn[1]:
             return False
         Kit.say("%s needs a zone at least %d x %d." % (self.title_of(key), mn[0], mn[1]), Kit.HUE_BAD)
         return True
@@ -14870,12 +16646,19 @@ class Layout(object):
         return Kit.get_var(LAYOUT_NAMED % name, "")
 
     def use_windows(self, name, tell=True):
-        """Switch to the window layout name, or to none (every window free) when name is empty.
+        """Switches to the window layout name, or to none (every window free) when name is empty.
 
-        The layout's frame set is switched to as well when it differs. tell says it in the journal.
+        The layout's frame set is switched to as well when it differs. tell says it in the journal. While
+        layouts by situation are on, a switch the player makes becomes the base layout that the situations
+        return to.
         """
         if (name and name not in (LAYOUT_DEFAULT, LAYOUT_MIRRORED) and name not in self.layout_names()):
             name = ""
+        if self.situ["on"] and not self.situ_busy:
+            self.situ["base"] = name
+            self.situ_now = self.situ_last
+            self.situ_pend = self.situ_back = None
+            self.situ_save()
         frames, assign = (self.parse_windows(self.window_layout_text(name)) if name else (self.frames_name, {}))
         if name:
             self.unfree(None)
@@ -14916,6 +16699,289 @@ class Layout(object):
         Kit.say('window layout "%s" saved.' % name, Kit.HUE_GOOD)
         self.page_refresh = True
 
+    CODE_HEAD, CODE_TAG, CODE_VER, CODE_FILE, CODE_MAX = "VA-", "VAL1", 1, "layout-code.txt", 8000
+    CODE_RAW = 65536
+    CODE_BAD = "Interface: that isn't a Virtue Assistant layout code."
+
+    def _shipped(self, key):
+        """Returns True when the window is the world map or belongs to a module that ships with Virtue
+        Assistant. Share codes list only those windows.
+        """
+        if key == "worldmap":
+            return True
+        s = dict.get(HOST.by_key, self.owner_of(key)[0] or "")
+        return s is not None and s.shipped
+
+    def share_code(self):
+        """Returns the share code of the layouts in use: the text VA- followed by the frame set, the zones and
+        the shipped windows' assignment, packed with zlib, a one byte format number and a two byte
+        checksum, written in base 64. Returns an empty string when there are no zones.
+
+        A saved frame set is read as saved for this screen's shape rather than as reflowed to it, so the
+        receiver gets the layout as it was drawn.
+        """
+        import zlib
+        W, H = Kit.screen()
+        zs = self.frames_in_use(W, H) if W > 0 and H > 0 else self.frames
+        if zs is None or not zs.zones:
+            return ""
+        if self.frames_name != LAYOUT_DEFAULT and W > 0 and H > 0:
+            var = FRAMES_NAMED % self.frames_name
+            text = Kit.get_var(var + "@" + ratio_class(W, H), "")
+            raw = ZoneSet.parse(self.frames_name, text or Kit.get_var(var, ""))
+            if raw is not None and raw.zones:
+                zs = raw
+        keep = {}
+        for zid, keys in self.assign.items():
+            ks = [k for k in keys if self._shipped(k)]
+            if ks:
+                keep[zid] = ks
+        text = "\n".join((self.CODE_TAG, self.frames_name, zs.save_text(), self.windows_text(self.frames_name, keep)))
+        data = [self.CODE_VER] + list(bytearray(zlib.compress(text.encode("utf-8"), 9)))
+        c = Kit.checksum(data)
+        data += [(c >> 8) & 255, c & 255]
+        n = len(data)
+        return self.CODE_HEAD + Kit.b64(data + [0] * (-n % 3))[:(n * 4 + 2) // 3]
+
+    def _code_read(self, t):
+        """Checks and unpacks the part of a share code after its VA- head. Returns (frame set name, ZoneSet,
+        {zone id: [window keys]}) or None for anything that is not a valid code: bad length or letters,
+        wrong format number, bad checksum, a pack that unpacks too big, wrong tag or lines, or no zones.
+        """
+        import zlib
+        try:
+            if len(t) % 4 == 1 or len(t) > self.CODE_MAX:
+                return None
+            if any(ch not in Kit.B64_REV for ch in t):
+                return None
+            full = Kit.unb64(t + "A" * (-len(t) % 4))
+            n = len(t) * 3 // 4
+            data = full[:n]
+            if n < 4 or any(full[n:]) or data[0] != self.CODE_VER:
+                return None
+            if Kit.checksum(data[:-2]) != (data[-2] << 8 | data[-1]):
+                return None
+            d = zlib.decompressobj()
+            raw = d.decompress(bytes(bytearray(data[1:-2])), self.CODE_RAW)
+            if d.unconsumed_tail or len(raw) >= self.CODE_RAW:
+                return None
+            lines = raw.decode("utf-8").split("\n")
+            if len(lines) != 4 or lines[0] != self.CODE_TAG:
+                return None
+            zs = ZoneSet.parse(lines[1], lines[2])
+            if zs is None or not zs.zones:
+                return None
+            return lines[1], zs, self.parse_windows(lines[3])[1]
+        except Exception:
+            return None
+
+    def load_code(self, text):
+        """Loads a pasted share code: saves its frame set and window layout under a name ending in (shared),
+        fitted to this screen, adds it to the layout list and switches to it. Tells the player and returns
+        False when the text is not a valid code.
+        """
+        t = re.sub(r"\s+", "", str(text or ""))
+        got = self._code_read(t[len(self.CODE_HEAD):]) if t.startswith(self.CODE_HEAD) else None
+        if got is None:
+            API.SysMsg(self.CODE_BAD, Kit.HUE_BAD)
+            return False
+        name, zs, assign = got
+        name = name[:-9] if name.endswith(" (shared)") else name
+        nm = self.clean_name(name, "Shared")[:15].strip() + " (shared)"
+        W, H = Kit.screen()
+        if W <= 0 or H <= 0:
+            W, H = zs.screen
+        if (W, H) != zs.screen:
+            zs.reflow(W, H, HOST.grid_size())
+        self.save_frames(zs, nm, W, H)
+        Kit.put_var(LAYOUT_NAMED % nm, self.windows_text(nm, assign))
+        names = self.layout_names()
+        if nm not in names:
+            names.append(nm)
+            Kit.put_var(LAYOUT_LIST, ",".join(names))
+        self.use_windows(nm)
+        return True
+
+    SITU_VAR = "VirtueAssistant_layout_situations"
+    SITU_KINDS = ("war", "bank", "dungeon", "town")
+    SITU_SAY = {"war": "war mode", "bank": "bank", "dungeon": "dungeon", "town": "town"}
+    SITU_EVERY, SITU_HOLD, SITU_WAR_HOLD, SITU_BANK_FOR, SITU_BANK_NEAR = 1.0, 2.0, 0.5, 300.0, 8
+
+    def situ_load(self):
+        """Reads the saved settings of layouts by situation (on or off, the layout for each situation and the
+        base layout) and clears the running state.
+        """
+        s = {"on": False, "base": ""}
+        for k in self.SITU_KINDS:
+            s[k] = ""
+        for k, v in Kit.codec_load(Kit.get_var(self.SITU_VAR, "")).items():
+            if k == "on":
+                s["on"] = v == "1"
+            elif k in s:
+                s[k] = self.clean_name(v, "")
+        self.situ = s
+        self.situ_now = self.situ_pend = self.situ_last = self.situ_back = None
+        self.situ_at = 0.0
+
+    def situ_park(self):
+        """Writes the layout, frame set and window assignment that were in use before a situation took over
+        back into the saved variables when the script stops, so a restart does not keep the situation's
+        layout. Does nothing when no situation is active.
+        """
+        b, self.situ_back = self.situ_back, None
+        if b is None or not self.situ_now:
+            return
+        Kit.put_var(LAYOUT_ACTIVE, b[0])
+        Kit.put_var(FRAMES_ACTIVE, b[1])
+        Kit.put_var(LAYOUT_VAR, self.windows_text(b[1], b[2]))
+
+    def situ_save(self):
+        """Saves the situation settings as one variable of name=value pairs."""
+        s = self.situ
+        Kit.put_var(self.SITU_VAR, ";".join(["on=%d" % (1 if s["on"] else 0)] + [
+            "%s=%s" % (k, s.get(k, "")) for k in self.SITU_KINDS + ("base",)]))
+
+    def situ_set(self, on):
+        """Switches layouts by situation on or off. Off while a situation is active goes back to the base
+        layout; on takes the layout in use as the base.
+        """
+        on = bool(on)
+        if on == self.situ["on"]:
+            return
+        if not on and self.situ_now:
+            self._situ_go("", self.situ["base"], self.situ_now)
+        self.situ["on"] = on
+        self.situ_now = self.situ_pend = self.situ_last = self.situ_back = None
+        self.situ_at = 0.0
+        if on:
+            self.situ["base"] = self.layout_name
+        self.situ_save()
+
+    def situ_pick(self, kind, name):
+        """Sets the layout (name) used for situation kind (war, bank, dungeon or town) and saves it."""
+        if kind not in self.SITU_KINDS:
+            return
+        self.situ[kind] = self.clean_name(name, "")
+        self.situ_now = self.situ_pend = None
+        self.situ_save()
+
+    def _bank_note(self, now, w):
+        """Remembers when and where the bank was last seen open (now, and w = x, y and facet from Guard), so
+        the bank situation holds while the player stays near it.
+        """
+        try:
+            b = int(API.Bank or 0)
+            it = API.FindItem(b) if b else None
+            up = it is not None and bool(it.Opened)
+        except Exception:
+            up = False
+        if up and w is not None:
+            self.situ_bank = (now, w[0], w[1], w[2])
+
+    def situ_want(self, now):
+        """Returns (situation kind, layout name) that fits the player right now: the first kind that has a
+        layout and applies, in the order war mode, bank, dungeon, town; otherwise ("", the base layout).
+        The bank applies for SITU_BANK_FOR seconds after it was opened while the player stays within
+        SITU_BANK_NEAR tiles on the same facet; a dungeon is one of DUNGEON_AREAS; a town is a guarded area.
+        """
+        s = self.situ
+        w = None
+        if s["bank"]:
+            w = Guard._where()
+            self._bank_note(now, w)
+        for kind in self.SITU_KINDS:
+            if not s[kind]:
+                continue
+            if kind == "war":
+                me = HOST.me()
+                hit = me is not None and bool(me.InWarMode)
+            elif kind == "bank":
+                b = self.situ_bank
+                hit = (w is not None and now - b[0] <= self.SITU_BANK_FOR and b[3] == w[2]
+                       and max(abs(b[1] - w[0]), abs(b[2] - w[1])) <= self.SITU_BANK_NEAR)
+            elif kind == "dungeon":
+                if w is None:
+                    w = Guard._where()
+                hit = False
+                for a in DUNGEON_AREAS:
+                    if w is not None and a[0] == w[2] and a[1] <= w[0] <= a[3] and a[2] <= w[1] <= a[4]:
+                        hit = True
+            else:
+                hit = GUARD.guarded() is True
+            if hit:
+                return kind, s[kind]
+        return "", s["base"]
+
+    def situ_tick(self, now, busy=False):
+        """Called from the Interface module's tick with the time now: at most every SITU_EVERY seconds works out the
+        wanted situation and switches layouts once it has held for SITU_HOLD seconds (SITU_WAR_HOLD for war
+        mode, so it reacts quickly). Nothing switches while busy, in Arrange mode or while a window is
+        dragged.
+        """
+        if not self.situ["on"] or not self.enabled or now < self.situ_at:
+            return
+        self.situ_at = now + self.SITU_EVERY
+        if self.situ_now == "" and self.layout_name != self.situ["base"]:
+            self.situ["base"] = self.layout_name
+            self.situ_back = None
+            self.situ_save()
+        try:
+            kind, name = self.situ_want(now)
+        except Exception:
+            return
+        self.situ_last = kind
+        was = self.situ_now
+        if kind == was:
+            self.situ_pend = None
+            return
+        if was is None and name == self.layout_name:
+            self.situ_now, self.situ_pend = kind, None
+            return
+        hold = self.SITU_WAR_HOLD if kind == "war" else self.SITU_HOLD
+        p = self.situ_pend
+        if p is None or p[0] != kind:
+            self.situ_pend = (kind, now)
+            self.situ_at = now + min(hold, self.SITU_EVERY)
+            return
+        if now - p[1] < hold:
+            self.situ_at = min(self.situ_at, p[1] + hold)
+            return
+        if busy or self.arrange or SNAP.pressed():
+            return
+        self.situ_now, self.situ_pend = kind, None
+        self._situ_go(kind, name, was)
+
+    def _situ_go(self, kind, name, was):
+        """Switches to layout name for situation kind ("" means back to the base layout; was is the situation
+        that was active). The layout and window assignment in use before the first switch is kept in
+        situ_back and put back exactly when the player leaves every situation. Says it in the journal.
+        """
+        if name == self.layout_name and (kind or self.situ_back is None):
+            return
+        if name and name not in (LAYOUT_DEFAULT, LAYOUT_MIRRORED) and name not in self.layout_names():
+            return
+        if kind and was in ("", None) and self.situ_back is None:
+            self.situ_back = (self.layout_name, self.frames_name, dict((z, list(v)) for z, v in self.assign.items()))
+        back = self.situ_back if not kind else None
+        self.situ_busy = True
+        try:
+            self.use_windows(name, tell=False)
+        finally:
+            self.situ_busy = False
+        if back is not None:
+            self.situ_back = None
+            if back[0] == name:
+                if back[1] != self.frames_name:
+                    self.use_frames(back[1], tell=False)
+                self.unfree(None)
+                self.assign = back[2]
+                self.save_assign()
+                self.placed = {}
+                self.dirty = True
+        t = name or "(none)"
+        API.SysMsg("Interface: %s layout (%s)." % (t, self.SITU_SAY[kind]) if kind else "Interface: back to %s." % t,
+                   Kit.HUE_INFO)
+
     def free_scrolled(self):
         """Give back windows that are fitted or sized by a zone but no longer held by one: undo their fit,
         and put scrolling windows at their own size.
@@ -14941,9 +17007,9 @@ class Layout(object):
         zones off it undoes everything instead. Steps: pick the zone set; hold the client journal, watch
         dropped client windows, redraw the Arrange overlay and repair homes; then for each zone collect
         its open, visible windows (with the windows that follow them), give each a slot with _slots, fit
-        it with _fit_slot, release windows that left their zone, strip or restore the seamless chrome,
-        fit the game view and grow zones that asked for more room. Windows that moved get their moved
-        callback after one flush.
+        it with _fit_slot, hide all but the shown window of a tabbed zone, release windows that left their
+        zone, strip or restore the seamless chrome, keep the tab strips, fit the game view and grow zones
+        that asked for more room. Windows that moved get their moved callback after one flush.
         """
         if not self.loaded or W <= 0 or H <= 0:
             return
@@ -14961,6 +17027,8 @@ class Layout(object):
         self.fresh = False
         self.fresh_adds.clear()
         Fill.prune()
+        if self.behind:
+            self._tabs_prune(zs)
         for key in [k for k in self.fitted if not self.holds(k)]:
             self._unfit(key)
         now = time.time()
@@ -15033,8 +17101,17 @@ class Layout(object):
                     except Exception:
                         pass
                 items.append((key, g, r, ext, fol, hooks, mini, self._base(key, g, ext, mini)))
+            # In a tabbed zone only the shown window stays on screen; the others are marked as behind it.
+            if items and z.stack == "t":
+                shown = self.tab_shown(z)
+                for it in items:
+                    if it[0] != shown:
+                        self.behind[it[0]] = z.id
             if items:
                 jobs.extend((it, slot, z) for it, slot in zip(items, self._slots(z, items)))
+        # Kit._behind is the set of gumps kept off screen behind tabs, shared with the snap code.
+        if self.behind or Kit._behind:
+            Kit._behind = set(g for g in map(self.gump_of, self.behind) if g is not None)
         # Padding between windows: thin in One panel mode, the full margin for a solo zone.
         thin, full = (Seam.pad(),) * 4, (Kit.MARGIN,) * 4
         small = set()
@@ -15050,7 +17127,8 @@ class Layout(object):
                     told.append(it[1])
                 continue
             try:
-                if self._fit_slot(it, slot, z, (full if z.solo else thin) if self.seamless else None):
+                pads = (full if z.solo else thin) if self.seamless and it[0] not in self.behind else None
+                if self._fit_slot(it, slot, z, pads):
                     told.append(it[1])
             except Exception:
                 self.placed[it[0]] = slot
@@ -15060,7 +17138,7 @@ class Layout(object):
                 Seam.undo(g)
         bare = set()
         if self.seamless and self.enabled:
-            for it, slot, z in [j for j in jobs if j[0][1] not in small]:
+            for it, slot, z in [j for j in jobs if j[0][1] not in small and j[0][0] not in self.behind]:
                 for g in [it[1]] + list(it[4]):
                     try:
                         if not isinstance(g, ClientWin) and Seam.strip(g, g is it[1] and it[5].get("untitled")):
@@ -15069,6 +17147,11 @@ class Layout(object):
                         pass
         for g in ([g for g in Seam.bare if g not in bare] if only is None else ()):
             Seam.unstrip(g)
+        if only is None and (self.strips or self.behind or any(z.stack == "t" for z in zs.zones)):
+            try:
+                self._strips_keep(zs)
+            except Exception:
+                pass
         try:
             self._game_view(zs)
         except Exception:
@@ -15102,12 +17185,15 @@ class Layout(object):
         return b
 
     def _slots(self, z, items):
-        """Divide the zone z among the items (windows) and return one (x, y, w, h) slot per item.
+        """Divides the zone z among the items (windows) and returns one (x, y, w, h) slot per item.
 
         Windows are stacked along the zone's stack direction (d down, u up, r right, l left). Slots are
         shared by the windows' natural sizes; a minimised window keeps its own length when others are
-        open. When the fixed parts do not fit, all windows are shared by weight.
+        open. When the fixed parts do not fit, all windows are shared by weight. In a tabbed zone (t)
+        every window gets the whole body below the tab strip.
         """
+        if z.stack == "t":
+            return [self._body(z)] * len(items)
         zx, zy, zw, zh = z.px
         down = z.stack in ("d", "u")
         along = zh if down else zw
@@ -15150,6 +17236,180 @@ class Layout(object):
                 pos += ln
         return out
 
+    TABS_VAR = "VirtueAssistant_layout_tabs"
+    TABS_CAP = 64
+
+    @staticmethod
+    def _body(z):
+        """Returns the rectangle of zone z that windows fill: the zone itself, or below the tab strip when the
+        zone is tabbed.
+        """
+        zx, zy, zw, zh = z.px
+        return (zx, zy + TAB_H, zw, max(1, zh - TAB_H)) if z.stack == "t" else (zx, zy, zw, zh)
+
+    @staticmethod
+    def _tabs_parse(text):
+        """Reads the saved tab choices (zone id=window key pairs joined by semicolons) into a dict."""
+        out = {}
+        for part in str(text or "").split(";"):
+            if "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            if k.strip() and v.strip():
+                out[k.strip()] = v.strip()
+        return out
+
+    def _tabs_save(self):
+        """Saves the chosen tab of each tabbed zone."""
+        Kit.put_var(self.TABS_VAR, ";".join("%s=%s" % kv for kv in sorted(self.tabs.items())))
+
+    def tab_shown(self, z):
+        """Returns the key of the window shown in tabbed zone z: the player's pick while it is still open and
+        usable, else the first usable window, else the first. None when the zone has no windows.
+        """
+        keys = self.assign.get(z.id, [])
+        if not keys:
+            return None
+        k = self.tabs.get(z.id)
+        if k in keys and self._tab_ok(k):
+            return k
+        return next((k for k in keys if self._tab_ok(k)), keys[0])
+
+    def _tab_ok(self, key):
+        """Returns True when the window is open, visible and not riding along with another window, so it can
+        be shown as a tab.
+        """
+        g = self.gump_of(key)
+        if g is None or not Snap.visible(g):
+            return False
+        riding = (self.hooks.get(key) or {}).get("riding")
+        return riding is None or not safe(riding, False)
+
+    def tab_pick(self, zid, key):
+        """Shows window key in tabbed zone zid, saves the choice (the saved list is trimmed to the zones in
+        use past TABS_CAP) and asks for a fresh placement pass. Returns False when the window is not in
+        that zone.
+        """
+        zid, key = str(zid), str(key)
+        if key not in self.assign.get(zid, ()):
+            return False
+        if self.tabs.get(zid) != key:
+            self.tabs[zid] = key
+            if len(self.tabs) > self.TABS_CAP:
+                self.tabs = dict(kv for kv in self.tabs.items() if kv[0] in self.assign)
+            self._tabs_save()
+        for k in self.assign.get(zid, ()):
+            self.seam_skip.pop(k, None)
+            self.seam_wait.pop(k, None)
+        self.fresh = True
+        HOST.poke()
+        return True
+
+    def spot(self, key):
+        """Returns the slot a window is held in. A window waiting behind a tab reports it with x at TAB_X, off
+        the screen, which is where it is kept.
+        """
+        slot = self.placed.get(key)
+        if slot is None or key not in self.behind:
+            return slot
+        return (TAB_X,) + tuple(slot[1:])
+
+    def _unhide(self, key):
+        """Brings window key back from behind a tab: forgets that it is hidden and moves it from the off screen
+        place back to its slot.
+        """
+        self.behind.pop(key, None)
+        g = self.gump_of(key)
+        if g is None:
+            return
+        Kit._behind.discard(g)
+        r = Snap.rect(g)
+        if r is None or r[0] > TAB_X // 2:
+            return
+        slot = self.placed.get(key)
+        x = slot[0] if slot is not None else Kit.clamp(0, r[1], r[2], r[3])[0]
+        self._move_all(g, SNAP.followers(g), r, x, r[1])
+
+    def _tabs_prune(self, zs):
+        """Unhides every hidden window whose zone no longer holds it as a hidden tab (the zone changed, the
+        window moved or it is the shown tab now).
+        """
+        for key, zid in list(self.behind.items()):
+            z = zs.by_id(zid) if zs is not None else None
+            if (z is None or z.stack != "t" or z.kind != "w" or z.px is None or not self.holds(key)
+                    or self.zone_of(key) != zid or self.tab_shown(z) == key):
+                self._unhide(key)
+
+    def _tabs_off(self):
+        """Unhides every window and removes every tab strip; part of switching zones off."""
+        for key in list(self.behind):
+            self._unhide(key)
+        Kit._behind = set()
+        for s in list(self.strips.values()):
+            Kit.dispose(s["g"])
+        self.strips = {}
+
+    def _strips_keep(self, zs):
+        """Keeps one tab strip window per tabbed zone that has windows: removes strips of zones that are gone
+        and rebuilds a strip only when its signature (place, windows, shown tab, titles, look, alpha)
+        changed.
+        """
+        want = {}
+        for z in (zs.zones if self.assign else ()):
+            if z.stack != "t" or z.kind != "w" or z.px is None:
+                continue
+            keys = tuple(k for k in self.assign.get(z.id, []) if self.gump_of(k) is not None)
+            if keys:
+                want[z.id] = (tuple(z.px), keys, self.tab_shown(z), tuple(self.title_of(k) for k in keys), Kit.look(),
+                              Kit.SECTION_ALPHA)
+        for zid in [k for k in self.strips if k not in want]:
+            Kit.dispose(self.strips.pop(zid)["g"])
+        for zid, sig in want.items():
+            s = self.strips.get(zid)
+            if s is not None and s["sig"] == sig and Kit.is_open(s["g"]):
+                continue
+            old = s["g"] if s is not None else None
+            self.strips[zid] = {"g": self._strip(zid, sig), "sig": sig}
+            Kit.dispose(old)
+
+    def _strip(self, zid, sig):
+        """Builds the tab strip gump of one zone from its signature sig: one button and title per window, the
+        shown tab in the title colour, laid across the top of the zone. Clicking a tab shows that window.
+        """
+        (x, y, w, h), keys, shown, titles = sig[0], sig[1], sig[2], sig[3]
+        g = G.CreateGump(True, False)
+        Kit.add_section(g, 0, 0, w, TAB_H)
+        share = max(1, w // len(keys))
+        bw, bh = Kit.pic_size(Kit.ART_PAGE[0])
+        bw, bh = bw or 30, bh or 22
+        for i, (k, t) in enumerate(zip(keys, titles)):
+            bx = i * share + 4
+            fn = self._tab_click(zid, k)
+            tip = "Show %s in this zone" % t
+            b = G.CreateGumpButton("", Kit.HUE_TEXT, Kit.ART_PAGE[0], Kit.ART_PAGE[1], Kit.ART_PAGE[2])
+            b.SetPos(bx, max(0, (TAB_H - bh) // 2))
+            g.Add(b)
+            Kit.on_click(b, fn)
+            Kit.with_tip(b, tip)
+            lbl = Kit.add_label(g, Kit.fit(t, max(10, share - bw - 15)), bx + bw + 5, max(0, (TAB_H - 16) // 2),
+                                Kit.HUE_TITLE if k == shown else Kit.HUE_TEXT)
+            lbl.SetAcceptMouseInput(True)
+            Kit.on_click(lbl, fn)
+            Kit.with_tip(lbl, tip)
+        g.SetRect(x, y, w, TAB_H)
+        g.CanMove = False
+        G.AddGump(g)
+        SNAP.skip_gump(g)
+        return g
+
+    def _tab_click(self, zid, key):
+        """Returns the click handler of the tab for window key in zone zid."""
+        def hit():
+            """Click handler: shows the window of this tab."""
+            self.tab_pick(zid, key)
+
+        return hit
+
     def retry_due(self, now):
         """True when a window that is waiting for the seamless fit has come due for another try.
 
@@ -15168,13 +17428,15 @@ class Layout(object):
         return bool(self.fresh_adds)
 
     def fit_now(self, key, g):
-        """Fit one window straight away, without waiting for the next pass, using its last slot.
+        """Fits one window straight away, without waiting for the next pass, using its last slot.
 
         Used when a window redraws itself in One panel mode and would flash at the wrong size. Only on
         the client thread, and not while the layout is dirty, the window is dragged, attached or has
-        followers.
+        followers. A window behind a tab is kept hidden.
         """
         was = self.slot_was.get(key)
+        if key in self.behind:
+            Kit._behind.add(g)
         if (was is None or not (self.seamless and self.enabled) or self.dirty or self.fresh or g in SNAP.drag
                 or g in SNAP.attached or not Client.on_client_thread()):
             return
@@ -15191,7 +17453,7 @@ class Layout(object):
         self.gump_key[g] = key
         try:
             self._fit_slot((key, g, r, r, [], hooks, mini, self._base(key, g, r, mini)), slot, z, pads)
-            if not isinstance(g, ClientWin):
+            if not isinstance(g, ClientWin) and key not in self.behind:
                 Seam.strip(g, hooks.get("untitled"))
         except Exception:
             pass
@@ -15246,12 +17508,12 @@ class Layout(object):
         return self._fit_at(it, slot, z, ins)
 
     def _fit_at(self, it, slot, z, ins):
-        """Size and place the window at slot: its fit hook if it has one, else the general fill; then move
+        """Sizes and places the window at slot: its fit hook if it has one, else the general fill; then moves
         it and the windows that follow it.
 
         Hooks used: fit (size to w, h), exact (position exactly), verify (check the size took), fill
-        (fill style), pieces_out (followers sit outside the slot), client (client window). Returns True
-        when anything moved.
+        (fill style), pieces_out (followers sit outside the slot), client (client window). A window behind
+        a tab is kept at TAB_X. Returns True when anything moved.
         """
         key, g, r, ext, fol, hooks, mini, base = it
         sx, sy, sw, sh = slot
@@ -15323,7 +17585,7 @@ class Layout(object):
             Fill.unfit(g)
             info = Kit.scroll_info(g)
             fw, fh = (info["w"], info["h"]) if info is not None else (r[2], r[3])
-            if (r[0], r[1]) == (sx, sy) and r[3] == min(fh, sh):
+            if (r[0], r[1]) == (TAB_X if g in Kit._behind else sx, sy) and r[3] == min(fh, sh):
                 return False
             Kit._place_raw(g, sx, sy, fw, fh, None, sh if fh > sh else None)
             done = True
@@ -15333,9 +17595,11 @@ class Layout(object):
 
     @staticmethod
     def _move_all(g, fol, r, x, y):
-        """Move gump g, and the windows that follow it by the same distance, to (x, y). Returns True when
-        it moved.
+        """Moves gump g, and the windows that follow it by the same distance, to (x, y). A window behind a tab
+        keeps its off screen x. Returns True when it moved.
         """
+        if g in Kit._behind:
+            x = TAB_X
         if (r[0], r[1]) == (x, y):
             return False
         Snap.move(g, x, y)
@@ -15440,26 +17704,26 @@ class Layout(object):
             Fill.unfit(g)
 
     def _small(self, key, z, g):
-        """True when zone z is smaller than the window's minimum; asked once per zone size, then
-        remembered.
+        """Returns True when zone z is smaller than the window's minimum; asked once per zone size and stack,
+        then remembered.
         """
-        sig = (z.id, tuple(z.px))
+        sig = (z.id, tuple(z.px), z.stack)
         was = self.min_seen.get(key)
         if was is None or was[0] != sig:
             was = self.min_seen[key] = (sig, self._too_small(key, z, g))
         return was[1]
 
     def report_fit(self):
-        """Settings button (Check fit): say in the journal, zone by zone, whether each zoned window fills
-        its zone.
+        """Settings button (Check fit): says in the journal, zone by zone, whether each zoned window fills its
+        zone.
 
-        Lists empty zones, windows assigned but not open, each window's size and place against its slot
-        (a window riding with another counts as filling their joint rect), windows drawn scaled down,
-        the One panel counts and a total.
+        Lists empty zones, windows assigned but not open, windows waiting behind a tab, each window's size
+        and place against its slot (a window riding with another counts as filling their joint rect),
+        windows drawn scaled down, the One panel counts and a total.
         """
         W, H = Kit.screen()
         zs = self.frames_in_use(W, H) if W > 0 and H > 0 else None
-        n = bad = 0
+        n = bad = hid = 0
         ridden = []
         for z in (zs.zones if zs is not None else []):
             keys = self.assign.get(z.id, [])
@@ -15479,6 +17743,11 @@ class Layout(object):
                 g = self.gump_of(key)
                 slot = self.placed.get(key)
                 if g is None or slot is None:
+                    continue
+                if key in self.behind:
+                    n += 1
+                    hid += 1
+                    Kit.say('%s: behind a tab in "%s".' % (self.title_of(key), z.id), Kit.HUE_GOOD)
                     continue
                 r = Snap.rect(g)
                 if r is None:
@@ -15504,7 +17773,8 @@ class Layout(object):
             Kit.say("One panel: on; %s without a title row, %s with its title hidden in place, %s left as is." % (
                 Kit.count(len(Seam.recs), "window"),
                 Kit.count(sum(1 for r in Seam.bare.values() if r["title"]), "window"),
-                Kit.count(max(0, n - len(Seam.recs) - sum(1 for r in Seam.bare.values() if r["title"])), "window")),
+                Kit.count(max(0, n - hid - len(Seam.recs) - sum(1 for r in Seam.bare.values() if r["title"])),
+                          "window")),
                 Kit.HUE_INFO)
         if not n:
             Kit.say("no window sits in a zone.", Kit.HUE_INFO)
@@ -15757,13 +18027,14 @@ class Layout(object):
         HOST.poke()
 
     def dropped(self, g, key=None, rect=None):
-        """Handle a window dropped in Arrange mode: move it to the zone it was dropped on, at the position
-        in the stack that its centre points to. Outside Arrange mode it just snaps back to its slot.
+        """Handles a window dropped in Arrange mode: moves it to the zone it was dropped on, at the position
+        in the stack that its centre points to, or makes it the shown tab of a tabbed zone. Outside Arrange
+        mode it just snaps back to its slot.
 
         Arguments: g the gump (or key to look it up instead), rect the drop rect when it is not the
-        gump's own. A drop on a zone with exactly one open window swaps the two; one that is too small,
-        or that breaks the world map's zone to itself, snaps back and says why. Holding Alt leaves the
-        drop alone.
+        gump's own. A drop on a zone with exactly one open window swaps the two (not in a tabbed zone);
+        one that is too small, or that breaks the world map's zone to itself, snaps back and says why.
+        Holding Alt leaves the drop alone.
         """
         if not self.loaded or self.frames is None:
             return
@@ -15810,6 +18081,10 @@ class Layout(object):
         if old == hit.id and len(self.assign.get(old, [])) <= 1:
             self._back()
             return
+        if old == hit.id and hit.stack == "t":
+            self.tab_pick(hit.id, key)
+            self._back()
+            return
         mz = self._map_zone()
         others_there = [k for k in self.assign.get(hit.id, []) if k != key]
         lone = len(others_there) == 1 and self.gump_of(others_there[0]) is not None
@@ -15826,7 +18101,7 @@ class Layout(object):
         slots_was = dict((k, self.placed.get(k)) for k in self.assign.get(hit.id, []))
         if old is not None:
             others = [k for k in self.assign.get(hit.id, []) if k != key] if old != hit.id else []
-            if len(others) == 1 and self.gump_of(others[0]) is not None:
+            if len(others) == 1 and self.gump_of(others[0]) is not None and hit.stack != "t":
                 swap = others[0]
                 if self._too_small(swap, self.frames.by_id(old)):
                     self._back()
@@ -15843,7 +18118,10 @@ class Layout(object):
                 del self.assign[old]
         keys = self.assign.setdefault(hit.id, [])
         pos = len(keys)
-        for i, k in enumerate(keys):
+        if hit.stack == "t":
+            self.tabs[hit.id] = key
+            self._tabs_save()
+        for i, k in enumerate(keys if hit.stack != "t" else ()):
             p = slots_was.get(k) or self.placed.get(k)
             if p is None:
                 continue
@@ -15879,11 +18157,11 @@ class Layout(object):
                                               for k in keys])))
 
     def preview_text(self, key, z, keys=None):
-        """Return the preview line shown while dragging window key over zone z.
+        """Returns the preview line shown while dragging window key over zone z.
 
         A line starting with ! is a refusal (a zone kind that cannot hold it, the world map's zone, too
-        small). Otherwise it says the size it would get, with the percentage when it would be drawn
-        smaller.
+        small for the body below any tab strip). Otherwise it says the size it would get, with the
+        percentage when it would be drawn smaller.
         """
         if key is None or z is None or z.px is None:
             return ""
@@ -15895,8 +18173,9 @@ class Layout(object):
                 (key == "worldmap" and [k for k in self.assign.get(z.id, []) if k != key]):
             return "!TazUO's World Map keeps its zone to itself."
         mn = self._min_of(key)
-        if mn and (z.px[2] < mn[0] or z.px[3] < mn[1]):
-            return ("!%s needs %d x %d at least; this zone is %d x %d." % (t, mn[0], mn[1], z.px[2], z.px[3]))
+        b = self._body(z)
+        if mn and (b[2] < mn[0] or b[3] < mn[1]):
+            return ("!%s needs %d x %d at least; this zone is %d x %d." % (t, mn[0], mn[1], b[2], b[3]))
         keys = ([k for k in (keys if keys is not None else self.assign.get(z.id, [])) if k != key] + [key])
         slot = None
         for k, sl in self.slots_for(z, keys):
@@ -16291,10 +18570,282 @@ class Seam(object):
                             pass
 
 
+class Fade(object):
+    """Fades idle windows. After a window has had no mouse over it and nothing changed in it for the
+    chosen time, every control in it is drawn at a lower alpha; the mouse over it, a change in it or a
+    wake call brings it back.
+
+    Settings are the saved fade, fade_to, fade_after and fade_all preferences (Settings > Interface,
+    LOOK). tick() runs from the host's main loop while fading is on. The Virtue Assistant window and the
+    alerts never fade, nor does a window whose hooks say fade is False; the Action Bar and the unit
+    frames fade only when fade_all is set. Nothing is touched in Arrange mode.
+    """
+    EVERY = 0.2
+    HIT_EVERY = 1.0
+    PRUNE_EVERY = 2.0
+    RETRY = 1.0
+    NEAR = 0.003
+    CAP = 64
+    TO, AFTER = (20, 90), (2, 30)
+    KEYS = ("fade", "fade_to", "fade_after", "fade_all")
+    ALL_ONLY = ("actionbar", "unitframes")
+
+    def __init__(self):
+        """Sets up empty state with fading off."""
+        self.on = self.all = False
+        self.to, self.after = 0.4, 6.0
+        self.base = {}
+        self.dim = {}
+        self.gk = {}
+        self.woke = {}
+        self.under = set()
+        self.mouse = self.sig = None
+        self.next = self.hit_at = self.prune_at = 0.0
+        self.kids = {}
+        self.look_at = 0.0
+
+    def load(self, host):
+        """Reads the saved fade settings from the host's preferences."""
+        self.opts(host.pref_int("fade", 0) == 1, host.pref_int("fade_to", 40), host.pref_int("fade_after", 6),
+                  host.pref_int("fade_all", 0) == 1)
+
+    def opts(self, on, to, after, all_):
+        """Applies the settings: on, the faded alpha to as a percentage (TO limits), the idle time after in
+        seconds (AFTER limits) and whether the Action Bar and unit frames fade too. Windows that are
+        dimmed are restored when fading goes off or the level or scope changes.
+        """
+        to = max(self.TO[0], min(self.TO[1], int(to))) / 100.0
+        after = float(max(self.AFTER[0], min(self.AFTER[1], int(after))))
+        on, all_ = bool(on), bool(all_)
+        if self.on and (not on or to != self.to or all_ != self.all):
+            self.reset()
+        self.on, self.to, self.after, self.all = on, to, after, all_
+        if not on:
+            self.base, self.woke = {}, {}
+
+    def set(self, new):
+        """Takes new settings from a dict with the KEYS (fade, fade_to, fade_after, fade_all), applies them,
+        writes the checked values back to the preferences (as strings) and saves them.
+        """
+        p = HOST.prefs
+        for k in self.KEYS:
+            try:
+                p[k] = str(int(new[k]))
+            except Exception:
+                pass
+        self.load(HOST)
+        p["fade"], p["fade_all"] = ("1" if self.on else "0"), ("1" if self.all else "0")
+        p["fade_to"], p["fade_after"] = str(int(round(self.to * 100))), str(int(self.after))
+        HOST.save_prefs()
+
+    def reset(self):
+        """Restores every dimmed window to its own alpha and forgets what was seen."""
+        for k, gs in list(self.dim.items()):
+            for g in gs:
+                if Kit.is_open(g):
+                    self._walk(g, False)
+        self.dim, self.gk, self.under, self.mouse, self.sig, self.kids = {}, {}, set(), None, None, {}
+
+    def wake(self, key):
+        """Marks window key, its parts and the windows it owns as just used (a window that redraws calls this),
+        so they come back at once.
+        """
+        now = time.time()
+        key = str(key)
+        self.woke[key] = now
+        pre = key + "."
+        for k in list(LAYOUT.wins) + list(Kit._wins):
+            if k.startswith(pre) or LAYOUT.owner.get(k, (None,))[0] == key:
+                self.woke[k] = now
+
+    def _may(self, k, g, skip):
+        """Returns True when window k (gump g) may fade: not skipped, not hidden behind a tab, not a lone
+        module settings window, not opted out by its hooks and not an Action Bar or unit frames window
+        unless fade_all is set.
+        """
+        if g in skip or g in Kit._behind or k in LAYOUT.behind or k.endswith("_alone"):
+            return False
+        if (LAYOUT.hooks.get(k) or {}).get("fade") is False:
+            return False
+        return self.all or not any(k == p or k.startswith(p + ".") for p in self.ALL_ONLY)
+
+    def _units(self):
+        """Returns {window key: [gumps]} of every window that may fade: those the windows helper registered,
+        then zoned windows (not client ones), with the tab strip of a zone added to the shown window of that
+        zone so both fade together. The Virtue Assistant window, the alerts and the alert history are
+        left out.
+        """
+        c = HOST.config
+        own = (c.g if c is not None else None, ALERTS.g, HOST.alert_log.g)
+        skip = set(g for g in own if g is not None)
+        out = {}
+        seen = set()
+        no = set()
+        for k, w in list(Kit._wins.items()):
+            g = w.win.get(w.gkey)
+            if not w.fade:
+                no.add(k)
+            elif Kit.is_open(g) and self._may(k, g, skip):
+                out[k] = [g]
+                seen.add(g)
+        for k in list(LAYOUT.wins):
+            if k in out or k in no:
+                continue
+            g = LAYOUT.gump_of(k)
+            if g is not None and g not in seen and not isinstance(g, ClientWin) and self._may(k, g, skip):
+                out[k] = [g]
+                seen.add(g)
+        for zid, rec in list(LAYOUT.strips.items()):
+            sg = rec.get("g")
+            if not Kit.is_open(sg):
+                continue
+            for k in LAYOUT.assign.get(zid) or ():
+                if k in out and k not in LAYOUT.behind:
+                    out[k].append(sg)
+                    break
+        return out
+
+    @staticmethod
+    def _kids(g):
+        """Returns how many controls a gump has (its children and their children), or -1 if that cannot be
+        read. A change in the count shows the window redrew itself.
+        """
+        try:
+            kids = Kit.client_control(g).Children
+            n = 0
+            for i in range(int(kids.Count)):
+                n += 1 + int(kids[i].Children.Count)
+            return n
+        except Exception:
+            return -1
+
+    @staticmethod
+    def _over(g, m):
+        """Returns True when mouse position m is inside gump g."""
+        r = Kit.rect(g)
+        return r is not None and r[0] <= m[0] < r[0] + r[2] and r[1] <= m[1] < r[1] + r[3]
+
+    def tick(self, now):
+        """Called from the host's main loop with the time now. At most every EVERY seconds: resets when the
+        layout changed shape, tracks which windows the mouse is over (the hit test runs at most every
+        HIT_EVERY seconds when the mouse is still), and dims windows that have been quiet for the idle time
+        and restores those that woke. A dimmed window whose number of controls changed is dimmed again so
+        the new controls fade too.
+        """
+        if now < self.next:
+            return
+        self.next = now + self.EVERY
+        L = LAYOUT
+        # Anything in this signature changing (layout, look, tabs, Arrange) puts every window back before
+        # fading starts again.
+        sig = (L.frames_name, L.layout_name, L.arrange, L.enabled, L.seamless, frozenset(L.behind), Kit.look())
+        if sig != self.sig:
+            if self.sig is not None:
+                self.reset()
+            self.sig = sig
+        if L.arrange:
+            return
+        m = Kit.mouse_pos()
+        units = self._units()
+        woke = self.woke
+        for k, gs in units.items():
+            if self.gk.get(k) is not gs[0]:
+                self.gk[k] = gs[0]
+                woke[k] = max(woke.get(k, 0.0), now)
+        if m != self.mouse or now >= self.hit_at:
+            self.mouse, self.hit_at = m, now + self.HIT_EVERY
+            self.under = set(k for k, gs in units.items() if m is not None and any(self._over(g, m) for g in gs))
+        for k in self.under:
+            if k in units:
+                woke[k] = now
+        # A window is due to fade when it has not been woken for the idle time.
+        want = set(k for k in units if now - woke.get(k, now) >= self.after)
+        for k, gs in list(self.dim.items()):
+            if k not in want or units.get(k) != gs:
+                self.dim.pop(k, None)
+                for g in gs:
+                    if Kit.is_open(g):
+                        self._walk(g, False)
+        if now >= self.look_at:
+            self.look_at = now + self.RETRY
+            for k, gs in list(self.dim.items()):
+                for g in gs:
+                    if not Kit.is_open(g):
+                        continue
+                    n = self._kids(g)
+                    if n != self.kids.get(g, n):
+                        self.kids[g] = n
+                        self._walk(g, True)
+        for k in want:
+            if k not in self.dim:
+                if all([self._walk(g, True) for g in units[k]]):
+                    self.dim[k] = list(units[k])
+                    for g in units[k]:
+                        self.kids[g] = self._kids(g)
+                else:
+                    # A window that could not be dimmed all at once is tried again after RETRY seconds.
+                    woke[k] = now - self.after + self.RETRY
+        if now >= self.prune_at:
+            self.prune_at = now + self.PRUNE_EVERY
+            self._prune(units, now)
+
+    def _prune(self, units, now):
+        """Drops records of closed windows and windows no longer listed so the tables stay small."""
+        self.base = dict((g, r) for g, r in self.base.items() if Kit.is_open(g))
+        self.kids = dict((g, n) for g, n in self.kids.items() if g in self.base)
+        self.gk = dict((k, g) for k, g in self.gk.items() if k in units)
+        self.woke = dict((k, t) for k, t in self.woke.items() if k in units or now - t < self.after)
+
+    def _walk(self, g, on):
+        """Dims (on) or restores (off) every control of gump g through Kit.walk. Returns False when it could
+        not (nothing to restore, or too many gumps recorded), True otherwise.
+
+        base[g] holds, per control, (the control's own alpha, the alpha set here). A control whose alpha
+        was changed by something else since is left at that value instead of being restored.
+        """
+        old = self.base.get(g)
+        if old is None:
+            if not on:
+                return False
+            if len(self.base) >= self.CAP:
+                self.base = dict((b, r) for b, r in self.base.items() if Kit.is_open(b))
+                if len(self.base) >= self.CAP:
+                    return False
+            old = {}
+        new = {}
+        f = self.to
+        near = self.NEAR
+
+        def one(c):
+            """Dims or restores one control c; controls that cannot be read are skipped."""
+            try:
+                a = float(c.Alpha)
+                r = old.get(c)
+                if on:
+                    b = r[0] if r is not None and abs(a - r[1]) <= near else a
+                    v = b * f
+                elif r is None:
+                    return
+                elif abs(a - r[1]) > near:
+                    new[c] = (a, a)
+                    return
+                else:
+                    b = v = r[0]
+                c.Alpha = v
+                new[c] = (b, v)
+            except Exception:
+                pass
+
+        ok = Kit.walk(g, one)
+        self.base[g] = new
+        return ok
+
+
 SNAP = Snap()
 ALERTS = Alerts()
 GUARD = Guard()
 LAYOUT = Layout()
+FADE = Fade()
 HOST = Host()
 MODULE_FILES = (("actionbar", "Action Bar", "ActionBarModule.py"), ("hud", "Character HUD", "CharacterHudModule.py"),
     ("interface", "Interface", "InterfaceModule.py"), ("inventory", "Inventory", "InventoryModule.py"),
@@ -16422,13 +18973,14 @@ def read_registration(text):
 
 
 def load_modules():
-    """Find the module files (*Module.py) beside the mother script and load each into this script's
+    """Finds the module files (*Module.py) beside the mother script and loads each into this script's
     namespace.
 
     Modules load in the order of MODULE_FILES, then any others by name. A retired module, or one now
     merged into another, is skipped with a note. A module with an interval is registered lazily from
     its registration; any other is compiled and run here. A module that fails to load is told, and a
-    stub is added so its name stays in the list.
+    stub is added so its name stays in the list. Every module added from the shipped module folder is
+    marked shipped, which is what share codes check.
     """
     folders = module_folders()
     if not folders:
@@ -16445,6 +18997,8 @@ def load_modules():
     titles = dict((f, (k, t)) for k, t, f in MODULE_FILES)
     for where, name in entries:
         path = os.path.join(where, name)
+        ship = os.path.basename(where) == MODULE_DIR
+        n0 = len(HOST.slots)
         if not os.path.isfile(path):
             continue
         m = None
@@ -16479,6 +19033,9 @@ def load_modules():
                 key, title = kt
                 s = HOST.add(key, title, "", lambda: None, 0.1)
                 s.api, s.broken = None, msg
+        finally:
+            for s in HOST.slots[n0:]:
+                s.shipped = ship
 
 
 Kit.data_setup()
@@ -16737,5 +19294,6 @@ def _module_sysstats():
 if not VA_ALONE:
     load_modules()
     HOST.boot_mark("module files")
-    HOST.add("sysstats", "System Stats", "Ping, FPS and memory button", _module_sysstats, 0.1, category="On screen")
+    HOST.add("sysstats", "System Stats", "Ping, FPS and memory button", _module_sysstats, 0.1,
+             category="On screen").shipped = True
     HOST.run()
