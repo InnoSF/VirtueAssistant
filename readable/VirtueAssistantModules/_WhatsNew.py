@@ -1,4 +1,9 @@
-WHATS_NEW = ("2.7.0.35: new settings show a \"new\" tag.",
+WHATS_NEW = ("2.7.0.37: \"Show start-up times\" adds a Splits line: where the start-up time goes.",
+    "New: Reagent Prices (The world) keeps the reagent prices of every buy list you open, shows the cheapest shops and "
+    "writes them into a book you pick.", "Character HUD frames show at once and keep their pictures between Plays.",
+    "2.7.0.36: \"Show start-up times\" now measures until every window has settled.",
+    "No warning about TazUO's door opener any more; the shard turns doors off itself.",
+    "2.7.0.35: new settings show a \"new\" tag.",
     "Settings > Interface: four looks (Classic, Dark, Parchment, High contrast), text size, compact rows, "
     "colour-blind marks and streamer mode, which hides names and places.",
     "Settings: a search box finds any setting; Alerts keeps a history and can go quiet; Backups saves and "

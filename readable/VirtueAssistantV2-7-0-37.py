@@ -59,17 +59,14 @@ import time
 # The app name shown in titles and journal lines, and the version the patch notes and the
 # What's new window go by. The script file is named after the version.
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.7.0.35"
+APP_VERSION = "2.7.0.37"
 # The folder of module files, beside this script.
 MODULE_DIR = "VirtueAssistantModules"
 # The folder every saved file goes in, beside this script (Kit.data_dir).
 SETTINGS_DIR = "VirtueAssistantSettings"
 SETTINGS_KEY = "VirtueAssistant_settings"
-# Set by a launcher that runs this file as the stand-alone window host; the full suite leaves it
-# False. Code that only the full suite does (the shared alive flag, the zone bookkeeping) is
-# guarded by it.
-VA_ALONE = "VA_ALONE" in globals()
-START_AT = time.time()
+VA_ALONE = "VA_ALONE" in globals() and "_VA_INNER" not in globals()
+START_AT = (globals().get("_VA_INNER") or [time.time()])[0]
 # Shared-variable key the suite keeps fresh once a second, so another script can tell it is running.
 ALIVE_KEY = "VirtueAssistant_alive"
 START_KEY = "VirtueAssistant_starting"
@@ -176,21 +173,41 @@ def whats_new():
 
 
 class _Gumps(object):
-    """API.Gumps with two changes every window gets: right-click closing is turned off on each gump it
-    adds, and each gump takes part in snapping and the layout. A module is turned off from the
-    Modules list or its own X button, never by a stray right-click on one of its windows.
+    """API.Gumps with three changes every window gets: right-click closing is turned off on each gump it
+    adds, each gump takes part in snapping and the layout, and the controls made during start-up are
+    counted for the start-up timing. A module is turned off from the Modules list or its own X button,
+    never by a stray right-click on one of its windows.
     """
     def __init__(self, inner):
-        """Keep the real API.Gumps object that every other call is passed on to."""
+        """Keep the real API.Gumps object that every other call is passed on to.
+
+        made counts the Create* calls while start-up is being timed; it becomes None when the timing ends.
+        """
         self._inner = inner
+        self.made = 0
 
     def __getattr__(self, name):
-        """Pass any other attribute through to API.Gumps."""
+        """Pass any other attribute through to API.Gumps.
+
+        While start-up is timed, each Create* function is wrapped so its calls are counted in made.
+        """
         # Found once, then stored as a plain attribute: later G.Create* calls skip __getattr__ and the
         # .NET member lookup.
         v = getattr(self._inner, name)
+        if self.made is not None and name.startswith("Create"):
+            v = self._counted(v)
         self.__dict__[name] = v
         return v
+
+    def _counted(self, fn):
+        """Wrap a Create* function so each call adds one to made, for as long as the timing runs."""
+        def run(*args, **kw):
+            """Count the call (only while made is not None), then make the control."""
+            if self.made is not None:
+                self.made += 1
+            return fn(*args, **kw)
+
+        return run
 
     def AddControlOnClick(self, ctrl, fn):
         """Register a click handler on a control, and poke the host after it ran so the module acts on the
@@ -200,6 +217,7 @@ class _Gumps(object):
 
         def run(*args):
             """Run the handler, then wake the host whether it succeeded or failed."""
+            HOST.pressed_at = time.time()
             try:
                 fn(*args)
             finally:
@@ -220,6 +238,7 @@ class _Gumps(object):
         if (p is not None and p[2] and p[3]) or g in Kit._scrolled:
             Kit.pin_size(g)
         r = self._inner.AddGump(g)
+        Kit.stir()
         # Quiet: a failure in the snapping or layout bookkeeping must never stop the window from showing.
         with Kit.quiet:
             SNAP.add(g)
@@ -283,7 +302,8 @@ class Client(object):
             if Client._client_asm is False:
                 Client._client_asm = None
                 try:
-                    Client._client_asm = API.GetType().Assembly
+                    # Kept with the other measured client data, so a later start in the same process skips the lookup.
+                    Client._client_asm = Kit._measure["asm"] = API.GetType().Assembly
                 except Exception:
                     pass
             asm = Client._client_asm
@@ -404,10 +424,15 @@ class Client(object):
     mtq_looked = False
     # The way of calling into the client thread that this IronPython build accepts (_pick_main_call).
     main_call = None
+    main_cached = False
 
     @staticmethod
     def _find_mtq():
-        """Find ClassicUO.Game.Managers.MainThreadQueue once. Returns the type or None."""
+        """Find ClassicUO.Game.Managers.MainThreadQueue once. Returns the type or None.
+
+        A type found is also kept in the measured client data, so a later start in the same process does
+        not look again.
+        """
         if Client.mtq_looked:
             return Client.MTQ
         Client.mtq_looked = True
@@ -415,7 +440,7 @@ class Client(object):
             import clr
             clr.AddReference(API.GetType().Assembly)
             from ClassicUO.Game.Managers import MainThreadQueue
-            Client.MTQ = MainThreadQueue
+            Client.MTQ = Kit._measure["mtq"] = MainThreadQueue
         except Exception:
             Client.MTQ = None
         return Client.MTQ
@@ -436,10 +461,13 @@ class Client(object):
 
     @staticmethod
     def _pick_main_call():
-        """Pick the way into the client thread that this build accepts, by trying each in turn once.
+        """Pick the way into the client thread that this build accepts. Returns a function taking a callable,
+        or None when none works.
 
-        The generic method and the delegate type are bound here, once, instead of on every hop. Returns
-        a function taking a callable, or None when none works.
+        A form that worked in an earlier start of this process is only built (Client.main_cached is set),
+        with no probe hop; if building it fails, the probing below runs as usual. Otherwise each form is
+        tried in turn once and the first that runs is remembered in the measured client data. The generic
+        method and the delegate type are bound here, once, instead of on every hop.
         """
         from System import Func
         MTQ = Client.MTQ
@@ -486,7 +514,17 @@ class Client(object):
 
             return with_event
 
-        for make in (generic_of, inferred_of, with_event_of):
+        makes = (generic_of, inferred_of, with_event_of)
+        at = Kit._measure.get("main_call")
+        Client.main_cached = False
+        if at in (0, 1, 2):
+            try:
+                candidate = makes[at]()
+                Client.main_cached = True
+                return candidate
+            except Exception:
+                Kit._measure.pop("main_call", None)
+        for at, make in enumerate(makes):
             probe = {}
 
             def run_probe():
@@ -499,8 +537,18 @@ class Client(object):
             except Exception:
                 continue
             if probe.get("ok"):
+                Kit._measure["main_call"] = at
                 return candidate
         return None
+
+    @staticmethod
+    def post(fn):
+        """Queue fn on the client thread without waiting for it, so the script thread can carry on at once.
+
+        Needs Client.MTQ to have been found (_find_mtq); callers check that first.
+        """
+        from System import Action
+        Client.MTQ.EnqueueAction(Action(fn))
 
     @staticmethod
     def on_main_ex(fn):
@@ -508,7 +556,9 @@ class Client(object):
 
         Returns ("ok", result) when fn ran there, ("err", message) when it ran there and raised, or
         ("no", None) when the hop cannot be made. On "err" the exception is kept in Client.exc and its
-        text in Client.error. Called on the client thread, fn runs in place.
+        text in Client.error. Called on the client thread, fn runs in place. When the hop cannot be queued
+        and the call form came from the measured client data, that form is dropped so the next call picks
+        one again.
         """
         # Cleared first so a stale exception is never read after a success.
         Client.exc = None
@@ -536,6 +586,10 @@ class Client(object):
             return "err", Client.error
         except Exception as ex:
             Client.error = str(ex)
+            if Client.main_cached:
+                Client.main_call = None
+                Client.main_cached = False
+                Kit._measure.pop("main_call", None)
             return "no", None
         if hop.e is not None:
             Client.error, Client.exc = hop.e, hop.x
@@ -948,6 +1002,10 @@ class Kit(object):
     sets from the saved interface choices. Everything is a static method on the class, so a module
     calls Kit.something with no setup.
 
+    What is measured from the client (text widths, picture sizes, reflected members) is kept for the
+    life of the client process by Kit.measure_bind, so a script started again in the same client does
+    not measure it twice.
+
     The window rules every window of every module and of this script follows:
     1. A window is always wholly on screen: place it with Kit.place, never a bare SetRect. The keeper
        (Snap.keep) moves back whatever still ends up off screen. A window taller than the screen
@@ -1038,6 +1096,11 @@ class Kit(object):
     GAP    = 8
     # Graphic to (width, height), as measured by pic_size.
     _sizes = {}
+    # The measured client data of this process: the entry measure_bind binds, holding the "bad" flag,
+    # the client assembly and queue type, the way into the client thread, the render scale and the
+    # missing-member list.
+    _measure = {}
+    MEASURE_CAP = 6000
 
     @staticmethod
     def on_client(fn, fallback=True):
@@ -1090,17 +1153,21 @@ class Kit(object):
 
         A gump's X, Y and size are logical pixels, the client window's pixels divided by this scale, so
         screen() gives the same pixels as the gumps use. The scale is read by reflection from the client's
-        Game.RenderScale property, because the client class is internal to the client.
+        Game.RenderScale property, because the client class is internal to the client. The two reflected
+        members are kept in the measured client data; a failed read drops them.
         """
         st = Kit._scale
         if not st["looked"]:
             st["looked"] = True
             try:
-                t = Client._type("ClassicUO.Client")
-                gp = t.GetProperty("Game", Client.flags(True))
-                game = gp.GetValue(None, None)
-                rp = game.GetType().GetProperty("RenderScale", Client.flags())
-                float(rp.GetValue(game, None))
+                gp, rp = Kit._measure.get("scale") or (None, None)
+                if rp is None:
+                    t = Client._type("ClassicUO.Client")
+                    gp = t.GetProperty("Game", Client.flags(True))
+                    game = gp.GetValue(None, None)
+                    rp = game.GetType().GetProperty("RenderScale", Client.flags())
+                    float(rp.GetValue(game, None))
+                    Kit._measure["scale"] = (gp, rp)
                 st["fn"] = lambda: float(rp.GetValue(gp.GetValue(None, None), None))
             except Exception:
                 st["fn"] = None
@@ -1112,6 +1179,7 @@ class Kit(object):
             # Anything outside a sane range is treated as no scale.
             return s if 0.25 <= s <= 4.0 else 1.0
         except Exception:
+            Kit._measure.pop("scale", None)
             return 1.0
 
     # The nine screen anchors: corners, edge midpoints, centre.
@@ -1146,12 +1214,25 @@ class Kit(object):
     _pend = {}
     # Seconds a request is believed before the client's own answer is taken again.
     PEND_FOR = 1.0
+    churn = 0
+    churn_at = 0.0
+
+    @staticmethod
+    def stir():
+        """Note that a window was added, moved, resized or disposed.
+
+        Counts it in churn and stamps churn_at, which Host.settle_tick reads: start-up is not settled until
+        the windows have been quiet for a moment.
+        """
+        Kit.churn += 1
+        Kit.churn_at = time.time()
 
     @staticmethod
     def note_rect(g, x, y, w=None, h=None):
         """Record that window g was asked to be at (x, y), and w x h when given, until the client applies it.
 
-        Kit.rect then answers with that. Never raises: a window that cannot be tracked is ignored.
+        Kit.rect then answers with that. A request that really changes the place or size also calls
+        Kit.stir. Never raises: a window that cannot be tracked is ignored.
         """
         if g is None:
             return
@@ -1172,8 +1253,11 @@ class Kit(object):
                 was = r
             else:
                 was = (int(g.GetX()), int(g.GetY()), int(g.GetWidth() or 0), int(g.GetHeight() or 0))
-            Kit._pend[g] = (int(x), int(y), None if w is None else int(w),
-                            None if h is None else int(h), time.time(), was)
+            n = (int(x), int(y), None if w is None else int(w), None if h is None else int(h))
+            b = old or was
+            if b[0:2] != n[0:2] or (n[2] is not None and (b[2], b[3]) != n[2:4]):
+                Kit.stir()
+            Kit._pend[g] = n + (time.time(), was)
         except Exception:
             # Not a window it can keep track of.
             pass
@@ -1865,7 +1949,8 @@ class Kit(object):
                 w, h = int(p.GetWidth() or 0), int(p.GetHeight() or 0)
                 Kit.dispose(p)
             except Exception:
-                pass
+                # A failed measure marks the kept client data as bad, so the next start measures afresh.
+                Kit._measure["bad"] = True
             wh = Kit._sizes[graphic] = (w, h)
         return wh
 
@@ -2253,6 +2338,7 @@ class Kit(object):
                         else:
                             fn()
                         e.Result = True
+                        HOST.pressed_at = time.time()
                         HOST.poke()
                 except Exception:
                     pass
@@ -2281,6 +2367,7 @@ class Kit(object):
         as a drag. Call it right after the move.
         """
         SNAP.moved_by_code(g)
+        Kit.stir()
 
     @staticmethod
     def title_catcher(g, x, y, w, h, fn, key=None):
@@ -2616,7 +2703,8 @@ class Kit(object):
                 px = int(l.GetWidth() or 0)
                 Kit.dispose(l)
             except Exception:
-                pass
+                # A failed measure marks the kept client data as bad, so the next start measures afresh.
+                Kit._measure["bad"] = True
             px = px or 8 * len(text)
             if len(Kit._widths) >= Kit.WIDTHS_MAX:
                 # The long, one-off texts go first; the short ones (letters, captions, numbers) are the ones asked
@@ -2707,6 +2795,8 @@ class Kit(object):
                 px["ok"] = Kit.text_w(ref) == px["pad"] + sum(Kit._ch_w(ch) for ch in ref)
             except Exception:
                 px["ok"] = False
+                # A failed measure marks the kept client data as bad, so the next start measures afresh.
+                Kit._measure["bad"] = True
         if not px["ok"]:
             return Kit.text_w(text)
         w, cw = px["pad"], Kit._px_ch
@@ -2714,6 +2804,39 @@ class Kit(object):
             x = cw.get(ch)
             w += Kit._ch_w(ch) if x is None else x
         return w
+
+    @staticmethod
+    def measure_bind():
+        """Bind the measured client data to the entry kept for this process, once, before anything measures.
+
+        The entry sits on the sys module under (app version, process id), so it outlives a Stop of the
+        script and a Play in the same client, and is one entry only. Each cache (text widths, letter widths,
+        picture sizes, reflected members, client types, texture parts) is the same dict object as the one in
+        the entry; a missing or oversized one is replaced by a fresh dict. An entry flagged bad is started
+        over. Also restores the client assembly and the queue type from it. Script thread; a failure is
+        caught by the caller.
+        """
+        import sys
+        key = (APP_VERSION, os.getpid())
+        st = sys.__dict__.get("_VA_MEASURE")
+        e = st.get(key) if type(st) is dict else None
+        if type(e) is not dict or e.get("bad") is not False:
+            e = {"bad": False}
+            sys._VA_MEASURE = {key: e}
+        for cls, name in ((Kit, "_widths"), (Kit, "_px_ch"), (Kit, "_px"), (Kit, "_sizes"), (Kit, "_rp_sizes"),
+                          (Kit, "_ctl_prop"), (Client, "_types"), (Typing, "_members"), (Tz, "_types"), (Tz, "_found"),
+                          (Tex, "parts")):
+            k = cls.__name__ + "." + name
+            d = e.get(k)
+            if type(d) is not dict or len(d) > Kit.MEASURE_CAP:
+                d = e[k] = cls.__dict__[name]
+            setattr(cls, name, d)
+        if e.get("asm") is not None:
+            Client._client_asm = e["asm"]
+        if e.get("mtq") is not None:
+            Client.MTQ, Client.mtq_looked = e["mtq"], True
+        Tex.ok = True if Tex.parts.get("ok") is True else None
+        Kit._measure = e
 
     @staticmethod
     def fit(text, width, tail=".."):
@@ -2912,8 +3035,13 @@ class Kit(object):
 
     @staticmethod
     def dispose(ctrl):
-        """Dispose a client control, ignoring None and any failure."""
+        """Dispose a client control, ignoring None and any failure.
+
+        Disposing a window that snaps (a member of SNAP) counts as window activity (Kit.stir).
+        """
         if ctrl is not None:
+            if ctrl in SNAP.members:
+                Kit.stir()
             try:
                 ctrl.Dispose()
             except Exception:
@@ -3025,8 +3153,8 @@ class Kit(object):
         temporary file and raises. A non-empty write is remembered in _seen for read_merge.
         """
         try:
-            import threading
-            tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+            import _thread
+            tmp = "%s.%d.%d.tmp" % (path, os.getpid(), _thread.get_ident())
         except Exception:
             tmp = "%s.%d.tmp" % (path, id(text))
         import io
@@ -3165,13 +3293,14 @@ class Kit(object):
 
     @staticmethod
     def data_setup():
-        """Once at start, on the script's thread, before any module loads: make the settings folder and move
-        into it the files an older layout left beside this script (Grimoire's from LegionScripts) and the
-        profiles folder.
+        """Once at start, on the script's thread, before any module loads: bind the measured client data
+        (measure_bind), make the settings folder and move into it the files an older layout left beside this
+        script (Grimoire's from LegionScripts) and the profiles folder.
 
         A file already in the folder is never written over; the older copy stays where it is. One journal
         line says how many files moved, and one when some could not.
         """
+        safe(Kit.measure_bind)
         base, d = Kit.script_dir(), Kit.data_dir()
         try:
             if not os.path.isdir(d):
@@ -3502,6 +3631,70 @@ class Kit(object):
         if fit is not None:
             hooks["fit"] = fit
         return hooks
+
+    @staticmethod
+    def add_front(g, hidden=False):
+        """Add gump g to the screen in front of the other windows and return what G.AddGump returns.
+
+        The client's queued control changes are run first (Kit.flush), so the gump is added with its
+        controls in place. hidden starts it invisible. Client thread.
+        """
+        Kit.flush()
+        if hidden:
+            g.IsVisible = False
+        return G.AddGump(g)
+
+    _stack = {"off": False}
+
+    @staticmethod
+    def replace_gump(old, g, hidden=False):
+        """Add the rebuilt window g and give it the old window's place in the stacking order.
+
+        old is the window being replaced (it is disposed by the caller afterwards). When old is still open,
+        g is moved in the client's gump list to sit directly in front of it, so a rebuilt window does not
+        jump to the top of the other windows. Does nothing extra when the start-up order setting is off
+        (Host.ORDER_OFF in HOST.tz_off), off the client thread, or after the first failure to reach the
+        client's list. Returns what Kit.add_front returns.
+        """
+        r = Kit.add_front(g, hidden)
+        st = Kit._stack
+        if st["off"] or Host.ORDER_OFF in HOST.tz_off or not Kit.is_open(old) or not Client.on_client_thread():
+            return r
+        try:
+            ro, rn = Kit._raw_gump(old), Kit._raw_gump(g)
+            if ro is None or rn is None:
+                return r
+            uim = Tz.T("ClassicUO.Game.Managers.UIManager")
+            gumps = Tz.get(None, "Gumps", uim)
+            same = Kit._same()
+        except Exception:
+            st["off"] = True
+            return r
+        try:
+            # The client keeps its windows in a linked list with the topmost first: take the new window out and
+            # put it back just in front of the old one.
+            node, new, at, n = gumps.First, None, None, 0
+            while node is not None and n < 2000 and (new is None or at is None):
+                v = node.Value
+                if new is None and same(v, rn):
+                    new = node
+                elif at is None and same(v, ro):
+                    at = node
+                node = node.Next
+                n += 1
+            if new is None or at is None or (new.Next is not None and same(new.Next.Value, ro)):
+                return r
+            gumps.Remove(new)
+            try:
+                gumps.AddBefore(at, new)
+            except Exception:
+                gumps.AddFirst(new)
+            # Tell the client the list changed and which window is on top, or it keeps using its old order.
+            Tz.put(None, "_gumpsStructureVersion", int(Tz.get(None, "_gumpsStructureVersion", uim)) + 1, uim)
+            Tz.put(None, "TopMostControl", gumps.First.Value, uim)
+        except Exception:
+            pass
+        return r
 
     @staticmethod
     def flush():
@@ -4037,26 +4230,27 @@ class Kit(object):
         return True
 
     @staticmethod
-    def show_window(g, x, y, w, h, lock_key, hidden, on_disposed, moved, into=None, parts=None, max_h=None):
+    def show_window(g, x, y, w, h, lock_key, hidden, on_disposed, moved, into=None, parts=None, max_h=None, old=None):
         """Place and show a freshly built window and return the (x, y) it was placed at.
 
-        The window is placed on screen (max_h is the zone slot's height), made immovable when the layout
-        locks it, its parts are merged into the module's window dict, an on_disposed handler and a moved
-        handler are attached, it is added through G.AddGump and hidden when hidden is set (folded into the
-        Action Bar).
+        The window is placed on screen (max_h is the zone slot's height), counted as built for the
+        start-up settling when lock_key is given, made immovable when the layout locks it, its parts are
+        merged into the module's window dict, an on_disposed handler and a moved handler are attached, and
+        it is added in front through Kit.replace_gump (old is the window it replaces) and hidden when
+        hidden is set (folded into the Action Bar).
         """
         xy = Kit.place(g, x, y, w, h, None, max_h)
+        if lock_key is not None:
+            HOST.built(lock_key)
         if lock_key is not None and HOST.layout_locked(lock_key):
             g.CanMove = False
         if into is not None:
             into.update(parts)
         if on_disposed is not None:
             G.AddControlOnDisposed(g, on_disposed)
-        G.AddGump(g)
+        Kit.replace_gump(old, g, hidden)
         if moved is not None:
             Kit.on_moved(g, moved)
-        if hidden:
-            g.IsVisible = False
         return xy
 
     @staticmethod
@@ -4426,11 +4620,12 @@ class Kit(object):
             """True when the window should start minimized: the dock wanted it, or its saved minimized flag."""
             return bool(HOST.dock_wanted(self.key) or (self.min_key and Kit.load_min(self.min_key)))
 
-        def begin(self, w, h, default=None):
+        def begin(self, w, h, default=None, resize=None):
             """Start a rebuild: open a fresh gump, remembering the old window to drop once the new one is up.
 
-            The size is the minimized form's when minimized. The place is the old window's, else the saved one
-            (adapted to the screen). Returns (gump, store, controls); a minimized window already has its bar.
+            The size is the minimized form's when minimized. The place is the old window's, else the layout's
+            planned slot, else the saved one (adapted to the screen). Returns (gump, store, controls); a
+            minimized window already has its bar.
             """
             if self.queue is not None:
                 Kit._wins[self.key] = self
@@ -4441,15 +4636,23 @@ class Kit(object):
             if mini and self.mini:
                 w, h = self.mini
             self.w, self.h = w, h
+            p = None if Kit.is_open(old) or mini or not LAYOUT.planned else LAYOUT.plan_at(self.key)
             if Kit.is_open(old):
                 self.x, self.y = old.GetX(), old.GetY()
+            elif p is not None:
+                self.x, self.y = int(p[0]), int(p[1])
             else:
                 self.x, self.y = Kit.load_pos(self.pos_key, default or self.default, (w, h))
             self.old, self.win[self.gkey] = old, None
             if self.cleanup is not None and not self.held:
                 self.held = True
                 self.cleanup.add(self.release)
-            g = G.CreateGump(True, True)
+            if resize is not None and not mini:
+                self.x, self.y = Kit.clamp(self.x, self.y, w, h)
+                g = G.CreateModernGump(self.x, self.y, w, h, True, resize[0], resize[1], resize[2])
+                g.SetAlpha(0)
+            else:
+                g = G.CreateGump(True, True)
             self.c, self.store = {}, ({}, {})
             if mini:
                 self.c["status"] = Kit.mini_bar(g, self.store, w, h, self.title, self.key, self.queue("toggle_min"),
@@ -4468,17 +4671,22 @@ class Kit(object):
             """Show the new window and drop the old one. Returns the (x, y) it was placed at.
 
             The window is placed and registered through Kit.show_window; a window the layout holds in a zone
-            is moved to its slot and fitted at once. parts are added to the window dict with the controls and
-            the button store under the names given. The fade service is woken so a faded window comes back
-            when it is rebuilt.
+            is moved to its slot and fitted at once. A minimized window that the Action Bar will fold into its
+            tray is marked docked from the start. parts are added to the window dict with the controls and the
+            button store under the names given. The fade service is woken so a faded window comes back when it
+            is rebuilt.
             """
             st, parts = self.st, dict(parts or {})
             parts[self.gkey] = g
+            if not self.lock:
+                HOST.built(self.key)
+            if st is not None and st.get("minimized") and st.get("docked") is False and HOST.dock_soon(self.key):
+                st["docked"] = True
             for name, v in zip(self.names or (), (self.c, self.store)):
                 parts[name] = v
             xy = Kit.show_window(g, self.x, self.y, self.w if w is None else w, self.h if h is None else h,
                                  self.key if self.lock else None, st is not None and st["minimized"] and st["docked"],
-                                 self.disposed(g), self.save_pos, self.win, parts, max_h)
+                                 self.disposed(g), self.save_pos, self.win, parts, max_h, self.old)
             slot = LAYOUT.spot(self.key) if LAYOUT.seamless and LAYOUT.holds(self.key) else None
             if slot is not None and xy is not None and (xy[0], xy[1]) != (slot[0], slot[1]):
                 g.SetPos(int(slot[0]), int(slot[1]))
@@ -4486,6 +4694,7 @@ class Kit(object):
                 Kit.moved_by_code(g)
                 xy = (slot[0], slot[1])
             if slot is not None and xy is not None:
+                LAYOUT._hold(g, self.key)
                 LAYOUT.fit_now(self.key, g)
             if FADE.on:
                 FADE.wake(self.key)
@@ -4539,9 +4748,32 @@ class Kit(object):
             the mode is again.
             """
             new = (int(w), int(h)) if (w is not None and h is not None) else None
-            if new != self.slot or (mode == "again" and new is not None):
+            if new != self._slot or (mode == "again" and new is not None):
                 self.slot = new
                 self.queue("redraw")()
+
+        @property
+        def slot(self):
+            """The (width, height) of the zone slot this window was given, or None.
+
+            When no fit has told the window yet and the layout has a plan, the planned slot is taken (once), so
+            the first draw already has the size.
+            """
+            s = self._slot
+            if s is None and LAYOUT.planned and not self.told and self.st is not None and not self.st["minimized"]:
+                p = LAYOUT.plan_at(self.key)
+                if p is not None:
+                    s = self._slot = (int(p[2]), int(p[3]))
+                    self.told = True
+            return s
+
+        @slot.setter
+        def slot(self, v):
+            """Set the zone slot size; a value that is not None also marks the window as told, so the layout's
+            plan is not asked again.
+            """
+            self._slot = v
+            self.told = v is not None or self.__dict__.get("told", False)
 
         def zone_slot(self, mw, mh):
             """The zone slot (width, height) this window should fill, or None to keep its own size.
@@ -5908,7 +6140,7 @@ class AlertLog(object):
 
     def _build(self):
         """Draw the window: title section, close button and one label per history line, scaled to the text
-        size and placed at its saved position (or near the top centre).
+        size, placed at its saved position (or near the top centre) and added in front of the other windows.
         """
         M, W, s = Kit.MARGIN, self.W, Kit.tscale
         rows = self.rows()
@@ -5933,7 +6165,7 @@ class AlertLog(object):
         sw = Kit.screen()[0] or 1024
         x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - WS) // 2), 80), (WS, HS))
         Kit.place(g, x, y, WS, HS, int(round((M + 30 + Kit.GAP) * sc)))
-        G.AddGump(g)
+        Kit.add_front(g)
         Kit.on_moved(g, lambda: Kit.save_pos(self.POS_KEY, self.g))
         self.g = g
 
@@ -6794,17 +7026,10 @@ class WhatsNew(object):
     W = 520
     SEEN_KEY = "VirtueAssistant_new_seen"
     seen_keys = None
-    NEW_KEYS = ("interface.look", "interface.tsize", "interface.compact", "interface.cblind", "interface.streamer",
-                "va.alerts.quiet", "va.alerts.history", "va.backups.backup_now", "va.backups.restore",
-                "interface.share", "interface.load_code", "interface.code", "interface.situ_on", "interface.fade",
-                "interface.fade_to", "interface.fade_after", "interface.fade_all", "ultima.overview",
-                "ultima.tracker.sort", "ultima.overview.range", "ultima.overview.rows", "inventory.sections",
-                "inventory.sections.p_reagents", "inventory.sections.p_potions", "inventory.sections.p_bandages",
-                "inventory.sections.p_gold", "inventory.sections.p_scrolls", "inventory.sections.p_maps",
-                "inventory.sections.p_ores", "inventory.sections.p_wood", "inventory.sections.p_hides",
-                "inventory.sections.p_food", "inventory.sections.p_weapons", "inventory.sections.p_armour",
-                "inventory.sections.p_jewellery", "inventory.sections.p_keys", "inventory.sections.other",
-                "inventory.sections.add", "actionbar.radial", "actionbar.radial_page")
+    # The settings added in this version, by key; the settings pages mark them until they have been seen.
+    NEW_KEYS = ("prices.pick_book", "prices.book_open", "prices.book_head", "prices.keep_SS", "prices.keep_NS",
+                "prices.keep_BP", "prices.keep_GA", "prices.keep_SA", "prices.keep_BM", "prices.keep_GI",
+                "prices.keep_MR", "prices.say", "prices.skip_old", "prices.dist", "prices.old", "prices.hk")
 
     def __init__(self):
         """Start closed with no text loaded."""
@@ -6869,7 +7094,7 @@ class WhatsNew(object):
 
     def _build(self):
         """Build and show the window: title bar, close button and the wrapped text, centred in the upper part
-        of the screen.
+        of the screen and added in front of the other windows.
         """
         M, W = Kit.MARGIN, self.W
         lines = []
@@ -6889,7 +7114,7 @@ class WhatsNew(object):
             Kit.add_label(g, line, M + 12, yb + 8 + 20 * i, Kit.HUE_TEXT)
         sw, sh = Kit.screen()
         Kit.place(g, max(0, ((sw or 1024) - W) // 2), max(0, ((sh or 768) - H) // 3), W, H)
-        G.AddGump(g)
+        Kit.add_front(g)
         self.g = g
 
     def poll(self):
@@ -7490,20 +7715,27 @@ class Host(object):
     Modules are loaded into slots and driven from here. The client tick runs the pass that gives each
     running module its turn; script threads run modules that need them. The host also keeps the caches
     shared by every module (the player, mobiles, backpack), hotkeys, docks and layout, fight and
-    cursor guards, services and saved preferences, the start-up timing list, the start mark and the
-    safe-start window, and the check that warns about TazUO settings the shard rules forbid. It also
-    applies the look settings, runs the backups and the alert history window, and sits in front of
-    the profile and backup requests. Modules reach it as HOST.
+    cursor guards, services and saved preferences, the start-up timing list and the split timers, the
+    settling of start-up (when the windows have stopped changing), the start mark and the safe-start
+    window, and the check that warns about TazUO settings the shard rules forbid. It also applies the
+    look settings, runs the backups and the alert history window, and sits in front of the profile and
+    backup requests. At start it caches the mother script and the module files' compiled code and
+    compiles module files ahead while the client builds windows. Modules reach it as HOST.
     """
     def __init__(self):
         """Create the empty tables, caches and flags, and the built-in Alerts, Hotkeys and Backups settings
         pages.
 
-        boot starts the start-up timing list with the time spent before the host existed. held_on and
-        held_parts name the modules and parts that are switched off for this session only but stay saved as
-        on. marked says this run set the start mark; ask_g and ask_store belong to the safe-start window.
-        tz_at is when the TazUO settings check runs next, tz_off holds its key when a client name it reads
-        is missing, and tz_told the settings already warned about this session. early_backup holds the
+        boot starts the start-up timing list with the time spent before the host existed. split holds the
+        split timers of start-up (None once start-up is over). compile_hit says the last compiled call
+        used the cache; texts holds module file text read ahead of its load and ahead_ms the compile time
+        spent ahead per file; ahead_off stops the compile-ahead. held_on and held_parts name the modules
+        and parts that are switched off for this session only but stay saved as on. marked says this run
+        set the start mark; ask_g and ask_store belong to the safe-start window. settled_at is when
+        start-up settled (None while booting); settle_seen, settle_from, settle_capped, settle_holds and
+        builds are the settling bookkeeping, and bar_dead says the Action Bar failed to start. tz_at is
+        when the TazUO settings check runs next, tz_off holds its key when a client name it reads is
+        missing, and tz_told the settings already warned about this session. early_backup holds the
         snapshot taken before anything loads, for the backup of a new version.
         """
         self.slots = []
@@ -7530,10 +7762,10 @@ class Host(object):
         self.off_q = []
         self._stop_fi = None
         self.look = self.LOOKAHEAD
-        import threading
-        self._drain_lk = threading.Lock()
+        import _thread
+        self._drain_lk = _thread.allocate_lock()
         self.ui_next = self.dock_next = self._claim_len = self.hurt_until = self.input_at = 0.0
-        self.attacked_until = self.prefs_at = 0.0
+        self.attacked_until = self.prefs_at = self.pressed_at = 0.0
         self.hurt_who = 0
         self.prefs_due = False
         self.docks = []
@@ -7569,6 +7801,17 @@ class Host(object):
         self.marked = False
         self.ask_g = None
         self.ask_store = ({}, {})
+        self.settled_at = self.boot_line = None
+        self.settle_seen = 0.0
+        self.settle_capped = False
+        self.builds = {}
+        self.settle_from = None
+        self.settle_holds = []
+        self.split = {}
+        self.compile_hit = False
+        self.bar_dead = self.ahead_off = False
+        self.texts = {}
+        self.ahead_ms = {}
         self.tz_at = 0.0
         self.tz_off = set()
         self.tz_told = set()
@@ -7741,6 +7984,7 @@ class Host(object):
         """
         def fired(*args):
             """Client callback for the key: run the current holder's handler, if any."""
+            self.pressed_at = time.time()
             ent = self.hk_fns.get(k)
             if ent is not None:
                 ent[1]()
@@ -8088,9 +8332,13 @@ class Host(object):
     def dock_add(self, key, hooks):
         """Register a window's dock hooks under key, replacing an older entry; windows with a gump also join
         the layout.
+
+        While booting, a window a zone holds is remembered in _zone_held.
         """
         self.dock_remove(key)
         self.docks.append((key, hooks))
+        if self.booting() and LAYOUT.holds(key):
+            self._zone_held.add(key)
         gump = hooks.get("gump")
         if gump is not None:
             self.layout_add(key, gump, hooks.get("title"), hooks)
@@ -8101,24 +8349,28 @@ class Host(object):
         self.layout_remove(key)
 
     def layout_add(self, key, get_gump, title=None, hooks=None):
-        """Add a window to the layout, owned by the module and part running now."""
+        """Add a window to the layout, owned by the module and part running now, and fit it at once."""
         cur = self.current()
         owner = (cur.key, self.cur_part if cur.parts else None) if cur is not None else None
         LAYOUT.add(key, get_gump, title, hooks, owner)
+        LAYOUT.fit_added(key)
 
     def layout_remove(self, key):
         """Remove a window from the layout."""
         LAYOUT.remove(key)
 
     def layout_slot(self, key):
-        """Return the (w, h) the layout zone gives the window, or None when no zone holds it."""
+        """Return the (w, h) the layout zone gives the window, or None when no zone holds it.
+
+        The size the window was last told wins, then the slot it was placed in, then the planned slot.
+        """
         key = str(key)
         if not LAYOUT.holds(key):
             return None
         rec = LAYOUT.fitted.get(key)
         if rec is not None and rec.get("told") is not None:
             return rec["told"]
-        slot = LAYOUT.placed.get(key)
+        slot = LAYOUT.placed.get(key) or LAYOUT.plan_at(key)
         return (slot[2], slot[3]) if slot is not None else None
 
     def layout_rect(self, key):
@@ -8183,15 +8435,34 @@ class Host(object):
             alive = 0.0
         return time.time() - alive <= ConfigWindow.LINK_STALE
 
+    def bar_on(self):
+        """True when the Action Bar module is on, loaded without a failure and has not failed to start. Always
+        False in stand-alone mode.
+        """
+        s = dict.get(self.by_key, "actionbar")
+        return not VA_ALONE and s is not None and bool(s.enabled) and not s.broken and not self.bar_dead
+
+    def bar_soon(self):
+        """True when the Action Bar is running now, or is on and start-up has not settled yet."""
+        return self.bar_alive() or (self.booting() and self.bar_on())
+
+    def dock_soon(self, key):
+        """True when window key is wanted in the tray, no zone holds it and the Action Bar is up or coming, so
+        it can be built folded into its tray from the start.
+        """
+        return key in self._dock_want() and not LAYOUT.holds(key) and self.bar_on() and (
+            self.booting() or self.bar_alive())
+
     def dock_tick(self):
         """Fold or unfold windows to match the tray list, and drive key binds; client tick, every 0.25 s at
         most.
 
         A window that is wanted in the tray and minimised is docked when the bar is up; docked windows
-        are undocked when the bar is gone. Windows held by a zone are left to the layout.
+        are undocked when the bar is gone (not while the bar is still starting). Windows held by a zone are
+        left to the layout. While start-up has not settled it runs on every pass.
         """
         now = time.time()
-        if now < self.dock_next and self.dock_next - now <= 0.25:
+        if now < self.dock_next and self.dock_next - now <= 0.25 and self.settled_at is not None:
             return
         self.dock_next = now + 0.25
         Binds.load()
@@ -8220,7 +8491,7 @@ class Host(object):
         if self.bar_alive():
             for d in fold:
                 safe(d.get("dock"))
-        else:
+        elif not (self.booting() and self.bar_on()):
             for d in unfold:
                 safe(d.get("undock"))
 
@@ -8284,13 +8555,123 @@ class Host(object):
                 safe(d.get("redraw"))
 
     TWICE = "%s: %s loaded twice (module key \"%s\"); skipped the second copy."
+    COMPILE_CAP = 64
+
+    def compiled(self, text, path):
+        """Return the compiled code of the module file at path, from a cache when its text is unchanged.
+
+        The cache is kept on the sys module, which outlives a run of the script, so starting the script
+        again skips the compile. An entry is used only when its text matches exactly. Entries of another
+        install folder are dropped, and the cache is emptied at COMPILE_CAP entries. A cache failure
+        only means a fresh compile. compile_hit says whether the last call came from the cache.
+        """
+        c = None
+        self.compile_hit = False
+        try:
+            import sys
+            c = sys.__dict__.get("_COMPILED")
+            if not isinstance(c, dict):
+                c = {}
+                sys._COMPILED = c
+            e = c.get(path)
+            if type(e) is tuple and len(e) == 3 and e[0] == len(text) and type(e[1]) is str and e[1] == text:
+                if type(e[2]) is type(self.compiled.__func__.__code__):
+                    self.compile_hit = True
+                    return e[2]
+        except Exception:
+            c = c if type(c) is dict else None
+        code = compile(text, path, "exec")
+        try:
+            if c is not None:
+                if path not in c:
+                    root = os.path.normcase(os.path.dirname(os.path.dirname(path)))
+                    for k in [k for k in c if os.path.normcase(os.path.dirname(os.path.dirname(str(k)))) != root]:
+                        c.pop(k, None)
+                    if len(c) >= self.COMPILE_CAP:
+                        c.clear()
+                c[path] = (len(text), text, code)
+        except Exception:
+            pass
+        return code
+
+    SELF_KEY = "_VA_INNER"
+
+    def self_run(self, g):
+        """Make the mother script run from its own cached compile. Returns True when the caller must stop.
+
+        g is the script's globals. Called from the tail of the mother. On the outer run it reads the
+        script file, takes its code from the entry kept on sys (path, length, text, code; used only when
+        all three match) or compiles the text with the import API line left out, and runs that code in the
+        same globals with a marker in them; that inner run reaches this call, finds the marker and returns
+        False so it carries on starting the suite. Later starts of the script in this client then skip
+        parsing and compiling the large file. Returns True once the inner run has done the work, and also
+        when a stop was asked; False when the caller itself should go on, which is the case for the inner
+        copy, when the file cannot be read or the TazUO setting for the module cache is off, and when an
+        earlier inner run failed (the entry then holds no code). The read and compile times go to the split
+        timers.
+        """
+        box = g.get(self.SELF_KEY)
+        if box is not None:
+            box[1] = True
+            for k, ms in box[2]:
+                self.split_add(k, ms)
+            return False
+        import sys
+        keep = None
+        try:
+            path = str(g.get("__file__") or os.path.join(str(API.ScriptPath), str(API.ScriptName)))
+            t0 = time.time()
+            text = _read_text(path)
+            t1 = time.time()
+            e = sys.__dict__.get("_VA_SELF")
+            same = type(e) is tuple and len(e) == 4 and e[0] == path and e[1] == len(text) and type(e[2]) is str \
+                and e[2] == text
+            if same and e[3] is None:
+                return False
+            if same and type(e[3]) is type(self.compiled.__func__.__code__):
+                code, kind = e[3], "hit"
+            elif safe(self.no_cache, False):
+                return False
+            else:
+                sys._VA_SELF = None
+                kind = "compile"
+                code = compile(re.sub(r"(?m)^import API$", "", text.replace("\r\n", "\n")), path, "exec")
+                sys._VA_SELF = (path, len(text), text, code)
+            keep = dict(g)
+            ms = (time.time() - t1) * 1000.0
+            box = [START_AT, False, [("read:mother", (t1 - t0) * 1000.0), (kind + ":mother", ms)]]
+            g[self.SELF_KEY] = box
+            exec(code, g)
+        except Exception:
+            if box is not None and box[1]:
+                raise
+        finally:
+            g.pop(self.SELF_KEY, None)
+        if box is not None and box[1]:
+            return True
+        stop = bool(safe(lambda: API.StopRequested, False))
+        if keep is not None:
+            g.clear()
+            g.update(keep)
+            if not stop:
+                sys._VA_SELF = (path, len(text), text, None)
+        return stop
+
+    @staticmethod
+    def no_cache():
+        """True when TazUO has its script module cache switched off, in which case the mother does not cache
+        itself. Raises when the setting cannot be read; callers wrap it in safe.
+        """
+        t = Tz.T("ClassicUO.LegionScripting.LegionScripting")
+        return bool(Tz.get(None, "LScriptSettings", t).DisableModuleCache)
 
     def add(self, key, title, desc, factory, interval, default_on=False, category=None, parts=(), aliases=()):
         """Register a module with the host and build its api.
 
         Returns the slot. A key already loaded for real is reported and skipped; a lazy slot is filled in.
         parts and aliases describe optional sub-features and older keys. In stand-alone mode the first
-        module is started alone.
+        module is started alone. A module whose factory fails is marked broken, and the player is told
+        unless the script is stopping.
         """
         s = dict.get(self.by_key, key)
         if s is not None and s.lazy is not None:
@@ -8309,7 +8690,8 @@ class Host(object):
             s.api = factory()
         except Exception as ex:
             s.broken = str(ex) + _error_where()
-            Kit.say("couldn't load %s (%s)." % (title, s.broken), Kit.HUE_BAD)
+            if not self.stopping():
+                Kit.say("couldn't load %s (%s)." % (title, s.broken), Kit.HUE_BAD)
         self._arm(s)
         if VA_ALONE and self.alone is None:
             self.run_alone(s)
@@ -8347,45 +8729,240 @@ class Host(object):
         return True
 
     def _run_load_jobs(self):
-        """Load one queued module and start it if it is on; a module that fails to load is switched off and
-        remembered.
+        """Load the queued modules and start those that are on, in start rank order; a module that fails to
+        load is switched off and remembered.
+
+        With two or more modules queued, compile_ahead may load and start some of them while the others
+        are still being compiled. The rest are loaded here, then all of those are started together.
         """
         if not self.load_jobs or self.stack:
             return
-        s = self.load_jobs.pop(0)
+        jobs, self.load_jobs, todo = self.load_jobs, [], []
+        jobs, owed, rank = self.compile_ahead(jobs)
+        for s in jobs:
+            if self.stopping():
+                break
+            if self._load_job(s):
+                todo.append(s)
+        todo.sort(key=lambda s: rank[s.key] if s.key in rank else self._start_rank(s))
+        self.start_all(todo)
+        if owed and not todo:
+            safe(lambda: Kit.on_client(self._starts_done))
+
+    def _load_job(self, s):
+        """Load module s (switching it off and remembering that when its file fails to load) and tell the
+        settings window it loaded. Returns True when it is on and should now be started.
+        """
         ok = self.load(s)
-        if ok and s.enabled and not s.running and not s.pending_stop:
-            self.start(s)
-        elif not ok and s.enabled:
+        if not ok and s.enabled and not self.stopping():
             s.enabled = False
             self.held_on.add(s.key)
             self.save_prefs()
         if self.config is not None:
             self.config.loaded(s.key)
+        return ok and s.enabled and not s.running and not s.pending_stop
+
+    AHEAD_WAIT = 5.0
+
+    def compile_ahead(self, jobs):
+        """Load and start the queued modules with their compiling overlapped with the client thread's work.
+
+        Returns (the jobs not handled, whether the final start-up call is still owed, start ranks by key).
+        Any failure turns the overlap off (ahead_off) and leaves all the jobs to the caller.
+        """
+        done, box = [], {"owed": False, "rank": {}}
+        try:
+            self._ahead(jobs, done, box)
+        except Exception:
+            self.ahead_off = True
+        return [s for s in jobs if s not in done], box["owed"], box["rank"]
+
+    def _ahead(self, jobs, done, box):
+        """Load modules in start rank order, starting each while the remaining cold files compile.
+
+        Does nothing once start-up has settled, with fewer than two jobs, on the client thread, or when
+        every file is already compiled in the cache. A module is loaded and started with its start hops
+        posted to the client thread; during each hop this thread compiles the next cold file (ahead).
+        Modules that load once nothing is left to compile are collected and started together at the end.
+        done collects the modules handled here; box gets the ranks used and whether _starts_done is owed
+        (start_all is called with last False until the final group).
+        """
+        if self.settled_at is not None or len(jobs) < 2 or self._poster() is None:
+            return
+        import sys
+        c = sys.__dict__.get("_COMPILED")
+        c = c if type(c) is dict else {}
+        texts = self.texts
+
+        def warm(path):
+            """True when the file at path is already in the compile cache with text of the length read."""
+            e = c.get(path)
+            return type(e) is tuple and len(e) == 3 and e[0] == len(texts.get(path) or "")
+
+        rank = dict((s.key, self._start_rank(s)) for s in jobs)
+        order = sorted(jobs, key=lambda s: rank[s.key])
+        cold = [s for s in order if s.lazy is not None and not warm(s.lazy)]
+        if not cold:
+            return
+        box["rank"] = rank
+        self.ahead_off = False
+        left = lambda: [x for x in cold if x.lazy is not None and x.lazy not in self.ahead_ms]
+
+        def ahead(busy):
+            """Compile the next module file that has not been compiled, again and again, while busy() is true.
+
+            Runs on the script thread during a client hop. The text is read once and kept in texts; the time
+            spent goes to ahead_ms so load can report it. A failure turns the overlap off.
+            """
+            while busy() and not self.ahead_off:
+                todo = left()
+                if not todo:
+                    break
+                path = todo[0].lazy
+                try:
+                    text = texts.get(path)
+                    if text is None:
+                        text = _read_text(path)
+                        texts[path] = text
+                    t0 = time.time()
+                    self.compiled(text, path)
+                    self.ahead_ms[path] = time.time() - t0
+                except Exception:
+                    self.ahead_off = True
+
+        tail = []
+        for s in order:
+            if self.stopping() or self.ahead_off:
+                return
+            bar = self.bar_on()
+            go = self._load_job(s)
+            # A module that put the Action Bar up or took it down changes which modules fold into its tray, so
+            # the ranks are recomputed without that last wait and the overlap stops.
+            if self.bar_on() != bar:
+                self.ahead_off = True
+                box["rank"] = dict((k, 2 if r == 3 else r) for k, r in rank.items())
+                if not go:
+                    done.append(s)
+                return
+            if go and (tail or not left()):
+                tail.append(s)
+                continue
+            if go:
+                box["owed"] = True
+                self.start_all((s,), ahead, False)
+            done.append(s)
+        if tail:
+            box["owed"] = False
+            self.start_all(tail)
+            done.extend(tail)
+
+    def _poster(self):
+        """Return Client.post, or None when the client thread cannot be queued to, or this code is already on
+        it.
+        """
+        if (Client.MTQ if Client.mtq_looked else Client._find_mtq()) is None or Client.on_client_thread():
+            return None
+        return Client.post
+
+    def _hop(self, fn, ahead):
+        """Run fn on the client thread while the script thread runs ahead(busy) meanwhile. Returns fn's result.
+
+        Without ahead, or when it is turned off or the queue is unreachable, this is Kit.on_client. fn is
+        posted without waiting; ahead is called with a function that stays true until the hop is finished
+        or, if the client has not begun it, until AHEAD_WAIT seconds have passed. If the client never
+        began within that time the hop is cancelled (a late run does nothing) and fn runs through
+        Kit.on_client instead. The result, or the error, is passed back as Kit.on_client would.
+        """
+        post = None if ahead is None or self.ahead_off else self._poster()
+        if post is None:
+            return Kit.on_client(fn)
+        import _thread
+        lk, began, done = _thread.allocate_lock(), _thread.allocate_lock(), _thread.allocate_lock()
+        began.acquire()
+        done.acquire()
+        hop = _Hop(fn)
+        box = {"go": None}
+        t0 = time.time()
+
+        def run():
+            """Runs on the client thread: begin fn once, unless it was cancelled, then signal that it finished."""
+            with lk:
+                if box["go"] is not None:
+                    return
+                box["go"] = True
+            began.release()
+            try:
+                hop.run()
+            finally:
+                done.release()
+
+        try:
+            post(run)
+        except Exception:
+            self.ahead_off = True
+            return Kit.on_client(fn)
+        try:
+            ahead(lambda: done.locked() and (box["go"] is not None or time.time() - t0 < self.AHEAD_WAIT))
+        except Exception:
+            self.ahead_off = True
+        if not began.acquire(True, max(0.0, self.AHEAD_WAIT - (time.time() - t0))):
+            with lk:
+                late = box["go"] is None
+                box["go"] = box["go"] or False
+            if late:
+                self.ahead_off = True
+                return Kit.on_client(fn)
+        done.acquire()
+        if hop.e is not None:
+            raise hop.x if isinstance(hop.x, Exception) else Exception(hop.e)
+        return hop.v
+
+    def _start_rank(self, s):
+        """Sort key for starting modules: the layout owner first, then the Action Bar, then ordinary modules,
+        and last the ones that will fold into the Action Bar's tray (so the bar is up when they start).
+        """
+        if s.key == LAYOUT_OWNER:
+            return 0
+        if s.key == "actionbar":
+            return 1
+        return 3 if self.dock_soon(s.key) else 2
 
     def load(self, s):
         """Load a lazy module now: compile and run its file in this namespace.
 
-        The file registers itself with the host. When it does not, or fails, the slot is marked broken
-        with the message and line, and the player is told. While start-up timing runs, the time taken is
-        added to the boot list under the module's title. Returns True when the module has an api.
+        The compile goes through Host.compiled. The file registers itself with the host. When it does
+        not, or fails, the slot is marked broken with the message and line, and the player is told. The
+        text may have been read, and the file compiled, ahead of this call. The read, compile (or cache
+        hit) and run times go to the split timers under the module's key. While start-up timing runs, the
+        time taken is added to the boot list under the module's title. Returns True when the module has
+        an api.
         """
         if s is None:
             return False
         if s.lazy is not None:
             path = s.lazy
             t0 = time.time()
+            pre = self.ahead_ms.pop(path, None)
             try:
-                code = compile(_read_text(path), path, "exec")
+                text = self.texts.pop(path, None) or _read_text(path)
+                t1 = time.time()
+                code = self.compiled(text, path)
+                hit, t2 = self.compile_hit, time.time()
                 exec(code, globals())
+                t3 = time.time()
+                hit = hit and pre is None
                 if s.lazy is not None:
                     raise Exception("the file's HOST.add line didn't run")
+                for n, a, b in (("read", t0, t1), ("hit" if hit else "compile", t1, t2 if pre is None else t1 + pre),
+                                ("exec", t2, t3)):
+                    self.split_add(n + ":" + s.key, (b - a) * 1000.0)
             except Exception as ex:
                 s.lazy = None
                 line = getattr(ex, "lineno", None)
                 where = (" (%s line %s)" % (os.path.basename(path), line)) if line else _error_where()
                 s.api, s.broken = None, "%s%s" % (getattr(ex, "msg", None) or ex, where)
-                Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
+                if not self.stopping():
+                    Kit.say("couldn't load %s (%s)." % (s.title, s.broken), Kit.HUE_BAD)
             if self.boot is not None:
                 d = time.time() - t0
                 self.boot.append((s.title, d))
@@ -8404,22 +8981,187 @@ class Host(object):
 
     def boot_done(self):
         """End start-up timing and, only when the main setting startup is 1 and the suite is not running
-        alone, print one journal line with the total and each phase.
+        alone, keep one journal line with the total and each phase.
 
         Called by run_due once the module load jobs are done. The last phase, first build, is the time
         since the final mark less the module compile times already listed. This is also the moment the
-        backup list is read and the backup for a new version is requested (backup_start).
+        backup list is read and the backup for a new version is requested (backup_start). The line is
+        printed by settle_report, at once when start-up has already settled.
         """
         # Setting boot to None above makes this a one-shot, whether or not the line is printed.
         boot, self.boot = self.boot, None
         t = time.time()
         if self.alone is None:
             self.backup_start()
-        if self.alone is not None or self.pref_int("startup", 0) != 1:
+        if self.alone is None and self.pref_int("startup", 0) == 1:
+            boot.append(("first build", max(0.0, t - self.boot_at - self.boot_load)))
+            self.boot_line = "start-up took %.1f s (%s)" % (t - START_AT, ", ".join("%s %d ms" % (n, d * 1000)
+                                                                                  for n, d in boot))
+        if self.settled_at is not None:
+            self.settle_report()
+
+    def built(self, key):
+        """Count a build of window key while start-up has not settled (at most 200 different keys), for the
+        settling report.
+        """
+        b = self.builds
+        if self.settled_at is None and (key in b or len(b) < 200):
+            b[key] = b.get(key, 0) + 1
+
+    def settle_tick(self, now):
+        """Decide whether start-up has settled; called every pass of the main loop until it has.
+
+        Start-up is busy while the load list, the layout, the hub, the settings window or any hold from
+        settle_hold still has work, and for SETTLE_QUIET seconds (SETTLE_QUIET_HOLD while a hold is open)
+        after the last such work or window change (Kit.churn_at). It is also declared settled after
+        SETTLE_CAP seconds, unless the safe-start window is waiting for the player. When settled it drops
+        the read-ahead module texts, prints the report and brings the Script Manager window to the front.
+        In stand-alone mode it settles at once and ends the split timers.
+        """
+        if self.alone is not None:
+            self.settled_at = now
+            self.split_end()
             return
-        boot.append(("first build", max(0.0, t - self.boot_at - self.boot_load)))
-        Kit.say("start-up took %.1f s (%s)." % (t - START_AT, ", ".join("%s %d ms" % (n, d * 1000)
-                                                                   for n, d in boot)), Kit.HUE_INFO)
+        cfg, hub, lay = self.config, self.hub, LAYOUT
+        if (self.boot is not None or self.load_jobs or (lay.enabled and lay.loaded and (
+                lay.dirty or lay.fresh or lay.fresh_adds or lay.seam_wait)) or (hub is not None and hub.dirty)
+                or (cfg is not None and (cfg.request is not None or cfg.request_tab is not None or (
+                    cfg.mode == "full" and (cfg.redraw_req or cfg.prof_redraw))))
+                or any(safe(fn, False) for fn in self.settle_holds)):
+            self.settle_seen = now
+        capped = self.ask_g is None and now - (self.settle_from or START_AT) >= self.SETTLE_CAP
+        quiet = self.SETTLE_QUIET_HOLD if self.settle_holds else self.SETTLE_QUIET
+        if not capped and now - max(self.settle_seen, Kit.churn_at) < quiet:
+            return
+        if not capped and safe(lay.plan_prune, False):
+            self.settle_seen = now
+            return
+        self.settled_at, self.settle_capped = now, capped
+        del self.settle_holds[:]
+        self.texts.clear()
+        self.ahead_ms.clear()
+        self.settle_report()
+        safe(lambda: Kit.on_client(self.front_script_manager))
+
+    def booting(self):
+        """True while start-up has not settled."""
+        return self.settled_at is None
+
+    def settle_hold(self, fn):
+        """Keep start-up unsettled while fn() returns true; used by a module with work still to finish
+        (at most 32 holds, dropped once settled).
+        """
+        if self.settled_at is None and len(self.settle_holds) < 32:
+            self.settle_holds.append(fn)
+
+    def split_add(self, key, ms):
+        """Record a split timer: key to milliseconds (or a count), while the timers run and fewer than
+        SPLIT_CAP keys are held.
+        """
+        sp = self.split
+        if sp is not None and (key in sp or len(sp) < self.SPLIT_CAP):
+            sp[key] = ms
+
+    def split_at(self, name):
+        """Record how long after the start of the script the current module (or the named part) was ready."""
+        s = self.current()
+        self.split_add("at:" + (name if s is None else s.title), (time.time() - START_AT) * 1000.0)
+
+    def split_end(self):
+        """End the split timers: drop the list and give the raw Create* calls back to G, so nothing is
+        counted or wrapped any more.
+        """
+        self.split = None
+        G.made = None
+        for k in [k for k in G.__dict__ if k.startswith("Create")]:
+            G.__dict__.pop(k, None)
+
+    def split_line(self, sp):
+        """Build the start-up splits line the report prints from the timers sp.
+
+        It adds up read, compile (cache hits included, with their count) and set-up times of the module
+        files, the number of start steps with the longest one and the controls it made, and the times
+        parts reported they were ready.
+        """
+        tot = dict((n, 0.0) for n in ("read", "compile", "hit", "exec"))
+        marks = []
+        for k, v in sp.items():
+            n = k.split(":", 1)
+            if len(n) == 2 and n[0] in tot:
+                tot[n[0]] += v
+            elif len(n) == 2 and n[0] == "at":
+                marks.append((v, n[1]))
+        hops = int(sp.get("hops", 0))
+        top = max([(sp.get("hop %d" % i, 0.0), i) for i in range(1, hops + 1)]
+                  or [(0.0, 0)])
+        text = "Splits: read %d ms, compiled %d ms (%d cached), set up %d ms; started in %s (longest %d ms, %s)" % (
+            tot["read"], tot["compile"] + tot["hit"], len([k for k in sp if k.startswith("hit:")]), tot["exec"],
+            Kit.count(hops, "step"), top[0], Kit.count(int(sp.get("hop %d controls" % top[1], 0)), "control"))
+        return text + "".join("; %s ready at %.1f s" % (n, v / 1000.0) for v, n in sorted(marks)) + "."
+
+    @staticmethod
+    def front_script_manager():
+        """Put the client's Script Manager window on top of the other windows, so it is not buried by the
+        windows built at start-up. Client thread. Does nothing when the start-up order setting is off.
+        """
+        if Host.ORDER_OFF in HOST.tz_off:
+            return
+        uim = Tz.T("ClassicUO.Game.Managers.UIManager")
+        node = Tz.get(None, "Gumps", uim).First
+        n = 0
+        while node is not None and n < 2000:
+            v = node.Value
+            if str(v.GetType().Name) == "ScriptManagerWindow" and not v.IsDisposed:
+                Tz.call(None, "MakeTopMostGump", [v], uim)
+                return
+            node = node.Next
+            n += 1
+
+    def settle_report(self):
+        """Print the start-up line (with when it settled) and up to two more lines, once.
+
+        The second line counts the window builds while settling, names the windows built more than once,
+        and lists when the main window was built and why, and what was ignored before any input. The
+        third is the splits line (split_line), printed when the timers held anything. The timers end here
+        once start-up timing is over. Nothing is printed when no line was kept (start-up timing is off) or
+        when running alone.
+        """
+        line, self.boot_line, sp = self.boot_line, None, self.split
+        if self.boot is None:
+            self.split_end()
+        if line is None or self.alone is not None:
+            return
+        end = ("not settled after %d s" % self.SETTLE_CAP) if self.settle_capped else \
+            ("settled at %.1f s" % (self.settled_at - START_AT))
+        Kit.say("%s; %s." % (line, end), Kit.HUE_INFO)
+        names = sorted((-n, APP_NAME if k == ConfigWindow.DOCK_KEY else safe(lambda: LAYOUT.title_of(k), k))
+                       for k, n in self.builds.items() if n > 1)
+        text = "Settling: " + Kit.count(sum(self.builds.values()), "window build")
+        if names:
+            text += " (%s)" % ", ".join("%s %d" % (t, -n) for n, t in names[:6])
+        log = self.config.why_log if self.config is not None else []
+        if log:
+            text += ", main window built at " + ", ".join("%.1f s (%s)" % (t - START_AT, self.why_text(w))
+                                                          for t, w in log[-3:])
+        stale = self.config.stale_log if self.config is not None else []
+        if stale:
+            text += ", ignored before any input: " + ", ".join("%s at %.1f s" % (
+            self.why_text(w), t - START_AT) for t, w in stale[-3:])
+        Kit.say(text + ".", Kit.HUE_INFO)
+        if sp:
+            Kit.say(self.split_line(sp), Kit.HUE_INFO)
+
+    WHY_WORDS = {"link": "Settings link", "gear": "gear click", "redraw": "refresh"}
+
+    def why_text(self, why):
+        """Turn a reason a main window was built (kind or kind:argument) into words for the report."""
+        kind, _, arg = str(why).partition(":")
+        s = dict.get(self.by_key, arg) if arg else None
+        if kind == "request":
+            return "%s settings" % (s.title if s is not None else arg)
+        if kind == "tab":
+            return "%s tab" % arg.capitalize()
+        return self.WHY_WORDS.get(kind, kind)
 
     def current(self):
         """Return the slot of the module being run now, or None."""
@@ -8522,19 +9264,68 @@ class Host(object):
     def start(self, s):
         """Start module s: mark it running and run its start hook on the client tick.
 
-        The start token and the lock make a start that is overtaken by a stop (or by the script ending)
-        undo itself: the module's stop hook is run and its claims released. A failure to start switches
-        the module off and saves that.
+        Same as start_all for one module. A start that is overtaken by a stop undoes itself, and a failure
+        to start switches the module off and saves that.
+        """
+        self.start_all((s,))
+
+    def start_all(self, slots, ahead=None, last=True):
+        """Start several modules together, hopping to the client thread as few times as possible.
+
+        Each module is prepared first (_start_prep), then the start hooks run in slices on the client tick
+        (_start_hop), through _hop so that compile-ahead work can run meanwhile when ahead is given. last
+        False leaves out the final _starts_done call, because more starts follow. A module whose start
+        never ran because the hop failed is queued to load again. The results are then settled one by one
+        (_start_end).
+        """
+        runs = [r for r in (self._start_prep(s) for s in slots) if r is not None]
+        n = len(runs)
+        pos = {"i": 0}
+        while pos["i"] < n and not self.stopping():
+            i = pos["i"]
+            try:
+                self._hop(lambda: self._start_hop(runs, pos, n, last), ahead)
+            except Exception as ex:
+                msg = str(ex) + _error_where()
+                pos["gone"] = True
+                hit = False
+                for r in runs[i:]:
+                    with r["lk"]:
+                        began, ended = r["began"], r["ended"]
+                    if ended or r["err"] is not None:
+                        continue
+                    if began or not hit:
+                        r["err"] = msg
+                        hit = True
+                    else:
+                        r["again"] = True
+                pos["i"] = n
+        for j, r in enumerate(runs):
+            if r["again"] or j >= pos["i"]:
+                with r["lk"]:
+                    r["s"].start_tok = None
+                    r["s"].running = False
+        for r in runs:
+            self._start_end(r)
+        again = [r["s"] for r in runs if r["again"] and r["s"] not in self.load_jobs]
+        if again and not self.stopping():
+            self.load_jobs[:0] = again
+
+    def _start_prep(self, s):
+        """Prepare the start of module s and return its run record, or None when it is running, the script is
+        stopping or it will not load.
+
+        The record holds the lock, the flags began and ended, the error, and the undo and go functions the
+        client tick uses. The start token makes a start that is overtaken by a stop undo itself.
         """
         if s.running or self.stopping() or not self.load(s):
-            return
+            return None
         s.errors, s.error_times = set(), {}
         s.pending_stop = False
-        self._enter(s)
         tok = s.start_tok = object()
-        import threading
-        lk = threading.Lock()
-        run = {"began": False, "ended": False, "undone": False}
+        import _thread
+        lk = _thread.allocate_lock()
+        run = {"s": s, "lk": lk, "began": False, "ended": False, "undone": False, "err": None, "again": False}
 
         def undo():
             """Run the module's stop hook and release its claims, once only."""
@@ -8546,9 +9337,11 @@ class Host(object):
             safe(lambda: self._unclaim(s))
 
         def go():
-            """Client-tick job: run the module's start hook unless the module was stopped meanwhile."""
+            """Run the module's start hook on the client tick, unless a stop overtook it, and undo the start when
+            one did meanwhile.
+            """
             with lk:
-                if s.start_tok is not tok or not s.running:
+                if s.start_tok is not tok or not s.running or run["began"]:
                     return
                 run["began"] = True
             try:
@@ -8560,26 +9353,85 @@ class Host(object):
                 if late:
                     undo()
 
+        run["undo"], run["go"] = undo, go
+        if s.key == "actionbar":
+            self.bar_dead = False
         try:
             s.running = True
             self._arm(s)
             self._refresh_active()
-            self.client_idles = 0
-            Kit.on_client(go)
         except Exception as ex:
-            with lk:
+            run["err"] = str(ex) + _error_where()
+        return run
+
+    def _start_hop(self, runs, pos, n, last=True):
+        """One client-tick slice of starting: start modules in turn until START_HOP seconds are used, so one
+        tick is never held up long.
+
+        While the split timers run, the slice's length and the controls created in it are recorded.
+        """
+        t0, m0 = time.time(), G.made
+        while pos["i"] < n and not pos.get("gone"):
+            r = runs[pos["i"]]
+            pos["i"] += 1
+            self._start_go(r)
+            if time.time() - t0 >= self.START_HOP:
+                break
+        if pos["i"] >= n and not pos.get("gone") and last:
+            self._starts_done()
+        sp = self.split
+        if sp is not None and m0 is not None:
+            h = sp["hops"] = sp.get("hops", 0) + 1
+            self.split_add("hop %d" % h, (time.time() - t0) * 1000.0)
+            self.split_add("hop %d controls" % h, (G.made or m0) - m0)
+
+    def _start_go(self, r):
+        """Start one module of the run list on the client tick, recording its error. A failed or dead Action
+        Bar is noted in bar_dead.
+        """
+        s = r["s"]
+        if r["err"] is None:
+            self._enter(s)
+            self.client_idles = 0
+            try:
+                r["go"]()
+            except Exception as ex:
+                r["err"] = str(getattr(ex, "InnerException", None) or ex) + _error_where()
+            finally:
+                self._leave(s)
+        if s.key == "actionbar" and (r["err"] is not None or not self.bar_alive()):
+            self.bar_dead = True
+
+    def _starts_done(self):
+        """After the last start: when the Action Bar did not come up, sync the tray list and run the dock
+        pass so windows folded for it open again.
+        """
+        cfg = self.config
+        if self.bar_dead and self.alone is None and cfg is not None:
+            safe(cfg.dock_sync)
+            safe(self.dock_tick)
+
+    def _start_end(self, r):
+        """Finish one start on the script thread: on an error release the module, say so, undo the start and
+        switch it off (saved); then refresh the active list and make the module due.
+
+        When the script is stopping, an error is neither said nor saved, because a stop explains it.
+        """
+        s = r["s"]
+        if r["err"] is not None:
+            with r["lk"]:
                 s.start_tok = None
                 s.running = False
-                busy = run["began"] and not run["ended"]
-            msg = str(ex) + _error_where()
-            Kit.say("couldn't start %s (%s)." % (s.title, msg), Kit.HUE_BAD)
+                busy = r["began"] and not r["ended"]
+            stop = self.stopping()
+            if not stop:
+                Kit.say("couldn't start %s (%s)." % (s.title, r["err"]), Kit.HUE_BAD)
             if not busy:
-                undo()
-            s.enabled = False
-            self.save_prefs()
-        finally:
-            self._leave(s)
-            self._refresh_active()
+                r["undo"]()
+            if not stop:
+                s.enabled = False
+                self.save_prefs()
+        self._refresh_active()
         s.next_due = 0.0
 
     def _stop(self, s):
@@ -8847,6 +9699,12 @@ class Host(object):
     MOB_AGE = 0.1
     PACK_CAP = 6000
     PREFS_EVERY = 1.0
+    SETTLE_QUIET = 0.25
+    SETTLE_QUIET_HOLD = 0.5
+    SETTLE_CAP = 30.0
+    START_HOP = 0.05
+    SPLIT_CAP = 300
+    ORDER_OFF = "start-up_order"
 
     def _client_due(self, now):
         """True when the client pass is needed now: the UI is due, a target job or window work is waiting, or
@@ -9323,7 +10181,8 @@ class Host(object):
         try:
             now = time.time()
             if now >= self.ui_next:
-                self.ui_next = now + UI_TICK
+                boot = self.settled_at is None
+                self.ui_next = now + (0.0 if boot else UI_TICK)
                 self.config.poll()
                 if not VA_ALONE and now >= self.alive_at:
                     self.alive_at = now + 1.0
@@ -9337,7 +10196,7 @@ class Host(object):
                         FADE.tick(now)
                     except Exception as ex:
                         self._tell("%s: fade error: %s%s" % (APP_NAME, ex, _error_where()))
-                if now - self.input_at > UI_IDLE_AFTER and not (SNAP.down or LAYOUT.arrange):
+                if now - self.input_at > UI_IDLE_AFTER and not (boot or SNAP.down or LAYOUT.arrange):
                     self.ui_next = now + UI_IDLE
                 if self.grid is not None:
                     self.grid.tick()
@@ -9766,8 +10625,7 @@ class Host(object):
                ("AutoLootHumanCorpses", "Auto Loot Human Corpses",
                 "it loots players' corpses by itself, which can flag you criminal", TZ_AL),
                ("EnableScavenger", "Enable Scavenger", TZ_RULE % "picks up items",
-                "Legion Assistant > Agents > Scavenger"),
-               ("AutoOpenDoors", "Automatically open doors", TZ_RULE % "opens doors", "Options > Gameplay > Movement"))
+                "Legion Assistant > Agents > Scavenger"))
 
     def tz_warn(self):
         """Warn once per session about each TazUO setting that breaks the shard rules; never change one.
@@ -9832,8 +10690,16 @@ class Host(object):
             Kit.put_var(START_KEY, "")
 
     def start_on(self):
-        """Queue every enabled module to be loaded and started by the main loop."""
-        self.load_jobs.extend(s for s in self.slots if s.enabled and s not in self.load_jobs)
+        """Queue every enabled module to be loaded and started by the main loop.
+
+        While start-up has not settled, it notes when queuing began (for the settle cap) and plans the
+        layout first. The layout owner is queued first.
+        """
+        if self.settled_at is None:
+            self.settle_from = self.settle_from or time.time()
+            safe(LAYOUT.plan)
+        self.load_jobs.extend(sorted((s for s in self.slots if s.enabled and s not in self.load_jobs),
+                                     key=lambda s: s.key != LAYOUT_OWNER))
 
     SAFE_ASK = "Virtue Assistant didn't finish starting last time. Start with every module off?"
     SAFE_DONE = "every module is off for now; tick them on one at a time on the Modules tab (%s)."
@@ -9875,7 +10741,7 @@ class Host(object):
         Kit.buttons(g, self.ask_store, M + 12, yb + 14 + 20 * n, self.SAFE_BUTTONS)
         sw, sh = Kit.screen()
         Kit.place(g, max(0, ((sw or 1024) - W) // 2), max(0, ((sh or 768) - H) // 3), W, H)
-        G.AddGump(g)
+        Kit.add_front(g)
         self.ask_g = g
 
     def ask_poll(self):
@@ -9904,9 +10770,10 @@ class Host(object):
         """Start the full suite: find the client, load settings, build the windows, then run the main loop.
 
         Sets the start mark first and checks the client for missing members (tz_check). Takes the early
-        backup snapshot before the settings are loaded. Shows a start line naming the modules that are on.
-        Modules are queued to load at once, unless the last start left its mark set, in which case the
-        safe-start window decides. Window build errors are shown, not fatal.
+        backup snapshot before the settings are loaded. The windows built on the client thread (the main
+        window, Ultima Tracker, the start line, What's new) are made in one hop, _front_hop. Modules are
+        queued to load at once, unless the last start left its mark set, in which case the safe-start
+        window decides. Window build errors are shown, not fatal.
         """
         ask = self.mark_start()
         Client.find()
@@ -9923,9 +10790,43 @@ class Host(object):
         self.grid = Grid(self)
         self.launcher = Launcher(self)
         self.services["launcher.open"] = self.launcher.toggle
+        why = None
         try:
             self.config = ConfigWindow(self)
-            self.config.open()
+            self.config.refresh_profiles()
+        except Exception as ex:
+            why = ex
+        safe(self.whats_new.due)
+        self._front_hop(ask, why)
+        # Last start-up phase before the loop; the time after it is reported as the first build.
+        self.boot_mark("main window")
+        self.loop()
+
+    def _front_hop(self, ask, why):
+        """Build the first windows in one hop to the client thread; if no hop is possible, build them here.
+
+        Raises the error that happened on the client thread. ask and why are the safe-start flag and the
+        error from building the main window object, passed on to _front.
+        """
+        how, v = Client.on_main_ex(lambda: self._front(ask, why))
+        if how == "no":
+            self._front(ask, why)
+        elif how == "err" and Client.exc is not None:
+            raise Client.exc
+
+    def _front(self, ask, why):
+        """Open the main window and the other first windows, then start the modules, on the client thread.
+
+        why is an error raised while the main window object was made; it is reported like one raised
+        while opening the window, and a gear button is built so the player can still reach the settings.
+        Makes the Ultima Tracker window, shows the grid when on, says which modules are on, and publishes
+        the alive mark. Binds and the modules start unless the safe-start window asks first. Opens the
+        What's new window last.
+        """
+        try:
+            if why is not None:
+                raise why
+            self.config.open(True)
         except Exception as ex:
             self._tell("%s: couldn't build the window: %s%s" % (APP_NAME, ex, _error_where()))
             if self.config is None:
@@ -9939,21 +10840,17 @@ class Host(object):
         if self.pref_int("grid_on", 0) == 1:
             safe(self.grid.show)
         names = [s.title for s in self.slots if s.enabled]
-        API.SysMsg("%s %s running. %s" % (APP_NAME, APP_VERSION, ("On: " + ", ".join(names)) if names else
+        API.SysMsg("%s %s running. %s" % (APP_NAME, APP_VERSION, ("On: " + ", ".join(names) + ".") if names else
                    "Tick a module on the Modules tab."), Kit.HUE_GOOD)
         API.SetSharedVar(ALIVE_KEY, str(time.time()))
         Binds.load()
         if not ask or not self.ask_open():
-            # Without the safe-start window the saved modules start at once.
             self.start_on()
         Kit.note_screen()
         try:
             self.whats_new.open()
         except Exception as ex:
             self._tell("%s: couldn't make the What's new window: %s" % (APP_NAME, ex))
-        # Last start-up phase before the loop; the time after it is reported as the first build.
-        self.boot_mark("main window")
-        self.loop()
 
     def run_alone(self, s):
         """Run one module on its own, without the rest of the suite (stand-alone mode).
@@ -9991,6 +10888,8 @@ class Host(object):
                 self.drain()
                 try:
                     self.run_due()
+                    if self.settled_at is None:
+                        self.settle_tick(time.time())
                 except Exception as ex:
                     if self.stopping():
                         break
@@ -10314,6 +11213,9 @@ class PartSet(object):
             Kit.add_section(g, x, y, w, self.HEAD_H, title.upper() if on else None)
             if not on:
                 Kit.add_label(g, Kit.fit(self.OFF_LINE % title, w - 24), x + 12, y + 7, Kit.HUE_INFO)
+            elif s is not None and s.part(pk) and len(s.part(pk)) > 2 and s.part(pk)[2]:
+                tx = x + 8 + Kit.text_w(title.upper()) + 14
+                Kit.add_label(g, Kit.fit(s.part(pk)[2], max(20, x + w - 12 - tx)), tx, y + 6, Kit.HUE_INFO)
             y += self.HEAD_H
             if on and api and api.get("build_config"):
                 y += Kit.GAP
@@ -10391,6 +11293,7 @@ class Tz(object):
         ("Game.Managers.UIManager", "ContainerScale", "inventory.bags"),
         ("Game.Managers.UIManager", "KeyboardFocusControl _gumpsStructureVersion SystemChat", "interface"),
         ("Game.Managers.UIManager", "MakeTopMostGump", "hud skills.window"),
+        ("Game.Managers.UIManager", "Gumps MakeTopMostGump _gumpsStructureVersion TopMostControl", "start-up_order"),
         ("Game.Managers.UIManager", "Add", "skills.window"),
         ("Game.Managers.UIManager", "IsMouseOverWorld", "worldmap.pings"),
         ("Game.Managers.MacroManager", "GetAllMacros SetMacroToExecute Update FindMacro", "actionbar"),
@@ -10412,8 +11315,7 @@ class Tz(object):
         ("Game.ItemHold", "Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic",
          "inventory.bags"), ("Configuration.ProfileManager", "CurrentProfile",
          "hud.frames inventory.bags inventory.storage TazUO_settings_check"),
-        ("Configuration.Profile", "EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors",
-         "TazUO_settings_check"),
+        ("Configuration.Profile", "EnableAutoLoot AutoLootHumanCorpses EnableScavenger", "TazUO_settings_check"),
         ("Game.Managers.ScavengerManager", "Instance IsLoaded ScavengerEntries", "TazUO_settings_check"),
         ("Configuration.Profile", "OpenHealthBarForLastAttack", "hud.frames"),
         ("Configuration.Profile", "Username ServerName", "inventory.storage"),
@@ -10450,19 +11352,22 @@ class Tz(object):
 
         The result is a sorted list of (name, keys), or an empty tuple when the client types cannot be
         reached at all, so a script that is not inside the client holds nothing. Each row is looked up
-        once; no API calls are made. Runs on the script thread at start.
+        once per client process; the result is kept in the measured client data. No API calls are made.
+        Runs on the script thread at start.
         """
-        if Client._type("ClassicUO.Client") is None:
-            return ()
-        # Static and instance members declared on a type are both searched; has also walks the base types.
-        fl = Tz._flags(True) | Tz._flags(False)
-        out = {}
-        for tn, names, keys in Tz.NEED:
-            t = Client._type("ClassicUO." + tn)
-            short = tn.split(".")[-1]
-            for gone in [short] if t is None else [short + "." + n for n in names.split() if not Tz.has(t, n, fl)]:
-                out.setdefault(gone, []).extend(keys.split())
-        return sorted(out.items())
+        got = Kit._measure.get("tz_missing")
+        if got is None:
+            if Client._type("ClassicUO.Client") is None:
+                return ()
+            fl = Tz._flags(True) | Tz._flags(False)
+            out = {}
+            for tn, names, keys in Tz.NEED:
+                t = Client._type("ClassicUO." + tn)
+                short = tn.split(".")[-1]
+                for gone in [short] if t is None else [short + "." + n for n in names.split() if not Tz.has(t, n, fl)]:
+                    out.setdefault(gone, []).extend(keys.split())
+            got = Kit._measure["tz_missing"] = tuple((k, tuple(v)) for k, v in sorted(out.items()))
+        return [(k, list(v)) for k, v in got]
 
     @staticmethod
     def has(t, name, fl):
@@ -10479,11 +11384,12 @@ class Tz(object):
     @staticmethod
     def T(name):
         """Returns the .NET type called name, cached; raises a plain-English error when this TazUO build lacks it."""
-        if name not in Tz._types:
-            Tz._types[name] = Client._type(name)
-        t = Tz._types[name]
+        t = Tz._types.get(name)
         if t is None:
-            raise Exception("this TazUO build has no %s" % name.split(".")[-1])
+            t = Client._type(name)
+            if t is None:
+                raise Exception("this TazUO build has no %s" % name.split(".")[-1])
+            Tz._types[name] = t
         return t
 
     @staticmethod
@@ -10647,12 +11553,12 @@ class Profiles(object):
                "Grimoire_", "Harvest_", "Interface_", "Layout_", "Lookout_", "Meters_", "Mongotchi_", "Pets_",
                "PropertyButler_", "Restock_", "SkillBags_", "Skills_", "Social_", "SpellTimers_", "StorageIndex_",
                "SwingTimer_", "swingtimer_", "SystemStats_", "TrapHL_", "TreasureHunter_", "UltimaTracker_",
-               "UnifiedBag_", "UnitFrames_", "VirtueAssistant_", "WorldMap_")
+               "UnifiedBag_", "UnitFrames_", "VirtueAssistant_", "WorldMap_", "ReagentPrices_")
     # Settings that hold this character's own lists and history; they stay out of profiles.
     OWN_VARS = ("CorpseRun_corpse", "SkillBags_rules", "SkillBags_done", "UnitFrames_tracked", "Social_names",
                 "TreasureHunter_maps", "Restock_settings", "PropertyButler_visits", "SpellTimers_active",
                 "VirtueAssistant_starting", "VirtueAssistant_new_seen", "VirtueAssistant_alert_log",
-                "VirtueAssistant_backup_ver")
+                "VirtueAssistant_backup_ver", "ReagentPrices_book")
     # A value no real setting holds, used to tell a missing setting from an empty one.
     MISSING = "\x01VA-missing"
 
@@ -11175,6 +12081,8 @@ class ConfigWindow(object):
         self.opt_wait = self.opt_mark = self.opt_lbl = self.opt_drawn = self.fresh_view = None
         self.opt_hits = (None, None)
         self.hit_keys = []
+        self.why, self.why_log, self.stale_log = None, [], []
+        self.from_xy = None
         # Saved positions are pulled back on screen if the screen is smaller than when they were saved.
         self.x, self.y = Kit.adapt(host.pref_int("cfg_x", 140), host.pref_int("cfg_y", 80), self.W, self.MIN_H)
         self.gx, self.gy = Kit.adapt(host.pref_int("gear_x", self.x),
@@ -11357,32 +12265,40 @@ class ConfigWindow(object):
         return [s for s in self.host.slots if s.lazy is not None or (s.api is not None and s.api.get("build_config"))] \
             + list(self.host.pages)
 
-    def open(self):
-        """Opens the window as the gear or in full, as last left."""
+    def open(self, launch=False):
+        """Opens the window as the gear icon or in full, as last left.
+
+        Script thread. launch is True when the player starts the script: the window then opens as the gear
+        (and asks the action bar to dock it when the bar is on) instead of in full.
+        """
         if self.prof_cache is None:
             self.refresh_profiles()
-        if self.minimized:
+        if launch and self.host.bar_on():
+            self.host.dock_want_set(self.DOCK_KEY, True)
+        if self.minimized or launch:
             self.build_gear(self.gx, self.gy)
         else:
-            self.build_full(self.x, self.y)
+            self.build_full(self.x, self.y, "start")
 
-    def build_full(self, x, y):
+    def build_full(self, x, y, why="redraw"):
         """Builds the full window at x, y on the client thread."""
+        self.why = why
         Kit.on_client(lambda: self._build_full(x, y))
 
-    def _replace(self, g, mode, x, y, w, h, head=None):
+    def _replace(self, g, mode, x, y, w, h, head=None, hidden=False):
         """Puts the new gump g in place of the old one: positions it on screen, adds it, hooks its move
         event, then disposes the previous gump so there is never a gap on screen.
         """
-        old = self.g
+        old, same = self.g, self.mode == mode
         x, y = Kit.place(g, x, y, w, h, head)
         if mode == "gear":
             self.gx, self.gy = x, y
         else:
             self.x, self.y = x, y
         self.g, self.mode = g, mode
-        G.AddGump(g)
+        Kit.replace_gump(old if same else None, g, hidden)
         Kit.on_moved(g, self._moved)
+        self.host.built(self.DOCK_KEY)
         if mode == "gear":
             g.SetInScreen()
         Kit.dispose(old)
@@ -12028,7 +12944,7 @@ class ConfigWindow(object):
         for key, title in wins:
             Kit.add_label(g, Kit.fit(title, 200), x + 12, ry + 3)
             zid = LAYOUT.zone_of(key)
-            cap = "Zone: " + (zid if zid else "free")
+            cap = "Zone: " + ((zid[5:] if zid.startswith("Zone ") else zid) if zid else "free")
             bkey = "zone_" + key
             Kit.art_button(g, self.store, bkey, Kit.ART_PAGE, x + 224, ry - 2, cap, self.ZONE_TIP)
             self.zone_keys.append((bkey, key, zones))
@@ -12190,6 +13106,8 @@ class ConfigWindow(object):
         row and body, scaled by the player's percentage. A search box that had keyboard focus gets it
         back so typing is not interrupted. Client thread.
         """
+        if self.host.settled_at is None and len(self.why_log) < 10:
+            self.why_log.append((time.time(), self.why))
         self._reset()
         self.seen, self.resize_at = {}, 0.0
         self.part_boxes, self.fold_keys = [], []
@@ -12258,6 +13176,10 @@ class ConfigWindow(object):
         if not Kit.scale_window(g, S) and S != 1.0:
             self.scale, S, WS, HS = 1.0, 1.0, W, H
             Kit.say("can't scale the window; it stays at 100%.", Kit.HUE_BAD)
+        if self.mode != "full":
+            jx = LAYOUT.beside_journal(x, y, WS, HS)
+            self.from_xy = (x, y, jx)
+            x = jx
         self._replace(g, "full", x, y, WS, HS, int(round(y_body * S)))
         fit = Kit.scroll_info(g)
         self.size = (fit["w2"], fit["hv"]) if fit else (WS, HS)
@@ -12287,11 +13209,9 @@ class ConfigWindow(object):
         g.Add(p)
         Kit.catcher(g, 0, 0, S, S, self._gear_click, "%s: click to open, drag to move" % APP_NAME, movable=True)
         self.gear_clicked, self.gear_pos, self.gear_moved = False, None, 0.0
-        self._replace(g, "gear", x, y, S, S)
+        self.docked = self.host.dock_wanted(self.DOCK_KEY) and self.host.bar_soon()
+        self._replace(g, "gear", x, y, S, S, hidden=self.docked)
         self.minimized = True
-        self.docked = self.host.dock_wanted(self.DOCK_KEY) and self.host.bar_alive()
-        if self.docked:
-            self._show_gear(False)
 
     def fold_to_bar(self):
         """Hands the window to the action bar: folds it and tells the player if the bar is not running."""
@@ -12306,11 +13226,15 @@ class ConfigWindow(object):
         g = self.g
         if self.mode == "gear" and Kit.is_open(g):
             g.IsVisible = bool(shown)
+            Kit.stir()
 
     def link_tick(self):
-        """Script thread, about ten times a second: takes commands and module enable requests from the
-        action bar through shared variables, keeps the gear hidden or shown to match the dock state,
-        and publishes the state (docked, gear or open).
+        """Script thread, about ten times a second: takes commands and module enable requests from the action
+        bar through shared variables, keeps the gear hidden or shown to match the dock state, and publishes
+        the state (docked, gear or open).
+
+        A show command is ignored while the script is still starting and the player has not pressed
+        anything (see _stale), so a request left over from an earlier run does not pop the window open.
         """
         now = time.time()
         if now < self.link_next and self.link_next - now <= 0.1:
@@ -12323,21 +13247,28 @@ class ConfigWindow(object):
         if cmd:
             cmd = str(cmd)
             if cmd == "show" and self.mode != "full":
-                self.unfold()
+                if not self._stale("link"):
+                    self.unfold("link")
             elif cmd == "dock" and self.mode == "full":
                 self.fold_to_bar()
             elif cmd == "modules":
                 self.request_tab = "modules"
-        want = self.host.dock_wanted(self.DOCK_KEY)
-        if self.mode == "gear" and (self.docked or want):
-            hide = want and self.host.bar_alive()
-            if hide != self.docked:
-                self.docked = hide
-                self._show_gear(not hide)
+        self.dock_sync()
         state = ("docked" if self.docked else "gear") if self.mode == "gear" else "open"
         if state != self.link_state:
             self.link_state = state
             API.SetSharedVar(self.LINK_STATE, state)
+
+    def dock_sync(self):
+        """Hides the gear icon when the window is wanted in the action bar and the bar is up or about to be,
+        and shows it again when that stops. Does nothing unless the window is the gear.
+        """
+        want = self.host.dock_wanted(self.DOCK_KEY)
+        if self.mode == "gear" and (self.docked or want):
+            hide = want and self.host.bar_soon()
+            if hide != self.docked:
+                self.docked = hide
+                self._show_gear(not hide)
 
     @staticmethod
     def _take_shared(name):
@@ -12355,6 +13286,22 @@ class ConfigWindow(object):
     def _gear_click(self):
         """Click handler of the gear icon; poll() checks the flag."""
         self.gear_clicked = True
+
+    def _unpressed(self):
+        """True while the script is still starting and no hotkey has been pressed yet."""
+        return self.host.booting() and self.host.pressed_at <= 0
+
+    def _stale(self, why):
+        """True when a request to open the window should be ignored because the script is still starting and
+        nothing was pressed. The first few refused requests are kept (stale_log) with the reason why, for
+        the start-up report.
+        """
+        h = self.host
+        if not h.booting() or h.pressed_at > 0:
+            return False
+        if len(self.stale_log) < 10:
+            self.stale_log.append((time.time(), why))
+        return True
 
     def pos(self):
         """Returns the window's (x, y) on screen; either is None if it cannot be read."""
@@ -12375,31 +13322,32 @@ class ConfigWindow(object):
     def fold(self):
         """Folds the full window to the gear icon at the same place."""
         x, y = self.pos()
+        f, self.from_xy = self.from_xy, None
         if x is not None:
             self.x, self.y = x, y
-        self.gx, self.gy = self.x, self.y
+        self.gx, self.gy = (f[0], f[1]) if f is not None and f[0] != f[2] == self.x else (self.x, self.y)
         self.build_gear(self.gx, self.gy)
         self.host.save_prefs()
 
-    def unfold(self):
+    def unfold(self, why="redraw"):
         """Opens the full window from the gear icon, where the gear sat, and clears the dock request."""
         x, y = self.pos()
         if x is not None:
             self.gx, self.gy = x, y
         self.docked = False
         self.host.dock_forget(self.DOCK_KEY)
-        self.build_full(self.gx, self.gy)
+        self.build_full(self.gx, self.gy, why)
         self.host.save_prefs()
 
-    def redraw(self):
+    def redraw(self, why="redraw"):
         """Rebuilds the full window in place (or opens it if it is the gear) and saves the preferences."""
         if self.mode != "full":
-            self.unfold()
+            self.unfold(why)
             return
         x, y = self.pos()
         if x is not None:
             self.x, self.y = x, y
-        self.build_full(self.x, self.y)
+        self.build_full(self.x, self.y, why)
         self.host.save_prefs()
 
     def _switch_page(self, key):
@@ -12430,6 +13378,7 @@ class ConfigWindow(object):
             except Exception as ex:
                 self.host._tell("%s: settings window error: %s%s" % (APP_NAME, ex, _error_where()))
         if not done:
+            self.why = "redraw"
             self._build_full(self.x, self.y)
 
     def _fast_body(self, g, W0, keys):
@@ -12502,13 +13451,15 @@ class ConfigWindow(object):
         if self.request is not None:
             key, self.request = self.request, None
             self.tab, self.page = "settings", key
-            self.redraw()
+            if self.mode == "full" or not self._unpressed():
+                self.redraw("request:%s" % key)
             return
         if self.request_tab is not None:
             tab, self.request_tab = self.request_tab, None
             if tab in ("modules", "settings"):
                 self.tab = tab
-            self.redraw()
+            if self.mode == "full" or not self._unpressed():
+                self.redraw("tab:%s" % tab)
             return
         if self.mode == "gear":
             now = time.time()
@@ -12523,9 +13474,8 @@ class ConfigWindow(object):
                     self.gear_pos = p
             if self.gear_clicked:
                 self.gear_clicked = False
-                # A click right after a move is the end of a drag, not a request to open.
-                if now - self.gear_moved > 0.35:
-                    self.unfold()
+                if now - self.gear_moved > 0.35 and not self._stale("gear"):
+                    self.unfold("gear")
             return
         if self.prof_redraw:
             self.prof_redraw = False
@@ -12857,6 +13807,7 @@ class HubWindow(object):
         self.minimized = host.pref_int("hub_min", 0) == 1 or host.dock_wanted("hub")
         self.docked = self.dirty = self.closing = False
         self._gates = {}
+        self.docked = self.minimized and host.dock_soon("hub")
         host.dock_add("hub", {"title": "Ultima Tracker", "icon": 0x1057, "always": True,
                               "state": self.state, "show": self.show, "dock": self.dock,
                               "undock": self.undock, "minimize": self.minimize, "on": self.open_modules,
@@ -13047,13 +13998,11 @@ class HubWindow(object):
         self.H = h
         self.g, self.store = g, store
         G.AddControlOnDisposed(g, lambda *a: self._disposed(g))
-        G.AddGump(g)
+        Kit.replace_gump(old, g, self.docked)
         if not held:
             g.SetInScreen()
         Kit.on_moved(g, self._moved)
         Kit.dispose(old)
-        if self.docked:
-            self._visible(False)
 
     def _moved(self):
         """Move event: remembers the new place and saves it."""
@@ -13357,7 +14306,7 @@ class Launcher(object):
             sw = Kit.screen()[0] or 1024
             x, y = Kit.load_pos(self.POS_KEY, (max(0, (sw - WS) // 2), 120), (WS, HS))
         Kit.place(g, x, y, WS, HS, int(round(yb * sc)))
-        G.AddGump(g)
+        Kit.add_front(g)
         Kit.on_moved(g, lambda: Kit.save_pos(self.POS_KEY, self.g))
         self.g, self.tb, self.store = g, tb, store
         Kit.dispose(old)
@@ -13822,17 +14771,19 @@ class Snap(object):
         Kit.note_rect(g, x, y)
 
     def tick(self, now=None):
-        """Script thread, rate limited to SNAP_EVERY seconds. One pass of dragging and tidying.
+        """Script thread, rate limited to SNAP_EVERY seconds (every pass while the script is starting). One
+        pass of dragging and tidying.
 
         Escape leaves layout arrange mode. While the mouse is up it runs keep() on a timer (or when the set
-        of windows changed) to keep windows on screen. While a button is down it compares each gump's place
-        with the last pass: a changed place is a drag, which carries followers and updates arrange hover;
-        a gump that stopped moving (button released, or still for SNAP_SETTLE when the button state is
-        unknown) is snapped. Moves made by code are skipped so they are not taken for drags.
+        of windows changed) to keep windows on screen; while starting it also retries windows that wait for
+        the seamless fit. While a button is down it compares each gump's place with the last pass: a
+        changed place is a drag, which carries followers and updates arrange hover; a gump that stopped
+        moving (button released, or still for SNAP_SETTLE when the button state is unknown) is snapped.
+        Moves made by code are skipped so they are not taken for drags.
         """
         now = time.time() if now is None else now
-        # Cheap exit: a pass that comes early is ignored.
-        if now < self.next and self.next - now <= SNAP_EVERY:
+        boot = HOST.booting()
+        if now < self.next and self.next - now <= SNAP_EVERY and not boot:
             return
         self.next = now + SNAP_EVERY
         if LAYOUT.arrange and not self.drag and API.IsKeyPressed("ESCAPE"):
@@ -13841,11 +14792,14 @@ class Snap(object):
         self.down = pressed is not False or bool(self.drag)
         if pressed is not True:
             if now >= self.keep_at:
-                self.keep_at = now + KEEP_EVERY
+                self.keep_at = now + (0.0 if boot else KEEP_EVERY)
                 if now >= self.sweep_at or self._keep_sig() != self.keep_sig:
                     self.sweep_at = now + KEEP_SWEEP
                     self.keep()
                     self.keep_sig = self._keep_sig()
+                # While starting, windows waiting for the seamless fit are retried on every pass.
+                elif boot and LAYOUT.assign and LAYOUT.retry_due(now):
+                    self.keep(light=bool(LAYOUT.fresh_adds) and not LAYOUT.fresh)
             elif LAYOUT.assign and (LAYOUT.fresh or LAYOUT.fresh_adds or LAYOUT.retry_due(now)):
                 self.keep(light=bool(LAYOUT.fresh_adds) and not LAYOUT.fresh)
         # With the button up and nothing dragged there is nothing to compare; only prune now and then.
@@ -14197,7 +15151,7 @@ class Grid(object):
             with Kit.quiet:
                 import System
                 g.LayerOrder = System.Enum.Parse(g.LayerOrder.GetType(), "Under")
-        G.AddGump(g)
+        Kit.add_front(g)
         SNAP.skip_gump(g)
 
     def toggle(self):
@@ -15297,7 +16251,8 @@ class Tex(object):
     """Registers images with the client's texture table so Legion gumps can draw them by name.
 
     State: ok is None until find() has run, then True or False; parts holds the reflected client
-    objects; names is every texture name this script has added, so they can be disposed.
+    objects and the outcome of find (kept for the client process, so a later start skips the lookup);
+    names is every texture name this script has added, so they can be disposed.
     """
     ok = None
     parts = {}
@@ -15306,8 +16261,8 @@ class Tex(object):
     @staticmethod
     def find():
         """Look up the client's texture table, graphics device and gump loader through reflection. Returns
-        True when all of them were found. The answer is cached; a failure leaves Tex.ok False and
-        nothing else is touched.
+        True when all of them were found. The answer is cached, and also kept in parts for the next start
+        of the script in this client; a failure leaves Tex.ok False and nothing else is touched.
         """
         if Tex.ok is not None:
             return Tex.ok
@@ -15332,6 +16287,7 @@ class Tex(object):
             Tex.ok = all(p.get(k) is not None for k in ("table", "device", "tex_t", "set_data", "gumps", "hued"))
         except Exception:
             Tex.ok = False
+        Tex.parts["ok"] = Tex.ok
         return Tex.ok
 
     @staticmethod
@@ -15377,6 +16333,20 @@ class Tex(object):
                     tex.Dispose()
 
     @staticmethod
+    def has(name):
+        """True when a texture called name is in the client's table and not disposed.
+
+        The table outlives a script Stop, so a texture kept across one is found again by name. False when
+        the table cannot be reached.
+        """
+        if not Tex.ok:
+            return False
+        table = Tex.parts["table"]
+        with Kit.quiet:
+            return bool(table.ContainsKey(name)) and not table[name].IsDisposed
+        return False
+
+    @staticmethod
     def control(g, name, x, y, w, h):
         """Add a texture control for the named texture to gump g at the given rect. It ignores the mouse,
         so clicks pass through to what is under it. Returns the control.
@@ -15398,8 +16368,8 @@ class Layout(object):
     journal). Its work runs on the client tick, in short hops.
     """
     def __init__(self):
-        """Sets up empty state: windows, assignments, frame sets, caches for placement, Arrange mode, undo,
-        the situation settings and the tab and tab strip records.
+        """Sets up empty state: windows, assignments, frame sets, caches for placement, the start-up plan,
+        Arrange mode, undo, the situation settings and the tab and tab strip records.
         """
         self.wins = {}
         self.assign = {}
@@ -15429,7 +16399,7 @@ class Layout(object):
         self.fresh = False
         self.fresh_adds = set()
         self.client_seen = {}
-        self.journal_held = None
+        self.journal_held = self.journal_px = None
         self.pair_tried = None
         self.client_settle = {}
         self.misfit = {}
@@ -15464,6 +16434,8 @@ class Layout(object):
         self.tabs = {}
         self.behind = {}
         self.strips = {}
+        self.planned = {}
+        self.plan_occ = self.plan_sig = None
 
     def _client_getter(self, kind, key):
         """Return a function that finds the client window of this kind for placement key.
@@ -15614,10 +16586,12 @@ class Layout(object):
             held.free()
             self.journal_held = None
         if cw is None:
+            self.journal_px = None
             return
         x, y, w, h = z.px
         h = self._clear_of_chat(x, y, w, h, H)
         cw.fit(w, h)
+        self.journal_px = (x, y, w, h)
         try:
             if (cw.GetX(), cw.GetY()) != (x, y):
                 cw.SetPos(x, y)
@@ -15626,14 +16600,25 @@ class Layout(object):
         cw.report()
         self.journal_held = cw
 
+    def beside_journal(self, x, y, w, h):
+        """Returns the x at which a window at x, y, w by h should sit so that it does not cover the client
+        journal held in its zone: the journal's right edge, or its left side when there is no room on the
+        right. Returns x unchanged when it does not overlap the journal.
+        """
+        r = self.journal_px
+        if r is None or not (r[0] <= x < r[0] + r[2] and y < r[1] + r[3] and r[1] < y + h):
+            return x
+        W = Kit.screen()[0]
+        return r[0] + r[2] if not W or r[0] + r[2] + w <= W else max(0, r[0] - w)
+
     def load(self):
         """Reads the saved layout state into memory: the active frame set and window layout, the options,
         which window sits in which zone, the situation settings, the chosen tab of each tabbed zone and
         whether the layout is switched on.
 
-        Registers the world map as a window that can be zoned. Resets the one-shot told flags and marks
-        the layout dirty so the next hop places everything. Rewrites the saved assignment when it still
-        names windows that no longer exist.
+        Registers the world map as a window that can be zoned. Resets the one-shot told flags and the start-up
+        plan, and marks the layout dirty so the next hop places everything. Rewrites the saved assignment
+        when it still names windows that no longer exist.
         """
         self.freed = None
         self.homes = None
@@ -15641,6 +16626,7 @@ class Layout(object):
         self.back_told = False
         self.loaded = True
         self.bags_swept = False
+        self.planned, self.plan_occ, self.plan_sig = {}, None, None
         self.seam_skip = {}
         self.seam_wait = {}
         if "worldmap" not in self.wins:
@@ -15857,7 +16843,7 @@ class Layout(object):
         self.placed = {}
         if self.held:
             self._release(set())
-        held, self.journal_held = self.journal_held, None
+        held, self.journal_held, self.journal_px = self.journal_held, None, None
         if held is not None:
             held.free()
         if not self.gv_off_done:
@@ -16402,8 +17388,11 @@ class Layout(object):
         return g if Kit.is_open(g) else None
 
     def occupied(self):
-        """Return the ids of zones that hold at least one open window."""
-        return set(zid for zid, keys in self.assign.items() if any(self.gump_of(key) is not None for key in keys))
+        """Returns the ids of zones that hold at least one open window, plus the zones the start-up plan
+        expects to be occupied while that plan lasts.
+        """
+        live = set(zid for zid, keys in self.assign.items() if any(self.gump_of(key) is not None for key in keys))
+        return live | self.plan_occ if self.plan_occ is not None else live
 
     def frames_in_use(self, W, H):
         """Return the zone set to use for a W x H screen, loading it when the screen, the choice or dirty
@@ -17159,6 +18148,9 @@ class Layout(object):
         if self.assign and self.need_due:
             self.need_due = False
             zs.reflow(W, H, HOST.grid_size())
+        # The start-up plan only lasts while the script is starting, or until the zones it was made for change.
+        if self.plan_occ is not None and (not HOST.booting() or self._plan_sig(zs) != self.plan_sig):
+            self.plan_drop()
         if told:
             Kit.flush()
             for g in told:
@@ -17310,7 +18302,9 @@ class Layout(object):
         the screen, which is where it is kept.
         """
         slot = self.placed.get(key)
-        if slot is None or key not in self.behind:
+        if slot is None:
+            return self.plan_at(key)
+        if key not in self.behind:
             return slot
         return (TAB_X,) + tuple(slot[1:])
 
@@ -17398,7 +18392,7 @@ class Layout(object):
             Kit.with_tip(lbl, tip)
         g.SetRect(x, y, w, TAB_H)
         g.CanMove = False
-        G.AddGump(g)
+        Kit.add_front(g)
         SNAP.skip_gump(g)
         return g
 
@@ -17427,17 +18421,114 @@ class Layout(object):
                 self.fresh_adds.add(g)
         return bool(self.fresh_adds)
 
+    def plan(self):
+        """Plans where each zoned window will sit before any of them is open, so a window built during
+        start-up can open straight in its slot instead of being moved afterwards. Called once when the
+        modules are queued to start.
+
+        Works from the saved assignment: a zone counts as occupied when a window in it is open or its
+        module and part are on. Fills planned (window key to body rectangle, zone and seamless padding) for
+        each window zone that holds exactly one window, or the shown tab of a tabbed zone, and plan_occ
+        with the occupied zones. Returns True when anything was planned.
+        """
+        self.plan_drop()
+        W, H = Kit.screen()
+        o = dict.get(HOST.by_key, LAYOUT_OWNER)
+        if not self.loaded or not self.assign or W <= 0 or H <= 0 or o is None or not o.enabled:
+            return False
+        on = {}
+        for zid, keys in self.assign.items():
+            for key in keys:
+                mk, part = self.owner_of(key)
+                s = dict.get(HOST.by_key, mk) if mk else None
+                if self.gump_of(key) is not None or (s is not None and s.enabled
+                                                     and (part is None or s.parts_on.get(part))):
+                    on.setdefault(zid, []).append(key)
+        self.plan_occ = set(on)
+        self.occ = self.occupied()
+        if self.frames_name == LAYOUT_DEFAULT:
+            self.dirty = True
+        zs = self.frames_in_use(W, H)
+        self.fresh = False
+        pad = (Seam.pad(),) * 4
+        for z in zs.zones:
+            keys = on.get(z.id)
+            if not keys or z.kind != "w" or z.px is None:
+                continue
+            if z.stack == "t":
+                k = self.tabs.get(z.id)
+                keys = [k if k in keys else keys[0]]
+            elif len(keys) > 1:
+                continue
+            pads = ((Kit.MARGIN,) * 4 if z.solo else pad) if self.seamless else None
+            self.planned[keys[0]] = (tuple(self._body(z)), z, pads)
+        self.plan_sig = self._plan_sig(zs)
+        return bool(self.planned)
+
+    def _plan_sig(self, zs):
+        """Returns a signature of the plan (screen, frame set, assignment, seamless setting and the planned
+        zone rectangles), so a later pass can tell that the plan no longer holds.
+        """
+        ids = set(p[1].id for p in self.planned.values())
+        px = [(z.id, z.px) for z in zs.zones if z.id in ids]
+        return zs.screen, self.frames_name, self.windows_text(), self.seamless, sorted(px)
+
+    def plan_drop(self):
+        """Forgets the start-up plan."""
+        self.planned, self.plan_occ, self.plan_sig = {}, None, None
+
+    def plan_prune(self):
+        """Drops from plan_occ the zones whose windows are not open any more. Returns True when it changed
+        anything, so the start-up settle check waits another round.
+        """
+        if not self.plan_occ:
+            return False
+        live = set(z for z in self.plan_occ if any(self.gump_of(k) is not None for k in self.assign.get(z, ())))
+        if live == self.plan_occ:
+            return False
+        self.plan_occ = live
+        return True
+
+    def plan_at(self, key):
+        """Returns the planned slot of window key, or None. The plan is dropped (and None returned) as soon as
+        start-up is over. With One panel mode on and on the client thread, the slot is grown to cover the
+        gap between windows, as _fit_slot would.
+        """
+        p = self.planned.get(key) if self.planned else None
+        if p is not None and not HOST.booting():
+            self.plan_drop()
+            return None
+        if p is None or not self.holds(key):
+            return None
+        slot, z, pads = p
+        if pads is not None and Client.on_client_thread() and not (self.hooks.get(key) or {}).get("untitled"):
+            grown = Seam.grow(slot, Seam.clip(slot, pads))
+            if grown[3] <= Kit.screen()[1]:
+                return grown
+        return slot
+
+    def fit_added(self, key):
+        """Fits window key straight away when it was just added to the layout and has a planned slot, so it
+        does not flash at the wrong place or size.
+        """
+        key = str(key)
+        g = self.gump_of(key) if key in self.planned else None
+        if g is not None and Snap.visible(g):
+            self.fit_now(key, g)
+
     def fit_now(self, key, g):
-        """Fits one window straight away, without waiting for the next pass, using its last slot.
+        """Fits one window straight away, without waiting for the next pass, using its last slot (or its
+        planned slot while starting).
 
         Used when a window redraws itself in One panel mode and would flash at the wrong size. Only on
-        the client thread, and not while the layout is dirty, the window is dragged, attached or has
-        followers. A window behind a tab is kept hidden.
+        the client thread, and not while the layout is dirty (unless the window is planned), the window is
+        dragged, attached or has followers. A window behind a tab is kept hidden.
         """
-        was = self.slot_was.get(key)
+        was = self.slot_was.get(key) or (self.planned.get(key) if self.planned else None)
         if key in self.behind:
             Kit._behind.add(g)
-        if (was is None or not (self.seamless and self.enabled) or self.dirty or self.fresh or g in SNAP.drag
+        if (was is None or not (self.seamless and self.enabled) or key not in self.wins
+                or ((self.dirty or self.fresh) and key not in self.planned) or g in SNAP.drag
                 or g in SNAP.attached or not Client.on_client_thread()):
             return
         Kit.flush()
@@ -17774,8 +18865,7 @@ class Layout(object):
                 Kit.count(len(Seam.recs), "window"),
                 Kit.count(sum(1 for r in Seam.bare.values() if r["title"]), "window"),
                 Kit.count(max(0, n - hid - len(Seam.recs) - sum(1 for r in Seam.bare.values() if r["title"])),
-                          "window")),
-                Kit.HUE_INFO)
+                          "window")), Kit.HUE_INFO)
         if not n:
             Kit.say("no window sits in a zone.", Kit.HUE_INFO)
         else:
@@ -18851,7 +19941,8 @@ MODULE_FILES = (("actionbar", "Action Bar", "ActionBarModule.py"), ("hud", "Char
     ("interface", "Interface", "InterfaceModule.py"), ("inventory", "Inventory", "InventoryModule.py"),
     ("grimoire", "Grimoire", "GrimoireModule.py"), ("worldmap", "World Map", "WorldMapModule.py"),
     ("ultima", "Ultima Tracker", "UltimaTrackerModule.py"),
-    ("social", "Social", "SocialModule.py"), ("skills", "Skills", "SkillsModule.py"),
+    ("social", "Social", "SocialModule.py"), ("prices", "Reagent Prices", "ReagentPricesModule.py"),
+    ("skills", "Skills", "SkillsModule.py"),
     ("butler", "Property Butler", "PropertyButlerModule.py"), ("meters", "Meters", "MetersModule.py"),
     ("mongotchi", "Mongotchi", "MongotchiModule.py"),)
 RETIRED_KEYS = ("autodoors",)
@@ -18887,13 +19978,25 @@ def module_folders():
 
 
 def _read_text(path):
-    """Return the text of a file, with a .NET fallback when Python cannot open it."""
+    """Return the text of a file, with a .NET fallback when Python cannot open it.
+
+    The bytes are read through .NET and decoded as UTF-8; text that does not decode cleanly goes
+    through Python's own reader instead. Line ends are returned as newlines.
+    """
     try:
-        with open(path, "r") as f:
-            return f.read()
-    except Exception:
         import System
-        return str(System.IO.File.ReadAllText(path))
+        raw = System.IO.File.ReadAllBytes(path)
+        text = System.Text.Encoding.UTF8.GetString(raw)
+        if len(text) != raw.Length or "\ufffd" in text:
+            raise ValueError(path)
+    except Exception:
+        try:
+            with open(path, "r") as f:
+                return f.read()
+        except Exception:
+            import System
+            return str(System.IO.File.ReadAllText(path))
+    return text.replace("\r\n", "\n").replace("\r", "\n") if "\r" in text else text
 
 
 class _Reg(object):
@@ -18978,9 +20081,10 @@ def load_modules():
 
     Modules load in the order of MODULE_FILES, then any others by name. A retired module, or one now
     merged into another, is skipped with a note. A module with an interval is registered lazily from
-    its registration; any other is compiled and run here. A module that fails to load is told, and a
-    stub is added so its name stays in the list. Every module added from the shipped module folder is
-    marked shipped, which is what share codes check.
+    its registration; its text is kept in HOST.texts (up to 64 files) so the compile-ahead and the
+    load need not read it again. Any other module is compiled and run here. A module that fails to
+    load is told, and a stub is added so its name stays in the list. Every module added from the
+    shipped module folder is marked shipped, which is what share codes check.
     """
     folders = module_folders()
     if not folders:
@@ -19019,8 +20123,11 @@ def load_modules():
                 continue
             if m is not None and m.interval is not None:
                 HOST.add_lazy(m.key, m.title, m.desc, path, m.interval, m.default_on, m.category, m.parts, m.aliases)
+                if len(HOST.texts) < 64:
+                    # Read once here for the registration; kept for the later load.
+                    HOST.texts[path] = text
                 continue
-            exec(compile(text, path, "exec"), globals())
+            exec(HOST.compiled(text, path), globals())
         except Exception as ex:
             line = getattr(ex, "lineno", None)
             if line:
@@ -19038,42 +20145,39 @@ def load_modules():
                 s.shipped = ship
 
 
-Kit.data_setup()
-PROFILES = Profiles()
-if not VA_ALONE:
-    HOST.boot_mark("data setup")
-    try:
-        PROFILES.startup()
-    except Exception as _ex:
-        Kit.say("couldn't put the favourite profile on this character (%s%s)."
-                   % (Tz.why(_ex), _error_where()), Kit.HUE_BAD)
-    HOST.boot_mark("profiles")
-
-
 def _module_sysstats():
     """The System Stats module, built in the mother script: a small button and window showing ping,
-    frames per second, frame time, memory, network traffic and packets, and the five busiest parts of
-    Virtue Assistant.
+    frames per second, frame time, memory, network traffic and packets, and the busiest parts of
+    Virtue Assistant (as many rows as the window's height allows).
 
-    Returns the start, tick and stop hooks the host runs, plus a settings page (Show start-up times and
-    Don't warn me about TazUO settings); ticks on the client thread. Saves its positions, minimised
-    state and open state under the SystemStats keys, and its two tick boxes as the main settings
-    startup and tz_quiet.
+    The window can be resized and the size is saved. Returns the start, tick and stop hooks the host
+    runs, plus a settings page (Show start-up times and Don't warn me about TazUO settings); ticks on
+    the client thread. Saves its positions, size, minimised state and open state under the SystemStats
+    keys, and its two tick boxes as the main settings startup and tz_quiet.
     """
     KEY = "sysstats"
     TITLE = "System Stats"
     POS_KEY, MIN_KEY, BTN_KEY, OPEN_KEY = ("SystemStats_pos", "SystemStats_min", "SystemStats_btn", "SystemStats_open")
-    W, MINI_W, MINI_H = 240, 240, 46
-    EVERY = 0.3
+    SIZE_KEY = "SystemStats_size"
+    W, W_MAX, MINI_W, MINI_H = 300, 600, 240, 46
     TRAY_ICON = 0x1F2D
+    EVERY, CLOSED_EVERY, RESIZE_SETTLE, SOCK_EVERY, BTN = 0.3, 2.0, 0.35, 1.0, 46
     ROWS = ("Ping", "FPS", "Frame", "Memory", "In", "Out", "Packets")
-    TOP, TOP_EVERY, NAME_W, TOP_TITLE = 5, 1.0, 100, "VIRTUE ASSISTANT  (busy, slowest)"
-    TOP_KEYS = tuple(("top_name%d" % i, "top_val%d" % i) for i in range(TOP))
+    TOP_MIN, TOP_MAX, TOP_EVERY, TOP_TITLE = 5, 12, 1.0, "BUSIEST PARTS  (share, ms)"
+    VAL_W, VAL_WORST = 110, "100.0%, 99999 ms"
+    TOP_KEYS = tuple(("top_name%d" % i, "top_val%d" % i) for i in range(TOP_MAX))
+    M = Kit.MARGIN
+    YB = M + 30 + Kit.GAP
+    HB = len(ROWS) * 20 + 4
+    Y2 = YB + HB + Kit.GAP
+    FIXED_H = Y2 + 26 + M
     settings = {"startup": False, "tz_quiet": False}
     st = {"shutting": False, "minimized": False, "docked": False, "open": False, "queue": [],
-          "next": 0.0, "vals": {}, "tip": None, "top_next": 0.0, "top": ()}
+          "next": 0.0, "vals": {}, "tip": None, "top_next": 0.0, "top": (), "size": None, "drawn": None,
+          "resize_at": 0.0, "preview": False, "rows": TOP_MIN, "name_w": 100, "sock": (0.0, None), "gc": None,
+          "ping": None}
     win = {"g": None, "c": {}, "store": ({}, {})}
-    btn = {"g": None, "b": None, "store": ({}, {})}
+    btn = {"g": None, "b": None, "lbl": None, "store": ({}, {})}
     queue = Kit.queuer(st)
 
     def load_settings():
@@ -19084,6 +20188,21 @@ def _module_sysstats():
         """Write both tick boxes to the main settings (1 or 0) and save them."""
         HOST.prefs.update([(k, "1" if v else "0") for k, v in settings.items()])
         HOST.save_prefs()
+
+    def own_size(w, h):
+        """Returns the (width, height) the window may have for a requested w by h: the width held between W
+        and W_MAX and the height rounded to a whole number of busiest-parts rows.
+        """
+        n = max(TOP_MIN, min(TOP_MAX, (int(h) - FIXED_H + 10) // 20))
+        return max(W, min(W_MAX, int(w))), FIXED_H + n * 20
+
+    def load_size():
+        """Returns the saved window size (own_size applied to it), or the default size when none is saved."""
+        try:
+            w, h = [int(p) for p in Kit.get_var(SIZE_KEY, "").split(",")[:2]]
+        except ValueError:
+            return own_size(W, 0)
+        return own_size(w, h)
 
     def busiest(now):
         """Return the five busiest running parts as ((fitted name, text), ...), busiest first.
@@ -19103,10 +20222,20 @@ def _module_sysstats():
             else:
                 rows.append((Host.busy_share(s.load, now), s.load[2], s.title))
         rows.sort(key=lambda r: -r[0])
-        # The slowest tick is capped so the text fits the label.
-        return tuple((Kit.fit(t, NAME_W), "%.1f%%, %d ms" % (b / 10.0, min(w, 99999))) for b, w, t in rows[:TOP])
+        nw = st["name_w"]
+        return tuple((Kit.fit(t, nw), "%.1f%%, %d ms" % (b / 10.0, min(w, 99999))) for b, w, t in rows[:st["rows"]])
 
-    def read():
+    def net_stats(now):
+        """Returns the client's network statistics object, looked up again at most once every SOCK_EVERY
+        seconds. now is the current time. None when the client does not expose it.
+        """
+        at, stats = st["sock"]
+        if stats is None or not 0 <= now - at <= SOCK_EVERY:
+            stats = Tz.get(Tz.get(None, "Socket", Tz.T("ClassicUO.Network.AsyncNetClient")), "Statistics")
+            st["sock"] = (now, stats)
+        return stats
+
+    def read(now):
         """Read ping, frame rate, network rates, packet counts and memory from the client. Returns {row
         name: text}.
         """
@@ -19116,8 +20245,7 @@ def _module_sysstats():
             v["FPS"] = str(fps)
             v["Frame"] = "%.1f ms" % (1000.0 / fps) if fps > 0 else "-"
         with Kit.quiet:
-            sock = Tz.get(None, "Socket", Tz.T("ClassicUO.Network.AsyncNetClient"))
-            stats = Tz.get(sock, "Statistics")
+            stats = net_stats(now)
             src = str(Typing._get(stats, "CurrentPingSource", default="") or "")
             v["Ping"] = "off" if src.endswith("Disabled") else "%d ms" % int(Tz.get(stats, "Ping"))
             v["In"] = "%.1f KB/s" % (int(Tz.get(stats, "DeltaBytesReceived")) / 1024.0)
@@ -19125,47 +20253,69 @@ def _module_sysstats():
             v["Packets"] = "%d in, %d out" % (int(Tz.get(stats, "TotalPacketsReceived")),
                                               int(Tz.get(stats, "TotalPacketsSent")))
         with Kit.quiet:
-            import System
-            v["Memory"] = "%d MB" % (int(System.GC.GetTotalMemory(False)) // (1024 * 1024))
+            if st["gc"] is None:
+                import System
+                st["gc"] = System.GC.GetTotalMemory
+            v["Memory"] = "%d MB" % (int(st["gc"](False)) // (1024 * 1024))
         return v
+
+    def show_ping(text):
+        """Shows the ping text on the face of the round button, dropping the ms unit when it does not fit.
+        Does nothing when the text has not changed.
+        """
+        lbl = btn["lbl"]
+        if lbl is None or text == st["ping"]:
+            return
+        st["ping"] = text
+        if Kit.text_w(text) > BTN - 6:
+            text = Kit.fit(text.replace(" ms", ""), BTN - 6)
+        Kit.set_text(lbl, text)
+        lbl.SetPos(max(3, (BTN - Kit.text_w(text)) // 2), (BTN - 16) // 2)
 
     def build_button():
         """Build the small round button that opens and closes the window; its tip shows the current
         figures.
         """
-        x, y = Kit.load_pos(BTN_KEY, (8, 200), (46, 46))
+        x, y = Kit.load_pos(BTN_KEY, (8, 200), (BTN, BTN))
         store = ({}, {})
         g = G.CreateGump(True, True)
-        Kit.add_window_frame(g, 46, 46, corners=False)
-        st["tip"] = None
-        b = Kit.art_button(g, store, "stats", Kit.ART_CIRCLE, 12, 12, None, "System stats", on_click=queue("toggle"))
-        Kit.show_window(g, x, y, 46, 46, None, False, None, lambda: Kit.save_pos(BTN_KEY, g), btn,
-                        {"g": g, "b": b, "store": store})
+        Kit.add_window_frame(g, BTN, BTN, corners=False)
+        st["tip"] = st["ping"] = None
+        lbl = Kit.inert(Kit.add_label(g, "", 3, (BTN - 16) // 2, Kit.HUE_TEXT))
+        b = Kit.catcher(g, 0, 0, BTN, BTN, queue("toggle"), "Click to open or close System Stats; drag to move",
+                        movable=True)
+        Kit.show_window(g, x, y, BTN, BTN, None, False, None, lambda: Kit.save_pos(BTN_KEY, g), btn,
+                        {"g": g, "b": b, "lbl": lbl, "store": store})
+        show_ping(st["vals"].get("Ping", "-"))
 
     def build_window():
-        """Build the window with one row per figure and the busiest-parts section, or just its title when
-        minimised; then fill the values.
+        """Builds the window with one row per figure and the busiest-parts section (its row count follows
+        the saved size), or just its title when minimised; then fills the values.
         """
-        M = Kit.MARGIN
-        yb = M + 30 + Kit.GAP
-        hb = len(ROWS) * 20 - 12
-        y2 = yb + hb + Kit.GAP
-        h = y2 + 26 + TOP * 20 + M
-        g, store, c = wnd.begin(W, h)
+        held = HOST.layout_holds(KEY)
+        st["resize_at"], st["preview"] = 0.0, False
+        if st["size"] is None:
+            st["size"] = load_size()
+        ww, h = st["size"]
+        n = (h - FIXED_H) // 20
+        vw = max(VAL_W, Kit.text_w(VAL_WORST) + 4)
+        st["rows"], st["name_w"] = n, ww - 2 * M - vw - 28
+        rs = None if held else (W, FIXED_H + TOP_MIN * 20, on_resized)
+        g, store, c = wnd.begin(ww, h, resize=rs)
         if not st["minimized"]:
-            wnd.frame(g, settings=False)
-            Kit.add_section(g, M, yb, W - 2 * M, hb)
-            # Resetting the timer makes the busiest list be gathered at the next tick instead of waiting up to
-            # a second.
-            st["top_next"] = 0.0
+            wnd.frame(g, mouse=rs is None)
+            Kit.add_section(g, M, YB, ww - 2 * M, HB)
+            st["top_next"] = time.time() + TOP_EVERY
+            st["top"] = busiest(time.time())
             for i, name in enumerate(ROWS):
-                Kit.add_label(g, name + ":", M + 10, yb + 6 + i * 20, Kit.HUE_INFO)
-                c[name] = Kit.add_label(g, "", M + 90, yb + 6 + i * 20, Kit.HUE_TEXT)
-            Kit.add_section(g, M, y2, W - 2 * M, h - y2 - M, Kit.fit(TOP_TITLE, W - 2 * M - 16))
-            for i, (kn, kv) in enumerate(TOP_KEYS):
-                c[kn] = Kit.add_label(g, "", M + 10, y2 + 26 + i * 20, Kit.HUE_INFO)
-                c[kv] = Kit.add_label(g, "", M + 116, y2 + 26 + i * 20, Kit.HUE_TEXT)
+                Kit.add_label(g, name + ":", M + 10, YB + 6 + i * 20, Kit.HUE_INFO)
+                c[name] = Kit.add_label(g, "", M + 90, YB + 6 + i * 20, Kit.HUE_TEXT)
+            Kit.add_section(g, M, Y2, ww - 2 * M, h - Y2 - M, Kit.fit(TOP_TITLE, ww - 2 * M - 16))
+            for i, (kn, kv) in enumerate(TOP_KEYS[:n]):
+                c[kn] = Kit.add_label(g, "", M + 10, Y2 + 26 + i * 20, Kit.HUE_INFO)
+                c[kv] = Kit.add_label(g, "", ww - M - 10 - vw, Y2 + 26 + i * 20, Kit.HUE_TEXT)
         wnd.end(g)
+        st["drawn"] = None if st["minimized"] else (ww, h)
         refresh()
 
     wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, default=(70, 200), mini=(MINI_W, MINI_H),
@@ -19177,10 +20327,8 @@ def _module_sysstats():
         """
         v = st["vals"]
         c = win["c"]
-        if st["minimized"]:
-            lbl = c.get("status")
-            if lbl is not None:
-                Kit.set_text(lbl, "%s: %s, %s FPS" % (TITLE, v.get("Ping", "-"), v.get("FPS", "-")))
+        if "status" in c:
+            Kit.set_text(c["status"], "%s: %s, %s FPS" % (TITLE, v.get("Ping", "-"), v.get("FPS", "-")))
             return
         for name in ROWS:
             lbl = c.get(name)
@@ -19189,10 +20337,45 @@ def _module_sysstats():
         top = st["top"]
         for i, (kn, kv) in enumerate(TOP_KEYS):
             if kn not in c:
-                continue
+                break
             row = top[i] if i < len(top) else ("", "")
             Kit.set_text(c[kn], row[0])
             Kit.set_text(c[kv], row[1])
+
+    def on_resized(*args):
+        """Resize event of the window: remembers when it happened and, when the size differs from what is
+        drawn, dims the window as a preview until the resize settles.
+        """
+        st["resize_at"] = time.time()
+        g = win["g"]
+        if st["preview"] or st["minimized"] or not Kit.is_open(g):
+            return
+        if (int(g.GetWidth()), int(g.GetHeight())) != st["drawn"]:
+            st["preview"] = True
+            g.SetAlpha(0.55)
+
+    def apply_resize():
+        """Applies a settled resize: takes the new size (cut to the screen height), saves it and redraws the
+        window with as many busiest-parts rows as fit. A window held by a zone, or one whose size did not
+        really change, is only made opaque again.
+        """
+        g = win["g"]
+        st["preview"] = False
+        if not Kit.is_open(g) or st["minimized"]:
+            return
+        if HOST.layout_holds(KEY):
+            g.SetAlpha(0)
+            return
+        gw, gh = int(g.GetWidth()), int(g.GetHeight())
+        drawn = st["drawn"] or (0, 0)
+        if abs(gw - drawn[0]) <= 2 and abs(gh - drawn[1]) <= 2:
+            g.SetAlpha(0)
+            return
+        sh = Kit.screen()[1]
+        size = own_size(gw, min(gh, sh) if sh > 0 else gh)
+        st["size"] = size
+        Kit.put_var(SIZE_KEY, "%d,%d" % size)
+        build_window()
 
     def page_table(w):
         """Return the settings page table: START-UP (Show start-up times) and SHARD RULES (the TazUO warning switch).
@@ -19211,6 +20394,7 @@ def _module_sysstats():
     def open_window():
         """Open the window and dock it."""
         st["open"] = True
+        st["next"] = 0.0
         build_window()
         wnd.dock()
 
@@ -19227,15 +20411,16 @@ def _module_sysstats():
         or a zone holds it.
         """
         load_settings()
-        st.update({"shutting": False, "docked": False, "queue": [], "next": 0.0, "top_next": 0.0,
-                   "minimized": Kit.load_min(MIN_KEY)
+        st.update({"shutting": False, "docked": False, "queue": [], "next": 0.0, "top_next": 0.0, "size": None,
+                   "resize_at": 0.0, "preview": False, "sock": (0.0, None), "minimized": Kit.load_min(MIN_KEY)
                    or HOST.dock_wanted(KEY), "open": Kit.get_var(OPEN_KEY, "0") == "1"})
         build_button()
         if st["open"] or HOST.layout_holds(KEY):
             open_window()
 
     def _tick():
-        """Module tick: run queued clicks, then read and show the figures about three times a second.
+        """Module tick: runs queued clicks, applies a settled resize, then reads and shows the figures about
+        three times a second.
 
         The figures are refreshed only when the window is shown; the button tip is rewritten when it
         changed. The busiest parts are collected once a second, only while the window is open and not
@@ -19245,6 +20430,8 @@ def _module_sysstats():
         while st["queue"]:
             action = st["queue"].pop(0)
             if action == "toggle":
+                if Kit.just_dragged(btn["g"]):
+                    continue
                 if st["open"] and not HOST.layout_holds(KEY):
                     close_window()
                 elif not st["open"]:
@@ -19258,12 +20445,16 @@ def _module_sysstats():
                 Kit.win_action(action, st, KEY, TITLE, build_window, MIN_KEY)
         if st["open"] and Kit.was_clicked(win["store"], "close"):
             close_window()
-        if not 0 <= st["next"] - now <= EVERY:
-            if not st["open"] and HOST.layout_holds(KEY):
-                open_window()
-            st["next"] = now + EVERY
-            v = st["vals"] = read()
-            tip = "Ping %s, %s FPS, memory %s; click to open or close the window" % (
+        if st["resize_at"] and now - st["resize_at"] >= RESIZE_SETTLE and not (SNAP.drag or SNAP.pressed() is True):
+            st["resize_at"] = 0.0
+            apply_resize()
+        if not st["open"] and HOST.layout_holds(KEY):
+            open_window()
+        if not 0 <= st["next"] - now <= CLOSED_EVERY:
+            st["next"] = now + (EVERY if st["open"] else CLOSED_EVERY)
+            v = st["vals"] = read(now)
+            show_ping(v.get("Ping", "-"))
+            tip = "Ping %s, %s FPS, memory %s; click to open or close, drag to move" % (
                 v.get("Ping", "-"), v.get("FPS", "-"), v.get("Memory", "-"))
             if tip != st["tip"] and btn["b"] is not None:
                 st["tip"] = tip
@@ -19283,6 +20474,7 @@ def _module_sysstats():
         Kit.put_var(OPEN_KEY, "1" if st["open"] else "0")
         wnd.close()
         b, btn["g"] = btn["g"], None
+        btn["b"] = btn["lbl"] = None
         Kit.save_pos(BTN_KEY, b)
         Kit.dispose(b)
 
@@ -19292,8 +20484,21 @@ def _module_sysstats():
 
 # Without the modules (running alone) the mother script does nothing further.
 if not VA_ALONE:
-    load_modules()
-    HOST.boot_mark("module files")
-    HOST.add("sysstats", "System Stats", "Ping, FPS and memory button", _module_sysstats, 0.1,
-             category="On screen").shipped = True
-    HOST.run()
+    if not HOST.self_run(globals()):
+        Kit.data_setup()
+        PROFILES = Profiles()
+        HOST.boot_mark("data setup")
+        try:
+            PROFILES.startup()
+        except Exception as _ex:
+            Kit.say("couldn't put the favourite profile on this character (%s%s)."
+                    % (Tz.why(_ex), _error_where()), Kit.HUE_BAD)
+        HOST.boot_mark("profiles")
+        load_modules()
+        HOST.boot_mark("module files")
+        HOST.add("sysstats", "System Stats", "Ping, FPS and memory button", _module_sysstats, 0.1,
+                 category="On screen").shipped = True
+        HOST.run()
+else:
+    Kit.data_setup()
+    PROFILES = Profiles()

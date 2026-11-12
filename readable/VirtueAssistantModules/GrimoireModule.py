@@ -2037,18 +2037,23 @@ def _module_grimoire():
             save_int(k, v)
 
     def set_docked(on):
-        """Folds the window into the Action Bar (hides it) or brings it back. The state is not saved."""
+        """Fold the window into the Action Bar (hide it) or bring it back. The state is not saved.
+
+        Also marks the window set as changed (Kit.stir) so the host notices the shown windows moved.
+        """
         on = bool(on)
         if on == st["docked"]:
             return
         st["docked"] = on
         win["g"].IsVisible = not on
+        Kit.stir()
 
     def link_tick():
         """Commands from the Action Bar and this window's state for it, through shared variables.
 
         Runs on the tick, looked at every 0.1 seconds. "show" and "dock" arrive in LINK_CMD; the state
-        goes out in LINK_STATE as open, minimized or docked.
+        goes out in LINK_STATE as open, minimized or docked. A folded window is shown again when the bar
+        is gone and is not about to appear (HOST.bar_soon).
         """
         now = time.time()
         if now < st.get("link_next", 0.0):
@@ -2071,7 +2076,9 @@ def _module_grimoire():
                 fold_to_bar()
         # The bar has gone: show the title strip again (the wish is kept).
         if st["docked"]:
-            if not HOST.bar_alive():
+            # bar_soon is also true while the host is still booting with the bar switched on, so a window
+            # folded at start is not shown loose before the bar has been drawn.
+            if not HOST.bar_soon():
                 set_docked(False)
         # Folded in by choice: back into the bar once it is up again.
         elif st["minimized"] and now >= st.get("wish_next", 0.0):
@@ -3279,7 +3286,9 @@ def _module_grimoire():
     def _start():
         """Starts the module: draws the window, registers it with the layout and the services.
 
-        Runs on the client thread when the module turns on.
+        Runs on the client thread when the module turns on. A window that was left minimized, or that the
+        Action Bar wants folded, is minimized before it is added to the screen, and it is added hidden
+        when it will be folded in, so it never shows loose at start.
         """
         reset_state()
         queue.add(("scan",), dup=True)
@@ -3290,7 +3299,10 @@ def _module_grimoire():
         st["want_tab"] = load_int("Tab", 0) or None
         build_window()
         G.AddControlOnDisposed(win["g"], on_close)
-        G.AddGump(win["g"])
+        if load_int("Min", 0) == 1 or HOST.dock_wanted(KEY):
+            toggle_min()
+        st["docked"] = bool(st["minimized"] and HOST.dock_soon(KEY))
+        Kit.add_front(win["g"], st["docked"])
         Kit.on_moved(win["g"], save_window_pos)
         # Registers the window as a zone-capable window: the layout can show, minimize, fold and fit it.
         HOST.dock_add(KEY, {"title": TITLE, "icon": SPELLBOOK_GRAPHICS[0], "state": layout_state, "show": zone_show,
@@ -3300,8 +3312,6 @@ def _module_grimoire():
         fitst["own"], fitst["told"] = None, None
         # A change of look (dark mode and so on) redraws the window.
         cleanup.service("look.grimoire", lambda: st.update(dirty=True))
-        if load_int("Min", 0) == 1 or HOST.dock_wanted(KEY):
-            toggle_min()
         # Ignore a stale command left from before.
         API.RemoveSharedVar(LINK_CMD)
         # Tells the Action Bar the state right away.

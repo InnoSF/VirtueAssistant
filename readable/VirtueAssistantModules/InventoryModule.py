@@ -375,7 +375,7 @@ def _module_inventory():
 
         def sub_shown(k, g, moved, **more):
             """Show a built sub-window and record it in win, with its moved callback; more are extra win keys."""
-            G.AddGump(g)
+            Kit.add_front(g)
             Kit.on_moved(g, moved)
             win[k] = g
             win.update(more)
@@ -809,6 +809,7 @@ def _module_inventory():
             remove_catcher(g)
             if not g.IsVisible:
                 g.IsVisible = True
+                Kit.stir()
             set_offset(g, 0, 0)
             g.AcceptMouseInput = True
             g.CanMove = True
@@ -1066,10 +1067,12 @@ def _module_inventory():
                     if hidden:
                         if g.IsVisible:
                             g.IsVisible = False
+                            Kit.stir()
                         H.placed.pop(g, None)
                         continue
                     if not g.IsVisible:
                         g.IsVisible = True
+                        Kit.stir()
                     # Between full looks a bag is left alone unless the client rebuilt it (a new art control: an item
                     # moved in or out, trimmed or not, minimized or not), re-showed a trimmed bag's art, or it was
                     # minimized or restored.
@@ -1132,6 +1135,7 @@ def _module_inventory():
                 return False
             if g.IsVisible:
                 g.IsVisible = False
+                Kit.stir()
             if g.AcceptMouseInput:
                 g.AcceptMouseInput = False
             if park:
@@ -1156,6 +1160,7 @@ def _module_inventory():
                 g = gumps.get(info[2])
                 if g is not None and g.IsVisible:
                     g.IsVisible = False
+                    Kit.stir()
 
         def restore_all():
             """Give every bag this part changed back to the client."""
@@ -1566,8 +1571,7 @@ def _module_inventory():
                 # Width the side panel takes.
                 extra = max(0, (st["grid_wh"][0] if st["grid_wh"] else gw_now) - gw_now)
                 if attached():
-                    # Combined: the area is the Paperdoll's hole, so the panel's own width is what is taken.
-                    extra = 0 if side_off() else st["side_pw"]
+                    extra = 0 if side_off() else gap + side_width(int(h))
                 aw = int(w) - extra
                 ah = int(h) - top_off()
                 cw, ch = st["cell_w"], st["cell_h"]
@@ -1593,21 +1597,17 @@ def _module_inventory():
                 fitov["cols"], fitov["cell"] = new
                 st["dirty_frame"] = True
 
-        def bag_cell():
+        def bag_cell(tall=None):
             """The bags' own cell data for the fitted Paperdoll's sums.
 
             Returns (cell w, cell h, gap, slots, side panel width), then (scale now, your scale, the least
             it may be shrunk to) as percentages; the cells are measured at the scale of now.
             """
             gap = 0 if trimming() else LOOSE_GAP
-            side = 0 if side_off() else st["side_pw"]
             area = fitov.get("area")
-            # The side panel's width at the area's height, not at the height the grid happens to have now: it
-            # would go from one column to two and back as the grid shrank.
-            if side and area is not None:
-                tw, th = bare_btn_size()
-                cols, _h = side_columns(area[1] - th - BARE_PAD)
-                side = len(cols) * SIDE_COL_W + 2 * SIDE_RIM
+            if tall is None and area is not None:
+                tall = area[1]
+            side = 0 if side_off() else (st["side_pw"] if tall is None else gap + side_width(int(tall)))
             cur = int(round(H.scale * 100)) if R.ok else st["scale_pct"]
             own = st["scale_pct"] if shrink["pct"] is not None else cur
             floor = SHRINK_MIN if (R.ok and not H.disabled) else own
@@ -2357,6 +2357,9 @@ def _module_inventory():
             whole = bag_name(bag, False)
             room = x + w - nx - (6 + Kit.text_w(COUNT_DIGITS) if kind == "open" else 0) - 10
             name = Kit.fit(whole, max(8, room))
+            plain = whole.rsplit(" [", 1)[0]
+            if name != whole and plain != whole and Kit.text_w(plain) <= max(8, room):
+                name = plain
             out.append((Kit.add_label(grid, name, nx, y + 3, Kit.HUE_INFO), "lbl"))
             CV["label"][slot] = (whole, name != whole)
             if kind == "open":
@@ -3518,7 +3521,7 @@ def _module_inventory():
                     grid.SetPos(nx, ny + (BAR_H if st["minimized"] else top_off()))
             add_hook(grid, True)
             lay_under(grid)
-            G.AddGump(grid)
+            Kit.add_front(grid)
             win["grid"] = grid
             bar = make_bar(total_w, st["docked"] or bare or attached(), free)
             if attached():
@@ -3584,7 +3587,7 @@ def _module_inventory():
             # Folded into the Action Bar, bags only or combined: the bar exists but stays hidden.
             if hide:
                 bar.IsVisible = False
-            G.AddGump(bar)
+            Kit.add_front(bar)
             win["bar"] = bar
             return bar
 
@@ -3666,7 +3669,7 @@ def _module_inventory():
             # Held in its zone.
             if HOST.layout_locked(KEY):
                 grid.CanMove = False
-            G.AddGump(grid)
+            Kit.add_front(grid)
             win["grid"] = grid
             # Hidden: nothing reads it as the window.
             bar = make_bar(W, True)
@@ -6004,7 +6007,6 @@ def _module_inventory():
                              ("look.bags", lambda: st.update(dirty_frame=True))):
                 cleanup.service(name, fn)
             Kit.hook_once(CV, "hooked", ("OnItemUpdated", on_bag_item))
-            API.SysMsg(TITLE + ": on, %s." % Kit.count(st["slots"], "slot"), HUE_OK)
 
         def _tick():
             """Run one client tick: handle the queued actions, keep the window built and tidy, step the trap
@@ -6231,6 +6233,7 @@ def _module_inventory():
         # Client constants: the paperdoll gump ids of an item are its animation id plus one of these
         # offsets, by sex.
         MALE_GUMP_OFFSET, FEMALE_GUMP_OFFSET = 50000, 60000
+        BAGS_WAIT = 2.0
         # A dead gargoyle's shroud draws from gump 0x0223 instead of its own animation id.
         SHROUD_ANIM, GARGOYLE_SHROUD = 0x03CA, 0x0223
         GARGOYLE_BODIES = (0x02B6, 0x02B7)
@@ -6318,10 +6321,10 @@ def _module_inventory():
         # under ours for the bag grid.
         st = {"shutting": False, "minimized": False, "docked": False, "queue": [], "sig": None, "doll_sig": None,
               "stats_at": 0.0, "doll_at": 0.0, "px": M, "attached": None, "beside_said": False, "layer_name": {},
-              "wait_player": False, "saved_min": False, "w_armed": True, "w_at": 0.0, "wbar": None, "fit": None,
-              "k": 1.0, "py": None, "strip_w": None, "pw": PANEL_W, "col": None, "ph": PANEL_H, "rp": COL_PITCH,
-              "pair": None, "pair_at": 0.0, "room": None, "room_fs": None, "told_shrink": None, "grew": False,
-              "paired": False}
+              "wait_player": False, "wait_bags": None, "saved_min": False, "w_armed": True, "w_at": 0.0, "wbar": None,
+              "fit": None, "k": 1.0, "py": None, "strip_w": None, "pw": PANEL_W, "col": None, "ph": PANEL_H,
+              "rp": COL_PITCH, "pair": None, "pair_at": 0.0, "room": None, "room_fs": None, "told_shrink": None,
+              "grew": False, "paired": False}
         # Window state: the gump, its controls, click store, the slot records, the client's raw gump and
         # the doll's pictures.
         win = {"g": None, "c": {}, "store": ({}, {}), "slots": [], "raw": None, "doll": []}
@@ -6680,7 +6683,7 @@ def _module_inventory():
             st["room"] = (hw, hh)
             fs = fit_scale(hw, hh)
             st["room_fs"] = fs
-            need = fs[1] if fs is not None else grid_need(hw)
+            need = fs[1] if fs is not None else grid_need(hw, hh)
             st["grew"] = need > hh
             if need > hh:
                 sh = int(Kit.screen()[1])
@@ -6710,7 +6713,7 @@ def _module_inventory():
                     rc.ScaleTiledTexture = True
                 rc.ApplyScale(k, True, True, False)
 
-        def cell_info():
+        def cell_info(tall=None):
             """Bags' cells as they would be at your own Bag scale: (cell w, cell h, gap, slots, side panel width,
             your scale, the least scale), or None.
 
@@ -6721,7 +6724,7 @@ def _module_inventory():
             if fn is None:
                 return None
             try:
-                v = fn()
+                v = fn() if tall is None else fn(tall)
                 cw, ch, gap, n, side = v[0], v[1], v[2], v[3], v[4]
                 cur, own, floor = (v[5], v[6], v[7]) if len(v) >= 8 else (100, 100, 100)
             except Exception:
@@ -6745,7 +6748,7 @@ def _module_inventory():
             rows = int(math.ceil(n / float(cols)))
             return rows, rows * ch + (rows - 1) * gap, cw + side
 
-        def grid_need(width):
+        def grid_need(width, tall=1 << 20):
             """The least height the combined bag grid needs across `width`.
 
             Bags' own packing sums are used when it offers them (bag.pack); otherwise the cells are laid out
@@ -6760,7 +6763,7 @@ def _module_inventory():
                     got = None
                 if got is not None:
                     return got[1]
-            ci = cell_info()
+            ci = cell_info(tall)
             # Not known yet: a third of a zone or so.
             return 120 if ci is None else need_at(ci, 1.0, width)[1]
 
@@ -6779,7 +6782,7 @@ def _module_inventory():
                     got = None
                 if got is not None:
                     return got
-            ci = cell_info()
+            ci = cell_info(hh)
             if ci is None:
                 return None
             own, floor = ci[5], ci[6]
@@ -6864,9 +6867,11 @@ def _module_inventory():
             bx, by = M, Y_BODY
             bw, bh = max(1, fw - 2 * M), max(1, fh - Y_BODY - M)
             gap = COMBINE_HOLE_GAP
-            # Combined: the bag grid's rows at the bags' own cell height are taken first and the doll panel
-            # fills what is left (never less than doll_room or half the body).
-            room = max(bh - grid_need(bw) - gap, min(bh, max(doll_room(bw), (bh - gap) // 2))) if combined else bh
+            room = bh
+            if combined:
+                least = min(bh, max(doll_room(bw), (bh - gap) // 2))
+                room = max(bh - grid_need(bw) - gap, least)
+                room = max(bh - grid_need(bw, max(1, bh - room - gap)) - gap, least)
             mode, aw, ah, k = choose_fit(bw, room)
             pw = max(PANEL_W_MIN, int(round(aw / k)))
             ph = max(PANEL_H, int(round(ah / k)))
@@ -7988,9 +7993,30 @@ def _module_inventory():
             elif cmd == "dock":
                 queue("to_bar")()
 
+        def attach_bags():
+            """Attach this window to the Bags grid (combined mode); True when it worked.
+
+            Hands Bags a record (this window, the hole's guessed offset, whether it is shown, the dock state,
+            the grid's size and the command callback) through bag.attach. On failure the record is dropped
+            and a message is printed. Client thread.
+            """
+            attach, size = bag_service("bag.attach"), bag_service("bag.grid_size")
+            hx, hy = hole_guess()
+            wh = safe(size)
+            att = {"g": win["g"], "raw": None, "dx": hx, "dy": hy, "shown": not st["minimized"],
+                   "state": dock_state(), "grid_wh": tuple(wh) if wh else None, "cmd": bag_cmd}
+            st["attached"] = att
+            try:
+                attach(att)
+            except Exception as e:
+                st["attached"] = None
+                API.SysMsg(TITLE + ": couldn't combine with Bags (%s)." % e, Kit.HUE_BAD)
+                return False
+            return True
+
         def combine_tick():
-            """Attaches to Bags when both run and the setting is on, lets go when either stops, and follows the
-            grid's size.
+            """Attach to Bags when both run and the setting is on, let go when either stops, and follow the grid's
+            size.
 
             Runs every tick; the grid size changing rebuilds the window.
             """
@@ -7999,23 +8025,8 @@ def _module_inventory():
             att = st["attached"]
             want = settings["combine"] and attach is not None and size is not None
             if att is None:
-                if not want:
-                    return
-                # Bags is taken on as soon as it is there; the hole for its slots is cut once it has drawn them and
-                # said how big they are. dx and dy start where the hole will be, so its grid is never drawn over the
-                # title bar for a tick or two before that.
-                hx, hy = hole_guess()
-                att = {"g": win["g"], "raw": None, "dx": hx, "dy": hy, "shown": not st["minimized"],
-                       "state": dock_state(), "grid_wh": None, "cmd": bag_cmd}
-                st["attached"] = att
-                try:
-                    # No safe() wrapper: this runs every tick.
-                    attach(att)
-                except Exception as e:
-                    st["attached"] = None
-                    API.SysMsg(TITLE + ": couldn't combine with Bags (%s)." % e, Kit.HUE_BAD)
-                    return
-                build_window()
+                if want and attach_bags():
+                    build_window()
                 return
             if not want:
                 detach()
@@ -8024,7 +8035,8 @@ def _module_inventory():
             wh = tuple(wh) if wh else None
             if wh != att["grid_wh"]:
                 att["grid_wh"] = wh
-                build_window()
+                if st["fit"] is None and not st["minimized"]:
+                    build_window()
 
         def detach():
             """Lets go of Bags and redraws the window at its own size."""
@@ -8073,11 +8085,12 @@ def _module_inventory():
         load_settings()
 
         def _start():
-            """Module start: loads settings, waits for a player, finds the client interop once, builds the
-            window and registers its dock hooks.
+            """Module start: load settings, wait for a player, find the client interop once, reset the state and
+            register the weight alert, then open the doll.
 
             If there is no player yet (not in the world) it waits and the tick retries: an error here would
-            untick the module for good.
+            untick the module for good. When combining with Bags and Bags is running but not ready, the
+            opening waits (up to BAGS_WAIT seconds) in the tick so the window is built once, already combined.
             """
             load_settings()
             # Not in the world yet: the window is built on the first tick with a player.
@@ -8088,19 +8101,48 @@ def _module_inventory():
             if not R.tried:
                 R.tried = True
                 init_interop()
-            st.update({"shutting": False, "docked": False, "queue": [], "sig": None, "doll_sig": None,
+            st.update({"shutting": False, "docked": HOST.dock_soon(KEY), "queue": [], "sig": None, "doll_sig": None,
                        "attached": None, "beside_said": False, "fit": None, "k": 1.0, "py": None,
                        "strip_w": None, "pw": PANEL_W, "col": None, "ph": PANEL_H, "rp": COL_PITCH,
                        "told_bags": None, "pair": None, "pair_at": 0.0,
                        "room": None, "room_fs": None, "told_shrink": None, "grew": False, "paired": False,
-                       "w_armed": True, "w_at": 0.0, "wbar": None,
+                       "w_armed": True, "w_at": 0.0, "wbar": None, "wait_bags": None,
                        "minimized": bool(st["saved_min"] or HOST.dock_wanted(KEY))})
             # Listed on Settings > Alerts (sound and on/off).
             HOST.alert_kind("character.weight", "Weight near the limit", WEIGHT_ALERT_SOUND)
+            if settings["combine"] and not bags_ready() and HOST.part_on("bags", "inventory"):
+                st["wait_bags"] = time.time()
+                return
+            open_doll()
+
+        def bags_ready():
+            """Is Bags ready to be combined with (True: it offers attach and grid_size and has a grid size)?
+
+            Used at start-up, so the doll can wait briefly for Bags and then open already combined.
+            """
+            size = bag_service("bag.grid_size")
+            return bag_service("bag.attach") is not None and size is not None and bool(safe(size))
+
+        def open_doll():
+            """Open the doll window for the first time: attach to Bags when combining, take the zone slot and
+            pair rectangles, build the window and register its dock hooks.
+
+            Called from the start or, when Bags was not ready, from the tick once Bags is ready or BAGS_WAIT
+            has passed. Prints a message when the client's private members cannot be reached. Client thread.
+            """
+            st["wait_bags"] = None
+            attach, size = bag_service("bag.attach"), bag_service("bag.grid_size")
+            if settings["combine"] and attach is not None and size is not None:
+                attach_bags()
+            slot = HOST.layout_slot(KEY)
+            if slot is not None and slot[0] is not None and slot[1] is not None:
+                st["fit"] = (int(slot[0]), int(slot[1]))
+                st["pair"] = pair_rects()
+                st["pair_at"] = time.time()
             build_window()
+            look_worn()
+            refresh_stats()
             hooks = Kit.dock_hooks(TITLE, TRAY_ICON, st, win, queue("redraw"))
-            # In a zone the window is drawn exactly its slot's size: the doll panel scaled as one piece and the
-            # bag grid filling the rest (layout_fit). pieces_out says nothing rides beside the window.
             hooks.update({"fit": layout_fit, "exact": True, "pieces_out": True, "verify": not st["paired"]})
             geo["hooks"] = hooks
             HOST.dock_add(KEY, hooks)
@@ -8109,12 +8151,16 @@ def _module_inventory():
                            % R.error, Kit.HUE_INFO)
 
         def _tick():
-            """Client tick: builds the window when the player arrives, handles queued actions, follows Bags and
-            the zones, and keeps the doll, slots and stats current.
+            """Client tick: build the window when the player arrives or Bags is ready, handle queued actions,
+            follow Bags and the zones, and keep the doll, slots and stats current.
             """
             if st["wait_player"]:
                 if safe(lambda: API.Player):
                     _start()
+                return
+            if st["wait_bags"] is not None:
+                if bags_ready() or not 0 <= time.time() - st["wait_bags"] < BAGS_WAIT:
+                    open_doll()
                 return
             if win["g"] is None:
                 return
@@ -8165,7 +8211,7 @@ def _module_inventory():
                     # rebuild happens only when Bags' own data changed, never on the timer alone.
                     room = st["room"]
                     if room is not None and st["fit"] is not None and not st["minimized"]:
-                        ci = cell_info()
+                        ci = cell_info(room[1])
                         sig = (room, None if ci is None else (round(ci[0], 1), round(ci[1], 1),
                                                               ci[2], ci[3], ci[4], ci[5]))
                         if sig != st.get("room_sig"):
@@ -11142,7 +11188,7 @@ def _module_inventory():
             if held:
                 to_slot(KEY, g, Kit.show_window(g, x, y0, w, h, KEY, False, None, None))
             else:
-                G.AddGump(g)
+                Kit.add_front(g)
             # Remember a drag so it can be saved.
             if not follow and not held:
                 Kit.on_moved(g, save_sup_pos)

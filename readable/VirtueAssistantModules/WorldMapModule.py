@@ -500,14 +500,27 @@ def _module_worldmap():
         # Pings kept in the History window's list; the oldest is dropped.
         HISTORY_MAX = 200
         HISTORY_ROWS = 10
-        # The socket module may be missing or broken in the runtime: the .NET transport then does the
-        # same job.
-        try:
-            import socket
-            import select
-            _HAVE_PY_SOCKET = True
-        except Exception:
-            _HAVE_PY_SOCKET = False
+        socket = select = _HAVE_PY_SOCKET = None
+
+        def net():
+            """Load the socket and select modules on first use and say whether they work here.
+
+            Returns True when Python sockets can be used. The raw _socket module is used instead
+            of socket,
+            because socket pulls in the slow os module at start-up. The answer is kept, so the
+            import is tried
+            once, and only when a connection is first wanted.
+            """
+            nonlocal socket, select, _HAVE_PY_SOCKET
+            if _HAVE_PY_SOCKET is None:
+                try:
+                    import _socket as so
+                    import select as se
+                    socket, select, _HAVE_PY_SOCKET = so, se, True
+                except Exception:
+                    _HAVE_PY_SOCKET = False
+            return _HAVE_PY_SOCKET
+
         import collections
         # Saved keys of this part start with this prefix (the part's earlier name, kept so saved settings
         # carry over).
@@ -662,9 +675,28 @@ def _module_worldmap():
             and close interface as DotNetTransport.
             """
             def __init__(self, host, port, timeout):
-                """Connect (timeout in seconds), then use SEND_TIMEOUT for writes."""
-                self.s = socket.create_connection((host, port), timeout)
-                self.s.settimeout(SEND_TIMEOUT)
+                """Connect to host:port (timeout in seconds), then use SEND_TIMEOUT for writes.
+
+                The loop over the getaddrinfo results is a small create_connection of its own, built
+                on the raw
+                _socket module. The last error is raised when no address answers.
+                """
+                err = None
+                for af, kind, proto, _, addr in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
+                    s = None
+                    try:
+                        s = socket.socket(af, kind, proto)
+                        s.settimeout(timeout)
+                        s.connect(addr)
+                        break
+                    except OSError as ex:
+                        err = ex
+                        if s is not None:
+                            s.close()
+                else:
+                    raise err if err is not None else OSError("getaddrinfo returns an empty list")
+                self.s = s
+                s.settimeout(SEND_TIMEOUT)
 
             def send(self, data):
                 """Write all the bytes."""
@@ -732,10 +764,12 @@ def _module_worldmap():
         def open_transport(host, port, timeout=5):
             """Open a transport to host:port, Python sockets first, then .NET.
 
-            Network errors from Python sockets are real answers and are raised as they are. Any other
-            failure means the socket module is broken in this runtime, so .NET is tried.
+            Network errors from Python sockets are real answers and are raised as they are. Any
+            other failure
+            (or no usable _socket / select) means Python sockets are broken in this runtime, so
+            .NET is tried.
             """
-            if _HAVE_PY_SOCKET:
+            if net():
                 try:
                     return PySocketTransport(host, port, timeout)
                 except (socket.timeout, socket.gaierror, ConnectionError, OSError):
@@ -747,49 +781,78 @@ def _module_worldmap():
         class Sender(object):
             """Writes to a transport on a thread of its own.
 
-            send only queues the bytes; the worker writes them. A stalled map server would otherwise stall
-            every module's thread work for up to the 5 s write timeout per packet. The first write error
-            is kept in error and picked up by MapConnection.poll, which drops the connection. Without
-            threads the writes happen in place.
+            send only queues the bytes; the worker writes them. A stalled map server would
+            otherwise stall
+            every module's thread work for up to the 5 s write timeout per packet. The worker
+            sleeps on a held
+            lock (wake) that send and stop release, with a short timeout as a backstop. The
+            first write error is
+            kept in error and picked up by MapConnection.poll, which drops the connection.
+            Without threads the
+            writes happen in place.
             """
             def __init__(self, transport):
-                """Start the worker thread on transport."""
+                """Start the worker thread on transport.
+
+                wake is a lock kept held, so the worker's acquire with a timeout is a sleep that
+                poke can cut short.
+                It is made with _thread, not threading.Condition, so no threading module loads at
+                start-up. When the
+                thread cannot start, wake stays None and send writes in place.
+                """
                 self.t = transport
-                self.error = self.cond = None
+                self.error = self.wake = None
                 self.stopped = False
                 self.q = collections.deque()
                 try:
-                    import threading
-                    self.cond = threading.Condition()
-                    th = threading.Thread(target=self._run)
-                    th.daemon = True
-                    th.start()
+                    import _thread
+                    self.wake = _thread.allocate_lock()
+                    self.wake.acquire()
+                    _thread.start_new_thread(self._run, ())
                 except Exception:
-                    # No threads available: send in place.
-                    self.cond = None
+                    self.wake = None
 
             def send(self, data):
-                """Queue data for the worker; raises the stored error when the sender has failed or stopped."""
+                """Queue data for the worker and wake it; raises the stored error when the sender has
+                failed or stopped.
+
+                With no worker the data is written in place.
+                """
                 if self.error is not None or self.stopped:
                     raise self.error or IOError("sender stopped")
-                if self.cond is None:
+                if self.wake is None:
                     self.t.send(data)
                     return
-                with self.cond:
-                    self.q.append(data)
-                    self.cond.notify()
+                self.q.append(data)
+                self.poke()
+
+            def poke(self):
+                """Wake the worker by releasing the wake lock.
+
+                The lock may already be free (a second poke before the worker woke); the error that
+                causes is
+                silenced.
+                """
+                with Kit.quiet:
+                    self.wake.release()
 
             def _run(self):
-                """Worker thread: take queued packets and write them, one at a time, until stopped or a write fails."""
+                """Worker thread: take queued packets and write them, one at a time, until stopped or a
+                write fails.
+                """
                 # The client refuses scripts that hold the always-true loop, so the loop tests the stop flag.
                 while not self.stopped:
-                    with self.cond:
-                        while not self.q and not self.stopped:
-                            # Wakes on a notify, or every half second to look at the stop flag.
-                            self.cond.wait(0.5)
-                        if self.stopped:
-                            return
+                    # With nothing queued, sleep on the wake lock for up to half a second; a poke ends the
+                    # wait at once and
+                    # the timeout makes sure the stop flag is looked at.
+                    if not self.q:
+                        self.wake.acquire(True, 0.5)
+                        continue
+                    # The queue may have been cleared by stop since the check above.
+                    try:
                         data = self.q.popleft()
+                    except IndexError:
+                        continue
                     try:
                         self.t.send(data)
                     except Exception as ex:
@@ -797,12 +860,14 @@ def _module_worldmap():
                         return
 
             def stop(self):
-                """Stop the worker and drop whatever is still queued."""
+                """Stop the worker and drop whatever is still queued.
+
+                The poke wakes the worker so it sees the stop flag without waiting out its timeout.
+                """
                 self.stopped = True
-                if self.cond is not None:
-                    with self.cond:
-                        self.q.clear()
-                        self.cond.notify()
+                if self.wake is not None:
+                    self.q.clear()
+                    self.poke()
 
         class MapConnection(object):
             """Talks to EnhancedMapServer with a separate login.
@@ -930,8 +995,11 @@ def _module_worldmap():
                     self.next_try = time.time() + 3
 
             def poll(self):
-                """Main pump, called every step on the script thread. Connects, reads, handles every complete
+                """Main pump, called every step on the script thread. Connects, reads, handles every
+                complete
                 packet and returns the events found.
+
+                The connect itself runs on a _thread thread, so this never waits on the network.
                 """
                 events = []
                 now = time.time()
@@ -944,9 +1012,12 @@ def _module_worldmap():
                         return events
                     pend = self.connecting
                     if pend is None:
-                        import threading
+                        import _thread
+                        # Makes sure the socket and select modules are loaded before the connect thread needs
+                        # them.
+                        net()
                         pend = self.connecting = {"done": False, "t": None, "err": None, "abandon": False,
-                                                  "lock": threading.Lock()}
+                                                  "lock": _thread.allocate_lock()}
 
                         def run(p=pend, host=self.host, port=self.port):
                             """The connect thread: open the transport, record the result, and close it here if the
@@ -963,9 +1034,7 @@ def _module_worldmap():
                                 p["t"].close()
 
                         try:
-                            th = threading.Thread(target=run)
-                            th.daemon = True
-                            th.start()
+                            _thread.start_new_thread(run, ())
                         except Exception:
                             # No threads here: connect in place.
                             run()
@@ -1041,6 +1110,9 @@ def _module_worldmap():
             def _handle(self, pid, data, events):
                 """React to one packet: the handshake reply, the login result, or a ping, alert or message to pass
                 on as an event.
+
+                The login result raises a status event that is loud (worth a journal line) only after trouble
+                earlier on, so a normal first connection is quiet.
                 """
                 r = Reader(data)
                 if pid == 0x2B and self.state == self.HANDSHAKE:
@@ -1050,6 +1122,7 @@ def _module_worldmap():
                 elif pid == 0x1F and self.state == self.LOGIN:
                     # Login result: 1 means accepted.
                     if r.u8() == 1:
+                        again = bool(self.login_failures or self.kicks or self.unreachable_reported)
                         r.u8()
                         self.name = r.ascii(r.u8()) or self.user
                         self.state = self.READY
@@ -1057,7 +1130,7 @@ def _module_worldmap():
                         self.login_failures = 0
                         self.backoff = 3
                         self.unreachable_reported = False
-                        events.append(("status", "Connected as %s." % self.name, True))
+                        events.append(("status", "Connected as %s." % self.name, again))
                     else:
                         self._drop(events, "eof", "login rejected", 30)
                 elif pid in (0x33, 0x27) and self.state == self.READY:
@@ -1352,13 +1425,17 @@ def _module_worldmap():
                 return (self.bridge.config() or {}).get("user", "")
 
             def poll(self):
-                """Report connection changes and return the pings and alerts that arrived."""
+                """Report connection changes and return the pings and alerts that arrived.
+
+                Connecting through TazUO's Enhanced Map login gives a quiet status event (panel only, no journal
+                line); drops and failures are loud.
+                """
                 events = []
                 connected = self.ready
                 if connected != self.was_connected:
                     if connected:
                         events.append(("status", "Using TazUO's Enhanced Map login (%s)."
-                                       % (self.name or "connected"), True))
+                                       % (self.name or "connected"), False))
                     elif self.was_connected:
                         now = time.time()
                         # Drops are counted in a sliding window.
@@ -2521,7 +2598,10 @@ def _module_worldmap():
                         self.send_ping(g["tile"][0], g["tile"][1], g["map"], t)
 
             def show_guide(self, center):
-                """Show the direction guide round the cursor: four labels and a plus sign."""
+                """Show the direction guide round the cursor: four labels and a plus sign.
+
+                The guide is put in front of the other windows and kept out of the mother's snapping.
+                """
                 self.close_guide()
                 w, h = 180, 104
                 gump = G.CreateGump(False, False)
@@ -2543,7 +2623,7 @@ def _module_worldmap():
                 plus = G.CreateGumpLabel("+", Kit.HUE_TITLE)
                 plus.SetRect(w // 2 - 3, h // 2 - 9, 10, 18)
                 gump.Add(plus)
-                G.AddGump(gump)
+                Kit.add_front(gump)
                 # A guide under the held wheel is no window to snap to or move: keep it out of the mother's
                 # snapping and keeper.
                 SNAP.skip_gump(gump)
@@ -2599,11 +2679,13 @@ def _module_worldmap():
                     self.conn.close()
 
             def start(self):
-                """Start the part: mouse, hotkeys, History window and the link."""
+                """Start the part: mouse, hotkeys, History window and the link.
+
+                Starts quietly: nothing is said in the journal.
+                """
                 self.init_mouse()
                 self.register_hotkeys()
                 self.history.start()
-                say("on; ping buttons are on the World Map settings page.", Kit.HUE_GOOD)
                 self.choose_link()
                 self.next_link_check = time.time() + 5
 
@@ -6670,9 +6752,10 @@ def _module_worldmap():
             """Module start: reset state, load settings, fields and view, hook the ground item and position
             events and build the window.
 
-            Runs on the client thread when the module is switched on.
+            Runs on the client thread when the module is switched on. The window starts docked when the host
+            says the Action Bar is about to fold it in.
             """
-            st.update({"shutting": False, "docked": False, "queue": [], "last_scan": 0.0,
+            st.update({"shutting": False, "docked": HOST.dock_soon(KEY), "queue": [], "last_scan": 0.0,
                        "hue_at": 0.0, "moved": False, "tracked": {}, "pinged": set(), "pinged_spots": set(),
                        "ping_wait": [], "ping_sent": 0, "ping_noted": False,
                        "ping_svc": ping_service(), "ping_next": 0.0, "fields": {}, "field_said": [], "alerted": set(),

@@ -51,15 +51,60 @@ def _module_mongotchi():
     Everything (settings, pet, shop, windows, companion, playpen) lives in this one function's scope,
     so the module's names never leak into the mother script. The returned MODULE table holds start,
     tick, stop and interval, which the mother calls. Code helpers shared with other modules
-    (Base64 packing, checksum, streamer veils) come from Kit.
+    (Base64 packing, checksum, streamer veils) come from Kit. Random numbers come from the module's
+    own Rng, named random inside the scope, so the standard random module (which loads os) is never
+    imported.
     """
     KEY = "mongotchi"
     TITLE = "Mongotchi"
     SETTINGS_KEY = "Mongotchi_settings"
-    import random
     # Item art: graphic ids from the client's tiledata. The pup is the folded figurine, the adult
     # has its wings spread.
     GFX_PUP = 0x20F9
+    import _random
+
+    class Rng(_random.Random):
+        """Random number source over the built-in _random generator, with the few calls the module uses.
+
+        It stands in for the standard random module: same method names and the same kind of results, but
+        nothing beyond _random is imported at start-up. _random seeds itself from the system.
+        """
+        def below(self, n):
+            """Return a whole number from 0 up to but not including `n`, every value equally likely.
+
+            Draws just enough random bits and tries again when the draw is too big, so there is no bias.
+            """
+            k = n.bit_length()
+            r = self.getrandbits(k)
+            while r >= n:
+                r = self.getrandbits(k)
+            return r
+
+        def randint(self, a, b):
+            """Return a whole number from `a` up to and including `b`.
+
+            Raises ValueError for a non-integer or empty range, as random.randint does.
+            """
+            lo, hi = int(a), int(b)
+            if lo != a or hi != b or hi < lo:
+                raise ValueError("empty or non-integer range for randint()")
+            return lo + self.below(hi - lo + 1)
+
+        def uniform(self, a, b):
+            """Return a float between `a` and `b`."""
+            return a + (b - a) * self.random()
+
+        def choice(self, seq):
+            """Return one item of the non-empty sequence `seq` at random.
+
+            Raises IndexError for an empty sequence, as random.choice does.
+            """
+            n = len(seq)
+            if not n:
+                raise IndexError("Cannot choose from an empty sequence")
+            return seq[self.below(n)]
+
+    random = Rng()
     GFX_ADULT = 0x25A6
     # Screen pixels per pixel of the gremlin line drawing, which is built from plain colour boxes
     # because no item art looks like it.
@@ -5245,9 +5290,10 @@ def _module_mongotchi():
 
         Loads the shop and guests before the pet and the achievements before catch_up, because the time
         away is added to them. Registers the main window and each sub-window with the Action Bar dock.
+        The main window starts docked when the host says the bar is about to fold it in.
         """
         t = time.time()
-        st.update({"shutting": False, "docked": False, "queue": [], "grem": None,
+        st.update({"shutting": False, "docked": HOST.dock_soon(KEY), "queue": [], "grem": None,
                    # The main window's minimized state is remembered, or the dock wants it folded.
                    "minimized": Kit.load_min(MIN_KEYS["main"]) or bool(HOST.dock_wanted(KEY)),
                    "redraw": False, "shop_redraw": False, "pen_redraw": False, "fit": None, "eat_until": 0.0,

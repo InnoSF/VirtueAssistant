@@ -38,7 +38,7 @@ def _module_hud():
     #   when something it reads cheaply changed
     #   inside: (piece, frame) pairs riding in a frame's zone
     PIECES = {"anchor": {}, "piece": {}, "tied": {}, "span": {}, "inner": {}, "bg": {}, "bare": {},
-              "stack": {}, "dirty": True, "full_at": 0.0, "sig": None, "objs": None, "inside": []}
+              "stack": {}, "dirty": True, "full_at": 0.0, "sig": None, "objs": None, "inside": [], "want": {}}
     # Seconds between full placements when nothing has changed (a safety net: a piece moved by
     # something else is put back).
     PLACE_EVERY = 0.5
@@ -119,6 +119,7 @@ def _module_hud():
             PIECES["anchor"].pop(fkey, None)
             PIECES["span"].pop(fkey, None)
             PIECES["inner"].pop(fkey, None)
+            PIECES["want"].pop(fkey, None)
             for pkey, (fk, _o, _g) in list(PIECES["piece"].items()):
                 if fk == fkey:
                     _piece_free(pkey)
@@ -166,6 +167,18 @@ def _module_hud():
         fn = PIECES["anchor"].get(fkey)
         g = fn() if fn is not None else None
         return g if Kit.is_open(g) and g.IsVisible else None
+
+    def pieces_wait(fkey, since, cap):
+        """Is the start-up wait for frame `fkey` still running (True: hold off building the piece)?
+
+        fkey: the anchor frame a piece will ride on. since: time.time() when the piece started waiting.
+        cap: the longest wait in seconds. True only while the frame is wanted but not yet shown, the
+        script is still booting, the cap has not run out and the frame's want test still holds. Lets a
+        piece appear together with its frame instead of flashing up as a free window first.
+        """
+        want = PIECES["want"].get(fkey)
+        return (want is not None and pieces_frame(fkey) is None and HOST.booting() and time.time() - since < cap
+                and want())
 
     def pieces_on(pkey):
         """Does piece `pkey` ride on a shown frame now (False: it is a free window)?"""
@@ -431,9 +444,12 @@ def _module_hud():
 
         Frames: player, target and tracked-player frames showing health, mana and stamina, each with a
         snapshot picture of the character (head and shoulders, from the paperdoll or the creature). The
-        rounded frame art is drawn here at run time; no image files are needed. Frames stay where they
-        are dropped, saved when a drag ends, and a frame dropped near another lines up with it exactly
-        (frames snap to frames only). Alt+click on a frame follows that character with TazUO's
+        rounded frame art is drawn here at run time; no image files are needed. A frame shows at once with
+        a plain stand-in (window background and two dark panels); its art is swapped in place when it has
+        been drawn, so start-up never waits long for it. Drawn textures and picture pixels are kept across
+        Plays in sys._VA_ART when the module cache is on, and reused at the next start. Frames stay where
+        they are dropped, saved when a drag ends, and a frame dropped near another lines up with it
+        exactly (frames snap to frames only). Alt+click on a frame follows that character with TazUO's
         auto-follow (the shared Follow helper), and again to stop. A cast bar sits under the player
         frame (your spell's name, filling through its cast delay; green when cast, red on a fizzle or
         broken concentration) and a GUARDED tag shows on the player frame.
@@ -488,6 +504,10 @@ def _module_hud():
         THREAD_BUDGET = 0.008
         # Prefix of the names of the textures this module makes.
         TEX_PREFIX = "vauf_"
+        FIRST_WAIT = 3.0
+        BOOT_BUDGET = 0.04
+        TEX_KEEP = 64
+        SNAP_CACHE = 4
         MAX_TRACKED = 12
         # Frame scale limits and default, in percent of the art's size.
         SCALE_MIN, SCALE_MAX, SCALE_DEFAULT = 50, 150, 70
@@ -551,6 +571,8 @@ def _module_hud():
         ART_ROWS_X = (182, 474)
         ART_ROWS_Y = ((51, 79), (83, 111), (115, 143))
         SQRT_HALF = 0.70710678
+        ART_SIG = (APP_VERSION, ART_W, ART_H, RING_C, HOLE_R, RING, NOTO_RING, PANEL, METAL, INNER, HOLES, SEPARATORS,
+                   RIVETS, OUTLINE_RGB, INNER_RGB, SNAP_BG)
         # Saved settings and their defaults. Keys saved by older builds stay so saved strings still read;
         # a key an older build does not know is skipped by it.
         settings = {"player": True, "target": True, "hide_empty": False, "numbers": True,
@@ -568,14 +590,15 @@ def _module_hud():
         def st_reset():
             """Reset the part's run state (queues, snapshots, caches, timers) to its starting values.
 
-            Called at start; the saved settings, tracked list and positions are untouched.
+            Called at start; the saved settings, tracked list and positions are untouched. The kept art store
+            (sys._VA_ART) is not part of this state.
             """
             st.update({"shutting": False, "queue": [], "rebuild": False, "docked": False, "target": 0,
                        "next_party": 0.0, "snaps": {}, "stale": set(), "snap_queue": [], "art_scales": set(),
                        "snap_px": None, "party": set(), "snap_job": None, "art_jobs": [], "art_failed": set(),
                        "recent": [], "next_prune": 0.0, "art_dirty": True, "snap_tries": {}, "guard": None,
                        "next_guard": 0.0, "jr": None, "dismissed": set(), "removing": False, "full_at": 0.0,
-                       "mirror_now": False, "pos_save_at": 0.0})
+                       "mirror_now": False, "pos_save_at": 0.0, "snap_keys": {}, "art_wait": False})
 
         # Run state. "queue" holds click actions that run on the next tick.
         st = {"minimized": False, "shutting": False, "docked": False, "queue": [], "me": 0, "names": {}, "pos": {},
@@ -1242,6 +1265,93 @@ def _module_hud():
             if names:
                 safe(lambda: Bridge.on_main(lambda: Tex.drop(names)))
 
+        def art_store():
+            """Return the dict the art caches live in, kept on the sys module under _VA_ART.
+
+            It is created empty when missing, so textures and portrait pixels outlive a stop and a new Play.
+            """
+            import sys
+            a = sys.__dict__.get("_VA_ART")
+            if not isinstance(a, dict):
+                a = {}
+                sys._VA_ART = a
+            return a
+
+        def adopt_art():
+            """Take over the textures and picture pixels kept from an earlier run, at start.
+
+            Drops the whole store when the art recipe (ART_SIG) or the client's texture table changed. Keeps
+            only names the client still has, whose size tag is wanted and, for notoriety rings, whose colour
+            is one of the palette. Kept portraits go back on the snapshot lists as stale, so they are taken
+            again to check them; a size whose full set of textures survived is marked drawn. Client thread.
+            """
+            a = art_store()
+            kept = a.pop("tex", None) or {}
+            scales = a.pop("scales", None) or ()
+            table = Tex.parts.get("table")
+            live = [n for n in kept if Tex.has(n)]
+            if a.get("sig") != ART_SIG or a.get("table") is not table:
+                a.clear()
+                a.update({"sig": ART_SIG, "table": table})
+                live = []
+            tags = set(str(int(round(s * 100))) for s in scales)
+            palette = set("%d_%d_%d" % tuple(c) for c in [Kit.cb_rgb(k, v) for k, v in NOTO_COLOR.items()] + [NO_NOTO])
+            for n in live:
+                v, bits = kept[n], n[len(TEX_PREFIX):].split("_")
+                if bits[0] == "snap" and len(bits) == 2 and bits[1].isdigit() and type(v) is tuple:
+                    serial = int(bits[1])
+                    st["snaps"][serial] = {"name": n, "creature": False}
+                    st["snap_keys"][n] = v
+                    st["stale"].add(serial)
+                elif bits[-1] not in tags or (bits[0] == "noto" and "_".join(bits[1:4]) not in palette):
+                    continue
+                st["textures"].add(n)
+            for s in scales:
+                if all(n in st["textures"] for n in list(art_names(s).values()) + [noto_name_of(NO_NOTO, s)]):
+                    st["art_scales"].add(s)
+
+        def sweep_art():
+            """Drop every texture of this module's prefix that this run does not own.
+
+            Run on the game thread at start, after adopt_art, so leftovers of a run that could not be adopted
+            do not pile up in the client.
+            """
+            own = st["textures"]
+            Tex.drop([n for n in list(Tex.parts["table"].Keys) if str(n).startswith(TEX_PREFIX) and n not in own])
+
+        def keep_art():
+            """Save the art textures worth keeping into the store when the module stops; return the rest.
+
+            At most TEX_KEEP are kept: the frame art, rings and blank backdrops first, then portraits with the
+            player's own first. The returned names are the textures to free now.
+            """
+            keys, art, snaps = st["snap_keys"], [], []
+            for n in st["textures"]:
+                if n in keys:
+                    snaps.append(n)
+                elif not n.startswith(TEX_PREFIX + "snap_") or n.startswith(TEX_PREFIX + "snap_blank_"):
+                    art.append(n)
+            me = "%ssnap_%d" % (TEX_PREFIX, st["me"])
+            snaps.sort(key=lambda n: n != me)
+            keep = (art + snaps)[:TEX_KEEP]
+            art_store().update({"sig": ART_SIG, "table": Tex.parts.get("table"), "scales": list(st["art_scales"]),
+                                "tex": dict((n, keys.get(n, True)) for n in keep)})
+            keep = set(keep)
+            return [n for n in st["textures"] if n not in keep]
+
+        def keep_pixels(key, pixels):
+            """Remember a portrait's pixels under `key` in the store, replacing any earlier entry for it.
+
+            Only the last SNAP_CACHE entries are held, so changing gear or crop settings cannot fill memory.
+            """
+            a = art_store()
+            px = [e for e in a.get("px") or () if e[0] != key]
+            a["px"] = px[-(SNAP_CACHE - 1):] + [(key, pixels)]
+
+        def kept_pixels(key):
+            """Return the pixels kept under `key`, or None."""
+            return next((p for k, p in art_store().get("px") or () if k == key), None)
+
         def noto_name_of(rgb, s):
             """Texture name of the notoriety ring of colour `rgb` at scale `s`."""
             return "%snoto_%d_%d_%d_%d" % (TEX_PREFIX, rgb[0], rgb[1], rgb[2], int(round(s * 100)))
@@ -1256,14 +1366,17 @@ def _module_hud():
             yield lambda: Bridge.put_texture(name, size, size, pixels)
 
         def noto_texture(rgb, s):
-            """Name of the ring texture in this colour and size, or None while thread_tick is still drawing it
-            (the frames are updated once it is in).
+            """Return the name of the ring texture in this colour and size, or None while it is not there yet.
 
-            Queues the drawing job once, unless it failed before.
+            None also means the ring is being drawn: the drawing job is queued once (unless it failed before)
+            and the frame is updated again when the texture is in. The plain ring colour waits for the frame
+            art of the size, which draws it.
             """
             name = noto_name_of(rgb, s)
             if name in st["textures"]:
                 return name
+            if rgb == NO_NOTO and want_art(s) is None:
+                return None
             if name not in st["art_failed"] and not any(j.get("name") == name for j in st["art_jobs"]):
                 job = {"kind": "noto", "s": s, "name": name, "gen": ring_steps(rgb, s, name)}
                 st["art_jobs"] = st["art_jobs"] + [job]
@@ -1642,7 +1755,8 @@ def _module_hud():
             """Collect a finished picture job in the client tick and make its texture.
 
             An error sends the character back on the queue after SNAP_RETRY seconds. A picture made at a size
-            that is no longer the biggest in use is queued again.
+            that is no longer the biggest in use is queued again. Otherwise the texture is made, and the
+            pixels kept for reuse, through snap_put.
             """
             job = st["snap_job"]
             if job is None or "out" not in job:
@@ -1655,25 +1769,40 @@ def _module_hud():
                 return
             if r is False:
                 return
-            serial, name, size = job["serial"], "%ssnap_%d" % (TEX_PREFIX, job["serial"]), job["size"]
+            serial, size = job["serial"], job["size"]
             if size != snap_px():
                 if not any(q[0] == serial for q in st["snap_queue"]):
                     st["snap_queue"].append((serial, now))
                 return
-            if safe(lambda: Bridge.put_texture(name, size, size, r) or True, False):
-                st["snaps"][serial] = {"name": name, "creature": False}
-                # The settings preview re-crops these layers. They are kept only while the page is open, as they
-                # hold the art of every layer (a megabyte or two).
-                if serial == st["me"] and cfg.f is not None:
-                    page["layers"] = (job["layers"], job["body"])
-                mark_frames(serial)
+            if snap_put(serial, size, r, job.get("key")) and serial == st["me"] and cfg.f is not None:
+                page["layers"] = (job["layers"], job["body"])
+
+        def snap_put(serial, size, pixels, key):
+            """Make the portrait texture of `serial` from `pixels` and record it; return True when it was made.
+
+            `key` identifies the look (character, size, body, gear, crop settings); with it the pixels are
+            also kept for a later Play. Frames showing the character are marked to redraw. Client thread.
+            """
+            name = "%ssnap_%d" % (TEX_PREFIX, serial)
+            if not safe(lambda: Bridge.put_texture(name, size, size, pixels) or True, False):
+                return False
+            st["snaps"][serial] = {"name": name, "creature": False}
+            st["snap_keys"].pop(name, None)
+            if key is not None:
+                st["snap_keys"][name] = key
+                keep_pixels(key, pixels)
+            mark_frames(serial)
+            art_mark()
+            return True
 
         def take_next_snapshot(now):
             """Start the next due picture. Pictures are made one at a time.
 
             Reading the paperdoll and its art happens here, in the game's frame with no waits; the rest is a
-            job that snapshot_work advances from thread_tick, a slice at a time. Creatures use their standing
-            frame, tried up to three times before the frame shows no picture.
+            job that snapshot_work advances from thread_tick, a slice at a time. A picture whose look key
+            matches the one already shown is skipped, and one whose pixels were kept from an earlier Play is
+            put up at once without drawing. Creatures use their standing frame, tried up to three times
+            before the frame shows no picture.
             """
             snap_take(now)
             if st["snap_job"] is not None:
@@ -1710,13 +1839,23 @@ def _module_hud():
                 # thread_tick takes it from here.
                 st["snap_job"] = job
                 return
+            key = (serial, size, doll["body"], doll["pieces"], settings["pzoom"], settings["pdx"], settings["pdy"])
+            name = "%ssnap_%d" % (TEX_PREFIX, serial)
+            if st["snap_keys"].get(name) == key and name in st["textures"] and \
+                    (st["snaps"].get(serial) or {}).get("name") == name:
+                return
+            px = safe(lambda: kept_pixels(key))
+            if px is not None and len(px) == size * size and snap_put(serial, size, px, key):
+                return
             layers, body = safe(lambda: fetch_layers(doll), []), doll["body"]
             if not layers:
                 # Art may still be loading.
                 st["snap_queue"].append((serial, now + SNAP_RETRY))
                 return
+            if len(layers) != len(doll["pieces"]):
+                key = None
             st["snap_job"] = {"gen": compose_steps(layers, body, size), "serial": serial,
-                              "size": size, "layers": layers, "body": body}
+                              "size": size, "layers": layers, "body": body, "key": key}
 
         def mark_frames(serial):
             """Make the frames showing `serial` redraw their picture."""
@@ -1751,7 +1890,8 @@ def _module_hud():
             """Drop the pictures (and their textures), names, retry counts and queued pictures of everyone not on
             a frame, tracked, in your party or among the last SNAP_KEEP shown.
 
-            Without it every target of the session would keep a texture and a retry.
+            Without it every target of the session would keep a texture and a retry. A picture still shown by
+            a frame is left alone. Dropped textures also leave the snapshot key table.
             """
             keep = set(frame_serial(k) for k in frames)
             keep.update(t["serial"] for t in tracked)
@@ -1770,6 +1910,7 @@ def _module_hud():
                 if name:
                     names.append(name)
                     st["textures"].discard(name)
+                    st["snap_keys"].pop(name, None)
             for d in (st["names"], st["snap_tries"]):
                 for serial in [s for s in d if s not in keep]:
                     del d[serial]
@@ -2036,11 +2177,13 @@ def _module_hud():
                     c["bar_" + v] = pb
 
         def build_frame(key):
-            """Build, or rebuild, the window of frame `key`: art or stone look, bars, labels, click catchers and
-            the guard tag. Client thread.
+            """Build, or rebuild, the window of frame `key`: art, plain stand-in or stone look, bars, labels,
+            click catchers and the guard tag. Client thread.
 
-            Keeps the old window's place when it is open, registers the new frame in `frames` and disposes
-            of the old window last so there is no gap.
+            With the art drawn the frame uses its textures; while the art is still being drawn it gets a
+            stand-in made of ordinary window pieces (kept in the frame as "stand") that art_swap hides later;
+            with no art possible it gets the stone look. Keeps the old window's place when it is open,
+            registers the new frame in `frames` and disposes of the old window last so there is no gap.
             """
             old = frames.get(key, {}).get("g")
             s, w, h = frame_size(key)
@@ -2054,6 +2197,7 @@ def _module_hud():
             sx = lambda v: int(round(v * s))
             # The drawn art is used once thread_tick has made it (want_art); until then, stone.
             art = bool(st["art"]) and s in st["art_scales"]
+            plain = bool(st["art"]) and not art and s not in st["art_failed"]
             # The slot's size, with the art inside it.
             W, H, ox, oy, zoned = frame_box(key, w, h)
             free = not settings["lock"] and not HOST.layout_locked(KEY + "." + key)
@@ -2077,9 +2221,15 @@ def _module_hud():
             rx0, rx1 = mirror_x(style, w, sx(ART_ROWS_X[0]), sx(ART_ROWS_X[1]))
             rows = [(ox + rx0, oy + sx(y0), ox + rx1, oy + sx(y1)) for y0, y1 in ART_ROWS_Y]
             hole = int(HOLE_R * s)
-            # Kept in the frame: set_snapshot reads it every tick.
-            names = art_names(s) if art else None
-            if art:
+            names = art_names(s) if art or plain else None
+            stand = []
+            if art or plain:
+                if plain:
+                    if not zoned:
+                        stand = Kit.add_resizepic(g, Kit.WINDOW_BG, ox, oy, w, h, mouse=False)
+                    stand = stand + [Kit.add_section(g, cx - hole, cy - hole, 2 * hole, 2 * hole, alpha=0.95),
+                                     Kit.add_section(g, rows[0][0] - 4, rows[0][1] - 4, rows[0][2] - rows[0][0] + 8,
+                                                     rows[-1][3] - rows[0][1] + 8, alpha=0.9)]
                 size = snap_size(s)
                 # The picture goes behind the frame's hole.
                 c["snap"] = Tex.control(g, names["blank"], cx - size // 2, cy - size // 2, size, size)
@@ -2129,7 +2279,8 @@ def _module_hud():
             # What each control shows is kept in "shown" and "bars", so update_frame touches only changes.
             # "box" is the art's place in the window, "win" the window's size and "slot" the zone slot.
             frames[key] = {"g": g, "c": c, "rows": rows, "centre": (cx, cy), "hole": hole, "s": s,
-                           "art": art, "names": names, "last": None, "seen": (x, y), "noto": None,
+                           "art": art or plain, "plain": plain, "stand": stand, "names": names, "last": None,
+                           "seen": (x, y), "noto": None,
                            "variant": None, "snap": None, "code_move": False, "shown": {}, "bars": {}, "serial": None,
                            "box": (ox, oy, w, h), "win": (W, H), "slot": fitbox.get(key), "rides": rides_inside(key)}
             if guard_at is not None:
@@ -2137,7 +2288,7 @@ def _module_hud():
             # prune_art may now free a size.
             st["art_dirty"] = True
             G.AddControlOnDisposed(g, frame_disposed(key, g))
-            G.AddGump(g)
+            Kit.add_front(g)
             # A frame lands exactly where it is dropped: it takes no part in window snapping (no jump to an
             # anchor, an edge or another window, it never follows a dragged window and no window snaps on to
             # it), but the keeper still keeps it on screen. It lines up with other frames by this module's own
@@ -2401,8 +2552,7 @@ def _module_hud():
             at = cast_spot(fr) or (0, 0)
             # Wholly on screen.
             Kit.place(g, at[0], at[1], w, h)
-            G.AddGump(g)
-            g.IsVisible = False
+            Kit.add_front(g, True)
             # Kept on screen with the frame.
             Kit.attach(g, fr["g"])
             # "at" is the spot asked for. The bar is moved again only when that changes, so a spot the keeper
@@ -2516,6 +2666,7 @@ def _module_hud():
                 c["lbl"].SetPos(max(6, (cast["w"] - TEXT_PX(text)) // 2), 4)
             if old is None:
                 g.IsVisible = True
+                Kit.stir()
 
         def guard_tick(now):
             """GUARDED tag on the player frame: green GUARDED while the town guards protect you, "?" while
@@ -2629,12 +2780,17 @@ def _module_hud():
                 return {}
             want_snapshot(serial)
             snap = st["snaps"].get(serial) or {}
-            # Names were cached at build: this runs every frame, every tick.
-            name = snap.get("name") or fr["names"]["blank"]
-            if fr["snap"] != name:
-                fr["snap"] = name
-                fr["c"]["snap"].TextureName = name
+            swap_portrait(fr, snap.get("name") or fr["names"]["blank"])
             return snap
+
+        def swap_portrait(fr, tex):
+            """Point frame `fr`'s portrait control at texture `tex`, only when it is not showing it already.
+
+            This swaps the picture in place, with no rebuild of the frame.
+            """
+            if fr["snap"] != tex:
+                fr["snap"] = tex
+                fr["c"]["snap"].TextureName = tex
 
         def pct(cur, mx):
             """Percent of `mx` that `cur` is, 0 when `mx` is not above zero."""
@@ -2726,6 +2882,8 @@ def _module_hud():
                     sw = Kit.text_w(status) + 10
                     Kit.ui_rect(c["strip"], cx - sw // 2, ty, sw, LABEL_H + 4)
                 c["strip"].IsVisible = bool(status)
+            if portrait_text == "No target" and Kit.text_w(portrait_text) > 2 * hole - 6:
+                portrait_text = "None"
             place(fr, "portrait_text", Kit.fit(portrait_text, 2 * hole - 6) if portrait_text else "",
                   cx, cy - LABEL_H // 2 - 1, Kit.HUE_INFO, "center")
 
@@ -2742,8 +2900,13 @@ def _module_hud():
             return keys
 
         def sync_frames():
-            """Open the frames wanted, close the others, rebuild one whose size or slot changed, then update
-            them all (client thread, each tick).
+            """Open the frames wanted, close the others, rebuild one whose size, slot or art changed, then
+            update them all (client thread, each tick).
+
+            During start-up a frame's slot is planned first (plan_fit). A first build does not wait for the
+            art: it shows the plain stand-in, and once the art is ready the stand-in is swapped for it in
+            place (art_swap). A frame is rebuilt only when its art is known (ready or failed), or when it has
+            no usable window or is only the stand-in.
             """
             want = wanted_frames()
             for key in list(frames):
@@ -2751,12 +2914,64 @@ def _module_hud():
                     close_frame(key)
             for key in want:
                 fr = frames.get(key)
-                if (fr is None or not Kit.is_open(fr.get("g")) or fr.get("s") != frame_scale(key) or fr.get("redo")
+                if fr is None:
+                    plan_fit(key)
+                s = frame_scale(key)
+                ready = want_art(s) if st["art"] else False
+                if fr is not None and fr.get("plain") and ready is not None and fr.get("s") == s:
+                    if ready:
+                        art_swap(fr)
+                    else:
+                        fr["redo"] = True
+                if (fr is None or not Kit.is_open(fr.get("g")) or fr.get("s") != s or fr.get("redo")
                         or fr.get("slot") != fitbox.get(key)
                         or (fr.get("slot") and fr.get("rides") != rides_inside(key))) \
-                        and (not st["art"] or want_art(frame_scale(key)) is not None):
+                        and (ready is not None or fr is None or fr.get("plain") or not Kit.is_open(fr.get("g"))):
                     build_frame(key)
+                    if not frames[key]["plain"]:
+                        art_mark()
                 update_frame(key)
+
+        def art_swap(fr):
+            """Replace frame `fr`'s plain stand-in with the drawn art that is now ready.
+
+            Hides the stand-in pieces and marks the frame to redraw its values, with no rebuild.
+            """
+            for p in fr["stand"]:
+                Kit.set(p, "IsVisible", False)
+            fr.update({"plain": False, "stand": [], "last": None})
+            art_mark()
+
+        def art_mark():
+            """Mark in the start-up timings that HUD art work happened, while start-up is still being timed."""
+            if st["art"] and HOST.booting() and time.time() < st.get("first_by", 0.0):
+                HOST.split_at("HUD art")
+
+        def plan_fit(key):
+            """Plan frame `key`'s slot early, while the script is still booting.
+
+            Asks the layout for the slot of this frame's zone and passes its size to the frame's fit hook,
+            so the first build already has the right size. Does nothing once a slot is known or after start-up.
+            """
+            if fitbox.get(key) is not None or key not in fitbox or not HOST.booting():
+                return
+            slot = HOST.layout_slot(KEY + "." + key)
+            if slot and slot[0] and slot[1]:
+                frame_fit(key)(slot[0], slot[1], None)
+
+        def art_waiting():
+            """Is start-up still waiting for the HUD's art, pictures or frames? (Client thread.)
+
+            True while booting and any art or picture job is running, a wanted frame is not built yet, a frame
+            is still the plain stand-in, or a queued character is in view and waiting for its picture. The
+            start hold on settling uses it, until FIRST_WAIT runs out.
+            """
+            if not st["art"] or not HOST.booting():
+                return False
+            if st["art_jobs"] or st["snap_job"] is not None or any(frames.get(k) is None for k in wanted_frames()) \
+                    or any(fr.get("plain") for fr in frames.values()):
+                return True
+            return any(find_mobile(q[0]) is not None for q in st["snap_queue"])
 
         def frame_gump(key):
             """A getter for frame `key`'s window, for the layout's registry."""
@@ -3067,7 +3282,7 @@ def _module_hud():
                         ("attack", "Prefer the attack target", "Frame who you attack, else your last target"),
                         ("mirror", "Mirror the player and target frames",
                          "Drag either frame and the other mirrors it across the screen"),
-                        ("guard", "Show a GUARDED tag on your frame",
+                        ("guard", "GUARDED tag on your frame",
                          "GUARDED in guard zones, ? until known (enter or leave one), blank outside"))
         # Settings page picture preview texture, tooltips and the three picture sliders.
         PREVIEW_TEX = TEX_PREFIX + "snap_preview"
@@ -3287,9 +3502,13 @@ def _module_hud():
         load_settings()
 
         def _start():
-            """Start the part: reset state, read the saved settings, tracked list and positions, register the
-            player-anchor and add-frame services and the layout hooks of the two frames, and build the window.
-            Client thread.
+            """Start the part: reset state, read the saved settings, tracked list and positions, adopt the kept
+            art, register the player-anchor and add-frame services and the layout hooks of the two frames,
+            and build the window. Client thread.
+
+            When the client can draw pictures, the textures kept from an earlier Play are adopted and the
+            leftovers swept first. Also sets the time limit of the first-picture wait and asks the host to
+            hold its start-up settling until the art and first pictures are in (or that limit passes).
             """
             st_reset()
             st.update({"me": my_serial(), "running": True})
@@ -3301,9 +3520,13 @@ def _module_hud():
             # Inventory > Supplies asks where the player frame is.
             cleanup.service("frames.player_anchor", player_anchor)
             st["minimized"] = wnd.start_min()
+            st["first_by"] = time.time() + FIRST_WAIT
             # Looks the client's picture plumbing up; without it stone frames are used.
             st["art"] = Bridge.find()
-            if not st["art"]:
+            if st["art"]:
+                safe(adopt_art)
+                safe(lambda: Bridge.on_main(sweep_art))
+            else:
                 say("no drawn pictures on this client; using stone frames.")
             build_window()
             wnd.dock()
@@ -3320,9 +3543,20 @@ def _module_hud():
                                 {"fit": frame_fit(fk), "fill": "frame", "exact": True, "pieces_out": True,
                                  "hug": frame_hug(fk), "untitled": True})
                 pieces_anchor(fk, frame_gump(fk), frame_span(fk), frame_inner(fk))
+                PIECES["want"][fk] = lambda k=fk: k not in frames and k in wanted_frames()
                 cleanup.add(HOST.layout_remove, KEY + "." + fk)
                 cleanup.add(pieces_anchor, fk, None)
             PIECES_TARGET["fn"] = lambda: st["target"]
+            update_target()
+            sync_frames()
+            now = time.time()
+            for _i in range(len(st["snap_queue"])):
+                if not st["art"] or st["snap_job"] is not None:
+                    break
+                take_next_snapshot(now)
+            st["art_wait"] = art_waiting()
+            if st["art_wait"]:
+                HOST.settle_hold(lambda: st["running"] and st["art_wait"] and time.time() < st.get("first_by", 0.0))
 
         def restyled():
             """Mark every frame to be redrawn, used when the host reports a change of look (colours, scale and
@@ -3341,8 +3575,8 @@ def _module_hud():
             Cheap exit while a full tick is not due: it only starts the next queued picture and drives a
             cast bar in progress. A full tick handles the click queue, party sync, art uploads, frame sync,
             pruning, drag watching, piece placement, the mirror option, the cast bar, TazUO's own target bar,
-            the GUARDED tag, snapshots and the crop, and saves positions every ten seconds as a belt and
-            braces.
+            the GUARDED tag, snapshots, the start-up art wait and the crop, and saves positions every ten
+            seconds as a belt and braces.
             """
             if win["g"] is None:
                 return
@@ -3488,6 +3722,8 @@ def _module_hud():
             guard_tick(now)
             if st["art"]:
                 take_next_snapshot(now)
+            if st["art_wait"]:
+                st["art_wait"] = art_waiting()
             apply_crop(now)
             if now >= st["next_save"]:
                 st["next_save"] = now + 10.0
@@ -3498,14 +3734,17 @@ def _module_hud():
         def _thread_tick():
             """On the script's own thread, after a tick: the slow drawing (frame art, notoriety rings,
             pictures and the settings preview), a slice at a time, so none of it runs inside the game's
-            frame. Each slice is bounded by THREAD_BUDGET.
+            frame. Each slice is bounded by THREAD_BUDGET, or by a larger budget while start-up is still
+            running and the host has no load jobs.
             """
             if st["shutting"]:
                 return
+            budget = BOOT_BUDGET if HOST.booting() and not HOST.load_jobs else THREAD_BUDGET
+            end = time.time() + budget
             if art_left():
-                art_work(THREAD_BUDGET)
+                art_work(budget)
             if snap_left():
-                snapshot_work(time.time(), THREAD_BUDGET)
+                snapshot_work(time.time(), max(0.002, end - time.time()))
             if page.get("preview_want"):
                 page["preview_want"] = False
                 if cfg.f is not None:
@@ -3526,6 +3765,9 @@ def _module_hud():
         def _stop():
             """Stop the part: save positions, settings and the tracked list, give the pieces and TazUO's target
             bar back, dispose every window and free the textures this part made.
+
+            When the script is stopping with the module cache on, the textures worth keeping stay in the
+            client (keep_art) for the next Play and only the rest are freed; otherwise all of them are.
             """
             st.update({"shutting": True, "running": False, "removing": False, "snap_job": None, "art_jobs": []})
             page.update({"preview_want": False, "preview_gen": None})
@@ -3545,8 +3787,12 @@ def _module_hud():
             st["jr"] = None
             # Free the pictures this module made.
             if st["art"] and st["textures"]:
-                names = list(st["textures"])
-                safe(lambda: Bridge.on_main(lambda: Tex.drop(names)))
+                names = safe(keep_art) if HOST.stopping() and not safe(HOST.no_cache, False) else None
+                if names is None:
+                    names = list(st["textures"])
+                    art_store().pop("tex", None)
+                if names:
+                    safe(lambda: Bridge.on_main(lambda: Tex.drop(names)))
                 st["textures"].clear()
                 st["art_scales"] = set()
             # Found again at the next start; no preview while off.
@@ -4760,8 +5006,7 @@ def _module_hud():
                 ln, col = divmod(i, per)
                 cells.append(make_cell(g, side, i, x0 + col * ROW_PITCH, ROW_PAD + ln * ROW_LINE))
             Kit.place(g, x, y, fw, h)
-            G.AddGump(g)
-            g.IsVisible = lines > 0
+            Kit.add_front(g, lines <= 0)
             ui.update({"g": g, "cells": cells, "per": per, "lines": lines, "w": fw})
             Kit.dispose(old)
 
@@ -5168,6 +5413,7 @@ def _module_hud():
         SWING_HISTORY = 10
         # A gap shorter than this is a doubled sound or a resync press, not a swing.
         MIN_GAP_MS = 250
+        FRAME_WAIT = 5.0
         HISTORY_KEY = "SwingTimer_history"
         # Journal texts (lower case, part of a line) for the notices; the shard's System speaks them.
         DISARM_TEXTS = ("you have been disarmed", "your weapon has been disarmed")
@@ -5315,7 +5561,8 @@ def _module_hud():
         DEFAULTS = dict(settings)
         st = {"minimized": False, "shutting": False, "docked": False, "queue": []}
         win = {"g": None, "c": {}, "store": ({}, {}), "bar_w": 109, "x1": 0, "row1": 0, "food_w": [0] * 21,
-               "fill_w": -1, "fill_state": None, "shown": {}, "tips": {}, "active": False, "closing": False}
+               "fill_w": -1, "fill_state": None, "shown": {}, "tips": {}, "active": False, "closing": False,
+               "wait": None}
         cleanup, queue, say = Kit.basics(st, TITLE)
 
         def load_settings():
@@ -5829,7 +6076,7 @@ def _module_hud():
             win["notice_shown"] = None
             # The close handler ignores a window that was replaced by a newer one.
             G.AddControlOnDisposed(gump, on_close(gump))
-            G.AddGump(gump)
+            Kit.add_front(gump)
             # Saved the moment you let go.
             Kit.on_moved(gump, save_position)
             Kit.dispose(old)
@@ -6082,8 +6329,11 @@ def _module_hud():
         loop = {}
 
         def _start():
-            """Module start: reset, load the history, journal reader, alert, satiety and kite settings, build
-            the window, ride the target frame, bind hotkeys and hook the sound event.
+            """Module start: reset, load the history, journal reader, alert, satiety and kite settings, register
+            as a piece on the target frame, bind hotkeys and hook the sound event.
+
+            The window is built at once unless the target frame is still being waited for (see pieces_wait);
+            the tick then builds it, and the host's start-up settling is held until that wait is over.
             """
             win["closing"], win["active"] = False, True
             files.update({"saved_at": now_ms(), "save": False})
@@ -6098,22 +6348,33 @@ def _module_hud():
             kite["on"] = bool(int(load_var(KITE_VAR, 1) or 0))
             kite["steps"].clear()
             kite["xy"], kite["stat0"], kite["swing0"] = None, None, None
-            build_window()
-            cleanup.service("look.hud.swing", lambda: win.update({"redo": True}))
-            # No zone window: it rides on the target frame; with Frames off it is a free window.
             pieces_add(KEY, "target", 0, lambda: win["c"].get("gump"))
+            win["wait"] = time.time()
+            if not pieces_wait("target", win["wait"], FRAME_WAIT):
+                win["wait"] = None
+                build_window()
+                pieces_place()
+            else:
+                HOST.settle_hold(lambda: win["active"] and win["wait"] is not None)
+            cleanup.service("look.hud.swing", lambda: win.update({"redo": True}))
             register_hotkeys(True)
             Kit.hook_once(hooked, 0, ("SoundPlayed", on_sound_event))
             loop.update({"slow_clock": 0.0, "eat_clock": 0.0, "weapon": current_weapon(), "mob": None, "my_skill": 0.0,
                          "mob_skill": enemy_skill(None, None), "mob_name": "",
                          "skill_of": None, "skill_clock": 0.0, "timer_clock": 0.0, "timer_mode": None, "fast": False,
                          "react": None})
-            say("on (%s picks the target, %s restarts the bar)." % (HK_SET_TARGET, HK_RESYNC), Kit.HUE_GOOD)
 
         def _tick():
-            """Client tick: handle sounds and hotkeys, notices, the game lookups (weapon, target, skill, hunger,
-            four times a second), the bar, the kite marker, the seconds and the hit chance row.
+            """Client tick: finish the start-up wait for the target frame, handle sounds and hotkeys, notices,
+            the game lookups (weapon, target, skill, hunger, four times a second), the bar, the kite marker,
+            the seconds and the hit chance row.
             """
+            if win["wait"] is not None:
+                if pieces_wait("target", win["wait"], FRAME_WAIT):
+                    return
+                win["wait"] = None
+                build_window()
+                pieces_place()
             if not is_open():
                 loop["fast"] = False
                 return
@@ -6537,7 +6798,7 @@ def _module_hud():
             win.update({"fill_w": -1, "text": None, "count_text": None, "wide": wide, "g": g})
             # The close handler ignores a window that was replaced by a newer one.
             G.AddControlOnDisposed(g, _closed(g))
-            G.AddGump(g)
+            Kit.add_front(g)
             Kit.on_moved(g, save_pos)
             Kit.dispose(old)
             refresh()
@@ -7007,8 +7268,6 @@ def _module_hud():
             # No zone window: it rides on the player frame; with Frames off it is a free window.
             pieces_add(KEY, "player", 0, lambda: win["g"])
             cleanup.service("look.hud.bandage", lambda: st.update({"rebuild": True, "redo": True}))
-            say("on (%s s on you, %s s on others)." % (num_text(st["band_time"]), num_text(st["other_time"])),
-                Kit.HUE_GOOD)
 
         def _tick():
             """Client tick: queued clicks, death, the count, the HP and poison alerts, the server's answer and
@@ -7502,6 +7761,7 @@ def _module_hud():
                                "List a pet of yours that isn't shown (this session)", on_click=queue("add"))
                 c["count"] = Kit.add_label(g, "", x_add - 60, yp + 6, Kit.HUE_INFO)
                 c["count_right"] = x_add - 10
+                c["count_y"] = yp + 6
                 x_bar = M + 12 + NAME_W + 8
                 x_info = x_bar + BAR_W + 10
                 way = heal_way()
@@ -7653,7 +7913,7 @@ def _module_hud():
                 tw = Kit.text_px(txt) if txt else 0
                 if win["count_w"] != tw:
                     win["count_w"] = tw
-                    Kit.ui_pos(lbl, c["count_right"] - tw, Kit.ui_y(lbl))
+                    Kit.ui_pos(lbl, c["count_right"] - tw, c["count_y"])
             empty = c.get("empty")
             if empty is not None:
                 if st["followers"] > 0:

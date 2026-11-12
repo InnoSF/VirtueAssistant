@@ -276,11 +276,11 @@ def _module_interface():
             return zid
 
         def build_zone(self, z):
-            """Build the transparent gump that shows one zone: tint, overlap hatch, title bar,
-            window names.
+            """Build the transparent gump that shows one zone: tint, overlap hatch, title bar, window names.
 
-            The gump is movable and resizable unless the zone is locked. A previous frame of the
-            same zone is disposed only after the new one is up, so the screen never flickers.
+            The gump is movable and resizable unless the zone is locked, and is put in front of the other
+            windows. A previous frame of the same zone is disposed only after the new one is up, so the screen
+            never flickers.
             """
             old = self.frames.get(z.id, {}).get("g")
             x, y, w, h = z.px
@@ -312,7 +312,7 @@ def _module_interface():
             Kit.catcher(g, M, M, w - 2 * M, 30, self._select(z.id), "Select the zone (Shift+click: pick more)" + (
                 "; locked" if z.lock else "; drag to move it on the grid"), movable=not z.lock)
             Kit.place(g, x, y, w, h)
-            G.AddGump(g)
+            Kit.add_front(g)
             Kit.no_snap(g)
             Kit.on_moved(g, self._moved(z.id))
             fr["g"] = g
@@ -657,8 +657,9 @@ def _module_interface():
             self.handles_sig = None
 
         def _sync_handles(self):
-            """Rebuild the four edge grips of the selected zone when its rectangle, lock or frame
-            changed.
+            """Rebuild the four edge grips of the selected zone when its rectangle, lock or frame changed.
+
+            The grips are added in front of the other windows and kept out of the snapping.
             """
             z = self.zs.by_id(self.sel) if self.sel else None
             fr = self.frames.get(z.id) if z is not None else None
@@ -686,7 +687,7 @@ def _module_interface():
                 Kit.add_box(g, 0, 0, r[2], r[3], 0.9, "#E8C15A")
                 Kit.catcher(g, 0, 0, r[2], r[3], lambda: None, "Drag to move this edge on the grid")
                 g.SetRect(r[0], r[1], r[2], r[3])
-                G.AddGump(g)
+                Kit.add_front(g)
                 SNAP.skip_gump(g)
                 self.handles.append((g, side, r))
 
@@ -828,12 +829,11 @@ def _module_interface():
             Binds.scoped("interface.editor", self.draw_bar)
 
         def draw_bar(self):
-            """Build the whole tool bar gump: zone tools, size fields, windows in the zone and
-            frame layout.
+            """Build the whole tool bar gump: zone tools, size fields, windows in the zone and frame layout.
 
             The layout is measured first (the "flow" ops with no gump) to get each section's
             height, then drawn. A rebuild keeps the old gump's place, disposes it last and re-
-            finds the client text boxes (self.raws) so typing keeps working.
+            finds the client text boxes (self.raws) so typing keeps working. The new gump is put in front.
             """
             old = self.bar
             W = self.BAR_W
@@ -1059,7 +1059,7 @@ def _module_interface():
             else:
                 x, y = self.bar_pos or Kit.load_pos(EDITOR_POS, (ax or 200, ay or 200), (W, H))
             Kit.place(g, x, y, W, H)
-            G.AddGump(g)
+            Kit.add_front(g)
             Kit.on_moved(g, self._bar_moved)
             # The tool bar opens at its remembered place, else at the bottom anchor, and keeps its
             # place across rebuilds.
@@ -2141,11 +2141,10 @@ def _module_interface():
                 look[k] = bool(c[k].IsChecked)
 
     def draw_setup():
-        """Draw the Set up window for the current step (0 layout cards, 1 window zones, 2
-        look).
+        """Draw the Set up window for the current step (0 layout cards, 1 window zones, 2 look).
 
-        Button clicks are queued (queue(...)) and handled in _tick, not in the click
-        callback.
+        Button clicks are queued (queue(...)) and handled in _tick, not in the click callback. Step 1 shows
+        each window's zone on a button, with the word Zone left off the caption to save room.
         """
         s = setup
         step = s["step"]
@@ -2196,7 +2195,8 @@ def _module_interface():
                 for key, title in wins:
                     zid = zone_in(key)
                     Kit.add_label(g, Kit.fit(title, 300), M + 12, ry + 3)
-                    Kit.art_button(g, store, "z_" + key, Kit.ART_PAGE, M + 330, ry - 2, "Zone: " + (zid or "free"),
+                    zcap = "Zone: " + ((zid[5:] if zid.startswith("Zone ") else zid) if zid else "free")
+                    Kit.art_button(g, store, "z_" + key, Kit.ART_PAGE, M + 330, ry - 2, zcap,
                                    "Click: next zone (free: stays where it is)", on_click=queue(("cycle", key)))
                     ry += 26
             else:
@@ -2461,11 +2461,9 @@ def _module_interface():
         LAYOUT.load_code(str(c.Text or "") if c is not None else settings["code"])
 
     def page_table(w):
-        """Return the rows of the Interface settings page: SCREEN, LOOK, SNAPPING, LAYOUTS and
-        WINDOWS.
+        """Return the rows of the Interface settings page: SCREEN, LOOK, SNAPPING, LAYOUTS and WINDOWS.
 
-        w is the page width. A shorter page is returned when run alone or while zones are
-        off.
+        w is the page width. A shorter page is returned when run alone or while zones are off.
         """
         load_settings()
         L = LAYOUT
@@ -2480,8 +2478,7 @@ def _module_interface():
                 ("check", "fade", "Fade windows when idle", "Dim windows until the mouse is over them or they change"),
                 ("num", "fade_to", "Faded:", "How solid an idle window stays (20-90)", "%", 20, 90),
                 ("num", "fade_after", "After:", "Seconds without the mouse or a change before it fades (2-30)", "s",
-                 2, 30),
-                ("check", "fade_all", "Fade the Action Bar and unit frames too",
+                 2, 30), ("check", "fade_all", "Fade the Action Bar and unit frames too",
                  "Off: they stay solid while other windows fade"))
         access = ("ACCESSIBILITY", (("check", "cblind", "Colour-blind marks",
                                      "Letters beside notoriety and HP colours; colour-blind palette"),
@@ -2517,8 +2514,7 @@ def _module_interface():
                                  "Print where each window in a zone sits and if it fills it"))),
                    ("buttons", (("reclaim", Kit.ART_PLAY, "Reclaim space",
                                  "Give the game area every gap beside it; windows keep their size"),) + undo),
-                   ("custom", 60, draw_drops),
-                   ("buttons", (("share", Kit.ART_PAGE, "Share code",
+                   ("custom", 60, draw_drops), ("buttons", (("share", Kit.ART_PAGE, "Share code",
                                  "Put a code for the layouts in use in the field below"),
                                 ("load_code", Kit.ART_OK, "Load code", "Load the layout code in the field below"))),
                    ("text", "code", "Code:", "Layout code: Ctrl+A then Ctrl+C copies it, Ctrl+V pastes one"))),

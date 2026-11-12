@@ -51,6 +51,15 @@ def _module_actionbar():
     RING_MIN_R = 70
     RING_STEP = 16
     RING_GOLD = "#E8B830"
+    NAME_PX = 14
+    NAME_PX_MIN = 9
+    KEY_PX = 11
+    NAME_COLOR = "#ECECEC"
+    KEY_COLOR = "#FFFFFF"
+    TTF_K = 0.88
+    TTF_EM_ELSE = 0.58
+    FITS_MAX = 300
+    TTF_EM = ((" ijlI.,:;'!|", 0.26), ("frt()[]-/", 0.36), ("mwMW", 0.9), ("ABCDEFGHJKLNOPQRSTUVXYZ&%@", 0.72))
     # Spell names treated as harmful (they ask for a target on someone else).
     HARMFUL_SPELLS = set(("clumsy|feeblemind|magic arrow|weaken|harm|fireball|poison|curse|lightning|mana drain|"
                           "mind blast|paralyze|dispel|energy bolt|explosion|mass curse|chain lightning|flamestrike|"
@@ -321,9 +330,13 @@ def _module_actionbar():
         return Kit.fit(str(text), width, ".")
 
     def short_key(k):
-        """Return a key name in the short form the cell shows (CTRL+ becomes C and so on)."""
-        return (k.upper().replace("CTRL+", "C").replace("SHIFT+", "S")
-                .replace("ALT+", "A").replace("NUMPAD", "N").replace("KP_", "N"))
+        """Return a key name in the short form the cell shows.
+
+        CTRL+, SHIFT+ and ALT+ become C, S and A, NUMPAD and KP_ become N, and MINUS and EQUALS become the
+        signs themselves, so the label fits a small cell.
+        """
+        return (k.upper().replace("CTRL+", "C").replace("SHIFT+", "S").replace("ALT+", "A").replace("NUMPAD", "N")
+                .replace("KP_", "N").replace("MINUS", "-").replace("EQUALS", "="))
 
     def fmt_count(n):
         """Format a counter for a cell: 12400 as 12k and 1500 as 1.5k when "short" is on, else as is."""
@@ -476,7 +489,8 @@ def _module_actionbar():
     def describe(ref):
         """Return the tooltip text of a cell: what a click does, its key, and a hint to right-click.
 
-        Reads st for the Grimoire and Virtue Assistant states and warns when a spell's reagent is out.
+        A script cell shows its file name, not the path. Reads st for the Grimoire and Virtue Assistant
+        states and warns when a spell's reagent is out.
         """
         c = cell(ref)
         t = c["t"]
@@ -498,12 +512,14 @@ def _module_actionbar():
         elif t == "ui" and c["v"] == "virtue":
             name = {"open": "Fold Virtue Assistant into the bar", "gear": "Open the Virtue Assistant window",
                     "docked": "Open the Virtue Assistant window"}.get(st["va_state"], "Virtue Assistant (not running)")
+        elif t == "script":
+            name = c["v"].replace("\\", "/").split("/")[-1] or "?"
         elif t == "ui" and c["v"].startswith("mod:"):
             name = mod_tip(c["v"][4:])
         elif t == "ui":
             name = UI_TIPS.get(c["v"], name)
         tip = {"item": "Use %s", "spell": "Cast %s", "skill": "Use %s", "macro": "Run macro %s",
-               "ability": "Use the %s ability", "script": "Start or stop script %s",
+               "ability": "Use the %s ability", "script": "%s: start or stop",
                "dress": "Dress %s", "undress": "Undress %s", "say": "Say \"%s\"", "ui": "%s"}.get(t, "%s") % name
         if c["tg"]:
             tip += ", then target %s" % ("yourself" if c["tg"] == "self" else "last target")
@@ -1075,6 +1091,8 @@ def _module_actionbar():
         if state not in ("open", "gear", "docked"):
             say("Virtue Assistant isn't running.", Kit.HUE_BAD)
             return False
+        # Stamp the press so the host knows a click of the bar is being answered while the command is sent.
+        HOST.pressed_at = time.time()
         API.SetSharedVar(VA_LINK_CMD, "dock" if state == "open" else "show")
         return True
 
@@ -1676,9 +1694,12 @@ def _module_actionbar():
     _ctrl = {"capw": None, "vtmp": None}
 
     def ctrl_capw():
-        """Return the width of the widest control caption plus padding, measured once."""
+        """Return the width of the widest control caption plus padding, measured once.
+
+        Uses the letter-width sum (Kit.text_px) so no label has to be made just to measure.
+        """
         if _ctrl["capw"] is None:
-            _ctrl["capw"] = max(Kit.text_w(c) for c in ("Keys", "Lock", "Grid")) + 6
+            _ctrl["capw"] = max(Kit.text_px(c) for c in ("Keys", "Lock", "Grid")) + 6
         return _ctrl["capw"]
 
     def ctrl_orders(vert):
@@ -1857,6 +1878,158 @@ def _module_actionbar():
         return [Kit.add_label(g, l, x + (w - Kit.text_w(l)) // 2, ty + i * 14,
                               Kit.HUE_TEXT if hue is None else hue) for i, l in enumerate(lines)]
 
+    _em = dict((ch, em) for chars, em in TTF_EM for ch in chars)
+    _name_fits = {}
+
+    def ttf_w(text, px):
+        """Return the estimated pixel width of text drawn in a TTF label of size px.
+
+        A TTF label cannot be measured before it exists, so each letter counts as a fraction of the size
+        (the TTF_EM table, TTF_EM_ELSE for letters not in it) and TTF_K scales the sum. Rounded up.
+        """
+        return int(math.ceil(sum(_em.get(ch, TTF_EM_ELSE) for ch in text) * px * TTF_K))
+
+    def best_lines(words, px, room, most):
+        """Split words into at most most lines that fit room pixels, with the widest line as short as possible.
+
+        words is a list of words and px the font size. Returns the lines as strings, or None when no split
+        into most lines or fewer fits (a word wider than room, for one). Uses a small memoised search over
+        the first word of each line.
+        """
+        ws = [ttf_w(wd, px) for wd in words]
+        sp = ttf_w(" ", px)
+        n = len(ws)
+        memo = {}
+
+        def go(i, k):
+            """Return (widest line, lines) for the words from index i on, using exactly k lines or fewer; None if
+            they cannot fit.
+            """
+            if i == n:
+                return (0, ())
+            if k == 0:
+                return None
+            if (i, k) in memo:
+                return memo[(i, k)]
+            best = None
+            run = -sp
+            for j in range(i, n):
+                # run is the width of the words from i to j on one line (the first word has no space before it).
+                run += sp + ws[j]
+                # Words only get longer from here, so no later j can fit either.
+                if run > room:
+                    break
+                rest = go(j + 1, k - 1)
+                if rest is not None and (best is None or max(run, rest[0]) < best[0]):
+                    best = (max(run, rest[0]), (" ".join(words[i:j + 1]),) + rest[1])
+            memo[(i, k)] = best
+            return best
+
+        for k in range(1, most + 1):
+            got = go(0, k)
+            if got is not None:
+                return list(got[1])
+        return None
+
+    def cap_parts(word):
+        """Split a camel-case word into its capitalised parts ("OpenSkills" as "Open" and "Skills").
+
+        A cut falls before a capital that follows a lower-case letter or that starts a lower-case run.
+        """
+        cut = [i for i in range(1, len(word)) if word[i].isupper()
+               and (word[i - 1].islower() or (i + 1 < len(word) and word[i + 1].islower()))]
+        return [word[a:b] for a, b in zip([0] + cut, cut + [len(word)])]
+
+    def ttf_cut(text, px, room, tail):
+        """Cut text so that it plus tail fits room pixels at size px; return the cut text with tail added."""
+        while text and ttf_w(text + tail, px) > room:
+            text = text[:-1]
+        return text.rstrip() + tail
+
+    def hard_parts(word, px, room):
+        """Break a word into pieces that each fit room pixels at size px, for words too wide for a line."""
+        out = [""]
+        for ch in word:
+            if out[-1] and ttf_w(out[-1] + ch, px) > room:
+                out.append(ch)
+            else:
+                out[-1] += ch
+        return out
+
+    def name_fit(text, w, h):
+        """Choose the font size and lines for a cell's name: return (px, lines).
+
+        The name is wrapped to the cell width w and height h at the largest size from the interface text
+        size down to NAME_PX_MIN. If nothing fits at the smallest size, camel-case parts and then single
+        letters are tried and the last line is shortened with two dots. Results are cached per
+        (text, w, h, size) and the cache is emptied at FITS_MAX entries.
+        """
+        top = max(NAME_PX_MIN, Kit.tsize(NAME_PX))
+        ck = (text, w, h, top)
+        got = _name_fits.get(ck)
+        if got is not None:
+            return got
+        words = caption_words(text).split()
+        room = max(1, w - 4)
+        # Largest size first: the first size whose lines all fit wins.
+        for px in range(top, NAME_PX_MIN - 1, -1):
+            most = max(1, h // (px + 1))
+            lines = best_lines(words, px, room, most)
+            if lines is not None:
+                got = (px, lines)
+                break
+        if got is None:
+            # Smallest size: the name may only be split at capitals now, then anywhere, then cut short.
+            px = NAME_PX_MIN
+            words = [p for wd in words for p in cap_parts(wd)]
+            lines = best_lines(words, px, room, most)
+            if lines is None:
+                words = [p for wd in words for p in hard_parts(wd, px, room)]
+                lines = best_lines(words, px, room, most)
+                if lines is None:
+                    lines = best_lines(words, px, room, len(words)) or words
+                    if len(lines) > most:
+                        lines = lines[:most - 1] + [ttf_cut(lines[most - 1], px, room, "..")]
+            got = (px, lines)
+        if len(_name_fits) >= FITS_MAX:
+            _name_fits.clear()
+        _name_fits[ck] = got
+        return got
+
+    def add_ttf(g, text, px, color, x, y, stroke=False):
+        """Add a TTF label at (x, y) in gump g that ignores the mouse; return it.
+
+        stroke draws the outline used for hotkey labels so they read on any picture.
+        """
+        lbl = Kit.inert(G.CreateGumpTTFLabel(text, px, color, applyStroke=stroke))
+        lbl.SetPos(x, y)
+        g.Add(lbl)
+        return lbl
+
+    def add_cell_name(g, text, x, y, w, h):
+        """Add a cell's name centred in the box (x, y, w, h) as TTF labels; return the labels."""
+        px, lines = name_fit(text, w, h)
+        lh = px + 1
+        ty = y + (h - lh * len(lines)) // 2
+        return [add_ttf(g, l, px, NAME_COLOR, x + (w - ttf_w(l, px)) // 2, ty + i * lh) for i, l in enumerate(lines)]
+
+    def key_room():
+        """Return the height at the top of a cell that a hotkey label needs (its size plus 3 pixels)."""
+        return max(NAME_PX_MIN, Kit.tsize(KEY_PX)) + 3
+
+    def add_key_label(g, k, x, y, w):
+        """Add the hotkey label of a cell in its top right corner; return the label.
+
+        The size shrinks towards NAME_PX_MIN until the short key fits the cell width, then the key is cut.
+        """
+        text = short_key(k)
+        px = max(NAME_PX_MIN, Kit.tsize(KEY_PX))
+        while px > NAME_PX_MIN and ttf_w(text, px) > w - 4:
+            px -= 1
+        if ttf_w(text, px) > w - 4:
+            text = ttf_cut(text, px, w - 4, ".")
+        return add_ttf(g, text, px, KEY_COLOR, max(x + 2, x + w - 2 - ttf_w(text, px)), y + 1, True)
+
     def click_handler(kind, menu_kind, arg):
         """Return a click callback that queues (kind, arg), or the menu kind on a Shift+click.
 
@@ -1930,7 +2103,7 @@ def _module_actionbar():
         c = cell(ref)
         t = c["t"]
         info = {"x": x, "y": y, "w": w, "h": h, "count": None}
-        parts = cell_art(g, ref, c, info, x, y, w, h, 14 if (settings["keys"] and c["k"] and t) else 0)[0]
+        parts = cell_art(g, ref, c, info, x, y, w, h, key_room() if (settings["keys"] and c["k"] and t) else 0)[0]
         win["cells"][ref] = finish_cell(g, info, parts, t in ("item", "spell", "ability", "script", "skill", "travel"),
                                         c["k"] if settings["keys"] and t else "", describe(ref), ("click", "menu", ref))
         # The counter list is rebuilt after a draw because the labels are new.
@@ -1941,7 +2114,8 @@ def _module_actionbar():
 
         Used by the bar's cells and by the radial ring. Returns (parts, pic): the list of controls added
         to gump g and the main picture control (None when the cell shows text only). ky is the height
-        reserved at the top of the cell for the hotkey label; info collects handles for later updates.
+        reserved at the top of the cell for the hotkey label; a cell with no picture gets its name below
+        that space through add_cell_name. info collects handles for later updates.
         """
         t = c["t"]
         parts = []
@@ -1963,15 +2137,14 @@ def _module_actionbar():
                 p = add_item_pic(g, TRAVEL_ITEM[m], 0, *pic_box(ref, x, y, w, h, 3))
             if p is not None:
                 p.SetAlpha(0.5)
-            name = fit(c["v"] or "?", w - 4)
-            parts.append(Kit.add_label(g, name, x + (w - Kit.text_w(name)) // 2, y + ky + (h - ky - 14) // 2 - 1))
+            parts.extend(add_cell_name(g, c["v"] or "?", x, y + ky, w, h - ky))
             shown = True
         elif t == "ability":
             icon, name = ability_info(c["v"])
             if icon:
                 p = add_icon(g, icon, x, y, w, h)
             elif name:
-                parts.extend(add_cell_text(g, name, x, y + ky, w, h - ky))
+                parts.extend(add_cell_name(g, name, x, y + ky, w, h - ky))
                 shown = True
         elif t == "ui":
             d = ui_def(c["v"])
@@ -1986,7 +2159,7 @@ def _module_actionbar():
             shown = True
             parts.append(p)
         if t and not shown:
-            parts.extend(add_cell_text(g, cell_text(c), x, y + ky, w, h - ky))
+            parts.extend(add_cell_name(g, cell_text(c), x, y + ky, w, h - ky))
         return parts, p
 
     def finish_cell(g, info, parts, counted, k, tip, click):
@@ -2001,8 +2174,7 @@ def _module_actionbar():
             info["txt"], info["hue"] = "", Kit.HUE_TEXT
             parts.append(info["count"])
         if k:
-            kt = fit(short_key(k), w - 4)
-            info["key"] = Kit.add_label(g, kt, x + w - 2 - Kit.text_w(kt), y + 1, Kit.HUE_INFO)
+            info["key"] = add_key_label(g, k, x, y, w)
             parts.append(info["key"])
         info["tip"] = tip
         info["catcher"] = Kit.catcher(g, x, y, w, h, click_handler(*click), tip)
@@ -2046,21 +2218,32 @@ def _module_actionbar():
         st["redraw"].update(refs)
 
     def refresh_key(ref):
-        """Update the hotkey label and tooltip of one cell or bag slot in place, without a redraw."""
+        """Update the hotkey label and tooltip of one cell or bag slot in place, without a redraw.
+
+        The label is rebuilt because its size depends on the text. When a cell gains or loses its label
+        the space reserved for it changes, so that cell is queued for a redraw instead.
+        """
         g = win["g"]
         bag = ref[0] == "b"
         info, k = (win["bags"].get(ref[1]), bag_keys()[ref[1]]) if bag else (win["cells"].get(ref), cell(ref)["k"])
         if info is None or not Kit.is_open(g):
             return
-        text = fit(short_key(k), info["w"] - 4) if (settings["keys"] and k and (bag or cell(ref)["t"])) else ""
-        lbl = info.get("key")
-        if text and lbl is None:
-            lbl = Kit.add_label(g, text, info["x"] + info["w"] - 2 - Kit.text_w(text), info["y"] + 1, Kit.HUE_INFO)
-            lbl.SetAcceptMouseInput(False)
-            info["key"] = lbl
-            info.setdefault("parts", []).append(lbl)
-        elif lbl is not None:
-            lbl.Text = text
+        lbl = info.pop("key", None)
+        parts = info.setdefault("parts", [])
+        want = settings["keys"] and k
+        # The label appearing or vanishing changes the room the picture has, so redraw the cell.
+        if not bag and bool(want and cell(ref)["t"]) != (lbl is not None):
+            if lbl is not None:
+                info["key"] = lbl
+            want_redraw([ref])
+            return
+        if lbl is not None:
+            Kit.dispose(lbl)
+            if lbl in parts:
+                parts.remove(lbl)
+        if settings["keys"] and k and (bag or cell(ref)["t"]):
+            info["key"] = add_key_label(g, k, info["x"], info["y"], info["w"])
+            parts.append(info["key"])
         set_tip(info, bag_tip(ref[1]) if bag else describe(ref))
 
     def set_tip(info, tip):
@@ -2545,7 +2728,7 @@ def _module_actionbar():
         x, y = tray_pos(w, h)
         Kit.place(g, x, y, w, h)
         tray.update({"g": g, "at": (x, y), "w": w, "h": h})
-        G.AddGump(g)
+        Kit.add_front(g)
         Kit.attach(g, win["g"])
         Kit.dispose(old)
 
@@ -3460,7 +3643,7 @@ def _module_actionbar():
         x, y = Kit.place(g, x, y, w, h)
         menu.update({"g": g, "c": c, "placed": (x, y)})
         G.AddControlOnDisposed(g, menu_disposed(g))
-        G.AddGump(g)
+        Kit.add_front(g)
         g.SetInScreen()
         Kit.dispose(menu.pop("stale", None))
 
@@ -3716,7 +3899,7 @@ def _module_actionbar():
         if W and H:
             x0, y0 = max(0, min(x0, W - 2 * half)), max(0, min(y0, H - 2 * half))
         x0, y0 = Kit.place(g, x0, y0, 2 * half, 2 * half)
-        G.AddGump(g)
+        Kit.add_front(g)
         SNAP.skip_gump(g)
         ring.update(g=g, at=(x0 + half, y0 + half), cells=spots, until=time.time() + RING_SECS, hot=None, box=box,
                     side=side, rad=rad, half=half, start=pos)
@@ -4033,8 +4216,7 @@ def _module_actionbar():
                     ("slider", "extra", "Extra rows:", "Rows of %d cells above the top row (0-%d); hidden rows' "
                      "hotkeys are off" % (TOP_SLOTS, EXTRA_ROWS), 0, EXTRA_ROWS,
                      {"sw": 100, "vfmt": "%d", "stay": True}), ("custom", 26, draw_anchor)),
-                 {"ldy": 2, "sdy": 6, "lgap": 8, "ugap": 10, "fh": 26, "pad": 6}),
-                ("RADIAL RING", [("buttons", (
+                 {"ldy": 2, "sdy": 6, "lgap": 8, "ugap": 10, "fh": 26, "pad": 6}), ("RADIAL RING", [("buttons", (
                     ("radial", Kit.ART_PLAY, "Ring key: %s" % (settings["radial"] or "none"),
                      "Pick the key to hold for a ring of one page's cells (Backspace clears it)",
                      queue(("ring_bind",))),
@@ -4250,6 +4432,8 @@ def _module_actionbar():
         """Start the module: load settings and cells, link to the other windows and draw the bar.
 
         Called by the host on the client thread (the script thread only if the client queue is out of reach).
+        While the host is still booting, the bar is first fitted to the slot its layout zone gives it so it
+        is drawn once at its final size.
         """
         st.update(fresh(), minimized=Kit.load_min(MIN_KEY), em=False, ub_last=None, ub_pending=True, counted_at=0.0)
         _told.clear()
@@ -4259,11 +4443,16 @@ def _module_actionbar():
         load_cells()
         scan_bags()
         st["ub_state"], st["grim_state"], st["va_state"] = ub_state(), grim_state(), va_state()
-        heartbeat()
         HOST.layout_add(KEY, bar_gump, TITLE, LAYOUT_HOOKS)
         cleanup.add(HOST.layout_remove, KEY)
+        slot = HOST.layout_slot(KEY) if HOST.booting() else None
+        if slot and slot[0] and slot[1]:
+            layout_fit(slot[0], slot[1], None)
         st.update(dock_sig=dock_sig(), tray_sig=tray_sig(), watch_next=0.0, owned_sig=frozenset(HOST.hotkeys_owned))
         build_window()
+        # The first heartbeat comes after the window is built, so other windows only see the bar as running
+        # once it is on screen.
+        heartbeat()
         st.update(rebuild_at=0.0, redraw=set())
         _hk_install()
         register_hotkeys()

@@ -1625,16 +1625,25 @@ def _module_social():
                        on_click=queue(("page", 1)))
 
     def chat(g, store, c, x, y, w, buttons, field_tip):
-        """A text box and its Send buttons, right-aligned. What was typed is kept per tab in st msg.
-        When the field would be narrower than MSG_W_MIN the buttons lose their captions.
+        """A text box with a Say: label and its Send buttons, right-aligned.
+
+        What was typed is kept per tab in st msg. When the field would be narrower than MSG_W_MIN the
+        buttons lose their captions, and the Say: label is left out if it would squeeze the field below
+        that width.
         """
         bw = sum(35 + Kit.text_w(cap) + 12 for _, cap, _ in buttons)
         fw = w - 20 - bw - 8
         if fw < MSG_W_MIN:
             fw = max(40, w - 20 - 30 * len(buttons) - 8)
-        c["msg"] = Kit.with_tip(Kit.add_textbox(g, st["msg"].get(settings["tab"], ""), x + 10, y + 3, fw,
+        fx = x + 10
+        lw = Kit.text_w("Say:") + 8
+        if fw - lw >= MSG_W_MIN:
+            Kit.add_label(g, "Say:", fx, y + 6, Kit.HUE_INFO)
+            fx += lw
+            fw -= lw
+        c["msg"] = Kit.with_tip(Kit.add_textbox(g, st["msg"].get(settings["tab"], ""), fx, y + 3, fw,
                                                 numbers=False), field_tip)
-        bx = x + 10 + fw + 12
+        bx = fx + fw + 12
         for key, cap, tip in buttons:
             bx = tool(g, store, bx, y, key, Kit.ART_PLAY, cap, tip)[1]
 
@@ -1783,11 +1792,13 @@ def _module_social():
             r[prev], r[key] = (r[key], time.time()), v
 
     def set_row(r, serial, name, status, hue, frac, extra=None, name_hue=None, bar=True, show_x=True, me=False):
-        """Write a row: the name, status, health bar and extra columns, only what changed since the last
-        pass. extra holds rank and title; text too long for its column goes into the row's tooltip,
-        with the player's note when there is one. A pass identical to the last one writes nothing. The
-        notes version and the name as shown (vis_name) are part of that comparison, so a changed note
-        or a switch of streamer or colour-blind mode refreshes the row. me marks your own row.
+        """Write a row: the name, status, health bar and extra columns, only what changed since the last pass.
+
+        extra holds rank and title. Text too long for its column goes into the row's tooltip (as Name: and
+        Status: lines, then the extra columns), with the player's note when there is one. A pass identical to
+        the last one writes nothing. The notes version and the name as shown (vis_name) are part of that
+        comparison, so a changed note or a switch of streamer or colour-blind mode refreshes the row.
+        me marks your own row.
         """
         # The comparison key: everything the row shows.
         ex = extra or NO_EXTRA
@@ -1802,10 +1813,10 @@ def _module_social():
         if name_hue is None:
             name_hue = Kit.HUE_TEXT if frac is not None else Kit.HUE_INFO
         c = win["c"]
-        Kit.set_text(r["name"], fit(shown, c.get("name_w", NAME_W)), name_hue)
-        Kit.set_text(r["status"], fit(status, c.get("status_w", STATUS_W)), hue)
-        # Columns too long for the row, listed in the tooltip.
-        cut = []
+        nm, sx = fit(shown, c.get("name_w", NAME_W)), fit(status, c.get("status_w", STATUS_W))
+        Kit.set_text(r["name"], nm, name_hue)
+        Kit.set_text(r["status"], sx, hue)
+        cut = (["Name: %s" % shown] if nm != shown else []) + (["Status: %s" % status] if sx != status else [])
         for key, (lbl, wd) in r["extra"].items():
             full = str(ex.get(key, "") or "")
             short = ""
@@ -2733,6 +2744,8 @@ def _module_social():
         """Module start: reset the run state, load saved data when the character changed, find the client
         classes, draw the window, register it with the zone layout and offer notes to other modules
         through the social.note service.
+
+        While the host is still booting, the window is drawn at the size its layout zone gives it.
         """
         # Everything the pass caches starts empty; the minimized state is as it was left.
         st.update({"shutting": False, "docked": False, "queue": [], "page": {}, "mobs": {},
@@ -2748,6 +2761,9 @@ def _module_social():
             load_settings()
         LOADED_FOR[0] = 0
         CL.find()
+        slot = HOST.layout_slot(KEY) if HOST.booting() else None
+        if slot and slot[0] and slot[1]:
+            st["fit"] = (int(slot[0]), int(slot[1]))
         build_window()
         # Exact means the window is drawn exactly the slot a zone gives it; verify has the layout measure
         # it every pass; min keeps a zone from going below the fixed part.

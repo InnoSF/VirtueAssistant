@@ -5,12 +5,12 @@ import re
 import struct
 import time
 APP_NAME="Virtue Assistant"
-APP_VERSION="2.7.0.35"
+APP_VERSION="2.7.0.37"
 MODULE_DIR="VirtueAssistantModules"
 SETTINGS_DIR="VirtueAssistantSettings"
 SETTINGS_KEY="VirtueAssistant_settings"
-VA_ALONE="VA_ALONE"in globals()
-START_AT=time.time()
+VA_ALONE="VA_ALONE"in globals()and "_VA_INNER"not in globals()
+START_AT=(globals().get("_VA_INNER")or[time.time()])[0]
 ALIVE_KEY="VirtueAssistant_alive"
 START_KEY="VirtueAssistant_starting"
 ALONE_PARTS="VirtueAssistant_alone_parts_%s"
@@ -58,18 +58,27 @@ def whats_new():
 	try:import _WhatsNew;return tuple(_WhatsNew.WHATS_NEW)
 	except Exception:return()
 class _Gumps(object):
-	def __init__(self,inner):self._inner=inner
-	def __getattr__(self,name):v=getattr(self._inner,name);self.__dict__[name]=v;return v
+	def __init__(self,inner):self._inner=inner;self.made=0
+	def __getattr__(self,name):
+		v=getattr(self._inner,name)
+		if self.made is not None and name.startswith("Create"):v=self._counted(v)
+		self.__dict__[name]=v;return v
+	def _counted(self,fn):
+		def a(*a,**b):
+			if self.made is not None:self.made+=1
+			return fn(*a,**b)
+		return a
 	def AddControlOnClick(self,ctrl,fn):
 		a=HOST.click_key()
 		def b(*b):
+			HOST.pressed_at=time.time()
 			try:fn(*b)
 			finally:HOST.poke(a)
 		self._inner.AddControlOnClick(ctrl,b)
 	def AddGump(self,g):
 		Kit.set(g,"CanCloseWithRightClick",False);Kit.set(Kit._raw_gump(g),"CanCloseWithRightClick",False);p=Kit._pend.get(g)
 		if(p is not None and p[2]and p[3])or g in Kit._scrolled:Kit.pin_size(g)
-		r=self._inner.AddGump(g)
+		r=self._inner.AddGump(g);Kit.stir()
 		with Kit.quiet:
 			SNAP.add(g)
 			if LAYOUT.loaded:LAYOUT.fresh_adds.add(g)
@@ -90,7 +99,7 @@ class Client(object):
 		try:
 			if Client._client_asm is False:
 				Client._client_asm=None
-				try:Client._client_asm=API.GetType().Assembly
+				try:Client._client_asm=Kit._measure["asm"]=API.GetType().Assembly
 				except Exception:pass
 			b=Client._client_asm
 			if b is not None:
@@ -140,12 +149,12 @@ class Client(object):
 		if a is None:return
 		try:return bool(a())
 		except Exception:return False
-	MTQ=None;mtq_looked=False;main_call=None
+	MTQ=None;mtq_looked=False;main_call=None;main_cached=False
 	@staticmethod
 	def _find_mtq():
 		if Client.mtq_looked:return Client.MTQ
 		Client.mtq_looked=True
-		try:import clr;clr.AddReference(API.GetType().Assembly);from ClassicUO.Game.Managers import MainThreadQueue;Client.MTQ=MainThreadQueue
+		try:import clr;clr.AddReference(API.GetType().Assembly);from ClassicUO.Game.Managers import MainThreadQueue;Client.MTQ=Kit._measure["mtq"]=MainThreadQueue
 		except Exception:Client.MTQ=None
 		return Client.MTQ
 	@staticmethod
@@ -156,31 +165,37 @@ class Client(object):
 		except Exception:return False
 	@staticmethod
 	def _pick_main_call():
-		from System import Func;a=Client.MTQ;F=Func[object]
-		def d():
-			b=a.InvokeOnMainThread[object]
-			def c(run):b(F(run))
-			return c
-		def e():
-			def b(run):a.InvokeOnMainThread(F(run))
-			return b
+		from System import Func;c=Client.MTQ;F=Func[object]
 		def f():
-			from System import Action;from System.Threading import ManualResetEventSlim
-			def b(run):
-				b=ManualResetEventSlim(False)
-				def c():
-					try:run()
-					finally:b.Set()
-				a.EnqueueAction(Action(c))
-				if not b.Wait(5000):raise _HopTimeout("the client thread didn't answer in 5 s")
+			a=c.InvokeOnMainThread[object]
+			def b(run):a(F(run))
 			return b
-		for g in(d,e,f):
-			b={}
-			def h():b["ok"]=True
-			try:c=g();c(h)
+		def g():
+			def a(run):c.InvokeOnMainThread(F(run))
+			return a
+		def h():
+			from System import Action;from System.Threading import ManualResetEventSlim
+			def a(run):
+				a=ManualResetEventSlim(False)
+				def b():
+					try:run()
+					finally:a.Set()
+				c.EnqueueAction(Action(b))
+				if not a.Wait(5000):raise _HopTimeout("the client thread didn't answer in 5 s")
+			return a
+		d=(f,g,h);a=Kit._measure.get("main_call");Client.main_cached=False
+		if a in(0,1,2):
+			try:b=d[a]();Client.main_cached=True;return b
+			except Exception:Kit._measure.pop("main_call",None)
+		for a,i in enumerate(d):
+			e={}
+			def j():e["ok"]=True
+			try:b=i();b(j)
 			except Exception:continue
-			if b.get("ok"):return c
+			if e.get("ok"):Kit._measure["main_call"]=a;return b
 		return
+	@staticmethod
+	def post(fn):from System import Action;Client.MTQ.EnqueueAction(Action(fn))
 	@staticmethod
 	def on_main_ex(fn):
 		Client.exc=None
@@ -195,7 +210,10 @@ class Client(object):
 		b=_Hop(fn)
 		try:c(b.run)
 		except _HopTimeout as a:Client.error=str(a);return "err",Client.error
-		except Exception as a:Client.error=str(a);return "no",None
+		except Exception as a:
+			Client.error=str(a)
+			if Client.main_cached:Client.main_call=None;Client.main_cached=False;Kit._measure.pop("main_call",None)
+			return "no",None
 		if b.e is not None:Client.error,Client.exc=b.e,b.x;return "err",b.e
 		return "ok",b.v
 	error="";exc=None
@@ -355,7 +373,7 @@ class Follow(object):
 		if serial and Follow.current()==serial:Follow.stop(who);return False
 		return Follow.start(serial,who)
 class Kit(object):
-	WINDOW_BG=5054;STONE_TILE=5058;SECTION_TILE=2624;SECTION_ALPHA=.8;FIELD_TILE=2624;CORNER_ART=10460;ART_PLAY=(4005,4007,4006);ART_CLOSE=(4017,4019,4018);DARK_HUE=1899;DARK_CORNER_HUE=2305;DARK_SECTION_ALPHA=.95;LIGHT_SECTION_ALPHA=.8;PARCH_HUE=2960;PARCH_CORNER_HUE=1260;PARCH_SECTION_HUE=1845;PARCH_SECTION_ALPHA=.9;CONTRAST_HUE=1175;CONTRAST_SECTION_ALPHA=1.;LOOKS={"classic":(0,0,0,LIGHT_SECTION_ALPHA),"dark":(DARK_HUE,DARK_CORNER_HUE,0,DARK_SECTION_ALPHA),"parchment":(PARCH_HUE,PARCH_CORNER_HUE,PARCH_SECTION_HUE,PARCH_SECTION_ALPHA),"contrast":(CONTRAST_HUE,CONTRAST_HUE,0,CONTRAST_SECTION_ALPHA)};LOOK_ORDER=("classic","dark","parchment","contrast");LOOK_NAMES={"classic":"Classic","dark":"Dark","parchment":"Parchment","contrast":"High contrast"};TEXT_SIZES=(100,115,130,150);SECTION_HUE=0;tscale=1.;compact=cblind=streamer=False;GOLD_H=2700;GOLD_V=2701;GOLD_T=3;_hues={};_look="classic";_wins={};_behind=set();ART_OK=(4023,4025,4024);ART_PAGE=(4011,4013,4012);ART_MIN=(253,252,253);ART_RESTORE=(251,250,251);ART_DOCK=(5602,5606,5602);ART_CIRCLE=(2117,2118,2118);DOCK_DX,DOCK_DY=20,2;DOCK_TIP="Fold into the Action Bar's tray";MIN_TIP="Minimize (or double-click the title)";RESTORE_TIP="Restore";SETTINGS_TIP="Open %s settings";CLOSE_TIP="Close %s (turns it off)";DOUBLE_TIP="Double-click: minimize or restore";LINE_RED,LINE_BLUE,LINE_POISON=2053,2054,2056;HUE_TITLE=53;HUE_TEXT=1153;HUE_GOOD=68;HUE_BAD=33;HUE_INFO=946;MARGIN=12;GAP=8;_sizes={}
+	WINDOW_BG=5054;STONE_TILE=5058;SECTION_TILE=2624;SECTION_ALPHA=.8;FIELD_TILE=2624;CORNER_ART=10460;ART_PLAY=(4005,4007,4006);ART_CLOSE=(4017,4019,4018);DARK_HUE=1899;DARK_CORNER_HUE=2305;DARK_SECTION_ALPHA=.95;LIGHT_SECTION_ALPHA=.8;PARCH_HUE=2960;PARCH_CORNER_HUE=1260;PARCH_SECTION_HUE=1845;PARCH_SECTION_ALPHA=.9;CONTRAST_HUE=1175;CONTRAST_SECTION_ALPHA=1.;LOOKS={"classic":(0,0,0,LIGHT_SECTION_ALPHA),"dark":(DARK_HUE,DARK_CORNER_HUE,0,DARK_SECTION_ALPHA),"parchment":(PARCH_HUE,PARCH_CORNER_HUE,PARCH_SECTION_HUE,PARCH_SECTION_ALPHA),"contrast":(CONTRAST_HUE,CONTRAST_HUE,0,CONTRAST_SECTION_ALPHA)};LOOK_ORDER=("classic","dark","parchment","contrast");LOOK_NAMES={"classic":"Classic","dark":"Dark","parchment":"Parchment","contrast":"High contrast"};TEXT_SIZES=(100,115,130,150);SECTION_HUE=0;tscale=1.;compact=cblind=streamer=False;GOLD_H=2700;GOLD_V=2701;GOLD_T=3;_hues={};_look="classic";_wins={};_behind=set();ART_OK=(4023,4025,4024);ART_PAGE=(4011,4013,4012);ART_MIN=(253,252,253);ART_RESTORE=(251,250,251);ART_DOCK=(5602,5606,5602);ART_CIRCLE=(2117,2118,2118);DOCK_DX,DOCK_DY=20,2;DOCK_TIP="Fold into the Action Bar's tray";MIN_TIP="Minimize (or double-click the title)";RESTORE_TIP="Restore";SETTINGS_TIP="Open %s settings";CLOSE_TIP="Close %s (turns it off)";DOUBLE_TIP="Double-click: minimize or restore";LINE_RED,LINE_BLUE,LINE_POISON=2053,2054,2056;HUE_TITLE=53;HUE_TEXT=1153;HUE_GOOD=68;HUE_BAD=33;HUE_INFO=946;MARGIN=12;GAP=8;_sizes={};_measure={};MEASURE_CAP=6000
 	@staticmethod
 	def on_client(fn,fallback=True):
 		a,v=Client.on_main_ex(fn)
@@ -381,12 +399,15 @@ class Kit(object):
 		a=Kit._scale
 		if not a["looked"]:
 			a["looked"]=True
-			try:t=Client._type("ClassicUO.Client");b=t.GetProperty("Game",Client.flags(True));c=b.GetValue(None,None);d=c.GetType().GetProperty("RenderScale",Client.flags());float(d.GetValue(c,None));a["fn"]=lambda:float(d.GetValue(b.GetValue(None,None),None))
+			try:
+				c,b=Kit._measure.get("scale")or(None,None)
+				if b is None:t=Client._type("ClassicUO.Client");c=t.GetProperty("Game",Client.flags(True));d=c.GetValue(None,None);b=d.GetType().GetProperty("RenderScale",Client.flags());float(b.GetValue(d,None));Kit._measure["scale"]=(c,b)
+				a["fn"]=lambda:float(b.GetValue(c.GetValue(None,None),None))
 			except Exception:a["fn"]=None
 		e=a["fn"]
 		if e is None:return 1.
 		try:s=e();return s if.25<=s<=4. else 1.
-		except Exception:return 1.
+		except Exception:Kit._measure.pop("scale",None);return 1.
 	ANCHORS=("TL","T","TR","L","C","R","BL","B","BR");SCREEN_KEY="VirtueAssistant_screen";_pos_screen=None
 	@staticmethod
 	def clamp(x,y,w,h):
@@ -394,7 +415,9 @@ class Kit(object):
 		if W>0:x=max(0,min(x,W-w))if w<=W else max(W-w,min(x,0))
 		if H>0:y=max(0,min(y,H-h))if h<=H else max(H-h,min(y,0))
 		return x,y
-	_frame_parts={};_pend={};PEND_FOR=1.
+	_frame_parts={};_pend={};PEND_FOR=1.;churn=0;churn_at=0.
+	@staticmethod
+	def stir():Kit.churn+=1;Kit.churn_at=time.time()
 	@staticmethod
 	def note_rect(g,x,y,w=None,h=None):
 		if g is None:return
@@ -406,7 +429,9 @@ class Kit(object):
 			if a is not None:b=a[5]
 			elif r is not None:b=r
 			else:b=(int(g.GetX()),int(g.GetY()),int(g.GetWidth()or 0),int(g.GetHeight()or 0))
-			Kit._pend[g]=(int(x),int(y),None if w is None else int(w),None if h is None else int(h),time.time(),b)
+			n=(int(x),int(y),None if w is None else int(w),None if h is None else int(h));c=a or b
+			if c[0:2]!=n[0:2]or(n[2]is not None and(c[2],c[3])!=n[2:4]):Kit.stir()
+			Kit._pend[g]=n+(time.time(),b)
 		except Exception:pass
 	@staticmethod
 	def rect(g):
@@ -694,7 +719,7 @@ class Kit(object):
 		if a is None:
 			w=h=0
 			try:p=G.CreateGumpPic(graphic);w,h=int(p.GetWidth()or 0),int(p.GetHeight()or 0);Kit.dispose(p)
-			except Exception:pass
+			except Exception:Kit._measure["bad"]=True
 			a=Kit._sizes[graphic]=(w,h)
 		return a
 	@staticmethod
@@ -848,7 +873,7 @@ class Kit(object):
 					if str(e.Button)==button:
 						if queue:Kit.pending.append(fn)
 						else:fn()
-						e.Result=True;HOST.poke()
+						e.Result=True;HOST.pressed_at=time.time();HOST.poke()
 				except Exception:pass
 			j.Invoke(c,System.Array[object]([i(k)]));return True
 		except Exception:return False
@@ -856,7 +881,7 @@ class Kit(object):
 	@staticmethod
 	def on_moved(g,fn):SNAP.on_moved(g,fn)
 	@staticmethod
-	def moved_by_code(g):SNAP.moved_by_code(g)
+	def moved_by_code(g):SNAP.moved_by_code(g);Kit.stir()
 	@staticmethod
 	def title_catcher(g,x,y,w,h,fn,key=None):
 		key=key or id(g);a=Kit.once(fn,key)
@@ -991,7 +1016,7 @@ class Kit(object):
 		if a is None:
 			a=0
 			try:l=G.CreateGumpLabel(text,Kit.HUE_TEXT);a=int(l.GetWidth()or 0);Kit.dispose(l)
-			except Exception:pass
+			except Exception:Kit._measure["bad"]=True
 			a=a or 8*len(text)
 			if len(Kit._widths)>=Kit.WIDTHS_MAX:
 				b=Kit._widths
@@ -1032,11 +1057,22 @@ class Kit(object):
 		a=Kit._px
 		if a["ok"]is None:
 			try:a["pad"]=2*Kit.text_w("x")-Kit.text_w("xx");b=Kit.PX_REF;a["ok"]=Kit.text_w(b)==a["pad"]+sum(Kit._ch_w(e)for e in b)
-			except Exception:a["ok"]=False
+			except Exception:a["ok"]=False;Kit._measure["bad"]=True
 		if not a["ok"]:return Kit.text_w(text)
 		w,d=a["pad"],Kit._px_ch
 		for c in text:x=d.get(c);w+=Kit._ch_w(c)if x is None else x
 		return w
+	@staticmethod
+	def measure_bind():
+		import sys;c=(APP_VERSION,os.getpid());f=sys.__dict__.get("_VA_MEASURE");e=f.get(c)if type(f)is dict else None
+		if type(e)is not dict or e.get("bad")is not False:e={"bad":False};sys._VA_MEASURE={c:e}
+		for a,b in((Kit,"_widths"),(Kit,"_px_ch"),(Kit,"_px"),(Kit,"_sizes"),(Kit,"_rp_sizes"),(Kit,"_ctl_prop"),(Client,"_types"),(Typing,"_members"),(Tz,"_types"),(Tz,"_found"),(Tex,"parts")):
+			k=a.__name__+"."+b;d=e.get(k)
+			if type(d)is not dict or len(d)>Kit.MEASURE_CAP:d=e[k]=a.__dict__[b]
+			setattr(a,b,d)
+		if e.get("asm")is not None:Client._client_asm=e["asm"]
+		if e.get("mtq")is not None:Client.MTQ,Client.mtq_looked=e["mtq"],True
+		Tex.ok=True if Tex.parts.get("ok")is True else None;Kit._measure=e
 	@staticmethod
 	def fit(text,width,tail=".."):
 		text=str(text or "")
@@ -1129,6 +1165,7 @@ class Kit(object):
 	@staticmethod
 	def dispose(ctrl):
 		if ctrl is not None:
+			if ctrl in SNAP.members:Kit.stir()
 			try:ctrl.Dispose()
 			except Exception:pass
 	@staticmethod
@@ -1174,7 +1211,7 @@ class Kit(object):
 	def data_path(name):return os.path.join(Kit.data_dir(),name)
 	@staticmethod
 	def write_safe(path,text,g="utf-8",tail=None):
-		try:import threading;a="%s.%d.%d.tmp"%(path,os.getpid(),threading.get_ident())
+		try:import _thread;a="%s.%d.%d.tmp"%(path,os.getpid(),_thread.get_ident())
 		except Exception:a="%s.%d.tmp"%(path,id(text))
 		import io
 		try:
@@ -1243,7 +1280,7 @@ class Kit(object):
 		e,c=Kit.merge_text(b,entries,d,a);Kit.write_safe(path,e+a if c else "");return c
 	@staticmethod
 	def data_setup():
-		a,d=Kit.script_dir(),Kit.data_dir()
+		safe(Kit.measure_bind);a,d=Kit.script_dir(),Kit.data_dir()
 		try:
 			if not os.path.isdir(d):os.makedirs(d)
 		except Exception as k:Kit._data_dir[0]=a or "";Kit.say("couldn't make the %s folder (%s); saving beside the script."%(SETTINGS_DIR,k),Kit.HUE_BAD);return
@@ -1363,6 +1400,35 @@ class Kit(object):
 		b={"title":title,"icon":icon,"state":c,"show":a(False,False),"dock":a(True,True),"undock":d,"minimize":a(False,True),"gump":lambda:win["g"],"redraw":redraw}
 		if fit is not None:b["fit"]=fit
 		return b
+	@staticmethod
+	def add_front(g,hidden=False):
+		Kit.flush()
+		if hidden:g.IsVisible=False
+		return G.AddGump(g)
+	_stack={"off":False}
+	@staticmethod
+	def replace_gump(old,g,hidden=False):
+		r=Kit.add_front(g,hidden);i=Kit._stack
+		if i["off"]or Host.ORDER_OFF in HOST.tz_off or not Kit.is_open(old)or not Client.on_client_thread():return r
+		try:
+			f,j=Kit._raw_gump(old),Kit._raw_gump(g)
+			if f is None or j is None:return r
+			e=Tz.T("ClassicUO.Game.Managers.UIManager");c=Tz.get(None,"Gumps",e);h=Kit._same()
+		except Exception:i["off"]=True;return r
+		try:
+			b,a,d,n=c.First,None,None,0
+			while b is not None and n<2000 and(a is None or d is None):
+				v=b.Value
+				if a is None and h(v,j):a=b
+				elif d is None and h(v,f):d=b
+				b=b.Next;n+=1
+			if a is None or d is None or(a.Next is not None and h(a.Next.Value,f)):return r
+			c.Remove(a)
+			try:c.AddBefore(d,a)
+			except Exception:c.AddFirst(a)
+			Tz.put(None,"_gumpsStructureVersion",int(Tz.get(None,"_gumpsStructureVersion",e))+1,e);Tz.put(None,"TopMostControl",c.First.Value,e)
+		except Exception:pass
+		return r
 	@staticmethod
 	def flush():
 		a=Client._find_mtq()
@@ -1540,7 +1606,7 @@ class Kit(object):
 		for i,b in enumerate(data):s=(s*31+b+i)&65535
 		return s
 	@staticmethod
-	def kv_load(key,d,b,a=None,e=()):
+	def kv_load(key,d,b,a=None,strs=()):
 		a=a or{}
 		for c in Kit.get_var(key).split(d):
 			if "="not in c:continue
@@ -1548,10 +1614,10 @@ class Kit(object):
 			if k in a:
 				try:b[k]=max(a[k][0],min(a[k][1],int(v)))
 				except ValueError:pass
-			elif k in e:b[k]=v
+			elif k in strs:b[k]=v
 			elif k in b:b[k]=v=="1"
 	@staticmethod
-	def kv_save(key,b,vals,order,a=None,c=()):a=a or{};Kit.put_var(key,b.join("%s=%s"%(d,vals[d]if d in a or d in c else("1"if vals[d]else "0"))for d in order))
+	def kv_save(key,b,vals,order,a=None,strs=()):a=a or{};Kit.put_var(key,b.join("%s=%s"%(c,vals[c]if c in a or c in strs else("1"if vals[c]else "0"))for c in order))
 	@staticmethod
 	def with_tip(ctrl,text):
 		if text:
@@ -1586,14 +1652,14 @@ class Kit(object):
 		else:return False
 		return True
 	@staticmethod
-	def show_window(g,x,y,w,h,a,hidden,b,moved,c=None,parts=None,max_h=None):
+	def show_window(g,x,y,w,h,a,hidden,b,moved,c=None,parts=None,max_h=None,old=None):
 		d=Kit.place(g,x,y,w,h,None,max_h)
+		if a is not None:HOST.built(a)
 		if a is not None and HOST.layout_locked(a):g.CanMove=False
 		if c is not None:c.update(parts)
 		if b is not None:G.AddControlOnDisposed(g,b)
-		G.AddGump(g)
+		Kit.replace_gump(old,g,hidden)
 		if moved is not None:Kit.on_moved(g,moved)
-		if hidden:g.IsVisible=False
 		return d
 	@staticmethod
 	def row_set(row,val,now):
@@ -1730,28 +1796,33 @@ class Kit(object):
 		def __init__(self,key,title,st,win,build,a,b=None,default=(200,200),mini=None,icon=None,cleanup=None,gkey="g",names=("c","store"),lock=True,owner=True,close_tip=None,clear=None,docked_min=False):self.key,self.title,self.st,self.win,self.build,self.pos_key=key,title,st,win,build,a;self.min_key,self.default,self.mini,self.icon,self.cleanup=b,default,mini,icon,cleanup;self.gkey,self.names,self.lock,self.owner,self.close_tip=gkey,names,lock,owner,close_tip;self.clear,self.docked_min,self.slot,self.held,self.old=clear or{},docked_min,None,False,None;self.queue=Kit.queuer(st)if st is not None else None;self.x=self.y=self.w=self.h=0;self.c,self.store,self.fade={},({},{}),True
 		def minimized(self):return self.st is not None and bool(self.st["minimized"])
 		def start_min(self):return bool(HOST.dock_wanted(self.key)or(self.min_key and Kit.load_min(self.min_key)))
-		def begin(self,w,h,default=None):
+		def begin(self,w,h,default=None,resize=None):
 			if self.queue is not None:Kit._wins[self.key]=self
 			if Kit.is_open(self.old)and self.old is not self.win.get(self.gkey):Kit.dispose(self.old)
 			a=self.win.get(self.gkey);b=self.minimized()
 			if b and self.mini:w,h=self.mini
-			self.w,self.h=w,h
+			self.w,self.h=w,h;p=None if Kit.is_open(a)or b or not LAYOUT.planned else LAYOUT.plan_at(self.key)
 			if Kit.is_open(a):self.x,self.y=a.GetX(),a.GetY()
+			elif p is not None:self.x,self.y=int(p[0]),int(p[1])
 			else:self.x,self.y=Kit.load_pos(self.pos_key,default or self.default,(w,h))
 			self.old,self.win[self.gkey]=a,None
 			if self.cleanup is not None and not self.held:self.held=True;self.cleanup.add(self.release)
-			g=G.CreateGump(True,True);self.c,self.store={},({},{})
+			if resize is not None and not b:self.x,self.y=Kit.clamp(self.x,self.y,w,h);g=G.CreateModernGump(self.x,self.y,w,h,True,resize[0],resize[1],resize[2]);g.SetAlpha(0)
+			else:g=G.CreateGump(True,True)
+			self.c,self.store={},({},{})
 			if b:self.c["status"]=Kit.mini_bar(g,self.store,w,h,self.title,self.key,self.queue("toggle_min"),close_tip=self.close_tip)
 			return g,self.store,self.c
 		def frame(self,g,w=None,h=None,extra=None,after=None,settings=True,mouse=True,corners=True):w=self.w if w is None else w;q=self.queue;Kit.add_window_frame(g,w,self.h if h is None else h,corners,mouse);return Kit.title_bar(g,self.store,w,self.title,self.key,q("toggle_min"),q("to_bar"),q("settings")if settings else None,self.close_tip,extra,after)
 		def end(self,g,parts=None,w=None,h=None,max_h=None):
-			c,parts=self.st,dict(parts or{});parts[self.gkey]=g
+			b,parts=self.st,dict(parts or{});parts[self.gkey]=g
+			if not self.lock:HOST.built(self.key)
+			if b is not None and b.get("minimized")and b.get("docked")is False and HOST.dock_soon(self.key):b["docked"]=True
 			for d,v in zip(self.names or(),(self.c,self.store)):parts[d]=v
-			b=Kit.show_window(g,self.x,self.y,self.w if w is None else w,self.h if h is None else h,self.key if self.lock else None,c is not None and c["minimized"]and c["docked"],self.disposed(g),self.save_pos,self.win,parts,max_h);a=LAYOUT.spot(self.key)if LAYOUT.seamless and LAYOUT.holds(self.key)else None
-			if a is not None and b is not None and(b[0],b[1])!=(a[0],a[1]):g.SetPos(int(a[0]),int(a[1]));Kit.note_rect(g,a[0],a[1]);Kit.moved_by_code(g);b=(a[0],a[1])
-			if a is not None and b is not None:LAYOUT.fit_now(self.key,g)
+			c=Kit.show_window(g,self.x,self.y,self.w if w is None else w,self.h if h is None else h,self.key if self.lock else None,b is not None and b["minimized"]and b["docked"],self.disposed(g),self.save_pos,self.win,parts,max_h,self.old);a=LAYOUT.spot(self.key)if LAYOUT.seamless and LAYOUT.holds(self.key)else None
+			if a is not None and c is not None and(c[0],c[1])!=(a[0],a[1]):g.SetPos(int(a[0]),int(a[1]));Kit.note_rect(g,a[0],a[1]);Kit.moved_by_code(g);c=(a[0],a[1])
+			if a is not None and c is not None:LAYOUT._hold(g,self.key);LAYOUT.fit_now(self.key,g)
 			if FADE.on:FADE.wake(self.key)
-			e,self.old=self.old,None;Kit.dispose(e);return b
+			e,self.old=self.old,None;Kit.dispose(e);return c
 		def disposed(self,g):
 			def a(*b):
 				a=self.win
@@ -1769,7 +1840,16 @@ class Kit(object):
 		def action(self,action):return Kit.win_action(action,self.st,self.key,self.title,self.build,self.min_key)
 		def fit(self,w,h,mode):
 			a=(int(w),int(h))if(w is not None and h is not None)else None
-			if a!=self.slot or(mode=="again"and a is not None):self.slot=a;self.queue("redraw")()
+			if a!=self._slot or(mode=="again"and a is not None):self.slot=a;self.queue("redraw")()
+		@property
+		def slot(self):
+			s=self._slot
+			if s is None and LAYOUT.planned and not self.told and self.st is not None and not self.st["minimized"]:
+				p=LAYOUT.plan_at(self.key)
+				if p is not None:s=self._slot=(int(p[2]),int(p[3]));self.told=True
+			return s
+		@slot.setter
+		def slot(self,v):self._slot=v;self.told=v is not None or self.__dict__.get("told",False)
 		def zone_slot(self,a,b):z=self.slot if Kit.zone_up(self.key)and not self.st["minimized"]else None;return z if z is not None and z[0]>=a and z[1]>=b else None
 		def rows(self,row_h,fixed_h,a,b=1):
 			if self.slot is None or not HOST.layout_holds(self.key):return a
@@ -2311,7 +2391,7 @@ class AlertLog(object):
 		M,W,s=Kit.MARGIN,self.W,Kit.tscale;a=self.rows();self.store=({},{});self.ver=ALERTS.log_ver;self.next=time.time()+self.EVERY;e=16+self.ROW*max(1,len(a));H=M+30+Kit.GAP+e+M;g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,self.TITLE,M+30,M+7,Kit.HUE_TITLE);Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,M+4,None,"Close");b=M+30+Kit.GAP;Kit.add_section(g,M,b,W-2*M,e)
 		if not a:Kit.add_label(g,"No alerts yet.",M+12,b+8,Kit.HUE_INFO)
 		for i,(h,j)in enumerate(a):Kit.add_label(g,h,M+12,b+8+self.ROW*i,j)
-		c=s if Kit.scale_window(g,s)else 1.;d,f=int(round(W*c)),int(round(H*c));k=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(k-d)//2),80),(d,f));Kit.place(g,x,y,d,f,int(round((M+30+Kit.GAP)*c)));G.AddGump(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g=g
+		c=s if Kit.scale_window(g,s)else 1.;d,f=int(round(W*c)),int(round(H*c));k=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(k-d)//2),80),(d,f));Kit.place(g,x,y,d,f,int(round((M+30+Kit.GAP)*c)));Kit.add_front(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g=g
 	def rebuild(self):
 		g,self.g=self.g,None
 		if Kit.is_open(g):Kit.save_pos(self.POS_KEY,g)
@@ -2506,7 +2586,7 @@ class Binds(object):
 		try:return fn(*a)
 		finally:Binds.scope=b
 	@staticmethod
-	def note(store,key,on_click,d,tip):
+	def note(store,key,on_click,ctl,tip):
 		a=Binds.scope or HOST.cur_owner
 		if a is None:b=HOST.current();a=b.key if b is not None else "va"
 		c="%s|%s"%(a,key)
@@ -2613,7 +2693,7 @@ class KeysPage(_Page):
 		if self.c is not None and Kit.was_clicked(self.store,"bind_clear"):Binds.clear();HOST.refresh_settings(KEYS_PAGE)
 ALERTS_PAGE,KEYS_PAGE,BACKUP_PAGE="va.alerts","va.keys","va.backups"
 class WhatsNew(object):
-	W=520;SEEN_KEY="VirtueAssistant_new_seen";seen_keys=None;NEW_KEYS=("interface.look","interface.tsize","interface.compact","interface.cblind","interface.streamer","va.alerts.quiet","va.alerts.history","va.backups.backup_now","va.backups.restore","interface.share","interface.load_code","interface.code","interface.situ_on","interface.fade","interface.fade_to","interface.fade_after","interface.fade_all","ultima.overview","ultima.tracker.sort","ultima.overview.range","ultima.overview.rows","inventory.sections","inventory.sections.p_reagents","inventory.sections.p_potions","inventory.sections.p_bandages","inventory.sections.p_gold","inventory.sections.p_scrolls","inventory.sections.p_maps","inventory.sections.p_ores","inventory.sections.p_wood","inventory.sections.p_hides","inventory.sections.p_food","inventory.sections.p_weapons","inventory.sections.p_armour","inventory.sections.p_jewellery","inventory.sections.p_keys","inventory.sections.other","inventory.sections.add","actionbar.radial","actionbar.radial_page")
+	W=520;SEEN_KEY="VirtueAssistant_new_seen";seen_keys=None;NEW_KEYS=("prices.pick_book","prices.book_open","prices.book_head","prices.keep_SS","prices.keep_NS","prices.keep_BP","prices.keep_GA","prices.keep_SA","prices.keep_BM","prices.keep_GI","prices.keep_MR","prices.say","prices.skip_old","prices.dist","prices.old","prices.hk")
 	def __init__(self):self.g=None;self.store=({},{});self.text=None
 	@staticmethod
 	def seen():
@@ -2643,7 +2723,7 @@ class WhatsNew(object):
 		for d in self.text:a+=Kit.wrap(d,W-2*M-24)or[""]
 		b=16+20*len(a);H=M+30+Kit.GAP+b+M;self.store=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,"WHAT'S NEW IN %s %s"%(APP_NAME.upper(),APP_VERSION),M+30,M+7,Kit.HUE_TITLE);Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,M+4,None,"Close (shown once per version)");c=M+30+Kit.GAP;Kit.add_section(g,M,c,W-2*M,b)
 		for i,e in enumerate(a):Kit.add_label(g,e,M+12,c+8+20*i,Kit.HUE_TEXT)
-		f,h=Kit.screen();Kit.place(g,max(0,((f or 1024)-W)//2),max(0,((h or 768)-H)//3),W,H);G.AddGump(g);self.g=g
+		f,h=Kit.screen();Kit.place(g,max(0,((f or 1024)-W)//2),max(0,((h or 768)-H)//3),W,H);Kit.add_front(g);self.g=g
 	def poll(self):
 		g=self.g
 		if g is None:return
@@ -2869,7 +2949,7 @@ class _Memo(object):
 	def __int__(self):return int(self.__dict__["raw"].Serial)
 class Host(object):
 	def __init__(self):
-		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.boot=[("code",time.time()-START_AT)];self.boot_at=time.time();self.boot_load=0.;self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import threading;self._drain_lk=threading.Lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set();self.held_parts=set();self.marked=False;self.ask_g=None;self.ask_store=({},{});self.tz_at=0.;self.tz_off=set();self.tz_told=set();self.backups=BackupPage();self.alert_log=AlertLog();self.launcher=None;self.early_backup=None
+		self.slots=[];self.by_key=_KeyMap(self);self.old_map={};self.boot=[("code",time.time()-START_AT)];self.boot_at=time.time();self.boot_load=0.;self.cur_part=self.cur_owner=self.config=self.hub=self.grid=self.profile_req=self.alone=None;self.hurt_hp=self._me=self._want_raw=self.attack_rd=None;self.stack=[];self.harm_conf=(None,0,0.);self.quitting=self.shut=self.ui_busy=self.poked=self.prefs_frozen=False;self.in_hop=self.pass_poked=self.pass_all=self.poke_user=self.draining=False;self.alive_at=0.;self.poke_keys=set();self.pass_keys=self.NO_KEYS;self.off_q=[];self._stop_fi=None;self.look=self.LOOKAHEAD;import _thread;self._drain_lk=_thread.allocate_lock();self.ui_next=self.dock_next=self._claim_len=self.hurt_until=self.input_at=0.;self.attacked_until=self.prefs_at=self.pressed_at=0.;self.hurt_who=0;self.prefs_due=False;self.docks=[];self.services={};self.hotkeys_owned={};self.prefs={};self.cursor_claim=(None,0.);self.hk_fns={};self.hk_wait={};self.gump_exp={};self.services["gump.expect"]=self.gump_expect;self.foe_seen=(0.,None);self.client_idles=self.pass_id=0;self._me_pid=self._mob_pid=self._one_pid=-1;self._mob_list=();self._one={};self._pack={};self._mob_at=0.;self._pack_v=0;self._pack_keys=set();self._pack_hook={"on":False};self._pack_fn=self._pack_event;self.active=[];self.client_run=[];self._pass_fn=self._client_pass;self._want_set=frozenset();self.told,self._zone_held,self._zone_was_d,self._zone_bring=set(),set(),None,{};self.load_jobs=[];self.hotkey_list=[];self.pages=[];self.held_on=set();self.held_parts=set();self.marked=False;self.ask_g=None;self.ask_store=({},{});self.settled_at=self.boot_line=None;self.settle_seen=0.;self.settle_capped=False;self.builds={};self.settle_from=None;self.settle_holds=[];self.split={};self.compile_hit=False;self.bar_dead=self.ahead_off=False;self.texts={};self.ahead_ms={};self.tz_at=0.;self.tz_off=set();self.tz_told=set();self.backups=BackupPage();self.alert_log=AlertLog();self.launcher=None;self.early_backup=None
 		for a,b,c in((ALERTS_PAGE,"Alerts",AlertsPage()),(KEYS_PAGE,"Hotkeys",KeysPage()),(BACKUP_PAGE,"Backups",self.backups)):s=ModuleSlot(a,b,"",None,1.);s.api=c.api();self.pages.append(s)
 		self.whats_new=WhatsNew();self.services["alerts.history"]=self.alert_log.open;self.services["alerts.quiet"]=ALERTS.toggle_quiet
 	def _tell(self,msg):
@@ -2925,7 +3005,7 @@ class Host(object):
 	def _hk_take(self,k,ent):self.hk_fns[k]=ent;self.hotkey_note(k,ent[0],ent[3]);self.hotkeys_owned[k]=ent[0]
 	def _hk_fire(self,k):
 		def a(*b):
-			a=self.hk_fns.get(k)
+			self.pressed_at=time.time();a=self.hk_fns.get(k)
 			if a is not None:a[1]()
 		return a
 	def hotkey_off(self,d,owner):
@@ -3061,17 +3141,19 @@ class Host(object):
 		self.dock_next=0.;return a
 	def dock_note(self,title):API.SysMsg("%s: minimized until the Action Bar opens; then it folds into its tray."%title,Kit.HUE_INFO)
 	def dock_add(self,key,hooks):
-		self.dock_remove(key);self.docks.append((key,hooks));a=hooks.get("gump")
+		self.dock_remove(key);self.docks.append((key,hooks))
+		if self.booting()and LAYOUT.holds(key):self._zone_held.add(key)
+		a=hooks.get("gump")
 		if a is not None:self.layout_add(key,a,hooks.get("title"),hooks)
 	def dock_remove(self,key):self.docks=[a for a in self.docks if a[0]!=key];self.layout_remove(key)
-	def layout_add(self,key,b,title=None,hooks=None):a=self.current();c=(a.key,self.cur_part if a.parts else None)if a is not None else None;LAYOUT.add(key,b,title,hooks,c)
+	def layout_add(self,key,b,title=None,hooks=None):a=self.current();c=(a.key,self.cur_part if a.parts else None)if a is not None else None;LAYOUT.add(key,b,title,hooks,c);LAYOUT.fit_added(key)
 	def layout_remove(self,key):LAYOUT.remove(key)
 	def layout_slot(self,key):
 		key=str(key)
 		if not LAYOUT.holds(key):return
 		a=LAYOUT.fitted.get(key)
 		if a is not None and a.get("told")is not None:return a["told"]
-		b=LAYOUT.placed.get(key);return(b[2],b[3])if b is not None else None
+		b=LAYOUT.placed.get(key)or LAYOUT.plan_at(key);return(b[2],b[3])if b is not None else None
 	def layout_rect(self,key):
 		key=str(key)
 		if not LAYOUT.holds(key):return
@@ -3094,9 +3176,12 @@ class Host(object):
 		try:a=float(API.GetSharedVar(ConfigWindow.LINK_ALIVE)or 0)
 		except Exception:a=0.
 		return time.time()-a<=ConfigWindow.LINK_STALE
+	def bar_on(self):s=dict.get(self.by_key,"actionbar");return not VA_ALONE and s is not None and bool(s.enabled)and not s.broken and not self.bar_dead
+	def bar_soon(self):return self.bar_alive()or(self.booting()and self.bar_on())
+	def dock_soon(self,key):return key in self._dock_want()and not LAYOUT.holds(key)and self.bar_on()and(self.booting()or self.bar_alive())
 	def dock_tick(self):
 		a=time.time()
-		if a<self.dock_next and self.dock_next-a<=.25:return
+		if a<self.dock_next and self.dock_next-a<=.25 and self.settled_at is not None:return
 		self.dock_next=a+.25;Binds.load();Binds.tick();b=self._dock_want();c,e=[],[];self.zone_up_tick()
 		for k,d in self.docks:
 			if LAYOUT.holds(k):continue
@@ -3111,7 +3196,7 @@ class Host(object):
 		if not c and not e:return
 		if self.bar_alive():
 			for d in c:safe(d.get("dock"))
-		else:
+		elif not(self.booting()and self.bar_on()):
 			for d in e:safe(d.get("undock"))
 	ZONE_WAS_VAR="Layout_zone_was"
 	def _zone_was(self):
@@ -3141,14 +3226,61 @@ class Host(object):
 				f=d.get("show")or d.get("on")
 				if f is not None:self._zone_bring[k]=time.time()+2.;safe(f)
 			if e and d.get("redraw")is not None and s!="docked":safe(d.get("redraw"))
-	TWICE="%s: %s loaded twice (module key \"%s\"); skipped the second copy."
+	TWICE="%s: %s loaded twice (module key \"%s\"); skipped the second copy.";COMPILE_CAP=64
+	def compiled(self,text,path):
+		c=None;self.compile_hit=False
+		try:
+			import sys;c=sys.__dict__.get("_COMPILED")
+			if not isinstance(c,dict):c={};sys._COMPILED=c
+			e=c.get(path)
+			if type(e)is tuple and len(e)==3 and e[0]==len(text)and type(e[1])is str and e[1]==text:
+				if type(e[2])is type(self.compiled.__func__.__code__):self.compile_hit=True;return e[2]
+		except Exception:c=c if type(c)is dict else None
+		a=compile(text,path,"exec")
+		try:
+			if c is not None:
+				if path not in c:
+					b=os.path.normcase(os.path.dirname(os.path.dirname(path)))
+					for k in[d for d in c if os.path.normcase(os.path.dirname(os.path.dirname(str(d))))!=b]:c.pop(k,None)
+					if len(c)>=self.COMPILE_CAP:c.clear()
+				c[path]=(len(text),text,a)
+		except Exception:pass
+		return a
+	SELF_KEY="_VA_INNER"
+	def self_run(self,g):
+		a=g.get(self.SELF_KEY)
+		if a is not None:
+			a[1]=True
+			for m,d in a[2]:self.split_add(m,d)
+			return False
+		import sys;f=None
+		try:
+			c=str(g.get("__file__")or os.path.join(str(API.ScriptPath),str(API.ScriptName)));n=time.time();b=_read_text(c);i=time.time();e=sys.__dict__.get("_VA_SELF");j=type(e)is tuple and len(e)==4 and e[0]==c and e[1]==len(b)and type(e[2])is str and e[2]==b
+			if j and e[3]is None:return False
+			if j and type(e[3])is type(self.compiled.__func__.__code__):h,k=e[3],"hit"
+			elif safe(self.no_cache,False):return False
+			else:sys._VA_SELF=None;k="compile";h=compile(re.sub(r"(?m)^import API$","",b.replace("\r\n","\n")),c,"exec");sys._VA_SELF=(c,len(b),b,h)
+			f=dict(g);d=(time.time()-i)*1000.;a=[START_AT,False,[("read:mother",(i-n)*1000.),(k+":mother",d)]];g[self.SELF_KEY]=a;exec(h,g)
+		except Exception:
+			if a is not None and a[1]:raise
+		finally:g.pop(self.SELF_KEY,None)
+		if a is not None and a[1]:return True
+		l=bool(safe(lambda:API.StopRequested,False))
+		if f is not None:
+			g.clear();g.update(f)
+			if not l:sys._VA_SELF=(c,len(b),b,None)
+		return l
+	@staticmethod
+	def no_cache():t=Tz.T("ClassicUO.LegionScripting.LegionScripting");return bool(Tz.get(None,"LScriptSettings",t).DisableModuleCache)
 	def add(self,key,title,desc,a,interval,default_on=False,category=None,parts=(),aliases=()):
 		s=dict.get(self.by_key,key)
 		if s is not None and s.lazy is not None:s.lazy=None;s.title,s.desc,s.factory,s.interval=title,desc,a,interval;self._note_parts(s,default_on,category,parts,aliases)
 		elif s is not None:API.SysMsg(self.TWICE%(APP_NAME,title,key),Kit.HUE_BAD);return s
 		else:s=ModuleSlot(key,title,desc,a,interval);self._note_parts(s,default_on,category,parts,aliases);self.slots.append(s);self.by_key[key]=s
 		try:s.api=a()
-		except Exception as b:s.broken=str(b)+_error_where();Kit.say("couldn't load %s (%s)."%(title,s.broken),Kit.HUE_BAD)
+		except Exception as b:
+			s.broken=str(b)+_error_where()
+			if not self.stopping():Kit.say("couldn't load %s (%s)."%(title,s.broken),Kit.HUE_BAD)
 		self._arm(s)
 		if VA_ALONE and self.alone is None:self.run_alone(s)
 		return s
@@ -3163,27 +3295,154 @@ class Host(object):
 		self.poke();return True
 	def _run_load_jobs(self):
 		if not self.load_jobs or self.stack:return
-		s=self.load_jobs.pop(0);a=self.load(s)
-		if a and s.enabled and not s.running and not s.pending_stop:self.start(s)
-		elif not a and s.enabled:s.enabled=False;self.held_on.add(s.key);self.save_prefs()
+		b,self.load_jobs,a=self.load_jobs,[],[];b,e,c=self.compile_ahead(b)
+		for d in b:
+			if self.stopping():break
+			if self._load_job(d):a.append(d)
+		a.sort(key=lambda s:c[s.key]if s.key in c else self._start_rank(s));self.start_all(a)
+		if e and not a:safe(lambda:Kit.on_client(self._starts_done))
+	def _load_job(self,s):
+		a=self.load(s)
+		if not a and s.enabled and not self.stopping():s.enabled=False;self.held_on.add(s.key);self.save_prefs()
 		if self.config is not None:self.config.loaded(s.key)
+		return a and s.enabled and not s.running and not s.pending_stop
+	AHEAD_WAIT=5.
+	def compile_ahead(self,jobs):
+		b,a=[],{"owed":False,"rank":{}}
+		try:self._ahead(jobs,b,a)
+		except Exception:self.ahead_off=True
+		return[c for c in jobs if c not in b],a["owed"],a["rank"]
+	def _ahead(self,jobs,done,box):
+		if self.settled_at is not None or len(jobs)<2 or self._poster()is None:return
+		import sys;c=sys.__dict__.get("_COMPILED");c=c if type(c)is dict else{};d=self.texts
+		def j(path):e=c.get(path);return type(e)is tuple and len(e)==3 and e[0]==len(d.get(path)or "")
+		e=dict((m.key,self._start_rank(m))for m in jobs);g=sorted(jobs,key=lambda s:e[s.key]);h=[n for n in g if n.lazy is not None and not j(n.lazy)]
+		if not h:return
+		box["rank"]=e;self.ahead_off=False;i=lambda:[m for m in h if m.lazy is not None and m.lazy not in self.ahead_ms]
+		def k(busy):
+			while busy()and not self.ahead_off:
+				c=i()
+				if not c:break
+				a=c[0].lazy
+				try:
+					b=d.get(a)
+					if b is None:b=_read_text(a);d[a]=b
+					e=time.time();self.compiled(b,a);self.ahead_ms[a]=time.time()-e
+				except Exception:self.ahead_off=True
+		a=[]
+		for b in g:
+			if self.stopping()or self.ahead_off:return
+			l=self.bar_on();f=self._load_job(b)
+			if self.bar_on()!=l:
+				self.ahead_off=True;box["rank"]=dict((p,2 if o==3 else o)for p,o in e.items())
+				if not f:done.append(b)
+				return
+			if f and(a or not i()):a.append(b);continue
+			if f:box["owed"]=True;self.start_all((b,),k,False)
+			done.append(b)
+		if a:box["owed"]=False;self.start_all(a);done.extend(a)
+	def _poster(self):
+		if(Client.MTQ if Client.mtq_looked else Client._find_mtq())is None or Client.on_client_thread():return
+		return Client.post
+	def _hop(self,fn,e):
+		f=None if e is None or self.ahead_off else self._poster()
+		if f is None:return Kit.on_client(fn)
+		import _thread;g,d,c=_thread.allocate_lock(),_thread.allocate_lock(),_thread.allocate_lock();d.acquire();c.acquire();a=_Hop(fn);b={"go":None};h=time.time()
+		def i():
+			with g:
+				if b["go"]is not None:return
+				b["go"]=True
+			d.release()
+			try:a.run()
+			finally:c.release()
+		try:f(i)
+		except Exception:self.ahead_off=True;return Kit.on_client(fn)
+		try:e(lambda:c.locked()and(b["go"]is not None or time.time()-h<self.AHEAD_WAIT))
+		except Exception:self.ahead_off=True
+		if not d.acquire(True,max(0.,self.AHEAD_WAIT-(time.time()-h))):
+			with g:j=b["go"]is None;b["go"]=b["go"]or False
+			if j:self.ahead_off=True;return Kit.on_client(fn)
+		c.acquire()
+		if a.e is not None:raise a.x if isinstance(a.x,Exception)else Exception(a.e)
+		return a.v
+	def _start_rank(self,s):
+		if s.key==LAYOUT_OWNER:return 0
+		if s.key=="actionbar":return 1
+		return 3 if self.dock_soon(s.key)else 2
 	def load(self,s):
 		if s is None:return False
 		if s.lazy is not None:
-			a=s.lazy;e=time.time()
+			a=s.lazy;f=time.time();b=self.ahead_ms.pop(a,None)
 			try:
-				f=compile(_read_text(a),a,"exec");exec(f,globals())
+				j=self.texts.pop(a,None)or _read_text(a);c=time.time();k=self.compiled(j,a);d,g=self.compile_hit,time.time();exec(k,globals());l=time.time();d=d and b is None
 				if s.lazy is not None:raise Exception("the file's HOST.add line didn't run")
-			except Exception as b:s.lazy=None;c=getattr(b,"lineno",None);g=(" (%s line %s)"%(os.path.basename(a),c))if c else _error_where();s.api,s.broken=None,"%s%s"%(getattr(b,"msg",None)or b,g);Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
-			if self.boot is not None:d=time.time()-e;self.boot.append((s.title,d));self.boot_load+=d
+				for n,m,o in(("read",f,c),("hit"if d else "compile",c,g if b is None else c+b),("exec",g,l)):self.split_add(n+":"+s.key,(o-m)*1000.)
+			except Exception as e:
+				s.lazy=None;h=getattr(e,"lineno",None);p=(" (%s line %s)"%(os.path.basename(a),h))if h else _error_where();s.api,s.broken=None,"%s%s"%(getattr(e,"msg",None)or e,p)
+				if not self.stopping():Kit.say("couldn't load %s (%s)."%(s.title,s.broken),Kit.HUE_BAD)
+			if self.boot is not None:i=time.time()-f;self.boot.append((s.title,i));self.boot_load+=i
 		return s.api is not None
 	def boot_mark(self,name):
 		if self.boot is not None:t=time.time();self.boot.append((name,t-self.boot_at));self.boot_at=t
 	def boot_done(self):
 		a,self.boot=self.boot,None;t=time.time()
 		if self.alone is None:self.backup_start()
-		if self.alone is not None or self.pref_int("startup",0)!=1:return
-		a.append(("first build",max(0.,t-self.boot_at-self.boot_load)));Kit.say("start-up took %.1f s (%s)."%(t-START_AT,", ".join("%s %d ms"%(b,c*1000)for b,c in a)),Kit.HUE_INFO)
+		if self.alone is None and self.pref_int("startup",0)==1:a.append(("first build",max(0.,t-self.boot_at-self.boot_load)));self.boot_line="start-up took %.1f s (%s)"%(t-START_AT,", ".join("%s %d ms"%(b,c*1000)for b,c in a))
+		if self.settled_at is not None:self.settle_report()
+	def built(self,key):
+		b=self.builds
+		if self.settled_at is None and(key in b or len(b)<200):b[key]=b.get(key,0)+1
+	def settle_tick(self,now):
+		if self.alone is not None:self.settled_at=now;self.split_end();return
+		b,d,a=self.config,self.hub,LAYOUT
+		if(self.boot is not None or self.load_jobs or(a.enabled and a.loaded and(a.dirty or a.fresh or a.fresh_adds or a.seam_wait))or(d is not None and d.dirty)or(b is not None and(b.request is not None or b.request_tab is not None or(b.mode=="full"and(b.redraw_req or b.prof_redraw))))or any(safe(f,False)for f in self.settle_holds)):self.settle_seen=now
+		c=self.ask_g is None and now-(self.settle_from or START_AT)>=self.SETTLE_CAP;e=self.SETTLE_QUIET_HOLD if self.settle_holds else self.SETTLE_QUIET
+		if not c and now-max(self.settle_seen,Kit.churn_at)<e:return
+		if not c and safe(a.plan_prune,False):self.settle_seen=now;return
+		self.settled_at,self.settle_capped=now,c;del self.settle_holds[:];self.texts.clear();self.ahead_ms.clear();self.settle_report();safe(lambda:Kit.on_client(self.front_script_manager))
+	def booting(self):return self.settled_at is None
+	def settle_hold(self,fn):
+		if self.settled_at is None and len(self.settle_holds)<32:self.settle_holds.append(fn)
+	def split_add(self,key,ms):
+		a=self.split
+		if a is not None and(key in a or len(a)<self.SPLIT_CAP):a[key]=ms
+	def split_at(self,name):s=self.current();self.split_add("at:"+(name if s is None else s.title),(time.time()-START_AT)*1000.)
+	def split_end(self):
+		self.split=None;G.made=None
+		for k in[a for a in G.__dict__ if a.startswith("Create")]:G.__dict__.pop(k,None)
+	def split_line(self,b):
+		a=dict((g,0.)for g in("read","compile","hit","exec"));c=[]
+		for k,v in b.items():
+			n=k.split(":",1)
+			if len(n)==2 and n[0]in a:a[n[0]]+=v
+			elif len(n)==2 and n[0]=="at":c.append((v,n[1]))
+		d=int(b.get("hops",0));e=max([(b.get("hop %d"%h,0.),h)for h in range(1,d+1)]or[(0.,0)]);f="Splits: read %d ms, compiled %d ms (%d cached), set up %d ms; started in %s (longest %d ms, %s)"%(a["read"],a["compile"]+a["hit"],len([i for i in b if i.startswith("hit:")]),a["exec"],Kit.count(d,"step"),e[0],Kit.count(int(b.get("hop %d controls"%e[1],0)),"control"));return f+"".join("; %s ready at %.1f s"%(l,j/1000.)for j,l in sorted(c))+"."
+	@staticmethod
+	def front_script_manager():
+		if Host.ORDER_OFF in HOST.tz_off:return
+		b=Tz.T("ClassicUO.Game.Managers.UIManager");a=Tz.get(None,"Gumps",b).First;n=0
+		while a is not None and n<2000:
+			v=a.Value
+			if str(v.GetType().Name)=="ScriptManagerWindow"and not v.IsDisposed:Tz.call(None,"MakeTopMostGump",[v],b);return
+			a=a.Next;n+=1
+	def settle_report(self):
+		b,self.boot_line,c=self.boot_line,None,self.split
+		if self.boot is None:self.split_end()
+		if b is None or self.alone is not None:return
+		g=("not settled after %d s"%self.SETTLE_CAP)if self.settle_capped else("settled at %.1f s"%(self.settled_at-START_AT));Kit.say("%s; %s."%(b,g),Kit.HUE_INFO);d=sorted((-i,APP_NAME if h==ConfigWindow.DOCK_KEY else safe(lambda:LAYOUT.title_of(h),h))for h,i in self.builds.items()if i>1);a="Settling: "+Kit.count(sum(self.builds.values()),"window build")
+		if d:a+=" (%s)"%", ".join("%s %d"%(k,-j)for j,k in d[:6])
+		e=self.config.why_log if self.config is not None else[]
+		if e:a+=", main window built at "+", ".join("%.1f s (%s)"%(l-START_AT,self.why_text(m))for l,m in e[-3:])
+		f=self.config.stale_log if self.config is not None else[]
+		if f:a+=", ignored before any input: "+", ".join("%s at %.1f s"%(self.why_text(o),n-START_AT)for n,o in f[-3:])
+		Kit.say(a+".",Kit.HUE_INFO)
+		if c:Kit.say(self.split_line(c),Kit.HUE_INFO)
+	WHY_WORDS={"link":"Settings link","gear":"gear click","redraw":"refresh"}
+	def why_text(self,why):
+		a,c,b=str(why).partition(":");s=dict.get(self.by_key,b)if b else None
+		if a=="request":return "%s settings"%(s.title if s is not None else b)
+		if a=="tab":return "%s tab"%b.capitalize()
+		return self.WHY_WORDS.get(a,a)
 	def current(self):return self.stack[-1]if self.stack else None
 	def stopping(self):
 		if self.quitting:return True
@@ -3224,9 +3483,29 @@ class Host(object):
 		s.error_times.pop(part,None);Kit.say("%s kept failing and was switched off."%(what or s.title),Kit.HUE_BAD)
 		if part is not None and s.parts and s.parts_on.get(part):self.part_set(s.key,part,False)
 		else:self.disable(s.key)
-	def start(self,s):
+	def start(self,s):self.start_all((s,))
+	def start_all(self,slots,e=None,last=True):
+		a=[l for l in(self._start_prep(m)for m in slots)if l is not None];n=len(a);b={"i":0}
+		while b["i"]<n and not self.stopping():
+			i=b["i"]
+			try:self._hop(lambda:self._start_hop(a,b,n,last),e)
+			except Exception as f:
+				g=str(f)+_error_where();b["gone"]=True;c=False
+				for r in a[i:]:
+					with r["lk"]:h,j=r["began"],r["ended"]
+					if j or r["err"]is not None:continue
+					if h or not c:r["err"]=g;c=True
+					else:r["again"]=True
+				b["i"]=n
+		for k,r in enumerate(a):
+			if r["again"]or k>=b["i"]:
+				with r["lk"]:r["s"].start_tok=None;r["s"].running=False
+		for r in a:self._start_end(r)
+		d=[o["s"]for o in a if o["again"]and o["s"]not in self.load_jobs]
+		if d and not self.stopping():self.load_jobs[:0]=d
+	def _start_prep(self,s):
 		if s.running or self.stopping()or not self.load(s):return
-		s.errors,s.error_times=set(),{};s.pending_stop=False;self._enter(s);c=s.start_tok=object();import threading;b=threading.Lock();a={"began":False,"ended":False,"undone":False}
+		s.errors,s.error_times=set(),{};s.pending_stop=False;c=s.start_tok=object();import _thread;b=_thread.allocate_lock();a={"s":s,"lk":b,"began":False,"ended":False,"undone":False,"err":None,"again":False}
 		def d():
 			with b:
 				if a["undone"]:return
@@ -3234,20 +3513,45 @@ class Host(object):
 			safe(lambda:s.api["stop"]());safe(lambda:self._unclaim(s))
 		def e():
 			with b:
-				if s.start_tok is not c or not s.running:return
+				if s.start_tok is not c or not s.running or a["began"]:return
 				a["began"]=True
 			try:s.api["start"]()
 			finally:
 				with b:a["ended"]=True;e=s.start_tok is not c or not s.running
 				if e:d()
-		try:s.running=True;self._arm(s);self._refresh_active();self.client_idles=0;Kit.on_client(e)
-		except Exception as f:
-			with b:s.start_tok=None;s.running=False;g=a["began"]and not a["ended"]
-			h=str(f)+_error_where();Kit.say("couldn't start %s (%s)."%(s.title,h),Kit.HUE_BAD)
-			if not g:d()
-			s.enabled=False;self.save_prefs()
-		finally:self._leave(s);self._refresh_active()
-		s.next_due=0.
+		a["undo"],a["go"]=d,e
+		if s.key=="actionbar":self.bar_dead=False
+		try:s.running=True;self._arm(s);self._refresh_active()
+		except Exception as f:a["err"]=str(f)+_error_where()
+		return a
+	def _start_hop(self,d,pos,n,last=True):
+		c,a=time.time(),G.made
+		while pos["i"]<n and not pos.get("gone"):
+			r=d[pos["i"]];pos["i"]+=1;self._start_go(r)
+			if time.time()-c>=self.START_HOP:break
+		if pos["i"]>=n and not pos.get("gone")and last:self._starts_done()
+		b=self.split
+		if b is not None and a is not None:h=b["hops"]=b.get("hops",0)+1;self.split_add("hop %d"%h,(time.time()-c)*1000.);self.split_add("hop %d controls"%h,(G.made or a)-a)
+	def _start_go(self,r):
+		s=r["s"]
+		if r["err"]is None:
+			self._enter(s);self.client_idles=0
+			try:r["go"]()
+			except Exception as a:r["err"]=str(getattr(a,"InnerException",None)or a)+_error_where()
+			finally:self._leave(s)
+		if s.key=="actionbar"and(r["err"]is not None or not self.bar_alive()):self.bar_dead=True
+	def _starts_done(self):
+		a=self.config
+		if self.bar_dead and self.alone is None and a is not None:safe(a.dock_sync);safe(self.dock_tick)
+	def _start_end(self,r):
+		s=r["s"]
+		if r["err"]is not None:
+			with r["lk"]:s.start_tok=None;s.running=False;b=r["began"]and not r["ended"]
+			a=self.stopping()
+			if not a:Kit.say("couldn't start %s (%s)."%(s.title,r["err"]),Kit.HUE_BAD)
+			if not b:r["undo"]()
+			if not a:s.enabled=False;self.save_prefs()
+		self._refresh_active();s.next_due=0.
 	def _stop(self,s):
 		s.pending_stop=False
 		if not s.running:return
@@ -3351,7 +3655,7 @@ class Host(object):
 		elif self.marked and self.ask_g is None and not self.load_jobs and all(i.next_due>0. for i in self.active):self.unmark()
 		d=self.config
 		if d is not None and d.prof_stale and not self.stack:d.refresh_profiles()
-	LOOKAHEAD=HOST_TICK+.035;CLOCK_BACK=60.;EARLY=.008;MOB_AGE=.1;PACK_CAP=6000;PREFS_EVERY=1.
+	LOOKAHEAD=HOST_TICK+.035;CLOCK_BACK=60.;EARLY=.008;MOB_AGE=.1;PACK_CAP=6000;PREFS_EVERY=1.;SETTLE_QUIET=.25;SETTLE_QUIET_HOLD=.5;SETTLE_CAP=30.;START_HOP=.05;SPLIT_CAP=300;ORDER_OFF="start-up_order"
 	def _client_due(self,now):
 		if now>=self.ui_next or Picker.jobs or(Kit.pending and self.config is not None):return True
 		if self.ui_next-now>UI_TICK and SNAP.pressed():self.ui_next=now;return True
@@ -3565,14 +3869,14 @@ class Host(object):
 		try:
 			a=time.time()
 			if a>=self.ui_next:
-				self.ui_next=a+UI_TICK;self.config.poll()
+				c=self.settled_at is None;self.ui_next=a+(0. if c else UI_TICK);self.config.poll()
 				if not VA_ALONE and a>=self.alive_at:self.alive_at=a+1.;API.SetSharedVar(ALIVE_KEY,str(a))
 				if self.hub is not None:self.hub.poll()
 				self.dock_tick();SNAP.tick()
 				if FADE.on:
 					try:FADE.tick(a)
 					except Exception as b:self._tell("%s: fade error: %s%s"%(APP_NAME,b,_error_where()))
-				if a-self.input_at>UI_IDLE_AFTER and not(SNAP.down or LAYOUT.arrange):self.ui_next=a+UI_IDLE
+				if a-self.input_at>UI_IDLE_AFTER and not(c or SNAP.down or LAYOUT.arrange):self.ui_next=a+UI_IDLE
 				if self.grid is not None:self.grid.tick()
 				try:ALERTS.tick(a)
 				except Exception as b:self._tell("%s: alert error: %s%s"%(APP_NAME,b,_error_where()))
@@ -3583,8 +3887,8 @@ class Host(object):
 				if self.launcher is not None and self.launcher.g is not None:self.launcher.poll(a)
 				if self.ask_g is not None:self.ask_poll()
 		except Exception as b:
-			c="%s: settings window error: %s%s"%(APP_NAME,b,_error_where())
-			if not self.stopping():self._tell(c)
+			d="%s: settings window error: %s%s"%(APP_NAME,b,_error_where())
+			if not self.stopping():self._tell(d)
 		finally:self.ui_busy=False
 	def load_prefs(self):
 		a=self.prefs=Kit.codec_load(Kit.get_var(SETTINGS_KEY));b=[g for g in a.get("modules","").split(",")if g];c=set(h for h in a.get("seen","").split(",")if h);d=a.get("seen","");e=self._migrate_parts(a,b,c);f=self.held_on=set();self.held_parts=set()
@@ -3742,7 +4046,7 @@ class Host(object):
 				if s is not None:self.hold(s,c)
 				else:self.tz_off.add(b)
 			if a:Kit.say(self.TZ_GONE%(d,", ".join(a),"are"if len(a)>1 else "is"),Kit.HUE_BAD)
-	TZ_KEY="TazUO_settings_check";TZ_EVERY=60.;TZ_LINE="TazUO's \"%s\" is on; %s. Switch it off in %s.";TZ_RULE="it %s by itself, which this shard's rules don't allow";TZ_AL="Legion Assistant > Agents > Auto Loot";TZ_SOON=5.;TZ_SETS=(("EnableAutoLoot","Enable Auto Loot",TZ_RULE%"loots",TZ_AL),("AutoLootHumanCorpses","Auto Loot Human Corpses","it loots players' corpses by itself, which can flag you criminal",TZ_AL),("EnableScavenger","Enable Scavenger",TZ_RULE%"picks up items","Legion Assistant > Agents > Scavenger"),("AutoOpenDoors","Automatically open doors",TZ_RULE%"opens doors","Options > Gameplay > Movement"))
+	TZ_KEY="TazUO_settings_check";TZ_EVERY=60.;TZ_LINE="TazUO's \"%s\" is on; %s. Switch it off in %s.";TZ_RULE="it %s by itself, which this shard's rules don't allow";TZ_AL="Legion Assistant > Agents > Auto Loot";TZ_SOON=5.;TZ_SETS=(("EnableAutoLoot","Enable Auto Loot",TZ_RULE%"loots",TZ_AL),("AutoLootHumanCorpses","Auto Loot Human Corpses","it loots players' corpses by itself, which can flag you criminal",TZ_AL),("EnableScavenger","Enable Scavenger",TZ_RULE%"picks up items","Legion Assistant > Agents > Scavenger"))
 	def tz_warn(self):
 		self.tz_at=time.time()+self.TZ_EVERY
 		if self.alone is not None or self.TZ_KEY in self.tz_off or self.pref_int("tz_quiet",0)==1:return
@@ -3764,7 +4068,9 @@ class Host(object):
 	def mark_start(self):a=Kit.get_var(START_KEY)=="1";Kit.put_var(START_KEY,"1");self.marked=True;return a
 	def unmark(self,stop=False):
 		if self.marked and self.ask_g is None and(not stop or safe(lambda:bool(API.StopRequested),False)):self.marked=False;Kit.put_var(START_KEY,"")
-	def start_on(self):self.load_jobs.extend(a for a in self.slots if a.enabled and a not in self.load_jobs)
+	def start_on(self):
+		if self.settled_at is None:self.settle_from=self.settle_from or time.time();safe(LAYOUT.plan)
+		self.load_jobs.extend(sorted((a for a in self.slots if a.enabled and a not in self.load_jobs),key=lambda s:s.key!=LAYOUT_OWNER))
 	SAFE_ASK="Virtue Assistant didn't finish starting last time. Start with every module off?";SAFE_DONE="every module is off for now; tick them on one at a time on the Modules tab (%s).";SAFE_BUTTONS=(("normal",Kit.ART_PLAY,"Start normally","Turn on the modules you had on"),("safe",Kit.ART_PLAY,"Start safely","Keep every module off for now"))
 	def ask_open(self):
 		if self.config is None:return False
@@ -3773,7 +4079,7 @@ class Host(object):
 	def _ask_build(self):
 		M,W=Kit.MARGIN,420;b=Kit.wrap(self.SAFE_ASK,W-2*M-24);n=len(b);h=48+20*n;a=M+30+Kit.GAP;H=a+h+M;self.ask_store=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,W,H);Kit.add_section(g,M,M,W-2*M,30);Kit.add_label(g,"SAFE START",M+30,M+7,Kit.HUE_TITLE);Kit.add_section(g,M,a,W-2*M,h)
 		for i,c in enumerate(b):Kit.add_label(g,c,M+12,a+8+20*i,Kit.HUE_TEXT)
-		Kit.buttons(g,self.ask_store,M+12,a+14+20*n,self.SAFE_BUTTONS);d,e=Kit.screen();Kit.place(g,max(0,((d or 1024)-W)//2),max(0,((e or 768)-H)//3),W,H);G.AddGump(g);self.ask_g=g
+		Kit.buttons(g,self.ask_store,M+12,a+14+20*n,self.SAFE_BUTTONS);d,e=Kit.screen();Kit.place(g,max(0,((d or 1024)-W)//2),max(0,((e or 768)-H)//3),W,H);Kit.add_front(g);self.ask_g=g
 	def ask_poll(self):
 		a=self.ask_store;b=Kit.was_clicked(a,"safe")
 		if not(b or Kit.was_clicked(a,"normal")or not Kit.is_open(self.ask_g)):return
@@ -3784,10 +4090,20 @@ class Host(object):
 			Kit.say(self.SAFE_DONE%(", ".join(c)or "none"),Kit.HUE_INFO)
 		self.start_on();self.poke()
 	def run(self):
-		c=self.mark_start();Client.find()
+		b=self.mark_start();Client.find()
 		if Client.mouse is None:Kit.say("no client mouse timer; double-clicks use the client's own event.",Kit.HUE_INFO)
-		self.early_backup=BackupPage.early();self.load_prefs();ALERTS.load();self.tz_check();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self);self.launcher=Launcher(self);self.services["launcher.open"]=self.launcher.toggle
-		try:self.config=ConfigWindow(self);self.config.open()
+		self.early_backup=BackupPage.early();self.load_prefs();ALERTS.load();self.tz_check();Kit.read_screen();LAYOUT.load();SNAP.on_drop(LAYOUT.dropped);API.OnStop(self.shutdown);self.grid=Grid(self);self.launcher=Launcher(self);self.services["launcher.open"]=self.launcher.toggle;a=None
+		try:self.config=ConfigWindow(self);self.config.refresh_profiles()
+		except Exception as c:a=c
+		safe(self.whats_new.due);self._front_hop(b,a);self.boot_mark("main window");self.loop()
+	def _front_hop(self,ask,why):
+		a,v=Client.on_main_ex(lambda:self._front(ask,why))
+		if a=="no":self._front(ask,why)
+		elif a=="err"and Client.exc is not None:raise Client.exc
+	def _front(self,ask,why):
+		try:
+			if why is not None:raise why
+			self.config.open(True)
 		except Exception as a:
 			self._tell("%s: couldn't build the window: %s%s"%(APP_NAME,a,_error_where()))
 			if self.config is None:self.config=safe(lambda:ConfigWindow(self))
@@ -3795,12 +4111,11 @@ class Host(object):
 		try:self.hub=HubWindow(self)
 		except Exception as a:self._tell("%s: couldn't make the Ultima Tracker window: %s%s"%(APP_NAME,a,_error_where()))
 		if self.pref_int("grid_on",0)==1:safe(self.grid.show)
-		b=[d.title for d in self.slots if d.enabled];API.SysMsg("%s %s running. %s"%(APP_NAME,APP_VERSION,("On: "+", ".join(b))if b else "Tick a module on the Modules tab."),Kit.HUE_GOOD);API.SetSharedVar(ALIVE_KEY,str(time.time()));Binds.load()
-		if not c or not self.ask_open():self.start_on()
+		b=[c.title for c in self.slots if c.enabled];API.SysMsg("%s %s running. %s"%(APP_NAME,APP_VERSION,("On: "+", ".join(b)+".")if b else "Tick a module on the Modules tab."),Kit.HUE_GOOD);API.SetSharedVar(ALIVE_KEY,str(time.time()));Binds.load()
+		if not ask or not self.ask_open():self.start_on()
 		Kit.note_screen()
 		try:self.whats_new.open()
 		except Exception as a:self._tell("%s: couldn't make the What's new window: %s"%(APP_NAME,a))
-		self.boot_mark("main window");self.loop()
 	def run_alone(self,s):
 		if self.suite_alive():API.SysMsg("%s: %s is running; use %s there."%(s.title,APP_NAME,s.title),Kit.HUE_BAD);return
 		self.alone,self.prefs_frozen=s,True;Client.find();self.load_prefs();Kit.read_screen();API.OnStop(self.shutdown);self.config=AlonePage(s);self.hub=safe(lambda:HubWindow(self));a=Kit.get_var(ALONE_PARTS%s.key,"")
@@ -3810,7 +4125,9 @@ class Host(object):
 		try:
 			while not self.stopping()and(self.alone is None or self.alone.enabled):
 				a=time.time();self.drain()
-				try:self.run_due()
+				try:
+					self.run_due()
+					if self.settled_at is None:self.settle_tick(time.time())
 				except Exception as b:
 					if self.stopping():break
 					self._tell("%s: main loop error: %s%s"%(APP_NAME,b,_error_where()))
@@ -3926,13 +4243,14 @@ class PartSet(object):
 		return max(40,h)
 	def _build_config(self,g,x,y,w):
 		s=self.slot()
-		for d in self.specs:
-			a=d[0];e=s.part(a)[1]if s is not None and s.part(a)else a;b=a in self.running;c=self.api.get(a)if b else None
-			if y>0 and d is not self.specs[0]:y+=Kit.GAP
-			Kit.add_section(g,x,y,w,self.HEAD_H,e.upper()if b else None)
-			if not b:Kit.add_label(g,Kit.fit(self.OFF_LINE%e,w-24),x+12,y+7,Kit.HUE_INFO)
+		for e in self.specs:
+			a=e[0];c=s.part(a)[1]if s is not None and s.part(a)else a;b=a in self.running;d=self.api.get(a)if b else None
+			if y>0 and e is not self.specs[0]:y+=Kit.GAP
+			Kit.add_section(g,x,y,w,self.HEAD_H,c.upper()if b else None)
+			if not b:Kit.add_label(g,Kit.fit(self.OFF_LINE%c,w-24),x+12,y+7,Kit.HUE_INFO)
+			elif s is not None and s.part(a)and len(s.part(a))>2 and s.part(a)[2]:f=x+8+Kit.text_w(c.upper())+14;Kit.add_label(g,Kit.fit(s.part(a)[2],max(20,x+w-12-f)),f,y+6,Kit.HUE_INFO)
 			y+=self.HEAD_H
-			if b and c and c.get("build_config"):y+=Kit.GAP;f=self._call(a,"config_height",w)if c.get("config_height")else 0;self._call(a,"build_config",g,x,y,w);y+=max(0,int(f or 0))
+			if b and d and d.get("build_config"):y+=Kit.GAP;h=self._call(a,"config_height",w)if d.get("config_height")else 0;self._call(a,"build_config",g,x,y,w);y+=max(0,int(h or 0))
 	def _poll_config(self):
 		for a in list(self.running):self._call(a,"poll_config")
 	def _config_closed(self):
@@ -3950,15 +4268,18 @@ class PartSet(object):
 		def e():return bool(a["thread_wanted"]())or self._thread_wanted()
 		f={"tick":b,"stop":c,"thread_tick":d,"thread_wanted":e};h.update((g,f[g])for g in a);return h
 class Tz(object):
-	_types={};_MISS=object();NEED=(("LegionScripting.LegionAPI","_onStopScheduled","early_event_handling"),("LegionScripting.LegionAPI","World","actionbar meters social"),("Game.GameActions","","actionbar social skills.window"),("Game.GameActions","DropItem","inventory.bags"),("Game.GameActions","Equip QueueEquipSwap","inventory.paperdoll"),("Game.Managers.UIManager","Gumps","actionbar grimoire interface hud inventory.bags skills.window social"),("Game.Managers.UIManager","ContainerScale","inventory.bags"),("Game.Managers.UIManager","KeyboardFocusControl _gumpsStructureVersion SystemChat","interface"),("Game.Managers.UIManager","MakeTopMostGump","hud skills.window"),("Game.Managers.UIManager","Add","skills.window"),("Game.Managers.UIManager","IsMouseOverWorld","worldmap.pings"),("Game.Managers.MacroManager","GetAllMacros SetMacroToExecute Update FindMacro","actionbar"),("Game.Managers.MacroObject","Items","actionbar"),("Game.Managers.MacroObject","","social"),("Common.Enums.MacroType","","actionbar social"),("Common.Enums.MacroSubType","","actionbar social"),("LegionScripting.LegionScripting","LoadedScripts","actionbar"),("Input.Keyboard","KeyDownEvent KeyUpEvent","actionbar"),("Input.Mouse","CancelDoubleClick","inventory.bags"),("Input.Mouse","Position MClickPosition MButtonPressed","worldmap.pings"),("Game.World","Macros","actionbar social"),("Game.World","Instance Get TargetManager","hud.frames"),("Game.World","TargetManager","meters"),("Game.World","Instance Player SkillsGroupManager","skills.window"),("Game.World","Party Player","social"),("Game.Managers.TargetManager","LastAttack","hud.frames meters"),("Client","Game","hud.frames inventory.bags inventory.paperdoll social"),("GameController","UO","hud.frames inventory.bags inventory.paperdoll social"),("UltimaOnline","Animations FileManager","hud.frames"),("UltimaOnline","GameCursor","inventory.bags inventory.paperdoll"),("UltimaOnline","World","social"),("Game.GameCursor","ItemHold","inventory.bags"),("Game.ItemHold","Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic","inventory.bags"),("Configuration.ProfileManager","CurrentProfile","hud.frames inventory.bags inventory.storage TazUO_settings_check"),("Configuration.Profile","EnableAutoLoot AutoLootHumanCorpses EnableScavenger AutoOpenDoors","TazUO_settings_check"),("Game.Managers.ScavengerManager","Instance IsLoaded ScavengerEntries","TazUO_settings_check"),("Configuration.Profile","OpenHealthBarForLastAttack","hud.frames"),("Configuration.Profile","Username ServerName","inventory.storage"),("Game.UI.Gumps.BaseHealthBarGump","LastAttackBar","hud.frames"),("Game.GameObjects.Mobile","GetGroupForAnimation","hud.frames"),("Game.GameObjects.Mobile","IsCovered","inventory.paperdoll"),("Renderer.SpriteInfo","","hud.frames"),("Time","Ticks","hud.timers"),("Game.UI.Controls.Control","SetHitTestOffset _bounds Location","inventory.bags"),("Game.UI.Controls.Control","_bounds Location","interface inventory.paperdoll"),("Game.UI.Gumps.ContainerGump","_data _gumpPicContainer _hitBox","inventory.bags"),("Assets.TileDataLoader","_staticData","inventory.bags"),("Game.Data.Layer","","inventory.paperdoll"),("Game.UI.Controls.PaperDollInteractable","GetAnimID","inventory.paperdoll"),("Game.Managers.EventSink","OnEntityDamage","meters"),("Game.GameObjects.Entity","","meters"),("Game.Data.Lock","","skills.window"),("Game.Data.Skill","Lock","skills.window"),("Game.GameObjects.PlayerMobile","Skills","skills.window"),("Game.GameObjects.PlayerMobile","Serial","social"),("Game.Managers.SkillsGroupManager","Groups","skills.window"),("Game.Managers.SkillsGroup","","skills.window"),("Game.UI.Gumps.SkillButtonGump","SkillID","skills.window"),("Game.Managers.FriendsListManager","Instance","social"),("Game.Managers.PartyManager","Leader Inviter CanLoot Members","social"),("Game.UI.Gumps.IgnoreManagerGump","","social"),("Network.AsyncNetClient","Socket","social sysstats"),("Network.AsyncNetClient","Statistics","sysstats"),("Network.NetClientExt","Send_PartyDecline","social"),("CUOEnviroment","CurrentRefreshRate","sysstats"),("CUOEnviroment","ExecutablePath","worldmap"),("Game.Managers.EnhancedMap.EnhancedMapManager","Instance IsConnected Config Reconnect _client","worldmap.pings"),("Game.SelectedObject","Object","worldmap.pings"),("Game.UI.Gumps.WorldViewportGump","Instance ResizeGameWindow SetGameWindowPosition","interface"),("Game.UI.Gumps.SystemChatControl","IsDisposed ParentX ParentY TextBoxControl","interface"),("Game.UI.Controls.TTFTextInputField","EnterPressed","launcher_Enter_key"),)
+	_types={};_MISS=object();NEED=(("LegionScripting.LegionAPI","_onStopScheduled","early_event_handling"),("LegionScripting.LegionAPI","World","actionbar meters social"),("Game.GameActions","","actionbar social skills.window"),("Game.GameActions","DropItem","inventory.bags"),("Game.GameActions","Equip QueueEquipSwap","inventory.paperdoll"),("Game.Managers.UIManager","Gumps","actionbar grimoire interface hud inventory.bags skills.window social"),("Game.Managers.UIManager","ContainerScale","inventory.bags"),("Game.Managers.UIManager","KeyboardFocusControl _gumpsStructureVersion SystemChat","interface"),("Game.Managers.UIManager","MakeTopMostGump","hud skills.window"),("Game.Managers.UIManager","Gumps MakeTopMostGump _gumpsStructureVersion TopMostControl","start-up_order"),("Game.Managers.UIManager","Add","skills.window"),("Game.Managers.UIManager","IsMouseOverWorld","worldmap.pings"),("Game.Managers.MacroManager","GetAllMacros SetMacroToExecute Update FindMacro","actionbar"),("Game.Managers.MacroObject","Items","actionbar"),("Game.Managers.MacroObject","","social"),("Common.Enums.MacroType","","actionbar social"),("Common.Enums.MacroSubType","","actionbar social"),("LegionScripting.LegionScripting","LoadedScripts","actionbar"),("Input.Keyboard","KeyDownEvent KeyUpEvent","actionbar"),("Input.Mouse","CancelDoubleClick","inventory.bags"),("Input.Mouse","Position MClickPosition MButtonPressed","worldmap.pings"),("Game.World","Macros","actionbar social"),("Game.World","Instance Get TargetManager","hud.frames"),("Game.World","TargetManager","meters"),("Game.World","Instance Player SkillsGroupManager","skills.window"),("Game.World","Party Player","social"),("Game.Managers.TargetManager","LastAttack","hud.frames meters"),("Client","Game","hud.frames inventory.bags inventory.paperdoll social"),("GameController","UO","hud.frames inventory.bags inventory.paperdoll social"),("UltimaOnline","Animations FileManager","hud.frames"),("UltimaOnline","GameCursor","inventory.bags inventory.paperdoll"),("UltimaOnline","World","social"),("Game.GameCursor","ItemHold","inventory.bags"),("Game.ItemHold","Enabled IsFixedPosition Serial Graphic Hue Container MouseOffset DisplayedGraphic","inventory.bags"),("Configuration.ProfileManager","CurrentProfile","hud.frames inventory.bags inventory.storage TazUO_settings_check"),("Configuration.Profile","EnableAutoLoot AutoLootHumanCorpses EnableScavenger","TazUO_settings_check"),("Game.Managers.ScavengerManager","Instance IsLoaded ScavengerEntries","TazUO_settings_check"),("Configuration.Profile","OpenHealthBarForLastAttack","hud.frames"),("Configuration.Profile","Username ServerName","inventory.storage"),("Game.UI.Gumps.BaseHealthBarGump","LastAttackBar","hud.frames"),("Game.GameObjects.Mobile","GetGroupForAnimation","hud.frames"),("Game.GameObjects.Mobile","IsCovered","inventory.paperdoll"),("Renderer.SpriteInfo","","hud.frames"),("Time","Ticks","hud.timers"),("Game.UI.Controls.Control","SetHitTestOffset _bounds Location","inventory.bags"),("Game.UI.Controls.Control","_bounds Location","interface inventory.paperdoll"),("Game.UI.Gumps.ContainerGump","_data _gumpPicContainer _hitBox","inventory.bags"),("Assets.TileDataLoader","_staticData","inventory.bags"),("Game.Data.Layer","","inventory.paperdoll"),("Game.UI.Controls.PaperDollInteractable","GetAnimID","inventory.paperdoll"),("Game.Managers.EventSink","OnEntityDamage","meters"),("Game.GameObjects.Entity","","meters"),("Game.Data.Lock","","skills.window"),("Game.Data.Skill","Lock","skills.window"),("Game.GameObjects.PlayerMobile","Skills","skills.window"),("Game.GameObjects.PlayerMobile","Serial","social"),("Game.Managers.SkillsGroupManager","Groups","skills.window"),("Game.Managers.SkillsGroup","","skills.window"),("Game.UI.Gumps.SkillButtonGump","SkillID","skills.window"),("Game.Managers.FriendsListManager","Instance","social"),("Game.Managers.PartyManager","Leader Inviter CanLoot Members","social"),("Game.UI.Gumps.IgnoreManagerGump","","social"),("Network.AsyncNetClient","Socket","social sysstats"),("Network.AsyncNetClient","Statistics","sysstats"),("Network.NetClientExt","Send_PartyDecline","social"),("CUOEnviroment","CurrentRefreshRate","sysstats"),("CUOEnviroment","ExecutablePath","worldmap"),("Game.Managers.EnhancedMap.EnhancedMapManager","Instance IsConnected Config Reconnect _client","worldmap.pings"),("Game.SelectedObject","Object","worldmap.pings"),("Game.UI.Gumps.WorldViewportGump","Instance ResizeGameWindow SetGameWindowPosition","interface"),("Game.UI.Gumps.SystemChatControl","IsDisposed ParentX ParentY TextBoxControl","interface"),("Game.UI.Controls.TTFTextInputField","EnterPressed","launcher_Enter_key"),)
 	@staticmethod
 	def missing():
-		if Client._type("ClassicUO.Client")is None:return()
-		d=Tz._flags(True)|Tz._flags(False);a={}
-		for b,e,f in Tz.NEED:
-			t=Client._type("ClassicUO."+b);c=b.split(".")[-1]
-			for g in[c]if t is None else[c+"."+h for h in e.split()if not Tz.has(t,h,d)]:a.setdefault(g,[]).extend(f.split())
-		return sorted(a.items())
+		a=Kit._measure.get("tz_missing")
+		if a is None:
+			if Client._type("ClassicUO.Client")is None:return()
+			e=Tz._flags(True)|Tz._flags(False);b={}
+			for c,f,g in Tz.NEED:
+				t=Client._type("ClassicUO."+c);d=c.split(".")[-1]
+				for h in[d]if t is None else[d+"."+i for i in f.split()if not Tz.has(t,i,e)]:b.setdefault(h,[]).extend(g.split())
+			a=Kit._measure["tz_missing"]=tuple((j,tuple(l))for j,l in sorted(b.items()))
+		return[(m,list(n))for m,n in a]
 	@staticmethod
 	def has(t,name,a):
 		while t is not None:
@@ -3967,9 +4288,11 @@ class Tz(object):
 		return False
 	@staticmethod
 	def T(name):
-		if name not in Tz._types:Tz._types[name]=Client._type(name)
-		t=Tz._types[name]
-		if t is None:raise Exception("this TazUO build has no %s"%name.split(".")[-1])
+		t=Tz._types.get(name)
+		if t is None:
+			t=Client._type(name)
+			if t is None:raise Exception("this TazUO build has no %s"%name.split(".")[-1])
+			Tz._types[name]=t
 		return t
 	@staticmethod
 	def get(obj,name,t=None):
@@ -4039,7 +4362,7 @@ class Tz(object):
 		while getattr(e,"InnerException",None)is not None:e=e.InnerException
 		return str(getattr(e,"Message",None)or e)
 class Profiles(object):
-	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active","VirtueAssistant_starting","VirtueAssistant_new_seen","VirtueAssistant_alert_log","VirtueAssistant_backup_ver");MISSING="\x01VA-missing"
+	PROFILE_SKIP=("Username","ServerName","CharacterName","Serial","LastLoaded","FollowingTarget");BAG_OWN=("slot.","trapsel=","trapextra=");SERIAL_KEY=re.compile(r"_[0-9A-Fa-f]{8}$");VA_KEYS=("ActionBar_","Attention_","BandageAgent","Character_","CombatBars_","CorpseRun_","EMPings.","Grimoire_","Harvest_","Interface_","Layout_","Lookout_","Meters_","Mongotchi_","Pets_","PropertyButler_","Restock_","SkillBags_","Skills_","Social_","SpellTimers_","StorageIndex_","SwingTimer_","swingtimer_","SystemStats_","TrapHL_","TreasureHunter_","UltimaTracker_","UnifiedBag_","UnitFrames_","VirtueAssistant_","WorldMap_","ReagentPrices_");OWN_VARS=("CorpseRun_corpse","SkillBags_rules","SkillBags_done","UnitFrames_tracked","Social_names","TreasureHunter_maps","Restock_settings","PropertyButler_visits","SpellTimers_active","VirtueAssistant_starting","VirtueAssistant_new_seen","VirtueAssistant_alert_log","VirtueAssistant_backup_ver","ReagentPrices_book");MISSING="\x01VA-missing"
 	def __init__(self):self.base=os.path.join(Kit.data_dir(),PROFILE_DIR)
 	@staticmethod
 	def _read(path):return Kit.read_safe(path,None)if path else None
@@ -4224,7 +4547,7 @@ class Profiles(object):
 class ConfigWindow(object):
 	W=640;GEAR=52;TABS=(("modules","Modules"),("settings","Settings"));DOCK_KEY="va";LINK_CMD="VirtueAssistant_cmd";LINK_STATE="VirtueAssistant_state";LINK_ALIVE="ActionBar_alive";LINK_STALE=10.;LINK_ENABLE="VirtueAssistant_enable"
 	def __init__(self,host):
-		self.host=host;self.g=self.mode=self._pp_key=self.shown_page=self.request=self.request_tab=None;self.lag_lbl=self.dirty=self.gear_pos=self.body=self.head=None;self.link_state=self.prof_sel=self.prof_cache=self.prof_shown=None;self.loading=self.stale_page=self.search_tb=self.search_text=None;self.gear_clicked=self.closing=self.docked=self.prof_stale=self.prof_redraw=False;self.box_hit=self.redraw_req=self.search_focus=self.find_prof=False;self.gear_look=self.lag_next=self.gear_moved=self.link_next=self.box_next=self.search_at=0.;self.resize_at=0.;self.store=({},{});self.seen={};self._pp_gate=[0.];self._fld_gate=[0.];self._fld_due=True;self.opt_search="";self.opt_index={};self.opt_ver=0;self.opt_open=False;self.opt_wait=self.opt_mark=self.opt_lbl=self.opt_drawn=self.fresh_view=None;self.opt_hits=(None,None);self.hit_keys=[];self.x,self.y=Kit.adapt(host.pref_int("cfg_x",140),host.pref_int("cfg_y",80),self.W,self.MIN_H);self.gx,self.gy=Kit.adapt(host.pref_int("gear_x",self.x),host.pref_int("gear_y",self.y),self.GEAR,self.GEAR);self.minimized=host.pref_int("cfg_min",0)==1 or host.dock_wanted(self.DOCK_KEY);self.tab=host.prefs.get("cfg_tab","modules")
+		self.host=host;self.g=self.mode=self._pp_key=self.shown_page=self.request=self.request_tab=None;self.lag_lbl=self.dirty=self.gear_pos=self.body=self.head=None;self.link_state=self.prof_sel=self.prof_cache=self.prof_shown=None;self.loading=self.stale_page=self.search_tb=self.search_text=None;self.gear_clicked=self.closing=self.docked=self.prof_stale=self.prof_redraw=False;self.box_hit=self.redraw_req=self.search_focus=self.find_prof=False;self.gear_look=self.lag_next=self.gear_moved=self.link_next=self.box_next=self.search_at=0.;self.resize_at=0.;self.store=({},{});self.seen={};self._pp_gate=[0.];self._fld_gate=[0.];self._fld_due=True;self.opt_search="";self.opt_index={};self.opt_ver=0;self.opt_open=False;self.opt_wait=self.opt_mark=self.opt_lbl=self.opt_drawn=self.fresh_view=None;self.opt_hits=(None,None);self.hit_keys=[];self.why,self.why_log,self.stale_log=None,[],[];self.from_xy=None;self.x,self.y=Kit.adapt(host.pref_int("cfg_x",140),host.pref_int("cfg_y",80),self.W,self.MIN_H);self.gx,self.gy=Kit.adapt(host.pref_int("gear_x",self.x),host.pref_int("gear_y",self.y),self.GEAR,self.GEAR);self.minimized=host.pref_int("cfg_min",0)==1 or host.dock_wanted(self.DOCK_KEY);self.tab=host.prefs.get("cfg_tab","modules")
 		if self.tab not in("modules","settings"):self.tab="modules"
 		self.page=host.prefs.get("cfg_page","");SNAP.enabled=host.pref_int("snap",1)==1;self.reported=set();self.page_keys=[];self.box_list=[];self.part_boxes=[];self.fold_keys=[];self.measured={};self.mod_search="";self._prof_reset();a=Kit.screen()[1];self.lim_w=max(self.W,host.pref_int("cfg_w",self.W));self.lim_h=max(self.MIN_H,host.pref_int("cfg_h",(a-60)if a>400 else 1000));self.scale=max(50,min(200,host.pref_int("cfg_scale",100)))/100.;self.size=(0,0)
 		for b in(self.LINK_CMD,self.LINK_ENABLE):API.RemoveSharedVar(b)
@@ -4283,16 +4606,17 @@ class ConfigWindow(object):
 		elif b:self.host.profile_req=("load",a)
 		else:self.host.profile_req=("fav",a)
 	def settings_slots(self):return[a for a in self.host.slots if a.lazy is not None or(a.api is not None and a.api.get("build_config"))]+list(self.host.pages)
-	def open(self):
+	def open(self,a=False):
 		if self.prof_cache is None:self.refresh_profiles()
-		if self.minimized:self.build_gear(self.gx,self.gy)
-		else:self.build_full(self.x,self.y)
-	def build_full(self,x,y):Kit.on_client(lambda:self._build_full(x,y))
-	def _replace(self,g,mode,x,y,w,h,head=None):
-		a=self.g;x,y=Kit.place(g,x,y,w,h,head)
+		if a and self.host.bar_on():self.host.dock_want_set(self.DOCK_KEY,True)
+		if self.minimized or a:self.build_gear(self.gx,self.gy)
+		else:self.build_full(self.x,self.y,"start")
+	def build_full(self,x,y,why="redraw"):self.why=why;Kit.on_client(lambda:self._build_full(x,y))
+	def _replace(self,g,mode,x,y,w,h,head=None,hidden=False):
+		a,b=self.g,self.mode==mode;x,y=Kit.place(g,x,y,w,h,head)
 		if mode=="gear":self.gx,self.gy=x,y
 		else:self.x,self.y=x,y
-		self.g,self.mode=g,mode;G.AddGump(g);Kit.on_moved(g,self._moved)
+		self.g,self.mode=g,mode;Kit.replace_gump(a if b else None,g,hidden);Kit.on_moved(g,self._moved);self.host.built(self.DOCK_KEY)
 		if mode=="gear":g.SetInScreen()
 		Kit.dispose(a)
 	def _note_pos(self):
@@ -4556,8 +4880,8 @@ class ConfigWindow(object):
 	def _part_box(self,g,s,p,x,c):a=bool(s.parts_on.get(p[0]));b=Kit.add_check(g,p[1],x,c,a,"%s: %s"%(s.title,p[2]or p[1]));self._hook_box(b);self.part_boxes.append((s,p[0],b));self.seen["%s.%s"%(s.key,p[0])]=a
 	ZONE_TIP="Click: next zone (free: stays where you put it; Settings > Interface lists them all)"
 	def _draw_windows(self,g,x,y,w,h,wins):
-		Kit.add_section(g,x,y,w,h,"WINDOWS  (the zone each sits in)");e=LAYOUT.zone_choices();a=y+32
-		for b,f in wins:Kit.add_label(g,Kit.fit(f,200),x+12,a+3);c=LAYOUT.zone_of(b);i="Zone: "+(c if c else "free");d="zone_"+b;Kit.art_button(g,self.store,d,Kit.ART_PAGE,x+224,a-2,i,self.ZONE_TIP);self.zone_keys.append((d,b,e));a+=26
+		Kit.add_section(g,x,y,w,h,"WINDOWS  (the zone each sits in)");e=LAYOUT.zone_choices();b=y+32
+		for c,f in wins:Kit.add_label(g,Kit.fit(f,200),x+12,b+3);a=LAYOUT.zone_of(c);i="Zone: "+((a[5:]if a.startswith("Zone ")else a)if a else "free");d="zone_"+c;Kit.art_button(g,self.store,d,Kit.ART_PAGE,x+224,b-2,i,self.ZONE_TIP);self.zone_keys.append((d,c,e));b+=26
 	FOLD_TIP="Show its parts";UNFOLD_TIP="Hide its parts";MOD_TIP="Type part of a name or feature to list matching modules (old names work)"
 	def _draw_mods(self,g,x,y,w,h,rows,first):
 		Kit.add_section(g,x,y,w,h,"MODULES  (tick a module to turn it on)"if first else "MODULES  (continued)")
@@ -4612,50 +4936,52 @@ class ConfigWindow(object):
 		for u,d,e,i,j,h in sorted(placed,key=lambda p:p[0]):units[u]["draw"](a,Kit.MARGIN+d*(b+Kit.GAP),c+e,h,i,j)
 		return a
 	def _build_full(self,x,y):
-		self._reset();self.seen,self.resize_at={},0.;self.part_boxes,self.fold_keys=[],[];M,u=Kit.MARGIN,Kit.GAP;L=M;F,v,w,z,W,H=self._plan();a=M;i=a+34+u;A=self._body_y();j=W-2*M;S=self.scale;d,e=int(round(W*S)),int(round(H*S));g=G.CreateModernGump(x,y,d,e,True,int(self.MIN_W*S),int(self.MIN_H*S),self._on_resized);g.SetAlpha(0);Kit.add_window_frame(g,W,H,mouse=False);Kit.add_section(g,L,a,j,34);Kit.add_label(g,"VIRTUE ASSISTANT",L+30,a+9,Kit.HUE_TITLE);o=L+30+Kit.text_w("VIRTUE ASSISTANT")+12;Kit.add_label(g,"v"+APP_VERSION,o,a+9,Kit.HUE_INFO);c=o+Kit.text_w("v"+APP_VERSION)+16;Kit.title_catcher(g,L,a,c-6-L,34,lambda:self.store[1].__setitem__("min",True),key="va")
-		for p,k in self.TABS:B=p==self.tab;Kit.art_button(g,self.store,"tab_"+p,Kit.ART_PAGE,c,a+6,k,"Show the %s tab"%k,Kit.HUE_TITLE if B else Kit.HUE_INFO);c+=self._cap_w(Kit.ART_PAGE,k)+16
+		if self.host.settled_at is None and len(self.why_log)<10:self.why_log.append((time.time(),self.why))
+		self._reset();self.seen,self.resize_at={},0.;self.part_boxes,self.fold_keys=[],[];M,v=Kit.MARGIN,Kit.GAP;L=M;I,w,z,A,W,H=self._plan();a=M;i=a+34+v;B=self._body_y();j=W-2*M;S=self.scale;c,d=int(round(W*S)),int(round(H*S));g=G.CreateModernGump(x,y,c,d,True,int(self.MIN_W*S),int(self.MIN_H*S),self._on_resized);g.SetAlpha(0);Kit.add_window_frame(g,W,H,mouse=False);Kit.add_section(g,L,a,j,34);Kit.add_label(g,"VIRTUE ASSISTANT",L+30,a+9,Kit.HUE_TITLE);o=L+30+Kit.text_w("VIRTUE ASSISTANT")+12;Kit.add_label(g,"v"+APP_VERSION,o,a+9,Kit.HUE_INFO);e=o+Kit.text_w("v"+APP_VERSION)+16;Kit.title_catcher(g,L,a,e-6-L,34,lambda:self.store[1].__setitem__("min",True),key="va")
+		for p,k in self.TABS:C=p==self.tab;Kit.art_button(g,self.store,"tab_"+p,Kit.ART_PAGE,e,a+6,k,"Show the %s tab"%k,Kit.HUE_TITLE if C else Kit.HUE_INFO);e+=self._cap_w(Kit.ART_PAGE,k)+16
 		l="%d%%"%int(round(S*100));q=W-M-74-Kit.DOCK_DX-8-16;Kit.art_button(g,self.store,"scale_up",self.ART_MORE,q,a+9,None,"Larger window and text");f=q-6-Kit.text_w(l);Kit.add_label(g,l,f,a+9,Kit.HUE_TEXT);Kit.catcher(g,f-2,a+6,Kit.text_w(l)+4,22,lambda:self.store[1].__setitem__("scale_reset",True),"Scale (click: 100%)");Kit.art_button(g,self.store,"scale_down",self.ART_LESS,f-6-16,a+9,None,"Smaller window and text");Kit.dock_button(g,self.store,W-M-74,a+9);Kit.art_button(g,self.store,"min",Kit.ART_MIN,W-M-74,a+9,None,"Minimize to the gear (or double-click the title)");Kit.art_button(g,self.store,"close",Kit.ART_CLOSE,W-M-54,a+6,None,"Close Virtue Assistant (stops every module)");self.find_prof=False;b=self.host.launcher;h=f-6-16-8;r,m=self._cap_w(Kit.ART_PAGE,"Find"),Kit.pic_size(Kit.ART_PAGE[0])[0]or 30
-		if b is not None and c+r<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-r,a+6,"Find",Launcher.TIP,Kit.HUE_INFO,b.toggle)
-		elif b is not None and c+m<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-m,a+6,None,Kit.caption_tip("Find",Launcher.TIP),None,b.toggle)
+		if b is not None and e+r<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-r,a+6,"Find",Launcher.TIP,Kit.HUE_INFO,b.toggle)
+		elif b is not None and e+m<=h:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,h-m,a+6,None,Kit.caption_tip("Find",Launcher.TIP),None,b.toggle)
 		else:self.find_prof=b is not None
 		try:self._build_profiles(g,L,i,j)
-		except Exception as C:self.prof_dd_args=None;Kit.add_label(g,"Profiles unavailable: %s"%C,L+12,i+9,Kit.HUE_BAD)
+		except Exception as D:self.prof_dd_args=None;Kit.add_label(g,"Profiles unavailable: %s"%D,L+12,i+9,Kit.HUE_BAD)
 		if self.find_prof:Kit.art_button(g,self.store,"find",Kit.ART_PAGE,L+j-12-m,i+6,None,Kit.caption_tip("Find",Launcher.TIP),None,b.toggle)
-		D=frozenset(self.store[0]);E=self._draw_body(g,v,w,z);self._add_profile_list(g)
-		if not Kit.scale_window(g,S)and S!=1.:self.scale,S,d,e=1.,1.,W,H;Kit.say("can't scale the window; it stays at 100%.",Kit.HUE_BAD)
-		self._replace(g,"full",x,y,d,e,int(round(A*S)));n=Kit.scroll_info(g);self.size=(n["w2"],n["hv"])if n else(d,e);self.minimized=False;self.dirty=None;self.body,self.head=E,(g,W,self.tab,(Kit.look(),Kit.compact),D)
+		E=frozenset(self.store[0]);F=self._draw_body(g,w,z,A);self._add_profile_list(g)
+		if not Kit.scale_window(g,S)and S!=1.:self.scale,S,c,d=1.,1.,W,H;Kit.say("can't scale the window; it stays at 100%.",Kit.HUE_BAD)
+		if self.mode!="full":s=LAYOUT.beside_journal(x,y,c,d);self.from_xy=(x,y,s);x=s
+		self._replace(g,"full",x,y,c,d,int(round(B*S)));n=Kit.scroll_info(g);self.size=(n["w2"],n["hv"])if n else(c,d);self.minimized=False;self.dirty=None;self.body,self.head=F,(g,W,self.tab,(Kit.look(),Kit.compact),E)
 		if self.search_focus:
-			self.search_focus=False;s=self.search_tb
-			if s is not None:
-				t=Kit.client_control(s)
-				if t is not None and Kit.flush():safe(lambda:t.SetKeyboardFocus())
-	def build_gear(self,x,y):
-		self._reset();self.fresh_view=None;S=self.GEAR;g=G.CreateGump(True,True);Kit.add_window_frame(g,S,S,corners=False);Kit.add_section(g,7,7,S-14,S-14);p=G.CreateGumpItemPic(4179,S-18,S-18);p.SetPos(9,9);p.SetAcceptMouseInput(False);g.Add(p);Kit.catcher(g,0,0,S,S,self._gear_click,"%s: click to open, drag to move"%APP_NAME,movable=True);self.gear_clicked,self.gear_pos,self.gear_moved=False,None,0.;self._replace(g,"gear",x,y,S,S);self.minimized=True;self.docked=self.host.dock_wanted(self.DOCK_KEY)and self.host.bar_alive()
-		if self.docked:self._show_gear(False)
+			self.search_focus=False;t=self.search_tb
+			if t is not None:
+				u=Kit.client_control(t)
+				if u is not None and Kit.flush():safe(lambda:u.SetKeyboardFocus())
+	def build_gear(self,x,y):self._reset();self.fresh_view=None;S=self.GEAR;g=G.CreateGump(True,True);Kit.add_window_frame(g,S,S,corners=False);Kit.add_section(g,7,7,S-14,S-14);p=G.CreateGumpItemPic(4179,S-18,S-18);p.SetPos(9,9);p.SetAcceptMouseInput(False);g.Add(p);Kit.catcher(g,0,0,S,S,self._gear_click,"%s: click to open, drag to move"%APP_NAME,movable=True);self.gear_clicked,self.gear_pos,self.gear_moved=False,None,0.;self.docked=self.host.dock_wanted(self.DOCK_KEY)and self.host.bar_soon();self._replace(g,"gear",x,y,S,S,hidden=self.docked);self.minimized=True
 	def fold_to_bar(self):
 		self.host.dock_want_set(self.DOCK_KEY,True)
 		if self.mode=="full":self.fold()
 		if not self.host.bar_alive():self.host.dock_note(APP_NAME)
 	def _show_gear(self,shown):
 		g=self.g
-		if self.mode=="gear"and Kit.is_open(g):g.IsVisible=bool(shown)
+		if self.mode=="gear"and Kit.is_open(g):g.IsVisible=bool(shown);Kit.stir()
 	def link_tick(self):
 		b=time.time()
 		if b<self.link_next and self.link_next-b<=.1:return
-		self.link_next=b+.1;e=self._take_shared(self.LINK_ENABLE)
-		if e:self.host.enable(str(e))
+		self.link_next=b+.1;d=self._take_shared(self.LINK_ENABLE)
+		if d:self.host.enable(str(d))
 		a=self._take_shared(self.LINK_CMD)
 		if a:
 			a=str(a)
-			if a=="show"and self.mode!="full":self.unfold()
+			if a=="show"and self.mode!="full":
+				if not self._stale("link"):self.unfold("link")
 			elif a=="dock"and self.mode=="full":self.fold_to_bar()
 			elif a=="modules":self.request_tab="modules"
-		f=self.host.dock_wanted(self.DOCK_KEY)
-		if self.mode=="gear"and(self.docked or f):
-			c=f and self.host.bar_alive()
-			if c!=self.docked:self.docked=c;self._show_gear(not c)
-		d=("docked"if self.docked else "gear")if self.mode=="gear"else "open"
-		if d!=self.link_state:self.link_state=d;API.SetSharedVar(self.LINK_STATE,d)
+		self.dock_sync();c=("docked"if self.docked else "gear")if self.mode=="gear"else "open"
+		if c!=self.link_state:self.link_state=c;API.SetSharedVar(self.LINK_STATE,c)
+	def dock_sync(self):
+		b=self.host.dock_wanted(self.DOCK_KEY)
+		if self.mode=="gear"and(self.docked or b):
+			a=b and self.host.bar_soon()
+			if a!=self.docked:self.docked=a;self._show_gear(not a)
 	@staticmethod
 	def _take_shared(name):
 		try:v=API.GetSharedVar(name)
@@ -4663,24 +4989,30 @@ class ConfigWindow(object):
 		if v:API.RemoveSharedVar(name)
 		return v
 	def _gear_click(self):self.gear_clicked=True
+	def _unpressed(self):return self.host.booting()and self.host.pressed_at<=0
+	def _stale(self,why):
+		h=self.host
+		if not h.booting()or h.pressed_at>0:return False
+		if len(self.stale_log)<10:self.stale_log.append((time.time(),why))
+		return True
 	def pos(self):g=self.g;return safe(lambda:int(g.GetX())),safe(lambda:int(g.GetY()))
 	def store_prefs(self,a):
 		if Client.on_client_thread():self._note_pos()
 		for k,v in(("cfg_x",self.x),("cfg_y",self.y),("cfg_w",self.lim_w),("cfg_h",self.lim_h),("cfg_scale",int(round(self.scale*100))),("gear_x",self.gx),("gear_y",self.gy)):a[k]=str(v)
 		a["cfg_min"]="1"if self.minimized else "0";a["cfg_tab"],a["cfg_page"]=self.tab,self.page or "";a["snap"]="1"if SNAP.enabled else "0"
 	def fold(self):
-		x,y=self.pos()
+		x,y=self.pos();f,self.from_xy=self.from_xy,None
 		if x is not None:self.x,self.y=x,y
-		self.gx,self.gy=self.x,self.y;self.build_gear(self.gx,self.gy);self.host.save_prefs()
-	def unfold(self):
+		self.gx,self.gy=(f[0],f[1])if f is not None and f[0]!=f[2]==self.x else(self.x,self.y);self.build_gear(self.gx,self.gy);self.host.save_prefs()
+	def unfold(self,why="redraw"):
 		x,y=self.pos()
 		if x is not None:self.gx,self.gy=x,y
-		self.docked=False;self.host.dock_forget(self.DOCK_KEY);self.build_full(self.gx,self.gy);self.host.save_prefs()
-	def redraw(self):
-		if self.mode!="full":self.unfold();return
+		self.docked=False;self.host.dock_forget(self.DOCK_KEY);self.build_full(self.gx,self.gy,why);self.host.save_prefs()
+	def redraw(self,why="redraw"):
+		if self.mode!="full":self.unfold(why);return
 		x,y=self.pos()
 		if x is not None:self.x,self.y=x,y
-		self.build_full(self.x,self.y);self.host.save_prefs()
+		self.build_full(self.x,self.y,why);self.host.save_prefs()
 	def _switch_page(self,key):
 		self.page=key;x,y=self.pos()
 		if x is not None:self.x,self.y=x,y
@@ -4690,7 +5022,7 @@ class ConfigWindow(object):
 		if a is not None and a[0]is g and Kit.is_open(g)and self.tab==a[2]=="settings"and a[3]==(Kit.look(),Kit.compact)and self.scale==1. and g not in Kit._scrolled and g not in Fill.recs and not self.resize_at and self.prof_cache is not None and self._prof_key(self.prof_cache)==self.prof_shown:
 			try:b=self._fast_body(g,a[1],a[4])
 			except Exception as c:self.host._tell("%s: settings window error: %s%s"%(APP_NAME,c,_error_where()))
-		if not b:self._build_full(self.x,self.y)
+		if not b:self.why="redraw";self._build_full(self.x,self.y)
 	def _fast_body(self,g,b,keys):
 		self._leave_page();self.page_keys,self.zone_keys,self.part_boxes,self.seen=[],[],[],{};d,e,f,h,W,H=self._plan()
 		if d is None or W!=b or H>Kit.screen()[1]>0 or not Kit.frame_fit(g,W,H):return False
@@ -4708,13 +5040,17 @@ class ConfigWindow(object):
 		if not Kit.is_open(self.g):
 			if self.host.stopping():return
 			self.shown_page=None;self.build_gear(self.gx,self.gy);return
-		g=self.g;self.link_tick()
-		if self.g is not g and not Kit.is_open(self.g):return
-		if self.request is not None:h,self.request=self.request,None;self.tab,self.page="settings",h;self.redraw();return
+		h=self.g;self.link_tick()
+		if self.g is not h and not Kit.is_open(self.g):return
+		if self.request is not None:
+			e,self.request=self.request,None;self.tab,self.page="settings",e
+			if self.mode=="full"or not self._unpressed():self.redraw("request:%s"%e)
+			return
 		if self.request_tab is not None:
-			d,self.request_tab=self.request_tab,None
-			if d in("modules","settings"):self.tab=d
-			self.redraw();return
+			c,self.request_tab=self.request_tab,None
+			if c in("modules","settings"):self.tab=c
+			if self.mode=="full"or not self._unpressed():self.redraw("tab:%s"%c)
+			return
 		if self.mode=="gear":
 			a=time.time()
 			if not self.docked and(self.gear_clicked or self.gear_pos is None or a>=self.gear_look or SNAP.pressed()is not False):
@@ -4724,7 +5060,7 @@ class ConfigWindow(object):
 					self.gear_pos=p
 			if self.gear_clicked:
 				self.gear_clicked=False
-				if a-self.gear_moved>.35:self.unfold()
+				if a-self.gear_moved>.35 and not self._stale("gear"):self.unfold("gear")
 			return
 		if self.prof_redraw:self.prof_redraw=False;self.redraw();return
 		if self.redraw_req:
@@ -4737,10 +5073,10 @@ class ConfigWindow(object):
 		if self.tab=="settings"and self.opt_search and not self.opt_open and self._fld_due:
 			if self._poll_index():return
 		if self.lag_lbl is not None and time.time()>=self.lag_next:
-			self.lag_next=time.time()+1.;c=self.host.active
-			if c:e=max(c,key=lambda s:s.load[2]);f="%d modules on; slowest lately: %s, %d ms"%(len(c),e.title,e.load[2])
-			else:f="No modules on"
-			Kit.set_text(self.lag_lbl,f)
+			self.lag_next=time.time()+1.;d=self.host.active
+			if d:f=max(d,key=lambda s:s.load[2]);g="%d modules on; slowest lately: %s, %d ms"%(len(d),f.title,f.load[2])
+			else:g="No modules on"
+			Kit.set_text(self.lag_lbl,g)
 		a=time.time()
 		if self.box_hit or a>=self.box_next or not Kit.clicks_seen:
 			self.box_hit=False;self.box_next=a+self.BOX_EVERY
@@ -4854,7 +5190,7 @@ class AlonePage(object):
 		self.wnd.close()
 class HubWindow(object):
 	W=372;MINI_W,MINI_H=240,46
-	def __init__(self,host):self.host=host;self.g=None;self.H=0;self.sections=[];self.stores={};self.store=({},{});self.x,self.y=Kit.adapt(host.pref_int("hub_x",100),host.pref_int("hub_y",100),self.W,self.MINI_H);self.minimized=host.pref_int("hub_min",0)==1 or host.dock_wanted("hub");self.docked=self.dirty=self.closing=False;self._gates={};host.dock_add("hub",{"title":"Ultima Tracker","icon":4183,"always":True,"state":self.state,"show":self.show,"dock":self.dock,"undock":self.undock,"minimize":self.minimize,"on":self.open_modules,"gump":lambda:self.g,"redraw":self.refresh})
+	def __init__(self,host):self.host=host;self.g=None;self.H=0;self.sections=[];self.stores={};self.store=({},{});self.x,self.y=Kit.adapt(host.pref_int("hub_x",100),host.pref_int("hub_y",100),self.W,self.MINI_H);self.minimized=host.pref_int("hub_min",0)==1 or host.dock_wanted("hub");self.docked=self.dirty=self.closing=False;self._gates={};self.docked=self.minimized and host.dock_soon("hub");host.dock_add("hub",{"title":"Ultima Tracker","icon":4183,"always":True,"state":self.state,"show":self.show,"dock":self.dock,"undock":self.undock,"minimize":self.minimize,"on":self.open_modules,"gump":lambda:self.g,"redraw":self.refresh})
 	def add(self,key,title,hooks):self.remove(key);self.sections.append((key,title,hooks));self.dirty=True
 	def remove(self,key):
 		a=[b for b in self.sections if b[0]!=key]
@@ -4905,24 +5241,23 @@ class HubWindow(object):
 	def _build(self):
 		self.dirty=False
 		if not self.sections:self._close_window();return
-		self._pos();self._leave();o=self.g;M,d=Kit.MARGIN,Kit.GAP;b=({},{});g=G.CreateGump(True,True);j=self.title().upper();e=self.host.layout_holds("hub");k="Close %s (turns %s off; the Modules tab turns %s back on)"%(self.title(),"them"if len(self.sections)>1 else "it","them"if len(self.sections)>1 else "it")
-		if self.minimized:w,h=self.MINI_W,self.MINI_H;Kit.add_window_frame(g,w,h,corners=False);Kit.add_section(g,8,8,w-16,h-16);Kit.add_label(g,j,18,15,Kit.HUE_TITLE);Kit.title_catcher(g,8,8,w-70,h-16,self.toggle_min,key="hub:mini");Kit.art_button(g,b,"min",Kit.ART_RESTORE,w-60,15,None,Kit.RESTORE_TIP);Kit.art_button(g,b,"close",Kit.ART_CLOSE,w-44,12,None,k)
+		self._pos();self._leave();j=self.g;M,d=Kit.MARGIN,Kit.GAP;b=({},{});g=G.CreateGump(True,True);k=self.title().upper();e=self.host.layout_holds("hub");l="Close %s (turns %s off; the Modules tab turns %s back on)"%(self.title(),"them"if len(self.sections)>1 else "it","them"if len(self.sections)>1 else "it")
+		if self.minimized:w,h=self.MINI_W,self.MINI_H;Kit.add_window_frame(g,w,h,corners=False);Kit.add_section(g,8,8,w-16,h-16);Kit.add_label(g,k,18,15,Kit.HUE_TITLE);Kit.title_catcher(g,8,8,w-70,h-16,self.toggle_min,key="hub:mini");Kit.art_button(g,b,"min",Kit.ART_RESTORE,w-60,15,None,Kit.RESTORE_TIP);Kit.art_button(g,b,"close",Kit.ART_CLOSE,w-44,12,None,l)
 		else:
 			w=self.W;c=w-2*M;f=[max(20,int(safe(lambda:r["height"](c),40)or 40))for s,u,r in self.sections];h=M+30+d+sum(f)+d*(len(f)-1)+M;Kit.add_window_frame(g,w,h,corners=False)
 			if e:Kit.title_bar(g,b,w,self.title(),"hub",None,None)
-			else:Kit.add_section(g,M,M,c,30);Kit.add_label(g,j,M+10,M+7,Kit.HUE_TITLE);Kit.title_catcher(g,M,M,c-70-Kit.DOCK_DX,30,self.toggle_min,key="hub");Kit.dock_button(g,b,w-M-66,M+7);Kit.art_button(g,b,"min",Kit.ART_MIN,w-M-66,M+7,None,Kit.MIN_TIP);Kit.art_button(g,b,"close",Kit.ART_CLOSE,w-M-44,M+4,None,k)
+			else:Kit.add_section(g,M,M,c,30);Kit.add_label(g,k,M+10,M+7,Kit.HUE_TITLE);Kit.title_catcher(g,M,M,c-70-Kit.DOCK_DX,30,self.toggle_min,key="hub");Kit.dock_button(g,b,w-M-66,M+7);Kit.art_button(g,b,"min",Kit.ART_MIN,w-M-66,M+7,None,Kit.MIN_TIP);Kit.art_button(g,b,"close",Kit.ART_CLOSE,w-M-44,M+4,None,l)
 			y=M+30+d
-			for(i,t,p),l in zip(self.sections,f):
+			for(i,t,p),m in zip(self.sections,f):
 				q=self.stores[i]=({},{})
 				try:Binds.scoped(i,p["build"],g,M,y,c,q)
-				except Exception as m:Kit.add_section(g,M,y,c,l);Kit.add_label(g,"%s: %s"%(t,m),M+10,y+10,Kit.HUE_BAD);self._error(i,m)
-				y+=l+d
-		if e:n=LAYOUT.spot("hub")or(self.x,self.y);g.SetPos(int(n[0]),int(n[1]))
+				except Exception as n:Kit.add_section(g,M,y,c,m);Kit.add_label(g,"%s: %s"%(t,n),M+10,y+10,Kit.HUE_BAD);self._error(i,n)
+				y+=m+d
+		if e:o=LAYOUT.spot("hub")or(self.x,self.y);g.SetPos(int(o[0]),int(o[1]))
 		else:self.x,self.y=Kit.place(g,self.x,self.y,w,h)
-		self.H=h;self.g,self.store=g,b;G.AddControlOnDisposed(g,lambda*a:self._disposed(g));G.AddGump(g)
+		self.H=h;self.g,self.store=g,b;G.AddControlOnDisposed(g,lambda*a:self._disposed(g));Kit.replace_gump(j,g,self.docked)
 		if not e:g.SetInScreen()
-		Kit.on_moved(g,self._moved);Kit.dispose(o)
-		if self.docked:self._visible(False)
+		Kit.on_moved(g,self._moved);Kit.dispose(j)
 	def _moved(self):self._pos();self.host.save_prefs()
 	def _disposed(self,g):
 		if self.g is g and not self.closing:
@@ -5019,7 +5354,7 @@ class Launcher(object):
 		p=self.status if self.hooked or self.status!=self.RUN else self.CLICK;Kit.add_label(g,Kit.fit(p,W-2*M-24),M+12,j+d*len(e)+4,Kit.HUE_INFO);h=s if Kit.scale_window(g,s)else 1.;i,m=int(round(W*h)),int(round(H*h))
 		if Kit.is_open(c):x,y=int(c.GetX()),int(c.GetY())
 		else:q=Kit.screen()[0]or 1024;x,y=Kit.load_pos(self.POS_KEY,(max(0,(q-i)//2),120),(i,m))
-		Kit.place(g,x,y,i,m,int(round(a*h)));G.AddGump(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g,self.tb,self.store=g,b,f;Kit.dispose(c);safe(b.SetFocus);self._put_caret(b,o)
+		Kit.place(g,x,y,i,m,int(round(a*h)));Kit.add_front(g);Kit.on_moved(g,lambda:Kit.save_pos(self.POS_KEY,self.g));self.g,self.tb,self.store=g,b,f;Kit.dispose(c);safe(b.SetFocus);self._put_caret(b,o)
 	def _caret(self):
 		with Kit.quiet:
 			n=int(self.tb.CaretIndex)
@@ -5208,15 +5543,16 @@ class Snap(object):
 	@staticmethod
 	def move(g,x,y):g.SetPos(int(x),int(y));Kit.note_rect(g,x,y)
 	def tick(self,now=None):
-		now=time.time()if now is None else now
-		if now<self.next and self.next-now<=SNAP_EVERY:return
+		now=time.time()if now is None else now;h=HOST.booting()
+		if now<self.next and self.next-now<=SNAP_EVERY and not h:return
 		self.next=now+SNAP_EVERY
 		if LAYOUT.arrange and not self.drag and API.IsKeyPressed("ESCAPE"):LAYOUT.set_arrange(False)
 		a=self.pressed();self.down=a is not False or bool(self.drag)
 		if a is not True:
 			if now>=self.keep_at:
-				self.keep_at=now+KEEP_EVERY
+				self.keep_at=now+(0. if h else KEEP_EVERY)
 				if now>=self.sweep_at or self._keep_sig()!=self.keep_sig:self.sweep_at=now+KEEP_SWEEP;self.keep();self.keep_sig=self._keep_sig()
+				elif h and LAYOUT.assign and LAYOUT.retry_due(now):self.keep(light=bool(LAYOUT.fresh_adds)and not LAYOUT.fresh)
 			elif LAYOUT.assign and(LAYOUT.fresh or LAYOUT.fresh_adds or LAYOUT.retry_due(now)):self.keep(light=bool(LAYOUT.fresh_adds)and not LAYOUT.fresh)
 		if a is False and not self.drag:
 			self.last=None
@@ -5233,14 +5569,14 @@ class Snap(object):
 			return
 		d=self.drag;c=self.by_code
 		if c:
-			for g in[j for j,k in c.items()if now-k>1.]:del c[g]
+			for g in[k for k,l in c.items()if now-l>1.]:del c[g]
 		for g in e:
 			p=self.pos(g)
 			if p is None:continue
 			f=b.get(g)
 			if f is None:b[g]=p;continue
 			if p!=f:
-				h,i=p[0]-f[0],p[1]-f[1];b[g]=p
+				i,j=p[0]-f[0],p[1]-f[1];b[g]=p
 				if c and g in c:del c[g];continue
 				if a is False:continue
 				d[g]=now;self.moved.add(g);self.dragged.add(g);r=None
@@ -5249,7 +5585,7 @@ class Snap(object):
 					r=self.rect(g)
 					if r is not None:self.drag_rect[g]=r
 				if LAYOUT.arrange:LAYOUT.arrange_hover(g,r)
-				if self.enabled and g not in self.no_snap and g not in LAYOUT.held:self.follow(g,h,i,set([g]))
+				if self.enabled and g not in self.no_snap and g not in LAYOUT.held:self.follow(g,i,j,set([g]))
 			elif g in d:
 				if a is False or(a is None and now-d[g]>=SNAP_SETTLE):
 					del d[g]
@@ -5401,7 +5737,7 @@ class Grid(object):
 		g.SetRect(x,y,w,h);g.SetAcceptMouseInput(False);g.CanMove=False
 		if a:
 			with Kit.quiet:import System;g.LayerOrder=System.Enum.Parse(g.LayerOrder.GetType(),"Under")
-		G.AddGump(g);SNAP.skip_gump(g)
+		Kit.add_front(g);SNAP.skip_gump(g)
 	def toggle(self):self.hide()if self.shown else self.show()
 	def show(self):self.shown=True;Kit.on_client(self.build)
 	def hide(self):self.shown=False;g,self.g=self.g,None;Kit.dispose(g)
@@ -5866,7 +6202,7 @@ class Tex(object):
 		if Tex.ok is not None:return Tex.ok
 		try:import clr;import System;b=Client.flags(True);c=Client.flags();p=Tex.parts;a=Client._type("ClassicUO.Assets.ExternalImageLoader");d=a.GetProperty("Instance",b).GetValue(None,None);p["table"]=a.GetField("_zipNamedTextures",c).GetValue(d);p["device"]=a.GetProperty("GraphicsDevice",c).GetValue(d,None);p["tex_t"]=Client._type("Microsoft.Xna.Framework.Graphics.Texture2D");p["format"]=System.Enum.Parse(Client._type("Microsoft.Xna.Framework.Graphics.SurfaceFormat"),"Color");p["set_data"]=[g for g in p["tex_t"].GetMethods()if g.Name=="SetData"and g.IsGenericMethodDefinition and len(g.GetParameters())==1][0].MakeGenericMethod(clr.GetClrType(System.UInt32));f=Client._type("ClassicUO.Client").GetProperty("Game",b).GetValue(None,None);e=Tz.get(Tz.get(f,"UO"),"Gumps");p["gumps"]=e;p["hued"]=e.GetType().GetMethod("GetHuedGumpPixels");Tex.ok=all(p.get(h)is not None for h in("table","device","tex_t","set_data","gumps","hued"))
 		except Exception:Tex.ok=False
-		return Tex.ok
+		Tex.parts["ok"]=Tex.ok;return Tex.ok
 	@staticmethod
 	def gump_pixels(gid):
 		import System;c=System.Array[System.Object]([System.UInt32(gid),System.UInt16(0),False,None]);a=Tex.parts["hued"].Invoke(Tex.parts["gumps"],c);b=c[3]
@@ -5885,9 +6221,15 @@ class Tex(object):
 			with Kit.quiet:
 				if b.ContainsKey(a):c=b[a];b.Remove(a);c.Dispose()
 	@staticmethod
+	def has(name):
+		if not Tex.ok:return False
+		a=Tex.parts["table"]
+		with Kit.quiet:return bool(a.ContainsKey(name))and not a[name].IsDisposed
+		return False
+	@staticmethod
 	def control(g,name,x,y,w,h):t=G.LegionTextureControl(name,int(w),int(h));t.SetRect(int(x),int(y),int(w),int(h));safe(lambda:t.SetAcceptMouseInput(False));g.Add(t);return t
 class Layout(object):
-	def __init__(self):self.wins={};self.assign={};self.frames=None;self.frames_name=LAYOUT_DEFAULT;self.layout_name="";self.game_grows=True;self.fit_view=True;self.screen=None;self.dirty=True;self.occ=None;self.gump_key={};self.placed={};self.titles={};self.min_seen={};self.loaded=False;self.page_refresh=False;self.enabled=True;self.seamless=False;self.gv_off_done=False;self.seam_skip={};self.seam_wait={};self.hooks={};self.owner={};self.fitted={};self.base={};self.fresh=False;self.fresh_adds=set();self.client_seen={};self.journal_held=None;self.pair_tried=None;self.client_settle={};self.misfit={};self.fallback={};self.client_told=set();self.chat_seen=(0.,None);self.held={};self.arrange=False;self.arrange_last=0.;self.arrange_g=None;self.arrange_lit={};self.arrange_hot=None;self.client_target={};self.repair_at=0.;self.repair_told=set();self.freed=None;self.page_preview="";self.homes=None;self.back_told=False;self._arrange_sig=None;self.rev={};self.retry_at=0.;self.slot_was={};self.bags_swept=False;self.reclaim_undo=self._vp_fields=self.gv_applied=self.small_said=None;self._undo_read=self.gv_small_told=self.gv_checked=self.need_due=self.migrating=False;self.situ={"on":False,"base":""};self.situ_now=self.situ_pend=self.situ_last=self.situ_back=None;self.situ_at=0.;self.situ_busy=False;self.situ_bank=(-1e9,0,0,-1);self.tabs={};self.behind={};self.strips={}
+	def __init__(self):self.wins={};self.assign={};self.frames=None;self.frames_name=LAYOUT_DEFAULT;self.layout_name="";self.game_grows=True;self.fit_view=True;self.screen=None;self.dirty=True;self.occ=None;self.gump_key={};self.placed={};self.titles={};self.min_seen={};self.loaded=False;self.page_refresh=False;self.enabled=True;self.seamless=False;self.gv_off_done=False;self.seam_skip={};self.seam_wait={};self.hooks={};self.owner={};self.fitted={};self.base={};self.fresh=False;self.fresh_adds=set();self.client_seen={};self.journal_held=self.journal_px=None;self.pair_tried=None;self.client_settle={};self.misfit={};self.fallback={};self.client_told=set();self.chat_seen=(0.,None);self.held={};self.arrange=False;self.arrange_last=0.;self.arrange_g=None;self.arrange_lit={};self.arrange_hot=None;self.client_target={};self.repair_at=0.;self.repair_told=set();self.freed=None;self.page_preview="";self.homes=None;self.back_told=False;self._arrange_sig=None;self.rev={};self.retry_at=0.;self.slot_was={};self.bags_swept=False;self.reclaim_undo=self._vp_fields=self.gv_applied=self.small_said=None;self._undo_read=self.gv_small_told=self.gv_checked=self.need_due=self.migrating=False;self.situ={"on":False,"base":""};self.situ_now=self.situ_pend=self.situ_last=self.situ_back=None;self.situ_at=0.;self.situ_busy=False;self.situ_bank=(-1e9,0,0,-1);self.tabs={};self.behind={};self.strips={};self.planned={};self.plan_occ=self.plan_sig=None
 	def _client_getter(self,kind,key):
 		def a():
 			a=ClientWin.of(kind)
@@ -5948,14 +6290,18 @@ class Layout(object):
 	def _hold_journal(self,zs,H=0):
 		z=(next((c for c in zs.zones if c.kind=="r"and c.px is not None),None)if self.layout_name or self.assign else None);a=ClientWin.of("journal")if z is not None else None;b=self.journal_held
 		if b is not None and b is not a:b.free();self.journal_held=None
-		if a is None:return
-		x,y,w,h=z.px;h=self._clear_of_chat(x,y,w,h,H);a.fit(w,h)
+		if a is None:self.journal_px=None;return
+		x,y,w,h=z.px;h=self._clear_of_chat(x,y,w,h,H);a.fit(w,h);self.journal_px=(x,y,w,h)
 		try:
 			if(a.GetX(),a.GetY())!=(x,y):a.SetPos(x,y)
 		except Exception:pass
 		a.report();self.journal_held=a
+	def beside_journal(self,x,y,w,h):
+		r=self.journal_px
+		if r is None or not(r[0]<=x<r[0]+r[2]and y<r[1]+r[3]and r[1]<y+h):return x
+		W=Kit.screen()[0];return r[0]+r[2]if not W or r[0]+r[2]+w<=W else max(0,r[0]-w)
 	def load(self):
-		self.freed=None;self.homes=None;self.repair_told=set();self.back_told=False;self.loaded=True;self.bags_swept=False;self.seam_skip={};self.seam_wait={}
+		self.freed=None;self.homes=None;self.repair_told=set();self.back_told=False;self.loaded=True;self.bags_swept=False;self.planned,self.plan_occ,self.plan_sig={},None,None;self.seam_skip={};self.seam_wait={}
 		if "worldmap"not in self.wins:self.add("worldmap",self._client_getter("worldmap","worldmap"),"TazUO's World Map",{"fit":self._client_fit("worldmap"),"exact":True,"client":True,"inset":ClientWin.INSET.get("worldmap",0)})
 		self.frames_name=Kit.get_var(FRAMES_ACTIVE,LAYOUT_DEFAULT)or LAYOUT_DEFAULT
 		if self.frames_name!=LAYOUT_DEFAULT and self.frames_name not in self.frame_names():self.frames_name=LAYOUT_DEFAULT
@@ -6036,7 +6382,7 @@ class Layout(object):
 				with Kit.quiet:Kit.place(g,int(g.GetX()),int(g.GetY()),a["w"],a["h"],a["head"]);Kit.moved_by_code(g)
 		self.placed={}
 		if self.held:self._release(set())
-		c,self.journal_held=self.journal_held,None
+		c,self.journal_held,self.journal_px=self.journal_held,None,None
 		if c is not None:c.free()
 		if not self.gv_off_done:self.gv_off_done=True;self.game_view_restore()
 	@staticmethod
@@ -6262,7 +6608,7 @@ class Layout(object):
 		try:g=w[0]()
 		except Exception:return
 		return g if Kit.is_open(g)else None
-	def occupied(self):return set(a for a,b in self.assign.items()if any(self.gump_of(c)is not None for c in b))
+	def occupied(self):a=set(b for b,c in self.assign.items()if any(self.gump_of(d)is not None for d in c));return a|self.plan_occ if self.plan_occ is not None else a
 	def frames_in_use(self,W,H):
 		if self.frames is not None and not self.dirty and self.screen==(W,H):return self.frames
 		a=self.load_frames(self.frames_name,W,H)if self.frames_name!=LAYOUT_DEFAULT else None
@@ -6569,6 +6915,7 @@ class Layout(object):
 		try:self._game_view(b)
 		except Exception:pass
 		if self.assign and self.need_due:self.need_due=False;b.reflow(W,H,HOST.grid_size())
+		if self.plan_occ is not None and(not HOST.booting()or self._plan_sig(b)!=self.plan_sig):self.plan_drop()
 		if l:
 			Kit.flush()
 			for g in l:
@@ -6633,7 +6980,8 @@ class Layout(object):
 		self.fresh=True;HOST.poke();return True
 	def spot(self,key):
 		a=self.placed.get(key)
-		if a is None or key not in self.behind:return a
+		if a is None:return self.plan_at(key)
+		if key not in self.behind:return a
 		return(TAB_X,)+tuple(a[1:])
 	def _unhide(self,key):
 		self.behind.pop(key,None);g=self.gump_of(key)
@@ -6664,7 +7012,7 @@ class Layout(object):
 	def _strip(self,l,sig):
 		(x,y,w,p),e,m,n=sig[0],sig[1],sig[2],sig[3];g=G.CreateGump(True,False);Kit.add_section(g,0,0,w,TAB_H);f=max(1,w//len(e));a,c=Kit.pic_size(Kit.ART_PAGE[0]);a,c=a or 30,c or 22
 		for o,(k,t)in enumerate(zip(e,n)):h=o*f+4;i=self._tab_click(l,k);j="Show %s in this zone"%t;b=G.CreateGumpButton("",Kit.HUE_TEXT,Kit.ART_PAGE[0],Kit.ART_PAGE[1],Kit.ART_PAGE[2]);b.SetPos(h,max(0,(TAB_H-c)//2));g.Add(b);Kit.on_click(b,i);Kit.with_tip(b,j);d=Kit.add_label(g,Kit.fit(t,max(10,f-a-15)),h+a+5,max(0,(TAB_H-16)//2),Kit.HUE_TITLE if k==m else Kit.HUE_TEXT);d.SetAcceptMouseInput(True);Kit.on_click(d,i);Kit.with_tip(d,j)
-		g.SetRect(x,y,w,TAB_H);g.CanMove=False;G.AddGump(g);SNAP.skip_gump(g);return g
+		g.SetRect(x,y,w,TAB_H);g.CanMove=False;Kit.add_front(g);SNAP.skip_gump(g);return g
 	def _tab_click(self,a,key):
 		def b():self.tab_pick(a,key)
 		return b
@@ -6676,10 +7024,47 @@ class Layout(object):
 			if g is None or not Snap.visible(g)or not self.holds(a)or now-b[1]>2*SEAM_WAIT:self.seam_wait.pop(a,None)
 			else:self.fresh_adds.add(g)
 		return bool(self.fresh_adds)
+	def plan(self):
+		self.plan_drop();W,H=Kit.screen();o=dict.get(HOST.by_key,LAYOUT_OWNER)
+		if not self.loaded or not self.assign or W<=0 or H<=0 or o is None or not o.enabled:return False
+		b={}
+		for g,a in self.assign.items():
+			for c in a:
+				d,e=self.owner_of(c);s=dict.get(HOST.by_key,d)if d else None
+				if self.gump_of(c)is not None or(s is not None and s.enabled and(e is None or s.parts_on.get(e))):b.setdefault(g,[]).append(c)
+		self.plan_occ=set(b);self.occ=self.occupied()
+		if self.frames_name==LAYOUT_DEFAULT:self.dirty=True
+		f=self.frames_in_use(W,H);self.fresh=False;h=(Seam.pad(),)*4
+		for z in f.zones:
+			a=b.get(z.id)
+			if not a or z.kind!="w"or z.px is None:continue
+			if z.stack=="t":k=self.tabs.get(z.id);a=[k if k in a else a[0]]
+			elif len(a)>1:continue
+			i=((Kit.MARGIN,)*4 if z.solo else h)if self.seamless else None;self.planned[a[0]]=(tuple(self._body(z)),z,i)
+		self.plan_sig=self._plan_sig(f);return bool(self.planned)
+	def _plan_sig(self,zs):a=set(c[1].id for c in self.planned.values());b=[(d.id,d.px)for d in zs.zones if d.id in a];return zs.screen,self.frames_name,self.windows_text(),self.seamless,sorted(b)
+	def plan_drop(self):self.planned,self.plan_occ,self.plan_sig={},None,None
+	def plan_prune(self):
+		if not self.plan_occ:return False
+		a=set(b for b in self.plan_occ if any(self.gump_of(c)is not None for c in self.assign.get(b,())))
+		if a==self.plan_occ:return False
+		self.plan_occ=a;return True
+	def plan_at(self,key):
+		p=self.planned.get(key)if self.planned else None
+		if p is not None and not HOST.booting():self.plan_drop();return
+		if p is None or not self.holds(key):return
+		a,z,b=p
+		if b is not None and Client.on_client_thread()and not(self.hooks.get(key)or{}).get("untitled"):
+			c=Seam.grow(a,Seam.clip(a,b))
+			if c[3]<=Kit.screen()[1]:return c
+		return a
+	def fit_added(self,key):
+		key=str(key);g=self.gump_of(key)if key in self.planned else None
+		if g is not None and Snap.visible(g):self.fit_now(key,g)
 	def fit_now(self,key,g):
-		c=self.slot_was.get(key)
+		c=self.slot_was.get(key)or(self.planned.get(key)if self.planned else None)
 		if key in self.behind:Kit._behind.add(g)
-		if(c is None or not(self.seamless and self.enabled)or self.dirty or self.fresh or g in SNAP.drag or g in SNAP.attached or not Client.on_client_thread()):return
+		if(c is None or not(self.seamless and self.enabled)or key not in self.wins or((self.dirty or self.fresh)and key not in self.planned)or g in SNAP.drag or g in SNAP.attached or not Client.on_client_thread()):return
 		Kit.flush();a=self.hooks.get(key)or{};r=Snap.rect(g)
 		if r is None or a.get("riding")is not None or SNAP.followers(g):return
 		try:b=a.get("state")is not None and a["state"]()=="minimized"
@@ -7298,7 +7683,7 @@ GUARD=Guard()
 LAYOUT=Layout()
 FADE=Fade()
 HOST=Host()
-MODULE_FILES=(("actionbar","Action Bar","ActionBarModule.py"),("hud","Character HUD","CharacterHudModule.py"),("interface","Interface","InterfaceModule.py"),("inventory","Inventory","InventoryModule.py"),("grimoire","Grimoire","GrimoireModule.py"),("worldmap","World Map","WorldMapModule.py"),("ultima","Ultima Tracker","UltimaTrackerModule.py"),("social","Social","SocialModule.py"),("skills","Skills","SkillsModule.py"),("butler","Property Butler","PropertyButlerModule.py"),("meters","Meters","MetersModule.py"),("mongotchi","Mongotchi","MongotchiModule.py"),)
+MODULE_FILES=(("actionbar","Action Bar","ActionBarModule.py"),("hud","Character HUD","CharacterHudModule.py"),("interface","Interface","InterfaceModule.py"),("inventory","Inventory","InventoryModule.py"),("grimoire","Grimoire","GrimoireModule.py"),("worldmap","World Map","WorldMapModule.py"),("ultima","Ultima Tracker","UltimaTrackerModule.py"),("social","Social","SocialModule.py"),("prices","Reagent Prices","ReagentPricesModule.py"),("skills","Skills","SkillsModule.py"),("butler","Property Butler","PropertyButlerModule.py"),("meters","Meters","MetersModule.py"),("mongotchi","Mongotchi","MongotchiModule.py"),)
 RETIRED_KEYS=("autodoors",)
 def module_folders():
 	c=[];a=str(API.ScriptPath or "").rstrip("/\\")
@@ -7316,8 +7701,13 @@ def module_folders():
 	f=([MODULE_DIR]if MODULE_DIR in b else[])+sorted(g for g in b if g!=MODULE_DIR);return[b[h]for h in f]
 def _read_text(path):
 	try:
-		with open(path,"r")as f:return f.read()
-	except Exception:import System;return str(System.IO.File.ReadAllText(path))
+		import System;b=System.IO.File.ReadAllBytes(path);a=System.Text.Encoding.UTF8.GetString(b)
+		if len(a)!=b.Length or "\ufffd"in a:raise ValueError(path)
+	except Exception:
+		try:
+			with open(path,"r")as f:return f.read()
+		except Exception:import System;return str(System.IO.File.ReadAllText(path))
+	return a.replace("\r\n","\n").replace("\r","\n")if "\r"in a else a
 class _Reg(object):
 	ok=False
 	def take(self,key,title,desc,a=None,interval=None,default_on=False,category=None,parts=(),aliases=()):self.key,self.title,self.desc=str(key),str(title),str(desc);self.interval=interval if isinstance(interval,(int,float))else None;self.default_on=bool(default_on);self.category=category;self.parts=tuple(tuple(b)for b in(parts or()));self.aliases=tuple(aliases or());self.ok=True
@@ -7348,103 +7738,134 @@ def read_registration(text):
 	except Exception:return
 	return c if c.ok else None
 def load_modules():
-	h=module_folders()
-	if not h:Kit.say("no %s folder beside this script, so no modules loaded."%MODULE_DIR,Kit.HUE_BAD);return
-	i=dict((B,z)for z,(A,A,B)in enumerate(MODULE_FILES));d,j=[],set()
-	for k in h:
-		for n in sorted(C for C in safe(lambda:os.listdir(k),[])or[]if C.endswith("Module.py")):
-			if n not in j:j.add(n);d.append((k,n))
-	d.sort(key=lambda e:i.get(e[1],len(i)));t=dict((F,(D,E))for D,E,F in MODULE_FILES)
-	for l,a in d:
-		b=os.path.join(l,a);u=os.path.basename(l)==MODULE_DIR;v=len(HOST.slots)
+	i=module_folders()
+	if not i:Kit.say("no %s folder beside this script, so no modules loaded."%MODULE_DIR,Kit.HUE_BAD);return
+	j=dict((B,z)for z,(A,A,B)in enumerate(MODULE_FILES));d,k=[],set()
+	for l in i:
+		for n in sorted(C for C in safe(lambda:os.listdir(l),[])or[]if C.endswith("Module.py")):
+			if n not in k:k.add(n);d.append((l,n))
+	d.sort(key=lambda e:j.get(e[1],len(j)));t=dict((F,(D,E))for D,E,F in MODULE_FILES)
+	for o,a in d:
+		b=os.path.join(o,a);u=os.path.basename(o)==MODULE_DIR;v=len(HOST.slots)
 		if not os.path.isfile(b):continue
 		m=None
 		try:
-			o=_read_text(b);m=read_registration(o)
+			f=_read_text(b);m=read_registration(f)
 			if m is not None and m.key in RETIRED_KEYS:Kit.say("skipped %s (retired; the file can be deleted)."%a,Kit.HUE_INFO);continue
 			if m is not None and m.key in HOST.old_map and HOST.old_map[m.key][0]!=m.key:p,y=HOST.old_map[m.key];q=dict.get(HOST.by_key,p);Kit.say("skipped %s (now part of %s; the file can be deleted)."%(a,q.title if q else p),Kit.HUE_INFO);continue
 			if m is not None and dict.__contains__(HOST.by_key,m.key):API.SysMsg(HOST.TWICE%(APP_NAME,m.title,m.key),Kit.HUE_BAD);continue
-			if m is not None and m.interval is not None:HOST.add_lazy(m.key,m.title,m.desc,b,m.interval,m.default_on,m.category,m.parts,m.aliases);continue
-			exec(compile(o,b,"exec"),globals())
+			if m is not None and m.interval is not None:
+				HOST.add_lazy(m.key,m.title,m.desc,b,m.interval,m.default_on,m.category,m.parts,m.aliases)
+				if len(HOST.texts)<64:HOST.texts[b]=f
+				continue
+			exec(HOST.compiled(f,b),globals())
 		except Exception as c:
 			r=getattr(c,"lineno",None)
-			if r:f="%s (%s line %s)"%(getattr(c,"msg",None)or c,a,r)
-			else:f="%s%s"%(c,_error_where())
-			Kit.say("couldn't load %s (%s)."%(a,f),Kit.HUE_BAD);g=(m.key,m.title)if m is not None else t.get(a)
-			if g is not None and not dict.__contains__(HOST.by_key,g[0]):w,x=g;s=HOST.add(w,x,"",lambda:None,.1);s.api,s.broken=None,f
+			if r:g="%s (%s line %s)"%(getattr(c,"msg",None)or c,a,r)
+			else:g="%s%s"%(c,_error_where())
+			Kit.say("couldn't load %s (%s)."%(a,g),Kit.HUE_BAD);h=(m.key,m.title)if m is not None else t.get(a)
+			if h is not None and not dict.__contains__(HOST.by_key,h[0]):w,x=h;s=HOST.add(w,x,"",lambda:None,.1);s.api,s.broken=None,g
 		finally:
 			for s in HOST.slots[v:]:s.shipped=u
-Kit.data_setup()
-PROFILES=Profiles()
-if not VA_ALONE:
-	HOST.boot_mark("data setup")
-	try:PROFILES.startup()
-	except Exception as _ex:Kit.say("couldn't put the favourite profile on this character (%s%s)."%(Tz.why(_ex),_error_where()),Kit.HUE_BAD)
-	HOST.boot_mark("profiles")
 def _module_sysstats():
-	u=HOST.dock_remove;l=HOST.layout_holds;v=Kit.HUE_INFO;x=Kit.HUE_TEXT;e=Kit.add_label;y=Kit.add_section;m=Kit.put_var;z=Kit.save_pos;f=Kit.set_text;b="sysstats";n="System Stats";H,o,p,g=("SystemStats_pos","SystemStats_min","SystemStats_btn","SystemStats_open");W,I,J=240,240,46;A=.3;K=7981;q=("Ping","FPS","Frame","Memory","In","Out","Packets");s,B,L,M=5,1.,100,"VIRTUE ASSISTANT  (busy, slowest)";C=tuple(("top_name%d"%X,"top_val%d"%X)for X in range(s));h={"startup":False,"tz_quiet":False};a={"shutting":False,"minimized":False,"docked":False,"open":False,"queue":[],"next":0.,"vals":{},"tip":None,"top_next":0.,"top":()};i={"g":None,"c":{},"store":({},{})};d={"g":None,"b":None,"store":({},{})};N=Kit.queuer(a)
-	def D():h.update([(r,HOST.pref_int(r,0)==1)for r in list(h)])
-	def O():HOST.prefs.update([(r,"1"if w else "0")for r,w in h.items()]);HOST.save_prefs()
-	def P(now):
+	z=HOST.dock_remove;g=HOST.layout_holds;c="sysstats";p="System Stats";L,q,s,k=("SystemStats_pos","SystemStats_min","SystemStats_btn","SystemStats_open");A="SystemStats_size";W,N,O,P=300,600,240,46;Q=7981;R,B,S,T,b=.3,2.,.35,1.,46;t=("Ping","FPS","Frame","Memory","In","Out","Packets");u,C,v,U=5,12,1.,"BUSIEST PARTS  (share, ms)";V,X=110,"100.0%, 99999 ms";D=tuple(("top_name%d"%ak,"top_val%d"%ak)for ak in range(C));M=Kit.MARGIN;l=M+30+Kit.GAP;E=len(t)*20+4;i=l+E+Kit.GAP;m=i+26+M;n={"startup":False,"tz_quiet":False};a={"shutting":False,"minimized":False,"docked":False,"open":False,"queue":[],"next":0.,"vals":{},"tip":None,"top_next":0.,"top":(),"size":None,"drawn":None,"resize_at":0.,"preview":False,"rows":u,"name_w":100,"sock":(0.,None),"gc":None,"ping":None};e={"g":None,"c":{},"store":({},{})};d={"g":None,"b":None,"lbl":None,"store":({},{})};Y=Kit.queuer(a)
+	def F():n.update([(h,HOST.pref_int(h,0)==1)for h in list(n)])
+	def Z():HOST.prefs.update([(h,"1"if r else "0")for h,r in n.items()]);HOST.save_prefs()
+	def x(w,h):n=max(u,min(C,(int(h)-m+10)//20));return max(W,min(N,int(w))),m+n*20
+	def aa():
+		try:w,h=[int(r)for r in Kit.get_var(A,"").split(",")[:2]]
+		except ValueError:return x(W,0)
+		return x(w,h)
+	def H(now):
 		b=[]
-		for a in HOST.slots:
-			if not a.running:continue
-			if a.parts:c=a.part_load;b.extend((Host.busy_share(c[X[0]],now),c[X[0]][2],X[1])for X in a.parts if X[0]in a.parts_running and X[0]in c)
-			else:b.append((Host.busy_share(a.load,now),a.load[2],a.title))
-		b.sort(key=lambda r:-r[0]);return tuple((Kit.fit(aa,L),"%.1f%%, %d ms"%(Y/10.,min(Z,99999)))for Y,Z,aa in b[:s])
-	def Q():
+		for s in HOST.slots:
+			if not s.running:continue
+			if s.parts:c=s.part_load;b.extend((Host.busy_share(c[h[0]],now),c[h[0]][2],h[1])for h in s.parts if h[0]in s.parts_running and h[0]in c)
+			else:b.append((Host.busy_share(s.load,now),s.load[2],s.title))
+		b.sort(key=lambda r:-r[0]);d=a["name_w"];return tuple((Kit.fit(am,d),"%.1f%%, %d ms"%(ak/10.,min(al,99999)))for ak,al,am in b[:a["rows"]])
+	def ab(now):
+		c,b=a["sock"]
+		if b is None or not 0<=now-c<=T:b=Tz.get(Tz.get(None,"Socket",Tz.T("ClassicUO.Network.AsyncNetClient")),"Statistics");a["sock"]=(now,b)
+		return b
+	def ac(now):
 		v={}
-		with Kit.quiet:b=int(Tz.get(None,"CurrentRefreshRate",Tz.T("ClassicUO.CUOEnviroment")));v["FPS"]=str(b);v["Frame"]="%.1f ms"%(1000./b)if b>0 else "-"
-		with Kit.quiet:c=Tz.get(None,"Socket",Tz.T("ClassicUO.Network.AsyncNetClient"));a=Tz.get(c,"Statistics");d=str(Typing._get(a,"CurrentPingSource",default="")or "");v["Ping"]="off"if d.endswith("Disabled")else "%d ms"%int(Tz.get(a,"Ping"));v["In"]="%.1f KB/s"%(int(Tz.get(a,"DeltaBytesReceived"))/1024.);v["Out"]="%.1f KB/s"%(int(Tz.get(a,"DeltaBytesSent"))/1024.);v["Packets"]="%d in, %d out"%(int(Tz.get(a,"TotalPacketsReceived")),int(Tz.get(a,"TotalPacketsSent")))
-		with Kit.quiet:import System;v["Memory"]="%d MB"%(int(System.GC.GetTotalMemory(False))//(1024*1024))
+		with Kit.quiet:c=int(Tz.get(None,"CurrentRefreshRate",Tz.T("ClassicUO.CUOEnviroment")));v["FPS"]=str(c);v["Frame"]="%.1f ms"%(1000./c)if c>0 else "-"
+		with Kit.quiet:b=ab(now);d=str(Typing._get(b,"CurrentPingSource",default="")or "");v["Ping"]="off"if d.endswith("Disabled")else "%d ms"%int(Tz.get(b,"Ping"));v["In"]="%.1f KB/s"%(int(Tz.get(b,"DeltaBytesReceived"))/1024.);v["Out"]="%.1f KB/s"%(int(Tz.get(b,"DeltaBytesSent"))/1024.);v["Packets"]="%d in, %d out"%(int(Tz.get(b,"TotalPacketsReceived")),int(Tz.get(b,"TotalPacketsSent")))
+		with Kit.quiet:
+			if a["gc"]is None:import System;a["gc"]=System.GC.GetTotalMemory
+			v["Memory"]="%d MB"%(int(a["gc"](False))//(1024*1024))
 		return v
-	def R():x,y=Kit.load_pos(p,(8,200),(46,46));b=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,46,46,corners=False);a["tip"]=None;c=Kit.art_button(g,b,"stats",Kit.ART_CIRCLE,12,12,None,"System stats",on_click=N("toggle"));Kit.show_window(g,x,y,46,46,None,False,None,lambda:z(p,g),d,{"g":g,"b":c,"store":b})
+	def I(text):
+		c=d["lbl"]
+		if c is None or text==a["ping"]:return
+		a["ping"]=text
+		if Kit.text_w(text)>b-6:text=Kit.fit(text.replace(" ms",""),b-6)
+		Kit.set_text(c,text);c.SetPos(max(3,(b-Kit.text_w(text))//2),(b-16)//2)
+	def ad():x,y=Kit.load_pos(s,(8,200),(b,b));c=({},{});g=G.CreateGump(True,True);Kit.add_window_frame(g,b,b,corners=False);a["tip"]=a["ping"]=None;e=Kit.inert(Kit.add_label(g,"",3,(b-16)//2,Kit.HUE_TEXT));f=Kit.catcher(g,0,0,b,b,Y("toggle"),"Click to open or close System Stats; drag to move",movable=True);Kit.show_window(g,x,y,b,b,None,False,None,lambda:Kit.save_pos(s,g),d,{"g":g,"b":f,"lbl":e,"store":c});I(a["vals"].get("Ping","-"))
 	def j():
-		b=Kit.MARGIN;f=b+30+Kit.GAP;j=len(q)*20-12;d=f+j+Kit.GAP;k=d+26+s*20+b;g,o,h=c.begin(W,k)
+		q=g(c);a["resize_at"],a["preview"]=0.,False
+		if a["size"]is None:a["size"]=aa()
+		d,h=a["size"];n=(h-m)//20;k=max(V,Kit.text_w(X)+4);a["rows"],a["name_w"]=n,d-2*M-k-28;o=None if q else(W,m+u*20,ae);b,w,j=f.begin(d,h,resize=o)
 		if not a["minimized"]:
-			c.frame(g,settings=False);y(g,b,f,W-2*b,j);a["top_next"]=0.
-			for i,l in enumerate(q):e(g,l+":",b+10,f+6+i*20,v);h[l]=e(g,"",b+90,f+6+i*20,x)
-			y(g,b,d,W-2*b,k-d-b,Kit.fit(M,W-2*b-16))
-			for i,(m,n)in enumerate(C):h[m]=e(g,"",b+10,d+26+i*20,v);h[n]=e(g,"",b+116,d+26+i*20,x)
-		c.end(g);E()
-	c=Kit.Window(b,n,a,i,j,H,default=(70,200),mini=(I,J),icon=K)
-	def E():
-		v=a["vals"];c=i["c"]
-		if a["minimized"]:
-			b=c.get("status")
-			if b is not None:f(b,"%s: %s, %s FPS"%(n,v.get("Ping","-"),v.get("FPS","-")))
-			return
-		for d in q:
-			b=c.get(d)
-			if b is not None:f(b,v.get(d,"-"))
-		e=a["top"]
-		for g,(h,k)in enumerate(C):
-			if h not in c:continue
-			j=e[g]if g<len(e)else("","");f(c[h],j[0]);f(c[k],j[1])
-	def S(w):D();return(("START-UP",(("check","startup","Show start-up times","After loading, list in the journal how long each step took"),)),("SHARD RULES",(("check","tz_quiet","Don't warn me about TazUO settings","No journal line when a TazUO setting breaks this shard's rules"),)))
-	k=Kit.Page(h,S,O)
-	def t():a["open"]=True;j();c.dock()
-	def F():a["open"]=False;a["top"]=();u(b);c.close();m(g,"0")
-	def T():
-		D();a.update({"shutting":False,"docked":False,"queue":[],"next":0.,"top_next":0.,"minimized":Kit.load_min(o)or HOST.dock_wanted(b),"open":Kit.get_var(g,"0")=="1"});R()
-		if a["open"]or l(b):t()
-	def U():
-		c=time.time()
+			f.frame(b,mouse=o is None);Kit.add_section(b,M,l,d-2*M,E);a["top_next"]=time.time()+v;a["top"]=H(time.time())
+			for e,p in enumerate(t):Kit.add_label(b,p+":",M+10,l+6+e*20,Kit.HUE_INFO);j[p]=Kit.add_label(b,"",M+90,l+6+e*20,Kit.HUE_TEXT)
+			Kit.add_section(b,M,i,d-2*M,h-i-M,Kit.fit(U,d-2*M-16))
+			for e,(r,s)in enumerate(D[:n]):j[r]=Kit.add_label(b,"",M+10,i+26+e*20,Kit.HUE_INFO);j[s]=Kit.add_label(b,"",d-M-10-k,i+26+e*20,Kit.HUE_TEXT)
+		f.end(b);a["drawn"]=None if a["minimized"]else(d,h);J()
+	f=Kit.Window(c,p,a,e,j,L,default=(70,200),mini=(O,P),icon=Q)
+	def J():
+		v=a["vals"];c=e["c"]
+		if "status"in c:Kit.set_text(c["status"],"%s: %s, %s FPS"%(p,v.get("Ping","-"),v.get("FPS","-")));return
+		for b in t:
+			d=c.get(b)
+			if d is not None:Kit.set_text(d,v.get(b,"-"))
+		f=a["top"]
+		for i,(g,j)in enumerate(D):
+			if g not in c:break
+			h=f[i]if i<len(f)else("","");Kit.set_text(c[g],h[0]);Kit.set_text(c[j],h[1])
+	def ae(*b):
+		a["resize_at"]=time.time();g=e["g"]
+		if a["preview"]or a["minimized"]or not Kit.is_open(g):return
+		if(int(g.GetWidth()),int(g.GetHeight()))!=a["drawn"]:a["preview"]=True;g.SetAlpha(.55)
+	def af():
+		b=e["g"];a["preview"]=False
+		if not Kit.is_open(b)or a["minimized"]:return
+		if g(c):b.SetAlpha(0);return
+		f,d=int(b.GetWidth()),int(b.GetHeight());h=a["drawn"]or(0,0)
+		if abs(f-h[0])<=2 and abs(d-h[1])<=2:b.SetAlpha(0);return
+		i=Kit.screen()[1];k=x(f,min(d,i)if i>0 else d);a["size"]=k;Kit.put_var(A,"%d,%d"%k);j()
+	def ag(w):F();return(("START-UP",(("check","startup","Show start-up times","After loading, list in the journal how long each step took"),)),("SHARD RULES",(("check","tz_quiet","Don't warn me about TazUO settings","No journal line when a TazUO setting breaks this shard's rules"),)))
+	o=Kit.Page(n,ag,Z)
+	def y():a["open"]=True;a["next"]=0.;j();f.dock()
+	def K():a["open"]=False;a["top"]=();z(c);f.close();Kit.put_var(k,"0")
+	def ah():
+		F();a.update({"shutting":False,"docked":False,"queue":[],"next":0.,"top_next":0.,"size":None,"resize_at":0.,"preview":False,"sock":(0.,None),"minimized":Kit.load_min(q)or HOST.dock_wanted(c),"open":Kit.get_var(k,"0")=="1"});ad()
+		if a["open"]or g(c):y()
+	def ai():
+		b=time.time()
 		while a["queue"]:
-			e=a["queue"].pop(0)
-			if e=="toggle":
-				if a["open"]and not l(b):F()
-				elif not a["open"]:m(g,"1");a["minimized"]=a["docked"]=False;t()
-			elif e=="redraw":
+			h=a["queue"].pop(0)
+			if h=="toggle":
+				if Kit.just_dragged(d["g"]):continue
+				if a["open"]and not g(c):K()
+				elif not a["open"]:Kit.put_var(k,"1");a["minimized"]=a["docked"]=False;y()
+			elif h=="redraw":
 				if a["open"]:j()
-			else:Kit.win_action(e,a,b,n,j,o)
-		if a["open"]and Kit.was_clicked(i["store"],"close"):F()
-		if not 0<=a["next"]-c<=A:
-			if not a["open"]and l(b):t()
-			a["next"]=c+A;v=a["vals"]=Q();f="Ping %s, %s FPS, memory %s; click to open or close the window"%(v.get("Ping","-"),v.get("FPS","-"),v.get("Memory","-"))
-			if f!=a["tip"]and d["b"]is not None:a["tip"]=f;Kit.with_tip(d["b"],f)
-			if a["open"]and not a["minimized"]and not 0<=a["top_next"]-c<=B:a["top_next"]=c+B;a["top"]=P(c)
-			if a["open"]and i["g"]is not None and not(a["minimized"]and a["docked"]):E()
-	def V():a["shutting"]=True;u(b);Kit.save_min(o,a["minimized"]);m(g,"1"if a["open"]else "0");c.close();e,d["g"]=d["g"],None;z(p,e);Kit.dispose(e)
-	return{"start":T,"tick":U,"stop":V,"client_tick":True,"config_height":k.height,"build_config":k.build,"poll_config":k.poll,"config_closed":k.closed}
-if not VA_ALONE:load_modules();HOST.boot_mark("module files");HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen").shipped=True;HOST.run()
+			else:Kit.win_action(h,a,c,p,j,q)
+		if a["open"]and Kit.was_clicked(e["store"],"close"):K()
+		if a["resize_at"]and b-a["resize_at"]>=S and not(SNAP.drag or SNAP.pressed()is True):a["resize_at"]=0.;af()
+		if not a["open"]and g(c):y()
+		if not 0<=a["next"]-b<=B:
+			a["next"]=b+(R if a["open"]else B);f=a["vals"]=ac(b);I(f.get("Ping","-"));i="Ping %s, %s FPS, memory %s; click to open or close, drag to move"%(f.get("Ping","-"),f.get("FPS","-"),f.get("Memory","-"))
+			if i!=a["tip"]and d["b"]is not None:a["tip"]=i;Kit.with_tip(d["b"],i)
+			if a["open"]and not a["minimized"]and not 0<=a["top_next"]-b<=v:a["top_next"]=b+v;a["top"]=H(b)
+			if a["open"]and e["g"]is not None and not(a["minimized"]and a["docked"]):J()
+	def aj():a["shutting"]=True;z(c);Kit.save_min(q,a["minimized"]);Kit.put_var(k,"1"if a["open"]else "0");f.close();b,d["g"]=d["g"],None;d["b"]=d["lbl"]=None;Kit.save_pos(s,b);Kit.dispose(b)
+	return{"start":ah,"tick":ai,"stop":aj,"client_tick":True,"config_height":o.height,"build_config":o.build,"poll_config":o.poll,"config_closed":o.closed}
+if not VA_ALONE:
+	if not HOST.self_run(globals()):
+		Kit.data_setup();PROFILES=Profiles();HOST.boot_mark("data setup")
+		try:PROFILES.startup()
+		except Exception as _ex:Kit.say("couldn't put the favourite profile on this character (%s%s)."%(Tz.why(_ex),_error_where()),Kit.HUE_BAD)
+		HOST.boot_mark("profiles");load_modules();HOST.boot_mark("module files");HOST.add("sysstats","System Stats","Ping, FPS and memory button",_module_sysstats,.1,category="On screen").shipped=True;HOST.run()
+else:Kit.data_setup();PROFILES=Profiles()

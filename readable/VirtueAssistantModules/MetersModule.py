@@ -1798,7 +1798,9 @@ def _module_meters():
 
         The window is drawn from scratch each time. Minimised it is a status bar. Otherwise: title
         bar, toolbar (previous, next, display list, segment list), a body (summary line, bar rows,
-        optional graph, footer buttons). In a zone its size is exactly its slot; free it is its own
+        optional graph, footer buttons). The display button shows its caption in full when there is room,
+        a shortened one when there is a little, and no caption (the name goes in the tooltip) when not.
+        In a zone its size is exactly its slot; free it is its own
         size (corner drag) or the default, with as many rows as the height holds. The old gump is
         disposed last, and any open side windows are moved onto the new one.
         """
@@ -1877,12 +1879,11 @@ def _module_meters():
                            "Show next display", on_click=queue(("step", w["id"], 1)))
             mt, _, _, color, mobrows = METRIC[mid]
             mx = bx + 68
-            # A narrow zone: the display button loses its caption (the summary line names the display)
-            # before the segment button could run past the window's edge.
-            pick_cap = mt if mx + 35 + Kit.text_w(mt) + 10 + 35 + 40 <= M + IW - 6 else None
+            room = M + IW - 6 - mx - 35 - 10 - 35 - 40
+            pick_cap = mt if room >= Kit.text_w(mt) else (Kit.fit(mt, room) if room >= 40 else None)
             Kit.art_button(g, store, "pick", Kit.ART_PAGE, mx, yb + 4, pick_cap, "Pick what this window shows"
-                           + ("" if pick_cap else " (now: %s)" % mt), on_click=queue(("picker", w["id"])))
-            sx = mx + (35 + Kit.text_w(mt) if pick_cap else 30) + 10
+                           + ("" if pick_cap == mt else " (now: %s)" % mt), on_click=queue(("picker", w["id"])))
+            sx = mx + (35 + Kit.text_w(pick_cap) if pick_cap else 30) + 10
             c["seg_room"], c["iw"] = max(20, M + IW - 6 - sx - 35), IW
             seg_cap = Kit.fit(seg_caption(w), c["seg_room"])
             c["seg"] = Kit.art_button(g, store, "segs", Kit.ART_PAGE, sx, yb + 4, seg_cap,
@@ -2755,6 +2756,8 @@ def _module_meters():
 
         The damage hook itself is built later on the script thread (a job): reflection and
         Expression.Compile take tens of milliseconds, which is too long for the client thread.
+        While the host is booting, each window takes the size its zone gives it and one the bar will
+        fold in starts docked.
         """
         st.update({"shutting": False, "active": True, "queue": [], "last_tick": time.time(),
                    "next_ui": 0.0, "next_friends": 0.0, "next_scan": 0.0, "me": None,
@@ -2774,6 +2777,7 @@ def _module_meters():
             w["shutting"] = w["docked"] = False
             if HOST.dock_wanted(dock_key(w)):
                 w["minimized"] = True
+                w["docked"] = HOST.dock_soon(dock_key(w))
         # Script events: items used, buffs added and the fallback damage amounts.
         Kit.hook_once(st, "hooked", ("ObjectUsed", on_used), ("OnBuffAdded", on_buff),
                       ("OnEntityDamage", on_damage_amount), ("OnPlayerDeath", on_died))
@@ -2782,6 +2786,9 @@ def _module_meters():
             del jobs[:]
             jobs.append(hook_damage)
         for w in wins:
+            slot = HOST.layout_slot(dock_key(w)) if HOST.booting() and w["fit"] is None else None
+            if slot and slot[0] and slot[1]:
+                w["fit"] = (int(slot[0]), int(slot[1]))
             build_window(w)
             dock_win(w)
 

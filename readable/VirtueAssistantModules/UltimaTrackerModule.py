@@ -637,11 +637,11 @@ def _module_ultima():
 
         def ttf(text, size, color, **kw):
             """Create a smooth-font (TTF) label that lets clicks through."""
-            return Kit.inert(API.Gumps.CreateGumpTTFLabel(text, size, color, **kw))
+            return Kit.inert(G.CreateGumpTTFLabel(text, size, color, **kw))
 
         def box(opacity, color):
             """Create a colour box that lets clicks through."""
-            return Kit.inert(API.Gumps.CreateGumpColorBox(opacity, color))
+            return Kit.inert(G.CreateGumpColorBox(opacity, color))
 
         def set_box_alpha(b, a):
             """Set the transparency of a box, ignoring controls that cannot take it."""
@@ -756,18 +756,18 @@ def _module_ultima():
 
         def catcher(x, y, w, h, fn, tip=None):
             """Create an invisible click target over (x, y, w, h) that calls fn, with an optional tooltip."""
-            c = API.Gumps.CreateGumpColorBox(0.01, "#000000")
+            c = G.CreateGumpColorBox(0.01, "#000000")
             c.SetRect(x, y, w, h)
             on_click(c, fn)
             return Kit.with_tip(c, tip)
 
         def pic(graphic, x=0, y=0, hue=0):
             """Create a gump picture that lets clicks through, hued by Kit.look_hue."""
-            return Kit.inert(API.Gumps.CreateGumpPic(graphic, x, y, Kit.look_hue(graphic, hue)))
+            return Kit.inert(G.CreateGumpPic(graphic, x, y, Kit.look_hue(graphic, hue)))
 
         def tiled(graphic, w, h, hue=0):
             """Create a tiled gump picture of w by h that lets clicks through."""
-            return Kit.inert(API.Gumps.CreateTiledGumpPic(graphic, max(0, w), max(0, h), Kit.look_hue(graphic, hue)))
+            return Kit.inert(G.CreateTiledGumpPic(graphic, max(0, w), max(0, h), Kit.look_hue(graphic, hue)))
 
         def init_native_art():
             """Work out which pieces of the client's art can be used and measure the UO font.
@@ -783,7 +783,7 @@ def _module_ultima():
             # A sample string that is measured once; its width divided by its length gives the average
             # character width used to trim and align names without asking the client again.
             sample = "Name the 75% PSN 12y Foes (3)"
-            lb = API.Gumps.CreateGumpLabel(sample, HUE_TEXT)
+            lb = G.CreateGumpLabel(sample, HUE_TEXT)
             w, h = int(lb.GetWidth()), int(lb.GetHeight())
             lb.Dispose()
             if w > 0 and h > 0:
@@ -863,7 +863,7 @@ def _module_ultima():
                         del LABELS[k]
                 LABELS_SWEEP[0] = max(LABELS_CAP, 2 * len(LABELS))
             text = fit_text(text, maxWidth)
-            lb = Kit.inert(API.Gumps.CreateGumpLabel(text, hue_of(color)))
+            lb = Kit.inert(G.CreateGumpLabel(text, hue_of(color)))
             LABELS[id(lb)] = [lb, aligned, maxWidth, size, 0, 0, text]
             return lb
 
@@ -1434,7 +1434,7 @@ def _module_ultima():
                     pw = int(round(34 * s))
                     sx = BORDER + int(round(54 * s))
                     sw = max(40, w - BORDER - 8 - pw - sx)
-                    self.slider = API.Gumps.CreateSlider(sw, 0, 100, opacity, sx, y + max(2, (rh - 10) // 2), True)
+                    self.slider = G.CreateSlider(sw, 0, 100, opacity, sx, y + max(2, (rh - 10) // 2), True)
                     self._add(self.slider)
                     self.pct_lbl = self._add(label("%d%%" % opacity, fs, TEXT_COLOR, aligned="right", maxWidth=pw))
                     place(self.pct_lbl, w - BORDER - 4 - pw, text_y(y, rh, fs))
@@ -1569,7 +1569,7 @@ def _module_ultima():
                         self._add(catcher(x, y, sz, sz, fn, tip))
                         return
                 if kind == "close" and "char_w" in NATIVE:
-                    lb = Kit.inert(self._add(API.Gumps.CreateGumpLabel("x", HUE_TEXT)))
+                    lb = Kit.inert(self._add(G.CreateGumpLabel("x", HUE_TEXT)))
                     lb.SetPos(x + max(0, (sz - int(NATIVE["char_w"])) // 2), y + (sz - NATIVE["font_h"]) // 2)
                     self._add(catcher(x, y, sz, sz, fn, tip))
                     return
@@ -1895,10 +1895,8 @@ def _module_ultima():
             """Return True when a "pop:<serial>" window key still has a pop-out in the list."""
             return k.startswith("pop:") and int(k[4:]) in POPS
 
-        # The save file is written from background threads too: the lock, counters and flags below guard
-        # and describe the file state.
-        import threading
-        FILE_LOCK = threading.Lock()
+        import _thread
+        FILE_LOCK = _thread.allocate_lock()
         SAVE_SEQ = [0]
         SAVE_ERR = [None]
         DATA_READY = [False]
@@ -1909,13 +1907,13 @@ def _module_ultima():
         GONE = [0.0]
 
         def in_background(fn):
-            """Run fn on a short-lived thread of its own, for file work with the module off.
+            """Run fn on a thread of its own, for file work while the module is off.
 
-            No thread_tick runs then. fn must not call the API (only the tick threads may).
+            No thread_tick runs then. The thread comes from _thread.start_new_thread, which avoids loading the
+            threading module at start-up. fn must not call the API (only the tick threads may), and an error in
+            it ends only that thread.
             """
-            t = threading.Thread(target=fn)
-            t.daemon = True
-            t.start()
+            _thread.start_new_thread(fn, ())
 
         def read_save_lines():
             """Read the save file (or a stranded temporary copy, or the predecessor's old file).
@@ -2289,7 +2287,11 @@ def _module_ultima():
                 report_save_error()
 
         def build_window():
-            """Build the three tracker windows, the Combat window, the panel and the docks, and say it is on."""
+            """Build the three tracker windows, the Combat window, the panel and the docks, and reopen Sightings.
+
+            Part hook step, client thread. The Combat window opens when it was left open, and the Sightings
+            window when its saved open flag is set.
+            """
             windows = {c: CategoryGump(c) for c in CATS}
             combat = CombatWindow()
             views.update({"windows": windows, "combat": combat})
@@ -2298,8 +2300,6 @@ def _module_ultima():
             views["panel"] = ControlPanel(windows, combat)
             register_docks(windows, combat)
             st["foe_ver"] += 1
-            n = len(FOES)
-            say("on, %s." % Kit.count(n, "saved foe"), Kit.HUE_GOOD)
             M.update({"last_layout": layout_signature(), "tick": 0,
                       "next_scan": 0.0, "next_combat": 0.0, "next_glow": 0.0})
             if Kit.get_var(SIGHT_OPEN_KEY) == "1":
@@ -3276,7 +3276,10 @@ def _module_ultima():
                 self.create()
 
             def create(self):
-                """Build the window at its place (kept on screen), its title strip and its content, and register it."""
+                """Build the window at its place (kept on screen), its title strip and its content, and register it.
+
+                The gump is brought to the front through Kit.add_front.
+                """
                 s = settings["scale"] / 100.0
                 w = sc(POP_W)
                 self.row_h = max(10, sc(16))
@@ -3288,7 +3291,7 @@ def _module_ultima():
                     h += self.row_h + 2 * self.pad
                 self.size = (w, h)
                 self.x, self.y = Kit.clamp(self.x, self.y, w, h)
-                g = API.Gumps.CreateModernGump(self.x, self.y, w, h, False, w, h)
+                g = G.CreateModernGump(self.x, self.y, w, h, False, w, h)
                 self.gump = g
                 # The gump itself is clear; Chrome draws the frame and its opacity.
                 g.SetAlpha(0.0)
@@ -3296,7 +3299,7 @@ def _module_ultima():
                 self.bar = self.info = self.hit = self.glow = None
                 self.low, self.spell_ctrls, self.bar_key, self.last = False, [], None, None
                 self.layout_chrome()
-                G.AddGump(g)
+                Kit.add_front(g)
                 Kit.on_moved(g, self.moved)
                 # The place is unknown to the anchors until their next look.
                 ANCHORS.placed(self.anchor_key)
@@ -3607,7 +3610,7 @@ def _module_ultima():
                 self.shown, self.low, self.ctrls = True, False, []
                 self.last = self.raw = self.name_raw = None
                 sa, rw = view.sa, geo["rw"]
-                bg = API.Gumps.CreateGumpColorBox(0.35, "#000000")
+                bg = G.CreateGumpColorBox(0.35, "#000000")
                 bg.SetRect(0, y, rw, geo["row_h"] - 2)
                 # RowClick reads the player at click time, because the row is reused.
                 on_click(bg, RowClick(self, lambda s, n: make_bar_click(s, n, view)))
@@ -3801,7 +3804,8 @@ def _module_ultima():
                 """Build (or rebuild) the gump from LAYOUT and the zone slot, draw the Kit chrome and place it.
 
                 Called on first show, after minimize toggles, scale changes and every fit that
-                needs a new window.
+                needs a new window. A window that is folded into the Action Bar and minimized is added hidden,
+                so it never flashes on screen.
                 """
                 x, y, w, h, locked, mini, _ = LAYOUT[self.cat]
                 self.minimized = mini
@@ -3836,7 +3840,7 @@ def _module_ultima():
                 if not held:
                     x, y = Kit.clamp(x, y, w, gh)
                     LAYOUT[self.cat][0], LAYOUT[self.cat][1] = x, y
-                self.gump = API.Gumps.CreateModernGump(x, y, w, gh, resizable, lo_w, min_h, self._on_resized)
+                self.gump = G.CreateModernGump(x, y, w, gh, resizable, lo_w, min_h, self._on_resized)
                 # Hide the built-in frame; Chrome draws the shared background and border.
                 self.gump.SetAlpha(0.0)
                 self.chrome = Chrome(self.gump, kit=True, key=self.dock_key)
@@ -3845,14 +3849,12 @@ def _module_ultima():
                 self.count_n = 0
                 self.locked = locked
                 self.layout_chrome()
-                G.AddGump(self.gump)
+                Kit.add_front(self.gump, bool(self.docked and mini))
                 # Saved when you let go of the title bar.
                 Kit.on_moved(self.gump, self.moved)
                 # Built here, not dragged here: the anchors measure it on the next poll.
                 ANCHORS.placed(self.cat)
                 self._apply_lock()
-                if self.docked and mini:
-                    Kit.set(self.gump, "IsVisible", False)
 
             def layout_fit(self, w, h, mode):
                 """The layout's fit hook: give this window the size of its zone slot, or free it again (None).
@@ -3969,7 +3971,7 @@ def _module_ultima():
                 self._forget_body()
                 self.geo = geo = self.geometry()
                 x, y, w, h = geo["sa"]
-                self.sa = API.Gumps.CreateGumpScrollArea(x, y, w, h)
+                self.sa = G.CreateGumpScrollArea(x, y, w, h)
                 self.gump.Add(self.sa)
 
             def make_empty(self):
@@ -4711,7 +4713,10 @@ def _module_ultima():
                 return Kit.is_open(self.gump)
 
             def show(self):
-                """Open the window at its saved place, size and lock, then draw the bars."""
+                """Open the window at its saved place, size and lock, then draw the bars.
+
+                It goes to the front of the other windows when opened.
+                """
                 if self.is_open():
                     return
                 L = LAYOUT["combat"]
@@ -4722,13 +4727,13 @@ def _module_ultima():
                     L[0], L[1] = Kit.clamp(L[0], L[1], self.width(), self.height(0))
                 # The smallest width the client lets it be made at; a narrow zone can lower it.
                 self.made_min = min(CB_MIN_WIDTH, self.width())
-                g = API.Gumps.CreateModernGump(L[0], L[1], self.width(), self.height(0), True,
+                g = G.CreateModernGump(L[0], L[1], self.width(), self.height(0), True,
                                                self.made_min, 16, self._on_resized)
                 # Chrome draws the shared look, so the built-in frame is hidden.
                 g.SetAlpha(0.0)
                 self.gump = g
                 self._forget()
-                G.AddGump(g)
+                Kit.add_front(g)
                 # Saved when you let go of the title bar.
                 Kit.on_moved(g, self.moved)
                 ANCHORS.placed("combat")
@@ -5122,7 +5127,7 @@ def _module_ultima():
                 f = tiled(Kit.FIELD_TILE, W, 24)
                 f.SetPos(X, y0 + 21)
                 g.Add(f)
-                self.input = API.Gumps.CreateGumpTextBox("", W - 4, 22, False, 16)
+                self.input = G.CreateGumpTextBox("", W - 4, 22, False, 16)
                 self.input.SetPos(X + 2, y0 + 22)
                 self.input.SetPlaceholder("Player name")
                 Kit.with_tip(self.input, "Player name for the buttons below")
@@ -5323,7 +5328,7 @@ def _module_ultima():
                     # The old rows' label notes go with their scroll area.
                     LABELS.pop(id(lb), None)
                 self.list_lbls = lbls = []
-                self.list_sa = API.Gumps.CreateGumpScrollArea(self.x0, self.list_top, self.w, self.list_h)
+                self.list_sa = G.CreateGumpScrollArea(self.x0, self.list_top, self.w, self.list_h)
                 self.g.Add(self.list_sa)
                 self.foe_rows = []
                 names = sorted(FOES.items(), key=lambda kv: kv[1].lower())
@@ -5565,14 +5570,15 @@ def _module_ultima():
                     self.build()
 
             def show(self):
-                """Open the window, minimized if it was last left that way or the Action Bar wants
-                it, and remember
-                it as open.
+                """Open the window, minimized if left so or if the Action Bar wants it; remember it as open.
+
+                It starts docked when the host says the Action Bar is about to fold it in, so it is not drawn
+                loose first. In a layout zone the saved minimized state is ignored.
                 """
                 if self.is_open():
                     return
                 held = HOST.layout_holds(self.KEY)
-                self.st.update(shutting=False, docked=False, minimized=not held and bool(
+                self.st.update(shutting=False, docked=HOST.dock_soon(self.KEY), minimized=not held and bool(
                     Kit.load_min(SIGHT_MIN_KEY) or HOST.dock_wanted(self.KEY)))
                 self.build()
                 Kit.put_var(SIGHT_OPEN_KEY, "1")
@@ -6023,8 +6029,7 @@ def _module_ultima():
                         mark = Kit.noto_mark(Kit.noto_name(HOST.mobile(a["serial"]))) if Kit.cblind and a["serial"] \
                             else ""
                         Kit.add_label(g, Kit.fit((mark + " " if mark else "") + nm(a["name"], a["serial"] or 0),
-                                                 bx - M - 30),
-                                      M + 10, ry + 3, Kit.HUE_BAD)
+                                                 bx - M - 30), M + 10, ry + 3, Kit.HUE_BAD)
                         Kit.catcher(g, M + 6, ry, bx - M - 14, 22, queue_click(self.make_follow(i)),
                                     tip_for("Alt+click: auto-follow (again to stop)", a["name"]))
                         c["add%d" % i] = Kit.art_button(g, store, "add%d" % i, Kit.ART_OK, bx, ry, "On Foe list" if on
@@ -7389,8 +7394,7 @@ def _module_ultima():
             where = Kit.veil("place", where_text(ev, True) if src == "lookout" else "%d,%d" % (ev["x"], ev["y"]))
             Kit.set_text(r["info"], Kit.fit("%s, %s ago (%s)" % (where, Kit.ago(now - ev["t"], Kit.AGO_SHORT), src),
                                             win["c"]["info_w"]))
-            tip = "%s (%s), seen %s at %s%s. %s" % (
-                nm(ev["name"], ev["serial"]), NOTO_WORD.get(noto, noto),
+            tip = "%s (%s), seen %s at %s%s. %s" % (nm(ev["name"], ev["serial"]), NOTO_WORD.get(noto, noto),
                 "by the lookout" if src == "lookout" else "here", Kit.veil("xy", "%d,%d" % (ev["x"], ev["y"])),
                 "" if ev["facet"] == st["facet"] else " in " + Kit.facet_name(ev["facet"]), ROW_TIP)
             if tip != r["tip"]:

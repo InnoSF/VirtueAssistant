@@ -314,6 +314,9 @@ def _module_skills():
         STATS_EVERY = 1.0
         # Seconds between looks at the total cap when nothing else asked.
         CAP_EVERY = 5.0
+        ROW_SPARE = 2
+        ROW_CHUNK = 8
+        ROW_WAIT = 2.0
 
         def list_moved():
             """A skill's values changed: redraw its texts, and re-sort the list only when it can follow values.
@@ -1624,11 +1627,15 @@ def _module_skills():
                 for j in range(Z["log_n"]):
                     c["log"].append(zlabel("log%d" % j, x0 + 12, y0 + 26 + 20 * j, c["log_w"], Kit.HUE_TEXT, 20, 1))
 
+        def back_by():
+            """Return where the player gets a hidden Skills window back from, as text for tooltips and journal lines."""
+            return ("the client's or the Action Bar's Skills button" if settings["replace"]
+                    else "the Action Bar's Skills button")
+
         def close_tip():
             """The Close button's tooltip: with x_hides on, it only hides the window."""
             if settings["x_hides"]:
-                return "Hide %s (%s brings it back)" % (
-                TITLE, "the client's Skills button" if settings["replace"] else "the Action Bar's Skills button")
+                return "Hide %s (%s brings it back)" % (TITLE, back_by())
             return Kit.CLOSE_TIP % TITLE
 
         def build_window():
@@ -1770,7 +1777,8 @@ def _module_skills():
 
             Each header label has a catcher over it that sorts by that column (again to reverse); the lock
             column has its own arrow. A column the player turned off has no header. The scroll area is
-            rows times row_h() high.
+            rows times row_h() high. Sets the row cap: while the host is still booting only the visible rows
+            plus ROW_SPARE are made, so the window appears quickly; otherwise every row is allowed.
             """
             m = metrics()
             Kit.add_section(g, x0, y0, IW, h)
@@ -1797,7 +1805,12 @@ def _module_skills():
             c["arrow"] = Kit.add_pic(g, LOCK_ART[1], sx, y0 + 8, mouse=False)
             c["sa"] = G.CreateGumpScrollArea(sx, y0 + 26, m["sa_w"], rows * row_h())
             g.Add(c["sa"])
+            # During boot, build only the rows that show (grow_rows adds the rest a chunk at a time).
+            boot = safe(HOST.booting, False)
             c["sa_xy"] = (sx, y0 + 26)
+            c["more"] = False
+            c["cap"] = rows + ROW_SPARE if boot else LIMITS["rows"][1] + 999
+            c["grow_at"] = time.time() + ROW_WAIT
 
         def move_row(r, y):
             """Moves every part of row r to y, scaled when the window is drawn smaller."""
@@ -1834,7 +1847,8 @@ def _module_skills():
 
             The list is worked out again only when something it depends on changed (see touch) or, with the
             gaining filter, once a second. Rows are made when first needed and then reused: moved, shown or
-            hidden, never destroyed. Row y positions are the row's index times row_h().
+            hidden, never destroyed. Row y positions are the row's index times row_h(). Rows past the cap are
+            left unmade and flagged in c["more"] for grow_rows, except the selected skill, which is always made.
             """
             c = win["c"]
             if "sa_xy" not in c:
@@ -1866,6 +1880,7 @@ def _module_skills():
             rowmap = win["rowmap"]
             rows, want, nth = [], set(), {}
             rh = row_h()
+            c["more"] = False
             for n, d in enumerate(desc):
                 ry = n * rh
                 k = (d[0], d[1])
@@ -1874,6 +1889,10 @@ def _module_skills():
                 nth[k] = c_k = nth.get(k, -1) + 1
                 k = (d[0], d[1], c_k)
                 r = rowmap.get(k)
+                # Past the cap: leave the row for a later pass; only the selected skill is made regardless.
+                if r is None and n >= c["cap"] and (d[0] == "g" or d[1] != st["sel"]):
+                    c["more"] = True
+                    continue
                 if r is None:
                     r = build_group_row(tgt, ry, d, m) if d[0] == "g" else build_skill_row(tgt, ry, d[1], m)
                     rowmap[k] = r
@@ -1893,6 +1912,20 @@ def _module_skills():
             if fitst["k"] != 1.0 and made != len(rowmap) + (0 if "selbox" in c else 1) + (0 if c.get("empty") else 1):
                 Kit.scale_window(win["g"], fitst["k"])
             place_selbox()
+
+        def grow_rows(now):
+            """Make the next ROW_CHUNK rows of a list that still has unmade rows, then redraw and refresh them.
+
+            Called from the tick. While booting it waits until c["grow_at"] (ROW_WAIT seconds after the list was
+            built) so the first rows are not slowed; once the host has settled it goes at once.
+            """
+            c = win["c"]
+            if not c.get("more") or (now < c["grow_at"] and safe(HOST.booting, False)):
+                return
+            c["cap"] += ROW_CHUNK
+            st["desc"] = None
+            rebuild_rows(now)
+            refresh_rows(now)
 
         def put(r, ctl, x, dy):
             """Adds control ctl to row r's parts (with its x and y offset) and returns it."""
@@ -1949,10 +1982,8 @@ def _module_skills():
             tip = "Click: pick it (details below); double-click: its floating button" \
                 if SK["click"][i] else "Click: pick it (details below)"
             r["cat"] = put(r, Kit.catcher(tgt, m["name_x"] - 2, ry, m["lock_x"] - m["name_x"] - 2,
-                                       row_h() - 1, row_click(i), tip), m["name_x"] - 2, 0)
-            # The tooltip without the training tip, and the one now set (with it).
-            r["tip0"] = r["cat_tip"] = tip
-            r["use"] = None
+                                       row_h() - 1, row_click(i)), m["name_x"] - 2, 0)
+            r["tip0"], r["cat_tip"], r["use"] = tip, None, None
             if SK["click"][i]:
                 b = G.CreateGumpButton("", Kit.HUE_TEXT, GEM[0], GEM[1], GEM[2])
                 b.SetPos(4, ry + 6)
@@ -2006,7 +2037,8 @@ def _module_skills():
             """Sets the texts of the shown rows.
 
             A row whose values, gain and name colour are what it already shows is passed over (most rows,
-            most seconds), so a quiet window costs very little.
+            most seconds), so a quiet window costs very little. The row tooltip is the same line as when the
+            row was built plus the training tip when tips are on; it is set only when it changed.
             """
             cur = SK["cur"]
             n = SK["n"]
@@ -2046,13 +2078,11 @@ def _module_skills():
                     if r.get("tip") != tip:
                         r["tip"] = tip
                         Kit.with_tip(r["lock"], tip)
-                # The training tip joins the row tooltip.
-                if tips_on:
-                    tp = tip_for(i)
-                    ct = r["tip0"] if tp is None else "%s\n%s %s: %s" % (r["tip0"], SK["names"][i], tp[0], tp[1])
-                    if ct != r["cat_tip"]:
-                        r["cat_tip"] = ct
-                        Kit.with_tip(r["cat"], ct)
+                tp = tip_for(i) if tips_on else None
+                ct = r["tip0"] if tp is None else "%s\n%s %s: %s" % (r["tip0"], SK["names"][i], tp[0], tp[1])
+                if ct != r["cat_tip"]:
+                    r["cat_tip"] = ct
+                    Kit.with_tip(r["cat"], ct)
                 if r["bar"] is not None:
                     fw = int(bar_w * min(1.0, float(val) / cap)) if cap > 0 else 0
                     setp(r["bar"], "Width", max(1, fw))
@@ -3010,9 +3040,11 @@ def _module_skills():
         def _start():
             """Part hook: reset the run state, load the saved data, read skills and stats and draw the window.
 
-            Registers the window with the dock so the layout can place it in its zone.
+            Registers the window with the dock so the layout can place it in its zone. The window starts
+            docked (in the Action Bar tray) when the host says it is about to be folded in, so it is not drawn
+            once loose and then folded.
             """
-            st.update({"shutting": False, "docked": False, "hidden": False, "queue": [],
+            st.update({"shutting": False, "docked": HOST.dock_soon(KEY), "hidden": False, "queue": [],
                        "rebuild": None, "desc": None, "m": None, "ready": False,
                        "asked": 0.0, "swallow_until": 0.0, "warned_cap": False, "hl": {},
                        "log": [], "gains": {}, "started": time.time(), "ref_at": 0.0,
@@ -3047,7 +3079,8 @@ def _module_skills():
             """Part hook, client tick: run queued actions, read skills and stats, redraw what changed.
 
             Runs on the client thread, so it never waits. A hidden, docked or minimized window reads the
-            skills only every HIDDEN_READ seconds; an open window reads on every tick.
+            skills only every HIDDEN_READ seconds; an open window reads on every tick. Also grows the list a
+            chunk of rows at a time while rows are still unmade.
             """
             now = time.time()
             # The X either hides the window (the Action Bar button brings it back) or turns the module off.
@@ -3056,9 +3089,7 @@ def _module_skills():
                     st["hidden"] = True
                     save_pos()
                     drop_window()
-                    say("hidden; %s brings it back."
-                        % ("the client's or the Action Bar's Skills button" if settings["replace"] else
-                        "the Action Bar's Skills button (or Skills off and on in the Modules tab)"), Kit.HUE_INFO)
+                    say("hidden; %s brings it back." % back_by(), Kit.HUE_INFO)
                 else:
                     Kit.dispose(win["g"])
                     return
@@ -3066,6 +3097,8 @@ def _module_skills():
             if st["resize_at"] and now - st["resize_at"] >= RESIZE_SETTLE and not safe(lambda: SNAP.pressed(), False):
                 st["resize_at"] = 0.0
                 apply_resize()
+            if win["g"] is not None and win["c"].get("more") and not st["rebuild"]:
+                grow_rows(now)
             if st["grp_dirty_at"] and now - st["grp_dirty_at"] >= GRP_SETTLE:
                 st["grp_dirty_at"] = 0.0
                 groups_save()
@@ -5637,8 +5670,6 @@ def _module_skills():
             # The layout may scale the window to its zone; bags_min is the smallest it may be.
             wnd.dock(fit=True, min=bags_min)
             resultw.dock(fit=True, min=res_min)
-            n = sum(1 for r in rules if r["auto"] and r["bag"])
-            say("on, %s, %d watching." % (Kit.count(len(rules), "rule"), n), Kit.HUE_GOOD)
 
         def _tick():
             """Part hook, client tick: run queued actions, redraw, read the Auto boxes and run the jobs.

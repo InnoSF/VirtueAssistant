@@ -1530,8 +1530,8 @@ def _module_butler():
     def _start():
         """Module start, on the client tick: reset the state, load the settings, draw and dock the windows.
 
-        Registers the two alert kinds (revealed, red or Foe), opens a journal reader, hooks the mobile
-        created event once and tells the user the state in the journal.
+        Registers the two alert kinds (revealed, red or Foe), opens a journal reader and hooks the mobile
+        created event once.
         """
         st.update({"shutting": False, "docked": False, "queue": [], "phase": "idle",
                    "house": None, "house_wait": None, "confirm": None, "visitors": [], "near": 0,
@@ -1554,9 +1554,6 @@ def _module_butler():
         wnd.dock(fit=True, exact=True, verify=True, drawn_at=drawn_at)
         logs.update({"shutting": False, "queue": []})
         logw.dock(fit=True, min=log_min)
-        say("on; sweep %s, visitors within %d tiles%s."
-            % ("on" if st["sweep"] else "off", settings["range"], ", red or Foe alarm on" if settings["eject_foes"]
-               else ""), Kit.HUE_GOOD)
 
     def _tick():
         """Module tick, on the client tick: act on queued actions, save, read the journal and run the work.
