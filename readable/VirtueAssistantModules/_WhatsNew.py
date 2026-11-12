@@ -1,4 +1,7 @@
-WHATS_NEW = ("2.7.0.37: \"Show start-up times\" adds a Splits line: where the start-up time goes.",
+WHATS_NEW = ("2.7.0.38: Reagent Prices keeps each vendor by name, with its own grid row and arrows; best stops "
+    "count every vendor of a shop and leave out gone ones.", "A price history file, vendor columns in the price log, "
+    "and a window you resize by its corner, its text scaling with it.",
+    "2.7.0.37: \"Show start-up times\" adds a Splits line: where the start-up time goes.",
     "New: Reagent Prices (The world) keeps the reagent prices of every buy list you open, shows the cheapest shops and "
     "writes them into a book you pick.", "Character HUD frames show at once and keep their pictures between Plays.",
     "2.7.0.36: \"Show start-up times\" now measures until every window has settled.",

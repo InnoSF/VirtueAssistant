@@ -17,9 +17,10 @@ def _module_prices():
     """Build the Reagent Prices module and return its callback table for the mother script.
 
     Holds all of the module's state in the closure: settings (saved), st (run state), data (shops,
-    vendors, reads and price history), win (window parts) and bridge (cached client reflection).
-    The returned dict has start, tick, stop, the settings page callbacks (config_height,
-    build_config, poll_config, config_closed) and thread_tick / thread_wanted for the script thread.
+    vendors, reads, price history and the per-vendor observations), win (window parts) and bridge
+    (cached client reflection). The returned dict has start, tick, stop, the settings page callbacks
+    (config_height, build_config, poll_config, config_closed) and thread_tick / thread_wanted for the
+    script thread.
     """
     KEY = "prices"
     TITLE = "Reagent Prices"
@@ -86,17 +87,29 @@ def _module_prices():
     KEEPS = tuple("keep_" + k for k in ORDER)
     STRS = ("hk",)
     STOPS = 3
-    STOPS_H = 30 + (STOPS + 1) * ROW_H + 6
     LIMITS.update((k, (0, KEEP_MAX)) for k in KEEPS)
-    GRID_MAX = 30
-    GRID_NAME = "Upper W Britain"
-    GRID_CELL = "99^ (999)"
+    GRID_MAX = 60
     SHOP_ROW = 28
-    GRID_TITLE = "ALL SHOPS  (price, stock; ^ up, v down)"
-    VIEW_TIP = "Switch between the cheapest list and every shop"
+    GONE_GAP = 3600
+    GONE_REACH = 12
+    HERE = " (here)"
+    SIZE_KEY = "ReagentPrices_size"
+    FONT = 14
+    SC_MIN = 60
+    SC_MAX = 150
+    SETTLE = 0.3
+    TTF_CAP = 4000
+    HD = 27
+    PAD = 9
+    DD_MIN = 80
+    GRID_TITLE = "ALL VENDORS  (price, stock; ^ up, v down)"
+    VIEW_TIP = "Switch between the cheapest list and every vendor"
     LOG_FILE = "ReagentPrices_log.csv"
     LOG_MAX = 5000
-    LOG_HEAD = "time,shop,reagent,price,stock"
+    LOG_HEAD = "time,shop,reagent,price,stock,vendor,serial"
+    HIST_FILE = "ReagentPrices_history.txt"
+    HIST_ALL = 10000
+    HIST_VENDOR = 400
     BUY_TIP = ("Open the nearest reagent vendor's buy list (within %d tiles). Alt+click: auto-follow (again to stop)"
                % BUY_RANGE)
     settings = {"say": True, "dist": 20, "book_open": True, "book_head": True, "old": 7, "hk": "", "skip_old": False,
@@ -107,11 +120,14 @@ def _module_prices():
           "check_at": 0.0, "aged_at": 0.0, "save_at": 0.0, "ask": None, "warned": set(), "load_fails": 0,
           "book": None, "book_serial": 0, "bookver": 0, "foreign": None, "ok_books": set(), "picking": None,
           "jobs": [], "have": None, "here": None, "hooked": None, "menu": False, "followed": None, "hk_at": 0.0,
-          "pv": None, "logq": [], "log_at": 0.0, "log_fails": 0}
+          "pv": None, "logq": [], "log_at": 0.0, "log_fails": 0, "histq": [], "drops": [], "hist_at": 0.0,
+          "hist_fails": 0, "obs_ok": False, "memo": {}, "miss": {}, "size": None, "resize_at": 0.0, "drawn": None,
+          "sc": 1.0, "f": FONT, "hd": HD}
     win = {"g": None, "c": {}, "store": ({}, {})}
-    data = {"shops": {}, "vendors": {}, "reads": {}, "hist": {}, "dirty": {}, "marks": 0}
+    data = {"shops": {}, "vendors": {}, "reads": {}, "hist": {}, "dirty": {}, "marks": 0, "obs": {}}
     bridge = {}
     widths = {}
+    tw = {}
     page_c = {"tb": {}, "typed": {}, "n": 0}
     # Kit.basics gives the cleanup list, the queue of named actions and the journal say function.
     cleanup, queue, say = Kit.basics(st, TITLE)
@@ -395,9 +411,11 @@ def _module_prices():
         """Parse the data file text into {shops, vendors, reads, hist} (the model).
 
         Each line is pipe separated and starts with a kind letter: P shop (id, name, order, map x y),
-        V vendor (serial in hex, shop id, map x y), R read (serial, time, CODE:price:stock list) and
-        H history (shop id, reagent code, list of time:price:stock). Anything after the known fields is
-        kept as tail so a longer line survives a round trip. Lines that do not parse are skipped.
+        V vendor (serial in hex, shop id, map x y, name, first read time, last read time, time it was
+        found gone), R read (serial, time, CODE:price:stock list) and H history (shop id, reagent code,
+        list of time:price:stock). Anything after the known fields is kept as tail so a longer line
+        survives a round trip. Lines that do not parse are skipped. A vendor's first and last times are
+        raised to its read's time when they are older.
         """
         out = {"shops": {}, "vendors": {}, "reads": {}, "hist": {}}
         for line in (text or "").split("\n"):
@@ -406,7 +424,9 @@ def _module_prices():
                 if f[0] == "P":
                     out["shops"][int(f[1])] = {"name": f[2], "order": int(f[3]), "spot": spot_of(f[4:7]), "tail": f[7:]}
                 elif f[0] == "V":
-                    out["vendors"][int(f[1], 16)] = {"shop": int(f[2]), "spot": spot_of(f[3:6]), "tail": f[6:]}
+                    out["vendors"][int(f[1], 16)] = {"shop": int(f[2]), "spot": spot_of(f[3:6]),
+                                                     "name": clean(f[6]) if len(f) > 6 else "", "first": num(f, 7),
+                                                     "last": num(f, 8), "gone": num(f, 9), "tail": f[10:]}
                 elif f[0] == "R":
                     p = {}
                     for part in f[3].split(","):
@@ -419,10 +439,22 @@ def _module_prices():
                     out["hist"][(int(f[1]), f[2])] = {"rows": [r for r in rows if len(r) == 3], "tail": f[4:]}
             except (IndexError, ValueError):
                 continue
+        for serial, v in out["vendors"].items():
+            rd = out["reads"].get(serial)
+            if rd is not None:
+                v["first"] = v["first"] or rd["t"]
+                v["last"] = max(v["last"], rd["t"])
         return out
 
+    def num(f, i):
+        """Whole number at index i of a split line, or 0 when it is missing or not a number."""
+        try:
+            return int(f[i])
+        except (IndexError, ValueError):
+            return 0
+
     def line_of(key):
-        """Build the data file line for a key such as P|3, V|1A2B or H|3|SS from the model.
+        """Build the data file line for a key such as P|3, V|1A2B, R|1A2B or H|3|SS from the model.
 
         Returns None when the entry no longer exists (the caller then drops the line).
         """
@@ -433,7 +465,8 @@ def _module_prices():
             body = e and [e["name"], str(e["order"])] + spot_text(e["spot"])
         elif kind == "V":
             e = data["vendors"].get(int(f[1], 16))
-            body = e and [str(e["shop"])] + spot_text(e["spot"])
+            body = e and [str(e["shop"])] + spot_text(e["spot"]) + [e.get("name", "")] + [
+                str(e.get(k, 0)) for k in ("first", "last", "gone")]
         elif kind == "R":
             e = data["reads"].get(int(f[1], 16))
             body = e and [str(e["t"]), ",".join("%s:%d:%d" % (k, v[0], v[1]) for k, v in sorted(e["p"].items()))]
@@ -522,36 +555,106 @@ def _module_prices():
         v = data["vendors"].get(serial)
         return v["shop"] if v is not None and v["shop"] in data["shops"] else None
 
-    def shop_prices(now=None):
-        """Best price per shop: {shop id: {code: (price, stock, read time)}}.
+    def vkey(serial):
+        """Sort key that puts a vendor in its shop's order, then by when it was first read (never-read last)."""
+        v = data["vendors"][serial]
+        sh = data["shops"].get(v["shop"])
+        return (sh["order"] if sh else 0, not v.get("first"), v.get("first", 0), serial)
 
-        When two vendors belong to one shop the lower price of each reagent counts. With now given and
-        Skip old prices on, reads older than Old after days are left out.
+    def roster(live=False):
+        """Group vendor serials by shop id, each group in vkey order.
+
+        With live set, vendors marked gone are left out. Vendors of a removed shop are never listed.
+        """
+        out = {}
+        for serial, v in data["vendors"].items():
+            if v["shop"] in data["shops"] and not (live and v.get("gone")):
+                out.setdefault(v["shop"], []).append(serial)
+        for mates in out.values():
+            mates.sort(key=vkey)
+        return out
+
+    def labels():
+        """Name every vendor: {serial: (full label, short label)}.
+
+        A named vendor is its name (a repeat of a name in the same shop gets a count) and the full label
+        adds the shop. A vendor with no name yet is "vendor", or "vendor N" by its place in the shop when
+        the shop has several.
+        """
+        out = {}
+        for sid, mates in roster().items():
+            seen = {}
+            shop = shop_name(sid)
+            for i, serial in enumerate(mates):
+                name = data["vendors"][serial].get("name", "")
+                low = name.lower()
+                seen[low] = seen.get(low, 0) + 1
+                if name:
+                    short = name if seen[low] == 1 else "%s %d" % (name, seen[low])
+                    full = short + ", " + shop
+                elif len(mates) == 1:
+                    short, full = "vendor", shop
+                else:
+                    short = "vendor %d" % (i + 1)
+                    full = shop + " " + short
+                out[serial] = (full, short)
+        return out
+
+    def tag(serial, tags=None):
+        """Full label of a vendor, or just the shop name when the vendor has no label. Pass tags to reuse a
+        labels() result.
+        """
+        return (tags or labels()).get(serial, (shop_name(shop_of(serial)), ""))[0]
+
+    def vendor_prices(now=None):
+        """Latest read per vendor: {serial: {code: (price, stock, read time)}}.
+
+        Vendors that are gone or whose shop was removed are left out. With now given and Skip old prices
+        on, reads older than Old after days are left out as well.
         """
         out = {}
         lim = settings["old"] * DAY if now is not None and settings["skip_old"] else None
         for serial, rd in data["reads"].items():
-            sid = shop_of(serial)
-            if sid is None or lim is not None and now - rd["t"] > lim:
+            v = data["vendors"].get(serial)
+            if v is None or v["shop"] not in data["shops"] or v.get("gone") or lim is not None and now - rd["t"] > lim:
                 continue
-            sp = out.setdefault(sid, {})
-            for code, (price, stock) in rd["p"].items():
-                if code not in sp or price < sp[code][0]:
-                    sp[code] = (price, stock, rd["t"])
+            out[serial] = dict((code, (price, stock, rd["t"])) for code, (price, stock) in rd["p"].items())
         return out
 
-    def cheapest(prices):
-        """Cheapest shop per reagent: {code: (shop id, (price, stock, time))}.
+    def shop_prices(now=None, vp=None):
+        """Best price per shop: {shop id: {code: (price, stock, read time)}}.
 
-        A tie goes to the shop that comes first in the shop order.
+        When two vendors belong to one shop the lower price of each reagent counts, and a tie adds the
+        stocks together. vp is a vendor_prices result to reuse; with it left out, now decides whether
+        old reads are skipped as in vendor_prices.
         """
-        shops = data["shops"]
+        out = {}
+        for serial, p in (vendor_prices(now) if vp is None else vp).items():
+            sp = out.setdefault(data["vendors"][serial]["shop"], {})
+            for code, row in p.items():
+                old = sp.get(code)
+                if old is None or row[0] < old[0]:
+                    sp[code] = row
+                elif row[0] == old[0]:
+                    sp[code] = (row[0], old[1] + row[1], max(old[2], row[2]))
+        return out
+
+    def cheapest(prices, rank=None):
+        """Cheapest source per reagent: {code: (key, (price, stock, time))}.
+
+        The keys of prices can be shop ids or vendor serials. A tie goes to the lower rank; rank defaults
+        to the shop order and is given as a function of the key (vkey when the keys are vendors).
+        """
+        rank = rank or (lambda sid: data["shops"][sid]["order"])
         best = {}
-        for sid, sp in prices.items():
+        ranks = {}
+        for key, sp in prices.items():
+            r = rank(key)
             for code, row in sp.items():
                 old = best.get(code)
-                if old is None or (row[0], shops[sid]["order"]) < (old[1][0], shops[old[0]]["order"]):
-                    best[code] = (sid, row)
+                if old is None or (row[0], r) < (old[1][0], ranks[code]):
+                    best[code] = (key, row)
+                    ranks[code] = r
         return best
 
     def commas(n):
@@ -572,25 +675,40 @@ def _module_prices():
         rd = data["reads"].get(serial)
         return shop_of(serial), (rd["p"] if rd else {})
 
-    def ranking(prices):
+    def ranking(prices, vp=None):
         """Rank the shops by what the shopping list costs there.
 
         How many to buy is the keep count minus what the backpack holds (from the pack count); with no
         list it is 1 of each reagent. Returns (want, whether a list is set, reagents still needed, the
         best STOPS shops). A ranked entry is (missing + short count, total cost, shop order, shop id,
-        missing codes, short codes); fewer gaps come first, then the lower cost. Cost counts only the
-        stock a shop really has.
+        missing codes, short codes); fewer gaps come first, then the lower cost. Cost buys from a shop's
+        vendors cheapest first and counts only the stock they really have. vp is the vendor_prices result
+        that gives the individual vendors' offers; without it each shop's best price is used alone.
         """
         keep = dict((k, settings["keep_" + k]) for k in ORDER if settings["keep_" + k] > 0)
         have = st["have"] or {}
         want = dict((k, max(0, n - have.get(k, 0))) for k, n in keep.items()) if keep else dict((k, 1) for k in ORDER)
         need = [k for k in ORDER if want.get(k)]
         ranked = []
+        offers = {}
+        for serial, p in (vp or {}).items():
+            for code, row in p.items():
+                offers.setdefault((data["vendors"][serial]["shop"], code), []).append(row[:2])
         for sid, sp in (prices.items() if need else ()):
-            outs = [k for k in need if k not in sp]
-            shorts = [k for k in need if k in sp and sp[k][1] < want[k]]
-            total = sum(sp[k][0] * min(want[k], sp[k][1]) for k in need if k in sp)
-            ranked.append((len(outs) + len(shorts), total, data["shops"][sid]["order"], sid, outs, shorts))
+            got = {}
+            for k in [k for k in need if k in sp]:
+                left = want[k]
+                cost = 0
+                rows = sorted(offers.get((sid, k)) or [sp[k][:2]])
+                for price, stock in rows:
+                    n = min(left, stock)
+                    cost += n * price
+                    left -= n
+                got[k] = (cost, sum(r[1] for r in rows))
+            outs = [k for k in need if k not in got]
+            shorts = [k for k in need if k in got and got[k][1] < want[k]]
+            ranked.append((len(outs) + len(shorts), sum(x[0] for x in got.values()), data["shops"][sid]["order"], sid,
+                           outs, shorts))
         ranked.sort()
         return want, bool(keep), need, ranked[:STOPS]
 
@@ -640,188 +758,418 @@ def _module_prices():
     def shape():
         """A tuple of the facts that decide the window's layout.
 
-        When it differs from the one stored at build time the window is rebuilt; otherwise only the
-        texts are refreshed.
+        When it differs from the one stored at build time the window is rebuilt; otherwise only the texts
+        are refreshed. Index 4 says whether a shopping list is set and index 7 is the column widths.
         """
         a = st["ask"]
         return (a and a["mode"], bool(a and a["new"]), last_read() is not None, st["foreign"] is not None,
-                any(settings[k] for k in KEEPS), settings["grid"], len(data["shops"]))
+                any(settings[k] for k in KEEPS), settings["grid"], len(data["shops"]), cols(st["f"]))
 
-    def extra_h():
-        """Height of the optional parts: the Overwrite bar, the "Which shop?" question (taller while a new
-        name is typed) and the best stops block (not in the grid view).
+    def sc(v, s=None):
+        """Scale a pixel size by the window scale (or by s when given), rounded."""
+        return int(round(v * (st["sc"] if s is None else s)))
+
+    def fsize(s):
+        """Pixel size of the body font at scale s, through the client's text size setting (at least 6)."""
+        return max(6, Kit.tsize(int(round(FONT * s))))
+
+    def pitch(s):
+        """Row height at scale s: never less than 1.5 times the font size."""
+        return max(sc(ROW_H, s), int(round(fsize(s) * 1.5)))
+
+    def head_h(s):
+        """Height of a section's title strip at scale s: never less than 1.9 times the font size."""
+        return max(sc(HD, s), int(round(fsize(s) * 1.9)))
+
+    def ty(bh):
+        """Top offset that centres a line of text in a band of height bh."""
+        return max(0, (bh - int(round(st["f"] * 1.3))) // 2)
+
+    def ttf_w(text, size):
+        """Pixel width of text in the smooth font at a size, cached.
+
+        The cache is cleared when it holds TTF_CAP entries. A width the client cannot give is estimated
+        from the length of the text and is not cached.
+        """
+        k = (text, size)
+        w = tw.get(k)
+        if w is None:
+            if len(tw) >= TTF_CAP:
+                tw.clear()
+            w = 0
+            if text:
+                l = G.CreateGumpTTFLabel(text, size, "#FFFFFF")
+                w = int(l.GetWidth() or 0)
+                Kit.dispose(l)
+                if not w:
+                    return int(0.6 * size * len(text))
+            tw[k] = w
+        return w
+
+    def tfit(text, room):
+        """Cut text with two dots so that it fits in room pixels (found by bisection)."""
+        f = st["f"]
+        text = str(text or "")
+        if ttf_w(text, f) <= room:
+            return text
+        lo, hi = 0, len(text) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if ttf_w(text[:mid].rstrip() + "..", f) <= room:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo].rstrip() + ".."
+
+    def lab(g, text, x, y, hue=None):
+        """Add one non-clickable smooth-font label to gump g at x, y and return it. The hue defaults to the
+        normal text hue.
+        """
+        l = Kit.inert(G.CreateGumpTTFLabel(text, st["f"], "#FFFFFF"))
+        l.Hue = Kit.HUE_TEXT if hue is None else hue
+        l.SetPos(x, y)
+        g.Add(l)
+        return l
+
+    def section(g, x, y, w, h, title=None):
+        """Add a section frame to gump g, with its title (cut to fit) in the title hue when one is given."""
+        Kit.add_section(g, x, y, w, h)
+        if title:
+            lab(g, tfit(title, w - 2 * sc(8)), x + sc(8), y + ty(st["hd"]), Kit.HUE_TITLE)
+
+    def grid_rows():
+        """The grid's rows as (shop id, vendor serial) pairs, in shop order.
+
+        A shop with no live vendor gets one row with a serial of None.
+        """
+        live = roster(True)
+        return [x for sid in shop_ids() for x in [(sid, s) for s in live.get(sid, [])] or [(sid, None)]]
+
+    def cell(serial, code, row):
+        """Grid cell text: price, the trend mark and the stock in brackets."""
+        return "%d%s (%d)" % (row[0], trend(serial, code, row), row[1])
+
+    def cols(f):
+        """Natural column widths in pixels at font size f, measured from the longest text of each column.
+
+        In the cheapest view this is (reagent name, price, buy count, age, shop-less message). In the grid
+        view it is (shop, vendor, widest cell, row count).
+        """
+        if not settings["grid"]:
+            return (max(ttf_w(Kit.REAGENTS[k][0], f) for k in ORDER), ttf_w("9999", f),
+                    ttf_w("buy 9999", f) if any(settings[k] for k in KEEPS) else 0, ttf_w("59 min ago", f),
+                    max(ttf_w("No price yet", f), ttf_w("Only old prices", f)))
+        rows = grid_rows()
+        tags = labels()
+        vp = vendor_prices()
+        first = set()
+        shops = ["Shop"]
+        names = ["Vendor"]
+        cells = ["-"] + list(ORDER)
+        for sid, serial in rows[:GRID_MAX]:
+            if sid not in first:
+                first.add(sid)
+                shops.append(shop_name(sid))
+            if serial is None:
+                continue
+            names.append(tags[serial][1] + (HERE if serial == st["here"] else ""))
+            cells += [cell(serial, k, r) for k, r in vp.get(serial, {}).items()]
+        return (max(ttf_w(x, f) for x in shops), max(ttf_w(x, f) for x in names), max(ttf_w(x, f) for x in cells),
+                len(rows))
+
+    def ctrl_w(f):
+        """Width the controls below the list need at font size f: the Change line, the "Which shop?"
+        question or the Overwrite bar, whichever is widest.
         """
         a = st["ask"]
-        over = Kit.GAP + OVER_H if st["foreign"] is not None else 0
-        return (over + ((Kit.GAP + ASK_H + (NAME_H if a["new"] else 0)) if a else 0) +
-                (0 if settings["grid"] else Kit.GAP + STOPS_H))
+        need = 0
+        if a is None and last_read() is not None:
+            need = 16 + 35 + Kit.text_w("Change") + 6 + 60
+        if a is not None:
+            need = 24 + ttf_w("Which shop?", f) + DD_MIN + 90 + Kit.text_w("OK") + Kit.text_w(
+                "Skip" if a["mode"] == "read" else "Cancel")
+        if st["foreign"] is not None:
+            need = max(need, 26 + 35 + Kit.text_w("Overwrite") + 60)
+        return need
 
-    def fixed_h(n=1):
-        """Height of the window without its resizable rows; n is the number of grid rows."""
-        body = ROW_H + n * ROW_H if settings["grid"] else len(ORDER) * ROW_H
-        return 2 * Kit.MARGIN + 30 + Kit.GAP + 30 + body + 6 + Kit.GAP + LINE_H + extra_h()
+    def need_w(s):
+        """Smallest window width at scale s: the margins plus the widest of the base width, the columns
+        and the controls.
+        """
+        f = fsize(s)
+        m = cols(f)
+        p = sc(8, s)
+        if settings["grid"]:
+            inner = sc(16, s) + m[0] + m[1] + 2 * p + len(ORDER) * (m[2] + p)
+        else:
+            inner = (sc(34, s) + m[0] + m[1] + 2 * sc(10, s) + m[4] + 2 * p + m[3] +
+                     (m[2] + sc(10, s) if any(settings[k] for k in KEEPS) else 0))
+        return 2 * Kit.MARGIN + max(sc(W - 2 * Kit.MARGIN, s), inner, ctrl_w(f))
 
-    def grid_cols():
-        """Pixel widths of the shop name column and of a price cell in the grid."""
-        return Kit.text_w(GRID_NAME) + 8, Kit.text_w(GRID_CELL) + 8
+    def bands():
+        """Number of row bands: the grid's header and rows (capped at GRID_MAX), or one per reagent."""
+        return 1 + max(1, min(GRID_MAX, len(grid_rows()))) if settings["grid"] else len(ORDER)
+
+    def parts(s):
+        """Heights of the optional parts at scale s: (status line, shop question, name box, best stops,
+        Overwrite bar). Parts that are not shown are 0.
+        """
+        a = st["ask"]
+        ah = max(ASK_H, sc(ASK_H, s)) if a else 0
+        nh = max(NAME_H, sc(NAME_H, s)) if a and a["new"] else 0
+        oh = max(OVER_H, sc(OVER_H, s)) if st["foreign"] is not None else 0
+        sh = 0 if settings["grid"] else head_h(s) + (STOPS + 1) * pitch(s) + sc(PAD, s)
+        return max(LINE_H, sc(LINE_H, s)), ah, nh, sh, oh
+
+    def tail_h(p):
+        """Total height of the parts below the list in p (from parts), each with its gap."""
+        return sum(Kit.GAP + x for x in (p[0], p[1] + p[2], p[3], p[4]) if x)
+
+    def need_h(s, k):
+        """Window height needed at scale s for k row bands."""
+        return 2 * Kit.MARGIN + 30 + Kit.GAP + head_h(s) + k * pitch(s) + sc(PAD, s) + tail_h(parts(s))
 
     def min_size():
-        """Smallest (width, height) the window can have in the current view."""
-        if not settings["grid"]:
-            return W, fixed_h()
-        nw, cw = grid_cols()
-        return max(W, 2 * Kit.MARGIN + 16 + nw + len(ORDER) * cw), fixed_h(1)
+        """Smallest (width, height) the window can have in the current view: the view at the smallest scale."""
+        s = SC_MIN / 100.0
+        return need_w(s), need_h(s, bands())
 
-    def trend(sid, code, row):
+    def pick(w, h, k, mw):
+        """Choose the largest scale in percent steps that fits a window of w by h with k row bands.
+
+        The scale is limited by the height first, then by the width given the natural width mw at the
+        smallest scale. Returns the scale as a fraction.
+        """
+        lo, hi = SC_MIN, SC_MAX
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if need_h(mid / 100.0, k) <= h:
+                lo = mid
+            else:
+                hi = mid - 1
+        M2 = 2 * Kit.MARGIN
+        room = w - M2
+        s = max(SC_MIN, min(lo, int(SC_MIN * room / max(1, mw - M2)))) / 100.0
+        nw = need_w(s)
+        while nw > w and s > SC_MIN / 100.0:
+            s = max(SC_MIN, min(int(round(s * 100)) - 1, int(100.0 * s * room / (nw - M2)))) / 100.0
+            nw = need_w(s)
+        return s
+
+    def own_size(mw, mh, k):
+        """Window size to build at: the saved size, kept on screen and not below mw by mh.
+
+        With no saved size it is the natural size at scale 1.0.
+        """
+        z = st["size"]
+        W0, H0 = Kit.screen()
+        if z is None:
+            return max(mw, need_w(1.0)), max(mh, need_h(1.0, k))
+        return max(mw, min(z[0], W0) if W0 > 0 else z[0]), max(mh, min(z[1], H0) if H0 > 0 else z[1])
+
+    def load_size():
+        """Saved window size (width, height) from the size variable, or None when it is missing or invalid."""
+        try:
+            w, h = [int(p) for p in Kit.get_var(SIZE_KEY, "").split(",")[:2]]
+        except ValueError:
+            return None
+        return (w, h) if w > 0 and h > 0 else None
+
+    def on_resized(*args):
+        """Resize callback: note when the window was last resized, so the rebuild waits until the drag
+        settles.
+        """
+        st["resize_at"] = time.time()
+
+    def apply_resize():
+        """Rebuild the window at its new size once a resize has settled. The size is saved for the next
+        start. Ignored while minimised, while a layout holds the window or when the size is unchanged.
+        """
+        g = win["g"]
+        if not Kit.is_open(g) or st["minimized"] or HOST.layout_holds(KEY):
+            return
+        gw, gh = int(g.GetWidth()), int(g.GetHeight())
+        d = st["drawn"] or (0, 0)
+        if abs(gw - d[0]) <= 2 and abs(gh - d[1]) <= 2:
+            return
+        st["size"] = (gw, gh)
+        Kit.put_var(SIZE_KEY, "%d,%d" % (gw, gh))
+        build_window()
+
+    def trend(serial, code, row):
         """Price trend of one grid cell: "^" if it rose, "v" if it fell, empty if equal or no earlier read.
 
-        Compares with the newest history row older than this read.
+        Compares with this vendor's newest observation older than this read (the observations come from
+        the history file).
         """
-        h = data["hist"].get((sid, code))
-        prev = [r for r in h["rows"] if r[0] < row[2]] if h else []
-        if not prev:
-            return ""
-        return "^" if row[0] > prev[-1][1] else "v" if row[0] < prev[-1][1] else ""
+        i = ORDER.index(code)
+        for t, p, _ in reversed(data["obs"].get(serial, ())):
+            if t < row[2]:
+                return "" if not p[i] else "^" if row[0] > p[i] else "v" if row[0] < p[i] else ""
+        return ""
 
-    def draw_ask(g, store, c, M, y, IW, a):
+    def draw_ask(g, store, c, M, y, IW, a, ah, nh):
         """Draw the "Which shop?" section: the drop-down of shops (plus New shop), the name box when New
         shop is picked and the Skip / Cancel and OK buttons.
 
         The first button reads Skip for a pending read (the read is dropped) and Cancel when only
         changing the shop of the last vendor.
         """
-        Kit.add_section(g, M, y, IW, ASK_H + (NAME_H if a["new"] else 0))
+        Kit.add_section(g, M, y, IW, ah + nh)
         x = M + IW - 8
+        by = y + (ah - 24) // 2
         cancel = ("Skip", "Drop this read") if a["mode"] == "read" else ("Cancel", "Keep this vendor's shop")
         for key, art, cap, tip in (("ask_skip", Kit.ART_CLOSE) + cancel,
                                    ("ask_ok", Kit.ART_OK, "OK", "Link this vendor to the picked shop")):
             x -= 35 + Kit.text_w(cap)
-            Kit.art_button(g, store, key, art, x, y + 6, cap, tip, on_click=queue(key))
+            Kit.art_button(g, store, key, art, x, by, cap, tip, on_click=queue(key))
             x -= 10
-        Kit.add_label(g, "Which shop?", M + 8, y + 10)
-        dx = M + 16 + Kit.text_w("Which shop?")
+        lab(g, "Which shop?", M + sc(8), y + ty(ah))
+        dx = M + sc(8) + 8 + ttf_w("Which shop?", st["f"])
         ids = c["ask_ids"] = shop_ids()
         names = [shop_name(sid) for sid in ids] + [NEW_SHOP]
         if a["new"]:
-            Kit.add_label(g, "Name:", M + 8, y + ASK_H + 2)
-            tb = Kit.add_textbox(g, "", dx, y + ASK_H, x - dx, numbers=False)
+            lab(g, "Name:", M + sc(8), y + ah + ty(nh))
+            tb = Kit.add_textbox(g, "", dx, y + ah + (nh - NAME_H) // 2, x - dx, numbers=False)
             c["ask_name"] = Kit.with_tip(tb, "Name of the new shop (up to %d letters)" % NAME_MAX)
         dd = G.CreateDropDown(x - dx, names, max(0, min(a["pick"], len(ids))))
-        dd.SetPos(dx, y + 6)
+        dd.SetPos(dx, by)
         g.Add(dd)
         c["ask_dd"] = Kit.with_tip(dd, "Shop this vendor is in")
 
-    def draw_over(g, store, M, y, IW):
+    def draw_over(g, store, M, y, IW, oh):
         """Draw the Overwrite bar shown when the picked book holds other writing."""
-        Kit.add_section(g, M, y, IW, OVER_H)
+        Kit.add_section(g, M, y, IW, oh)
         x = M + IW - 8 - 35 - Kit.text_w("Overwrite")
-        Kit.art_button(g, store, "overwrite", Kit.ART_OK, x, y + 6, "Overwrite",
+        Kit.art_button(g, store, "overwrite", Kit.ART_OK, x, y + (oh - 24) // 2, "Overwrite",
                        "Write the prices over this book's text (this book only)", on_click=queue("overwrite"))
-        Kit.add_label(g, Kit.fit("The book holds other writing", x - M - 18), M + 8, y + 10, Kit.HUE_BAD)
+        lab(g, tfit("The book holds other writing", x - M - sc(8) - 10), M + sc(8), y + ty(oh), Kit.HUE_BAD)
 
-    def draw_grid(g, c, M, y, IW, sh, n):
-        """Draw the grid section: shop name column, one column per reagent and n empty rows to fill."""
-        Kit.add_section(g, M, y, IW, sh, GRID_TITLE)
-        nw, cw = grid_cols()
-        cw = max(cw, (IW - 16 - nw) // len(ORDER))
-        x0 = M + 8 + nw
-        c["name_w"] = nw - 8
-        c["cell_w"] = cw - 4
-        for i, code in enumerate(ORDER):
-            Kit.add_label(g, code, x0 + i * cw, y + 30, Kit.HUE_TITLE)
-        c["grid"] = [(Kit.add_label(g, "", M + 8, y + 30 + (j + 1) * ROW_H),
-                      [Kit.add_label(g, "", x0 + i * cw, y + 30 + (j + 1) * ROW_H) for i in range(len(ORDER))])
-                     for j in range(n)]
+    def draw_grid(g, c, M, y, IW, sh, n, m, rp):
+        """Draw the grid section: headings, then n empty label rows that fill_grid fills.
+
+        Column widths come from m (from cols) and rp is the row height.
+        """
+        section(g, M, y, IW, sh, GRID_TITLE)
+        p8 = sc(8)
+        sw, vw = m[0] + p8, m[1] + p8
+        cw = max(m[2] + p8, (IW - sc(16) - sw - vw) // len(ORDER))
+        vx = M + p8 + sw
+        x0 = vx + vw
+        c["name_w"] = sw - p8
+        c["vendor_w"] = vw - p8
+        c["cell_w"] = cw - sc(4)
+        top = y + st["hd"] + ty(rp)
+        for x, text in [(M + p8, "Shop"), (vx, "Vendor")] + [(x0 + i * cw, k) for i, k in enumerate(ORDER)]:
+            lab(g, text, x, top, Kit.HUE_TITLE)
+        c["grid"] = [(lab(g, "", M + p8, top + (j + 1) * rp),
+                      [lab(g, "", x0 + i * cw, top + (j + 1) * rp) for i in range(len(ORDER))],
+                      lab(g, "", vx, top + (j + 1) * rp)) for j in range(n)]
 
     def build_window():
         """Build the whole window from the current state, then refresh it.
 
-        The window takes a slot in its zone when it has one (rows then follow the zone's height) and
-        caps the grid at GRID_MAX shops. Layout: title row with the Buy list and View buttons, the
-        cheapest list or the grid, the status line with Change, the "Which shop?" question, best stops
-        and the Overwrite bar. Client tick.
+        The scale is the largest that fits the window size (the zone slot, the saved size or the natural
+        size). Layout: title row with the Buy list and View buttons, the cheapest list or the grid, the
+        status line with Change, the "Which shop?" question, best stops and the Overwrite bar. Client tick.
         """
+        grid = settings["grid"]
+        if st["minimized"]:
+            g, store, c = wnd.begin(MINI[0], MINI[1])
+            wnd.end(g)
+            st["drawn"] = None
+            refresh()
+            return
+        k = bands()
         mw, mh = min_size()
         z = wnd.zone_slot(mw, mh)
-        grid = settings["grid"]
-        n = 0
-        if grid:
-            own = max(1, min(GRID_MAX, len(data["shops"])))
-            n = min(GRID_MAX, wnd.rows(ROW_H, fixed_h(0), own)) if z else own
-            mh = fixed_h(n)
-        w, h = z if z else (mw, mh)
-        g, store, c = wnd.begin(w, h)
+        w, h = z if z else own_size(mw, mh, k)
+        s = 1.0 if z is None and st["size"] is None else pick(w, h, k, mw)
+        st.update(sc=s, f=fsize(s), hd=head_h(s), resize_at=0.0)
+        rh = pitch(s)
+        hd = st["hd"]
+        rs = None if HOST.layout_holds(KEY) else (mw, mh, on_resized)
+        g, store, c = wnd.begin(w, h, resize=rs)
         c["shape"] = shape()
-        if not st["minimized"]:
-            # The Buy list button uses press_buy so that Alt+click can start Follow (R5) instead of opening
-            # the list.
-            wnd.frame(g, extra=[("buy", Kit.ART_PLAY, "Buy list", BUY_TIP, press_buy),
-                                ("view", Kit.ART_PAGE, "View: grid" if grid else "View: cheapest", VIEW_TIP,
-                                 queue("view"))])
-            M = Kit.MARGIN
-            IW = w - 2 * M
-            y = M + 30 + Kit.GAP
-            a = st["ask"]
-            listed = c["shape"][4]
-            tail = Kit.GAP + LINE_H + extra_h()
-            if grid:
-                draw_grid(g, c, M, y, IW, h - M - tail - y, n)
-            else:
-                Kit.add_section(g, M, y, IW, h - M - tail - y, "CHEAPEST")
-                nx = M + 34
-                px = nx + max(Kit.text_w(Kit.REAGENTS[k][0]) for k in ORDER) + 10
-                bx = px + Kit.text_w("9999") + 10
-                sx = bx + (Kit.text_w("buy 9999") + 10 if listed else 0)
-                ax = M + IW - 8 - Kit.text_w("59 min ago")
-                c["shop_w"] = ax - 8 - sx
-                c["rows"] = []
-                for i, code in enumerate(ORDER):
-                    ry = y + 30 + i * ROW_H
-                    name, graphic = Kit.REAGENTS[code]
-                    pic = G.CreateGumpItemPic(graphic, 20, 20)
-                    pic.SetPos(M + 8, ry - 2)
-                    Kit.inert(pic)
-                    g.Add(pic)
-                    Kit.add_label(g, name, nx, ry)
-                    # The buy column exists only when a shopping list is set.
-                    c["rows"].append((code, Kit.add_label(g, "", px, ry), Kit.add_label(g, "", sx, ry),
-                                      Kit.add_label(g, "", ax, ry, Kit.HUE_INFO),
-                                      Kit.add_label(g, "", bx, ry, Kit.HUE_INFO) if listed else None))
-            ys = h - M - tail + Kit.GAP
-            Kit.add_section(g, M, ys, IW, LINE_H)
-            c["line_w"] = IW - 16
-            if a is None and last_read() is not None:
-                bx = M + IW - 8 - 35 - Kit.text_w("Change")
-                c["line_w"] = bx - 6 - M - 8
-                Kit.art_button(g, store, "change", Kit.ART_PAGE, bx, ys + 4, "Change",
-                               "Pick another shop for the last vendor read", on_click=queue("change"))
-            c["line"] = Kit.add_label(g, "", M + 8, ys + 9, Kit.HUE_INFO)
-            ys += LINE_H + Kit.GAP
-            if a is not None:
-                draw_ask(g, store, c, M, ys, IW, a)
-                ys += ASK_H + (NAME_H if a["new"] else 0) + Kit.GAP
-            if not grid:
-                Kit.add_section(g, M, ys, IW, STOPS_H, "BEST STOPS")
-                c["stops_w"] = IW - 16
-                c["stops"] = [Kit.add_label(g, "", M + 8, ys + 30 + i * ROW_H, Kit.HUE_INFO) for i in range(STOPS + 1)]
-                ys += STOPS_H + Kit.GAP
-            if st["foreign"] is not None:
-                draw_over(g, store, M, ys, IW)
+        wnd.frame(g, mouse=rs is None, extra=[("buy", Kit.ART_PLAY, "Buy list", BUY_TIP, press_buy),
+                                              ("view", Kit.ART_PAGE, "View: grid" if grid else "View: cheapest",
+                                               VIEW_TIP, queue("view"))])
+        M = Kit.MARGIN
+        IW = w - 2 * M
+        y = M + 30 + Kit.GAP
+        a = st["ask"]
+        listed = c["shape"][4]
+        m = c["shape"][7]
+        p = parts(s)
+        lh, ah, nh, sh, oh = p
+        bh = h - M - tail_h(p) - y
+        rp = max(rh, (bh - hd - sc(PAD)) // k)
+        if grid:
+            draw_grid(g, c, M, y, IW, bh, k - 1, m, rp)
+        else:
+            section(g, M, y, IW, bh, "CHEAPEST")
+            p8 = sc(8)
+            nx = M + sc(34)
+            px = nx + m[0] + sc(10)
+            bx = px + m[1] + sc(10)
+            sx = bx + (m[2] + sc(10) if listed else 0)
+            ax = M + IW - p8 - m[3]
+            c["shop_w"] = ax - p8 - sx
+            c["rows"] = []
+            pz = sc(20)
+            dy = ty(rp)
+            for i, code in enumerate(ORDER):
+                ry = y + hd + i * rp
+                name, graphic = Kit.REAGENTS[code]
+                pic = G.CreateGumpItemPic(graphic, pz, pz)
+                pic.SetPos(M + p8, ry + (rp - pz) // 2)
+                Kit.inert(pic)
+                g.Add(pic)
+                lab(g, name, nx, ry + dy)
+                c["rows"].append((code, lab(g, "", px, ry + dy), lab(g, "", sx, ry + dy),
+                                  lab(g, "", ax, ry + dy, Kit.HUE_INFO),
+                                  lab(g, "", bx, ry + dy, Kit.HUE_INFO) if listed else None))
+        ys = y + bh + Kit.GAP
+        section(g, M, ys, IW, lh)
+        c["line_w"] = IW - 2 * sc(8)
+        if a is None and last_read() is not None:
+            bx = M + IW - 8 - 35 - Kit.text_w("Change")
+            c["line_w"] = bx - 6 - M - sc(8)
+            Kit.art_button(g, store, "change", Kit.ART_PAGE, bx, ys + (lh - 26) // 2, "Change",
+                           "Pick another shop for the last vendor read", on_click=queue("change"))
+        c["line"] = lab(g, "", M + sc(8), ys + ty(lh), Kit.HUE_INFO)
+        ys += lh + Kit.GAP
+        if a is not None:
+            draw_ask(g, store, c, M, ys, IW, a, ah, nh)
+            ys += ah + nh + Kit.GAP
+        if not grid:
+            section(g, M, ys, IW, sh, "BEST STOPS")
+            c["stops_w"] = IW - 2 * sc(8)
+            dy = ys + hd + ty(rh)
+            c["stops"] = [lab(g, "", M + sc(8), dy + i * rh, Kit.HUE_INFO) for i in range(STOPS + 1)]
+            ys += sh + Kit.GAP
+        if st["foreign"] is not None:
+            draw_over(g, store, M, ys, IW, oh)
         wnd.end(g)
+        st["drawn"] = (int(g.GetWidth()), int(g.GetHeight()))
         refresh()
 
     wnd = Kit.Window(KEY, TITLE, st, win, build_window, POS_KEY, MIN_KEY, mini=MINI, icon=TRAY_ICON, cleanup=cleanup)
 
-    def fill_rows(c, prices, pool, hv, want, now):
+    def fill_rows(c, vall, vpool, hv, want, now):
         """Fill the cheapest list rows with text and colours.
 
-        Without an open buy list each row shows the cheapest price, its shop and its age (grey when
-        older than Old after). With one open, each row shows this vendor's price (green when it ties the
-        best elsewhere or beats it) and the best other shop. hv is the here_view result, want how many
-        to buy.
+        Without an open buy list each row shows the cheapest price, its shop (the vendor when the shop has
+        more than one) and its age (grey when older than Old after). With one open, each row shows this
+        vendor's price (green when it ties the best elsewhere or beats it) beside the best of every other
+        vendor. hv is the here_view result, want how many to buy, vall all vendors' prices and vpool those
+        that count for the cheapest.
         """
-        best = cheapest(dict((s, p) for s, p in pool.items() if s != hv[0]) if hv else pool)
-        every = cheapest(prices)
+        here = st["here"] if hv else None
+        tags = labels()
+        live = roster(True)
+        best = cheapest(dict((s, p) for s, p in vpool.items() if s != here) if hv else vpool, vkey)
+        every = cheapest(vall, vkey)
         olds = settings["old"] * DAY
         for code, lp, ls, la, lb in c["rows"]:
             hit = best.get(code)
@@ -833,39 +1181,52 @@ def _module_prices():
                 good = mine is not None and (hit is None or mine[0] <= hit[1][0])
                 Kit.set_text(lp, "out" if mine is None else str(mine[0]),
                              Kit.HUE_GOOD if good else Kit.HUE_INFO if mine is None else Kit.HUE_TEXT)
-                Kit.set_text(ls, Kit.fit("best %d %s" % (hit[1][0], shop_name(hit[0])) if hit else "no other shop",
+                Kit.set_text(ls, tfit("best %d %s" % (hit[1][0], tag(hit[0], tags)) if hit else "no other shop",
                                          c["shop_w"]), Kit.HUE_INFO)
                 Kit.set_text(la, Kit.ago(now - hit[1][2], AGE) if hit else "", Kit.HUE_INFO)
                 continue
             if hit is None:
                 Kit.set_text(lp, "-", Kit.HUE_INFO)
-                Kit.set_text(ls, "Only old prices" if code in every else "No price yet", Kit.HUE_INFO)
+                Kit.set_text(ls, tfit("Only old prices" if code in every else "No price yet", c["shop_w"]),
+                             Kit.HUE_INFO)
                 Kit.set_text(la, "")
                 continue
-            sid, row = hit
+            serial, row = hit
             hue = Kit.HUE_INFO if now - row[2] > olds else Kit.HUE_TEXT
+            sid = shop_of(serial)
+            name = tag(serial, tags) if len(live.get(sid, ())) > 1 else shop_name(sid)
             Kit.set_text(lp, str(row[0]), hue)
-            Kit.set_text(ls, Kit.fit(shop_name(sid), c["shop_w"]), hue)
+            Kit.set_text(ls, tfit(name, c["shop_w"]), hue)
             Kit.set_text(la, Kit.ago(now - row[2], AGE), Kit.HUE_INFO)
 
-    def fill_grid(c, prices, pool, now):
-        """Fill the grid cells: price, trend and stock per shop and reagent.
+    def fill_grid(c, prices, vall, vpool, now):
+        """Fill the grid cells: price, trend and stock per vendor and reagent.
 
-        The cheapest of each column is green, an old price grey, a dash means not listed. When there are
-        more shops than rows the last row says how many are left out.
+        The cheapest of each column is green, an old price grey, a dash means not listed. The vendor of
+        the open buy list is marked. When there are more vendors than rows the last row says how many are
+        left out.
         """
-        best = cheapest(pool)
-        ids = shop_ids()
+        best = cheapest(vpool, vkey)
+        ids = grid_rows()
         rows = c["grid"]
         more = len(ids) - len(rows) + 1
         olds = settings["old"] * DAY
-        for j, (ln, cells) in enumerate(rows):
-            sid = ids[j] if j < len(ids) and (more <= 1 or j < len(rows) - 1) else None
-            sp = prices.get(sid)
-            if sid is None:
-                Kit.set_text(ln, "+%d more shops" % more if j < len(ids) else "", Kit.HUE_INFO)
+        tags = labels()
+        here = st["here"]
+        for j, (ln, cells, lv) in enumerate(rows):
+            hit = ids[j] if j < len(ids) and (more <= 1 or j < len(rows) - 1) else None
+            sid, serial = hit or (None, None)
+            sp = vall.get(serial)
+            if hit is None:
+                Kit.set_text(ln, tfit("+%d more vendors" % more, c["name_w"] + c["vendor_w"])
+                             if j < len(ids) else "", Kit.HUE_INFO)
             else:
-                Kit.set_text(ln, Kit.fit(shop_name(sid), c["name_w"]), Kit.HUE_INFO if sp is None else Kit.HUE_TEXT)
+                first = j == 0 or ids[j - 1][0] != sid
+                Kit.set_text(ln, tfit(shop_name(sid), c["name_w"]) if first else "",
+                             Kit.HUE_INFO if sid not in prices else Kit.HUE_TEXT)
+            text = tags[serial][1] + (HERE if serial == here else "") if serial is not None else ""
+            Kit.set_text(lv, tfit(text, c["vendor_w"]), Kit.HUE_GOOD if serial is not None and serial == here else
+                         Kit.HUE_INFO if sp is None else Kit.HUE_TEXT)
             for code, lbl in zip(ORDER, cells):
                 row = sp.get(code) if sp else None
                 if row is None:
@@ -873,7 +1234,7 @@ def _module_prices():
                     continue
                 old = now - row[2] > olds
                 low = code in best and row[0] <= best[code][1][0]
-                Kit.set_text(lbl, Kit.fit("%d%s (%d)" % (row[0], trend(sid, code, row), row[1]), c["cell_w"]),
+                Kit.set_text(lbl, tfit(cell(serial, code, row), c["cell_w"]),
                              Kit.HUE_INFO if old else Kit.HUE_GOOD if low else Kit.HUE_TEXT)
 
     def refresh():
@@ -888,7 +1249,7 @@ def _module_prices():
         if last is None:
             text = "no reads yet"
         else:
-            text = "read %s %s" % (shop_name(shop_of(last)), Kit.ago(now - data["reads"][last]["t"], AGE))
+            text = "read %s %s" % (tag(last), Kit.ago(now - data["reads"][last]["t"], AGE))
         if st["foreign"] is not None:
             text = "book holds other writing; Restore to overwrite"
         if st["ask"] is not None:
@@ -896,21 +1257,22 @@ def _module_prices():
         if "status" in c:
             Kit.set_text(c["status"], "%s: %s" % (TITLE, text))
         elif "line" in c:
-            prices = shop_prices()
-            pool = shop_prices(now)
+            vall = vendor_prices()
+            vpool = vendor_prices(now)
+            pool = shop_prices(vp=vpool)
             hv = here_view()
-            want, listed, need, ranked = ranking(pool)
+            want, listed, need, ranked = ranking(pool, vpool)
             if "grid" in c:
-                fill_grid(c, prices, pool, now)
+                fill_grid(c, shop_prices(vp=vall), vall, vpool, now)
             else:
-                fill_rows(c, prices, pool, hv, want, now)
+                fill_rows(c, vall, vpool, hv, want, now)
             if st["ask"] is not None:
                 line = "Which shop is this vendor in? Pick it below"
             elif last is None:
                 line = "No reads yet: open a reagent vendor's buy list"
             else:
                 line = "Last %s" % text
-            Kit.set_text(c["line"], Kit.fit(line, c["line_w"]), Kit.HUE_INFO)
+            Kit.set_text(c["line"], tfit(line, c["line_w"]), Kit.HUE_INFO)
             if "stops" not in c:
                 return
             rows = [cost_line(pool, hv, want, listed, need)] + [
@@ -920,7 +1282,7 @@ def _module_prices():
                 rows.append("No prices yet")
             for i, lbl in enumerate(c["stops"]):
                 r = ranked[i - 1] if 0 < i <= len(ranked) else None
-                Kit.set_text(lbl, Kit.fit(rows[i] if i < len(rows) else "", c["stops_w"]),
+                Kit.set_text(lbl, tfit(rows[i] if i < len(rows) else "", c["stops_w"]),
                              Kit.HUE_TEXT if r is not None and not r[0] else Kit.HUE_INFO)
 
     def show():
@@ -957,14 +1319,18 @@ def _module_prices():
         del h["rows"][:-HIST_KEEP]
         mark("H|%d|%s" % (sid, code))
 
-    def link(serial, sid, spot, picked=False):
+    def link(serial, sid, spot, picked=False, name="", t=0):
         """Link a vendor to a shop and remember where the vendor stands.
 
-        When the player picked the shop it also remembers that spot for the shop, so later vendors
-        close to it are placed without asking.
+        Keeps the vendor's first read time, name and old place when the new values are empty, takes the
+        newest last-read time and clears its gone mark when a read time is given. When the player picked
+        the shop it also remembers that spot for the shop, so later vendors close to it are placed
+        without asking.
         """
         old = data["vendors"].get(serial) or {"spot": None, "tail": []}
-        data["vendors"][serial] = {"shop": sid, "spot": spot or old["spot"], "tail": old["tail"]}
+        data["vendors"][serial] = {"shop": sid, "spot": spot or old["spot"], "name": name or old.get("name", ""),
+                                   "first": old.get("first") or t, "last": max(t, old.get("last", 0)),
+                                   "gone": 0 if t else old.get("gone", 0), "tail": old["tail"]}
         mark("V|%X" % serial)
         if picked and (spot or old["spot"]):
             data["shops"][sid]["spot"] = spot or old["spot"]
@@ -988,41 +1354,185 @@ def _module_prices():
     def store_read(pend, sid, picked=False):
         """Store a vendor read under a shop.
 
-        Links the vendor, replaces its read, adds history rows, queues the log lines and, when the
-        journal line is on, says which reagents this shop is cheapest for. Raises the book version so
-        the book is written again. picked is True when the player chose the shop.
+        Links the vendor, replaces its read, adds history rows, queues the log and history lines and,
+        when the journal line is on, says which reagents this vendor is cheapest for. Raises the book
+        version so the book is written again. picked is True when the player chose the shop.
         """
         serial, t = pend["serial"], pend["t"]
-        link(serial, sid, pend["spot"], picked)
+        link(serial, sid, pend["spot"], picked, pend.get("name", ""), t)
         old = data["reads"].get(serial) or {"tail": []}
         data["reads"][serial] = {"t": t, "p": dict(pend["p"]), "tail": old["tail"]}
         mark("R|%X" % serial)
         for code, (price, stock) in pend["p"].items():
             add_hist(sid, code, (t, price, stock))
         log_read(pend, sid)
+        line = hist_line(t, "%X" % serial, pend["p"])
+        r = hist_row(line)
+        q = st["histq"]
+        obs = data["obs"].setdefault(serial, [])
+        obs.append((r[0], r[2], r[3]))
+        del obs[:-HIST_VENDOR]
+        q.append(line)
+        if len(q) > HIST_ALL:
+            del q[:-HIST_ALL]
+        st["miss"].pop(serial, None)
         if settings["say"]:
-            pool = shop_prices(time.time())
-            best = cheapest(pool)
-            here = pool.get(sid, {})
+            pool = vendor_prices(time.time())
+            best = cheapest(pool, vkey)
+            here = pool.get(serial, {})
             won = [k for k in ORDER if k in here and here[k][0] == best[k][1][0]]
-            say("%s read%s." % (shop_name(sid), "; cheapest for " + ", ".join(won) if won else ""), Kit.HUE_GOOD)
+            say("%s read%s." % (tag(serial), "; cheapest for " + ", ".join(won) if won else ""), Kit.HUE_GOOD)
         st["bookver"] += 1
         show()
 
     def log_read(pend, sid):
         """Queue the csv log lines of a read, one per reagent (price empty and stock 0 when not listed).
 
-        Names with a comma or quote are quoted. The queue keeps at most LOG_MAX lines.
+        Each line is time, shop, reagent, price, stock, vendor name and serial in hex. Names with a comma
+        or quote are quoted. The queue keeps at most LOG_MAX lines.
         """
-        name = shop_name(sid)
+        name = csv(shop_name(sid))
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(pend["t"]))
         q = st["logq"]
-        if "," in name or '"' in name:
-            name = '"%s"' % name.replace('"', '""')
-        q.extend("%s,%s,%s,%s,%d" % (when, name, Kit.REAGENTS[k][0], pend["p"][k][0] if k in pend["p"] else "",
-                                     pend["p"][k][1] if k in pend["p"] else 0) for k in ORDER)
+        who = "%s,%X" % (csv((data["vendors"].get(pend["serial"]) or {}).get("name", "")), pend["serial"])
+        q.extend("%s,%s,%s,%s,%d,%s" % (when, name, Kit.REAGENTS[k][0], pend["p"][k][0] if k in pend["p"] else "",
+                                        pend["p"][k][1] if k in pend["p"] else 0, who) for k in ORDER)
         if len(q) > LOG_MAX:
             del q[:-LOG_MAX]
+
+    def csv(text):
+        """Quote a field for the csv log when it holds a comma or a quote."""
+        return '"%s"' % text.replace('"', '""') if "," in text or '"' in text else text
+
+    def hist_line(t, who, p):
+        """History file line for a read: time, who (vendor serial in hex) and the CODE:price:stock list."""
+        return "%d|%s|%s" % (t, who, ",".join("%s:%d:%d" % (k, p[k][0], p[k][1]) for k in ORDER if k in p))
+
+    def hist_key(line):
+        """Key of a history file line (time and who), or None when it is malformed. Used to merge the file."""
+        f = line.split("|")
+        return "|".join(f[:2]) if len(f) > 2 else None
+
+    def hist_row(line):
+        """Parse a history line into (time, who, prices, stocks), or None when it does not parse.
+
+        who is the vendor serial, or "S" and the shop id for old lines written before vendors were told
+        apart. Prices and stocks are tuples in ORDER with 0 for a reagent not listed.
+        """
+        f = line.split("|")
+        got = {}
+        try:
+            who = f[1].upper()
+            key = "S%d" % int(who[1:]) if who[:1] == "S" else int(who, 16)
+            for part in f[2].split(","):
+                if part:
+                    c = part.split(":")
+                    got[c[0]] = (int(c[1]), int(c[2]))
+            return (int(f[0]), key, tuple(got[k][0] if k in got else 0 for k in ORDER),
+                    tuple(got[k][1] if k in got else 0 for k in ORDER))
+        except (IndexError, ValueError):
+            return None
+
+    def fill_lines():
+        """Build history lines for an empty history file from the saved model: the per-shop history rows,
+        then each vendor's newest read.
+
+        A row is credited to the vendor that read it when that is certain, else to the shop's only vendor,
+        else to the shop alone.
+        """
+        vend, reads, by, owners, out = dict(data["vendors"]), dict(data["reads"]), {}, {}, []
+        for (sid, code), h in list(data["hist"].items()):
+            for t, price, stock in list(h["rows"]):
+                by.setdefault((sid, t), {})[code] = (price, stock)
+        for serial, v in vend.items():
+            owners.setdefault(v["shop"], []).append(serial)
+        for (sid, t), p in sorted(by.items()):
+            mine = owners.get(sid, [])
+            hit = [s for s in mine if s in reads and reads[s]["t"] == t]
+            who = hit[0] if len(hit) == 1 else mine[0] if len(mine) == 1 else None
+            out.append(hist_line(t, "S%d" % sid if who is None else "%X" % who, p))
+        out.extend(hist_line(rd["t"], "%X" % s, rd["p"]) for s, rd in sorted(reads.items()) if s in vend)
+        return out
+
+    def flush_hist():
+        """Write the queued history lines, unless another thread is already writing (script thread).
+
+        A failed write retries after RETRY seconds and the journal says so on the second failure.
+        """
+        lock = st["log_lock"]
+        if not lock.acquire(False):
+            return
+        try:
+            ok = write_hist()
+        except Exception:
+            ok = False
+        finally:
+            lock.release()
+        if not ok:
+            st["hist_at"] = time.time() + RETRY
+            st["hist_fails"] += 1
+            if st["hist_fails"] == 2:
+                say("couldn't write %s (trying again)." % HIST_FILE, Kit.HUE_BAD)
+            return
+        st["hist_fails"] = 0
+
+    def write_hist():
+        """Merge the queued history lines into the history file, trimmed to HIST_ALL lines and HIST_VENDOR
+        per vendor, and rebuild the observations used for the trend marks (script thread).
+
+        Rows of removed shops are dropped by the times in drops. Only the first n queued lines are
+        removed, so lines queued meanwhile survive. Returns True when done, False when the file could not
+        be read.
+        """
+        q, drops = st["histq"], st["drops"]
+        n, nd = len(q), len(drops)
+        path = Kit.data_path(HIST_FILE)
+        text = Kit.read_merge(path)
+        if text is None:
+            return False
+        new = (fill_lines() if not st["obs_ok"] and not text.strip() else []) + q[:n]
+        gone = {}
+        for k, at in drops[:nd]:
+            gone[k] = max(at, gone.get(k, 0))
+        merged = Kit.merge_text(text, dict((hist_key(x), x) for x in new), hist_key)[1]
+        memo = st["memo"]
+        rows = []
+        for x in merged:
+            r = memo.get(x) or hist_row(x)
+            if r is not None and not (r[1] in gone and r[0] <= gone[r[1]]):
+                rows.append((r, x))
+        rows.sort(key=lambda e: e[0][0])
+        per = {}
+        keep = []
+        for r, x in reversed(rows):
+            if len(keep) >= HIST_ALL:
+                break
+            if per.get(r[1], 0) < HIST_VENDOR:
+                per[r[1]] = per.get(r[1], 0) + 1
+                keep.append((r, x))
+        keep.reverse()
+        out = "\n".join(x for r, x in keep)
+        if out != "\n".join(x.rstrip("\r") for x in text.split("\n") if x.strip()):
+            Kit.write_safe(path, out + "\n" if keep else "")
+        obs = {}
+        for r, x in keep:
+            obs.setdefault(r[1], []).append((r[0], r[2], r[3]))
+        for r in [hist_row(x) for x in q[n:]]:
+            if r is not None:
+                obs.setdefault(r[1], []).append((r[0], r[2], r[3]))
+        st["memo"] = dict((x, r) for r, x in keep)
+        data["obs"] = obs
+        st["obs_ok"] = True
+        del q[:n]
+        del drops[:nd]
+        return True
+
+    def hist_due(now):
+        """True when the history file needs work: data is loaded, the start-up settle time has passed, the
+        retry time is reached and there are observations to build, lines queued or drops to apply.
+        """
+        return (st["loaded"] and HOST.settled_at is not None and now >= st["hist_at"] and
+                (not st["obs_ok"] or bool(st["histq"]) or bool(st["drops"])))
 
     def flush_log():
         """Write the queued log lines unless another thread is already writing.
@@ -1071,16 +1581,20 @@ def _module_prices():
     def take_read(serial, now, got):
         """Handle a freshly opened buy list: skip a repeat, find the shop, then store or ask.
 
-        A read identical to the stored one within REREAD_GAP seconds is ignored. The vendor's spot is
-        taken from the mobile. A vendor with a known shop is stored at once; else the nearest known shop
-        within Shop distance; else the window asks "Which shop?".
+        A read identical to the stored one within REREAD_GAP seconds is ignored. The vendor's spot and
+        name are taken from the mobile. A vendor with a known shop is stored at once; else the nearest
+        known shop within Shop distance; else the window asks "Which shop?".
         """
         old = data["reads"].get(serial)
         if old is not None and now - old["t"] < REREAD_GAP and old["p"] == got:
             return
         mob = API.FindMobile(serial)
         spot = (int(API.GetMap()), int(mob.X), int(mob.Y)) if mob else None
-        pend = {"serial": serial, "t": int(now), "p": got, "spot": spot}
+        try:
+            name = clean(mob.Name) if mob else ""
+        except Exception:
+            name = ""
+        pend = {"serial": serial, "t": int(now), "p": got, "spot": spot, "name": name}
         sid = shop_of(serial)
         if sid is None:
             sid = shop_near(spot)
@@ -1093,9 +1607,10 @@ def _module_prices():
         """Watch the client for an open vendor buy list (client tick, every CHECK_EVERY seconds).
 
         A new list is read once: the same gump object is not read again, a list whose prices are not
-        filled in yet is waited for, and a vendor with no reagents and no shop is ignored. While the
-        same list stays open a change of the backpack asks for a new count of the pack. While a shop
-        question for a read is open, nothing else is read.
+        filled in yet is waited for, and a vendor with no reagents and no shop is ignored. After a read it
+        also checks the shop's other vendors (sweep). While the same list stays open a change of the
+        backpack asks for a new count of the pack. While a shop question for a read is open, nothing else
+        is read.
         """
         a = st["ask"]
         hit = shop_open()
@@ -1125,10 +1640,60 @@ def _module_prices():
             st["here"], st["pv"] = hit[1], HOST.pack_ver()
             want_count()
             take_read(hit[1], now, got)
+            sweep(hit[1], now)
             show()
         elif st["here"] is not None:
             st["here"] = None
             show()
+
+    def sweep(serial, now):
+        """Check the other vendors of a shop after a read: learn their names and mark absent ones as gone.
+
+        A vendor found in the client's world is present and gets its name if it has none. One that is not
+        there while the player is within GONE_REACH tiles of its place counts as missing; missing on two
+        checks at least GONE_GAP seconds apart marks it gone, which hides it until it is read again.
+        """
+        sid = shop_of(serial)
+        miss = st["miss"]
+        done = False
+        try:
+            me = (int(API.GetMap()), int(API.Player.X), int(API.Player.Y))
+        except Exception:
+            return
+        for s in roster(True).get(sid, []) if sid is not None else ():
+            v = data["vendors"][s]
+            sp = v["spot"]
+            if s == serial:
+                continue
+            try:
+                mob = API.FindMobile(s)
+            except Exception:
+                continue
+            if mob is not None:
+                miss.pop(s, None)
+                try:
+                    name = "" if v.get("name") else clean(mob.Name)
+                except Exception:
+                    name = ""
+                if name:
+                    v["name"] = name
+                    mark("V|%X" % s)
+                    done = True
+                continue
+            if not sp or sp[0] != me[0] or max(abs(sp[1] - me[1]), abs(sp[2] - me[2])) > GONE_REACH:
+                continue
+            at = miss.get(s)
+            if at is None or at < v.get("last", 0):
+                miss[s] = now
+            elif now - at >= GONE_GAP:
+                v["gone"] = int(now)
+                miss.pop(s)
+                mark("V|%X" % s)
+                done = True
+        for s in sorted(miss, key=miss.get)[:max(0, len(miss) - ITEM_CAP)]:
+            del miss[s]
+        if done:
+            st["bookver"] += 1
 
     def book_w(text):
         """Pixel width of book text, cached; the cache is cleared when it grows past WIDTH_CAP."""
@@ -1167,19 +1732,23 @@ def _module_prices():
         """Build the 18 pages of the book, each a list of BOOK_LINES lines.
 
         Page 1: the cheapest shop for each reagent (an asterisk marks an old price). Page 2: the best
-        stops with what each lacks. Pages 3 to 18: one shop each with when it was read and its prices
-        in pairs (full names, short codes when too wide). Unused lines and pages are blank.
+        stops with what each lacks. Pages 3 to 18: one shop each with when its newest vendor was read,
+        the number of vendors when more than one, and the lowest prices in pairs (full names, short codes
+        when too wide). Unused lines and pages are blank.
         """
-        prices = shop_prices()
-        pool = shop_prices(now)
+        vall = vendor_prices()
+        vpool = vendor_prices(now)
+        prices = shop_prices(vp=vall)
+        pool = shop_prices(vp=vpool)
         best = cheapest(pool)
         every = cheapest(prices)
         old = settings["old"] * DAY
         seen = {}
-        for serial, rd in data["reads"].items():
+        many = {}
+        for serial, p in vall.items():
             sid = shop_of(serial)
-            if sid is not None:
-                seen[sid] = max(seen.get(sid, 0), rd["t"])
+            many[sid] = many.get(sid, 0) + 1
+            seen[sid] = max(seen.get(sid, 0), data["reads"][serial]["t"])
 
         def cost(row):
             """Price text for a row, with an asterisk when its read is older than Old after."""
@@ -1187,7 +1756,7 @@ def _module_prices():
 
         pages = [[fit_line("%s %s " % (code, cost(best[code][1])), shop_name(best[code][0])) if code in best
                   else "%s - (old)" % code if code in every else "%s - (no read)" % code for code in ORDER]]
-        want, listed, need, ranked = ranking(pool)
+        want, listed, need, ranked = ranking(pool, vpool)
         top = ["Best stops", "For: your list" if listed else "For: 1 of each"]
         if not ranked:
             top.append("No prices yet" if need else "Nothing to buy")
@@ -1200,6 +1769,8 @@ def _module_prices():
                 lines.append("Not read yet")
             else:
                 lines.append("Read " + stamp(seen[sid]))
+                if many[sid] > 1:
+                    lines.append("%d vendors" % many[sid])
                 for a, z in PAIRS:
                     pa, pz = [cost(sp[k]) if k in sp else "out" for k in (a, z)]
                     line = "%s %s  %s %s" % (BOOK_NAMES[a], pa, BOOK_NAMES[z], pz)
@@ -1398,7 +1969,8 @@ def _module_prices():
     def remove_shop(sid):
         """Remove a shop with its vendors, reads and history; at least one shop must stay.
 
-        Pending typed names are applied first. A shop question for the removed shop's vendor is closed.
+        Pending typed names are applied first. The removed history is also queued as drops so the history
+        file forgets it. A shop question for the removed shop's vendor is closed.
         """
         apply_names()
         if sid not in data["shops"]:
@@ -1409,11 +1981,18 @@ def _module_prices():
         name = shop_name(sid)
         del data["shops"][sid]
         mark("P|%d" % sid)
-        for serial in [v for v, e in data["vendors"].items() if e["shop"] == sid]:
+        at = int(time.time())
+        drops = st["drops"]
+        for serial in [v for v, e in data["vendors"].items() if e["shop"] == sid] + ["S%d" % sid]:
+            data["obs"].pop(serial, None)
+            drops.append((serial, at))
+            if serial not in data["vendors"]:
+                continue
             del data["vendors"][serial]
             mark("V|%X" % serial)
             if data["reads"].pop(serial, None) is not None:
                 mark("R|%X" % serial)
+        del drops[:-ITEM_CAP]
         for key in [k for k in data["hist"] if k[0] == sid]:
             del data["hist"][key]
             mark("H|%d|%s" % key)
@@ -1769,15 +2348,17 @@ def _module_prices():
         """Module start: reset the state, load the data and settings, hook the key, build the window.
 
         The data text read while the module loaded is used when it is fresh; else the script thread
-        loads it. Creates the lock that guards the log file.
+        loads it. Creates the lock that guards the log and history files and reads the saved window size.
         """
         import _thread
         st.update({"shutting": False, "docked": False, "queue": [], "loaded": False, "seen": None, "check_at": 0.0,
                    "aged_at": 0.0, "save_at": 0.0, "ask": None, "load_fails": 0, "book": None, "foreign": None,
                    "ok_books": set(), "picking": None, "minimized": wnd.start_min(), "jobs": [], "have": None,
                    "here": None, "hooked": None, "menu": False, "followed": None, "hk_at": 0.0, "pv": None,
-                   "logq": [], "log_at": 0.0, "log_fails": 0, "log_lock": _thread.allocate_lock()})
-        data.update({"shops": {}, "vendors": {}, "reads": {}, "hist": {}, "dirty": {}, "marks": 0})
+                   "logq": [], "log_at": 0.0, "log_fails": 0, "log_lock": _thread.allocate_lock(), "histq": [],
+                   "drops": [], "hist_at": 0.0, "hist_fails": 0, "obs_ok": False, "memo": {}, "miss": {},
+                   "size": load_size(), "resize_at": 0.0, "drawn": None})
+        data.update({"shops": {}, "vendors": {}, "reads": {}, "hist": {}, "dirty": {}, "marks": 0, "obs": {}})
         text, at = pre.pop("text", None), pre.pop("at", 0.0)
         if text is not None and time.time() - at < PRE_KEEP:
             load_data(text)
@@ -1791,7 +2372,7 @@ def _module_prices():
         """Client tick: run queued actions, watch the shop question, then check for a buy list and the book.
 
         Reading the buy list and writing the book are done every CHECK_EVERY seconds, the window text
-        ages every AGE_EVERY seconds.
+        ages every AGE_EVERY seconds, and a window resize is applied once it has settled.
         """
         q = st["queue"]
         while q:
@@ -1811,10 +2392,13 @@ def _module_prices():
         if now >= st["aged_at"]:
             st["aged_at"] = now + AGE_EVERY
             refresh()
+        if st["resize_at"] and now - st["resize_at"] >= SETTLE and not (SNAP.drag or SNAP.pressed() is True):
+            st["resize_at"] = 0.0
+            apply_resize()
 
     def _thread_tick():
-        """Script thread tick: run queued jobs (pack count, buy list menu), write the log and save or
-        load the data file.
+        """Script thread tick: run queued jobs (pack count, buy list menu), write the log and history files
+        and save or load the data file.
 
         Slow file and context menu work lives here so the client tick stays light. Stops when the
         module is shutting down.
@@ -1826,6 +2410,8 @@ def _module_prices():
         now = time.time()
         if st["logq"] and now >= st["log_at"]:
             flush_log()
+        if hist_due(now):
+            flush_hist()
         if now < st["save_at"]:
             return
         if not st["loaded"]:
@@ -1834,14 +2420,14 @@ def _module_prices():
             save_data()
 
     def _thread_wanted():
-        """True when the script thread has work: jobs, log lines waiting or data to load or save."""
+        """True when the script thread has work: jobs, log or history lines waiting, or data to load or save."""
         now = time.time()
-        return bool(st["jobs"]) or bool(st["logq"]) and now >= st["log_at"] or (
+        return bool(st["jobs"]) or bool(st["logq"]) and now >= st["log_at"] or hist_due(now) or (
             not st["loaded"] or bool(data["dirty"])) and now >= st["save_at"]
 
     def _stop():
-        """Module stop: save settings and data, flush the log, release the hotkey and Follow, close
-        the window.
+        """Module stop: save settings and data, flush the log and history, release the hotkey and Follow,
+        close the window.
         """
         st["shutting"] = True
         save_settings()
@@ -1855,6 +2441,8 @@ def _module_prices():
             save_data()
         if st["logq"]:
             flush_log()
+        if st["loaded"] and (st["histq"] or st["drops"]):
+            flush_hist()
         cleanup.close()
 
     return {"start": _start, "tick": _tick, "stop": _stop, "client_tick": True, "config_height": cfg.height,

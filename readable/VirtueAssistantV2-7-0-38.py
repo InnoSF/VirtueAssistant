@@ -59,7 +59,7 @@ import time
 # The app name shown in titles and journal lines, and the version the patch notes and the
 # What's new window go by. The script file is named after the version.
 APP_NAME = "Virtue Assistant"
-APP_VERSION = "2.7.0.37"
+APP_VERSION = "2.7.0.38"
 # The folder of module files, beside this script.
 MODULE_DIR = "VirtueAssistantModules"
 # The folder every saved file goes in, beside this script (Kit.data_dir).

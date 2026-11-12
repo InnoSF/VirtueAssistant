@@ -5,7 +5,7 @@ import re
 import struct
 import time
 APP_NAME="Virtue Assistant"
-APP_VERSION="2.7.0.37"
+APP_VERSION="2.7.0.38"
 MODULE_DIR="VirtueAssistantModules"
 SETTINGS_DIR="VirtueAssistantSettings"
 SETTINGS_KEY="VirtueAssistant_settings"
@@ -267,12 +267,12 @@ class Typing(object):
 			except Exception:t=None
 		return t
 	@staticmethod
-	def hop(b,fn):
+	def hop(memo,fn):
 		try:h=HOST;a=h.pass_id if h.in_hop else None
 		except Exception:a=None
-		if a is not None and b[0]==a:return b[1]
+		if a is not None and memo[0]==a:return memo[1]
 		v=fn()
-		if a is not None:b[0]=a;b[1]=v
+		if a is not None:memo[0]=a;memo[1]=v
 		return v
 	@staticmethod
 	def now():return Typing.hop(Typing._now_memo,Typing._now)
