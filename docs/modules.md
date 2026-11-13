@@ -4,7 +4,7 @@ What each module and part does. A part has its own box under its module's row on
 
 ## Action Bar (ActionBarModule.py)
 
-Key "actionbar", On screen. Cells for items, spells, skills and windows.
+Key "actionbar", On screen. Items, spells, skills and windows.
 
 - A cell holds an item (counted in your pack), spell, skill, weapon ability, TazUO macro, Legion script, outfit, text to say, window or runebook destination, each with a hotkey and target. Right-click a cell to set it.
 - The 12 bottom-left cells have 12 pages; up to 4 extra rows go above the top row.
@@ -36,16 +36,16 @@ Buffs & Timers: since 2.7.0.32 its settings page has **Also show Polymorph as a 
 
 ## Grimoire (GrimoireModule.py)
 
-Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, charge or scroll, star favourite destinations and search every runebook. The Quick Launcher finds its runes too; running one is one trip, refused while another is on its way.
+Key "grimoire", Your things. Spellbook, runebooks and reagents: cast from your spellbook, travel to any rune by Recall, Gate Travel, Sacred Journey, charge or scroll, star favourite destinations and search every runebook. The Quick Launcher finds its runes too; running one is one trip, refused while another is on its way.
 
 ## Interface (InterfaceModule.py)
 
-Key "interface", On screen. Zones, layout and the unified UI. On by default.
+Key "interface", On screen. Zones, layouts and the one-panel look. On by default.
 
 - Its settings page (Settings > Interface) holds everything about zones, layouts and snapping: Set up, Arrange windows, Edit zones, the look, saved frame and window layouts, the zone of each window, snapping and the grid.
 - **Set up** opens a three-step window: a ready-made screen, the zone of each window, the look. It opens by itself once, when no layout has been chosen yet.
 - **One panel** (Join windows in zones into one panel): one frame over every zone, no corners or dividing lines, a gold border round the game view; windows drop their frames and title rows (hover a window's top edge for it).
-- **LOOK:** Look (Classic, Dark, Parchment, High contrast), Text size, Compact rows and Fade windows when idle (Faded:, After:, and whether the Action Bar and unit frames fade too); they stay on with Interface off. ACCESSIBILITY: Colour-blind marks and Streamer mode (see the README).
+- **LOOK:** Look (Classic, Dark, Parchment, High contrast), Text size, Compact rows and Fade windows when idle (Faded:, After:, and whether the Action Bar and Character HUD > Frames fade too); they stay on with Interface off. ACCESSIBILITY: Colour-blind marks and Streamer mode (see the README).
 - The zone editor (Edit zones) adds Split, Join and Apart to the zone tools. Its Stack button also cycles to tabs: the zone shows one window at a time under a strip of tabs (the window's title on each), and the others wait behind it, still running.
 - **Share code** and **Load code** (LAYOUTS) pass the layouts in use as a text code; **LAYOUTS BY SITUATION** switches window layouts in war mode, at the bank, in dungeons and in town.
 - Windows in zones (2.7.0.12): every window that holds a list or rows draws at its zone's size and shows as many rows as fit; a window too small for its zone keeps its own size and says so once. A window assigned to a zone opens there even if it was closed, and its own buttons don't close it. Windows that can sit in a zone include the Ultima Tracker panel, Supplies (and Supplies Rows), the killer window, Mongotchi's Shop, Playpen, Journeys and Achievements, the Property Butler Log and Skill Bags Results.
@@ -102,7 +102,7 @@ Key "mongotchi", Extras. A pet mongbat to raise and dress up.
 - **Care:** feed it, play, brush, clean the pen, put it to bed (Lights), cure it, send it foraging; click it to pet it. Its mood is a UO loyalty level. It grows from pup to mongotchi to Greater Mongotchi when well cared for; neglected, it goes wild.
 - **Gremlins** steal half your food; click one before it reaches the pantry to swat it.
 - **Squeaks** come from care and trickle in at 30 an hour, even while off (up to a day's worth). Spend them in the Shop on treats, clothes, dyes, auras, toys, decor, titles, voices and upgrades.
-- **Playpen:** Share posts your mongotchi as a 64-character code in chat (channel: Settings). Players running Mongotchi pick it up from their journal; up to six visit at once. Codes can be pasted by hand. Sharing happens only on a press; the re-share reminder only prints a journal line.
+- **Playpen:** Share posts your mongotchi as a 64-character code in chat (channel: Settings). Players running Mongotchi pick it up from their journal; up to five visit at once (six with yours). Codes can be pasted by hand. Sharing happens only on a press; the re-share reminder only prints a journal line.
 - **Journeys:** treasure hunts to eight places, each with its own finds and two relics; far places take longer and are riskier. Each distinct relic adds 1% to squeaks. Meditating at the eight shrines levels each virtue (0-10), each with its own bonus; all eight at 5 unlock the Avatar title. Trips continue while the module is off.
 - **Seasons** (your computer's calendar): Halloween, Winter and New Year items, in the Shop's Seasonal tab only in season.
 - **Achievements:** sixteen milestones, each paying squeaks once.
@@ -114,21 +114,23 @@ Time passes for the pet only while the module is on, unless "Keep living while t
 
 Key "butler", Skills and home. House sweeps, visitors, eject and ban: Detect Hidden on your spot (once, or whenever ready), eject, ban, befriend, lock down and release on a press, and a log of actions and visits.
 
+Visits and the foe alarm count only in your own house: a house is noted as yours when you Release or Friend there (until one is noted, any house counts). Visitor rows keep their place: a row that empties stays blank for 1.5 s, and a press within 1 s of a row changing is refused, so a press never lands on someone else. The Ban... target pick is the confirmation; it needs no second click.
+
 ## Reagent Prices (ReagentPricesModule.py)
 
 Key "prices", The world. Reagent prices and a price book: it reads the price and stock of the eight reagents from every buy list you open (it never opens one by itself or buys anything), keeps them per vendor and shop and writes them into a book you pick.
 
-Shops: it starts with 16 shops (Castle British to Yew Abbey). A vendor belongs to the shop it was linked to, else to the nearest known shop within Shop distance (settings NUMBERS), else the window asks "Which shop?" with the first shop not read yet picked; "New shop" in that list adds one. Change links the last vendor read to another shop. A vendor is named as Kara, Vesper (its name, then its shop); until its name is known (it is taken at a read, or when you open another buy list in its shop while it is in your client's world) it shows as Vesper vendor 2 (the second vendor first read there), and a second vendor of the same name in one shop as Kara 2. A vendor that isn't there on two visits at least 1 hour apart (you within 12 tiles of its place, opening another buy list in its shop) is gone: it leaves the window, the best stops and the book, and comes back when it is read again; its history stays. The settings section SHOPS renames (type over a name; it applies when the page closes), removes (with its prices) and adds shops.
+Shops: it starts with 16 shops (Castle British to Yew Abbey). A vendor belongs to the shop it was linked to, else to the nearest known shop within Shop distance (settings NUMBERS), else the window asks "Which shop?" with the first shop not read yet picked; "New shop" in that list adds one. Change links the last vendor read to another shop. A vendor is named as Kara, Vesper (its name, then its shop); until its name is known (it is taken at a read, or when you open another buy list in its shop while it is in your client's world) it shows as Vesper vendor 2 (its place in the order the shop's vendors were first read; a shop's only vendor shows as just the shop name), and a second vendor of the same name in one shop as Kara 2. A vendor that isn't there on two visits at least 1 hour apart (you within 12 tiles of its place, opening another buy list in its shop) is gone: it leaves the window, the best stops and the book, and comes back when it is read again; its history stays. The settings section SHOPS renames (type over a name; it applies when the page closes), removes (with its prices) and adds shops.
 
-View: cheapest shows each reagent's lowest price, its shop and how old it is; a shop with more than one vendor names the vendor. While a buy list is open, each row shows this vendor's price (green when it is cheapest or tied) beside the best of every other vendor, the same shop's others included. View: grid shows a row per vendor (by shop, then the order they were first read; up to 60 rows): the shop on its first row, the vendor, then its price and stock for each reagent: the cheapest of each column green, "-" sold out, "^" or "v" when the price rose or fell since that vendor's read before; the vendor of the open buy list is marked "(here)". A price older than Old after (7 days) shows grey; "Skip old prices for the cheapest" leaves old prices out of the cheapest and the best stops. With a shopping list (settings SHOPPING LIST: how many of each to keep, bags included) each row shows how many to buy, and BEST STOPS ranks the shops by what the list costs there, buying from the shop's vendors cheapest first; a shop whose vendors together have too little stock says "short". The journal line after a read and the last-read line name the vendor.
+View: cheapest shows each reagent's lowest price, its shop and how old it is; a shop with more than one vendor names the vendor. While a buy list is open, each row shows this vendor's price (green when it is cheapest or tied) beside the best of every other vendor, the same shop's others included. View: grid shows a row per vendor (by shop, then the order they were first read; up to 60 rows): the shop on its first row, the vendor, then its price and stock for each reagent: the cheapest of each column green, "-" sold out, "^" or "v" when the price rose or fell since that vendor's read before; the vendor of the open buy list is marked "(here)". A price older than Old after (7 days) shows grey; "Skip old prices for the cheapest" leaves old prices out of the cheapest and the best stops. With a shopping list (settings SHOPPING LIST: how many of each to keep, bags included) each row shows how many to buy, and BEST STOPS shows the three best shops for the list: shops that have every reagent in full come first, cheapest first (buying from the shop's vendors cheapest first); a shop that lacks a reagent says "no ..." and one whose vendors together have too little stock says "short ...", and these rank after complete shops. The journal line after a read and the last-read line name the vendor.
 
 Size: drag a corner to resize the window; its body (text, rows, columns, reagent pictures and sections) scales with it from 60% to 150%, the largest that fits both its width and height, with spare room shared out between the columns and rows; the title row stays as it is. The smallest size is the view at 60%, so every vendor row always shows; a window taller than the screen scrolls. Body text uses the client's smooth font so it can scale, and follows Settings > Interface text size. The size is kept per character (ReagentPrices_size) and applies to both views: a switch keeps it and rescales, growing to the other view's smallest size when needed. In a zone the zone's size is the size.
 
 Buy list (the title-row button, or a key set in the HOTKEYS section) opens the buy list of the nearest reagent vendor within 8 tiles, one per press. Alt+click it to auto-follow that vendor (again to stop).
 
-The book: "Pick book..." in the settings. Page 1 is the cheapest shop for each reagent, page 2 the best stops, pages 3-18 one shop each (the lowest price of its vendors; under the date of the newest read, "2 vendors" when more than one was read); "*" marks an old price. It writes while you have the book open, from your backpack or within 1 tile, and only a book that is blank, titled Reagent Prices or already in its layout; any other book shows Overwrite in the window first.
+The book: "Pick book..." in the settings. Page 1 is the cheapest shop for each reagent, page 2 the best stops, pages 3-18 one shop each (the lowest price of its vendors; under the date of the newest read, "2 vendors" when more than one was read); "*" marks an old price. It writes while you have the book open, from your backpack, your open bank box or within 1 tile, and only a book that is blank, titled Reagent Prices or already in its layout; any other book shows Overwrite in the window first. The book holds 16 shops (pages 3-18); with more shops, the extra ones are left out and the journal says how many.
 
-Files, in the VirtueAssistantSettings folder and shared by your characters: ReagentPrices_data.txt (shops, vendors, the newest reads, the last 10 prices of each shop and reagent) and ReagentPrices_log.csv (time, shop, reagent, price, stock: one line per reagent per read, the last 5000 lines), which opens in a spreadsheet.
+Files, in the VirtueAssistantSettings folder and shared by your characters: ReagentPrices_data.txt (shops, vendors, the newest reads, the last 10 prices of each shop and reagent), ReagentPrices_history.txt (every read of every vendor: the newest 10000, at most 400 per vendor) and ReagentPrices_log.csv (time, shop, reagent, price, stock, vendor, serial: one line per reagent per read, the last 5000 lines), which opens in a spreadsheet.
 
 ## Skills (SkillsModule.py)
 
@@ -153,7 +155,7 @@ Key "ultima", The world. Friends, foes and neutrals near you.
 ```
    Tracker          Trackers and combat bars
    Lookout          A second client keeps watch
-   Overview         Players, monsters, pets and corpses near you
+   Overview         Players, monsters, pets, corpses
 ```
 
 Overview is a window with four tabs (Players, Monsters, Pets, Corpses): one row each with name, health, a bar and distance, up to a set number of rows within a set range (settings LIST). Its Sort: button orders each tab by distance, HP or name (Corpses: distance or name), kept per tab. The Tracker's settings have their own Sort: button (name, distance or HP) for the tracker list. Alt+click a row (not on Corpses) to auto-follow it (again to stop).
@@ -175,6 +177,10 @@ The other parts send their pings through Map Pings. Corpse uses only a corpse na
 ## Alerts (in the main script)
 
 Settings > Alerts. Alert banners and sounds from every module. History (also on the banner) opens the Alert History window: the last 50 alerts with their time, kept across restarts. Quiet 30 min stops banners and sounds for 30 minutes (Resume ends it); alerts still reach the history and journal, and an alarm still pauses skill loops.
+
+## Backups, Hotkeys and What's new (in the main script)
+
+Settings > Backups and Settings > Hotkeys are described in the README. What's new lists what changed in each recent version.
 
 ## System Stats (in the main script)
 

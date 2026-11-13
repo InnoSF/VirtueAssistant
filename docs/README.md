@@ -2,7 +2,7 @@
 
 An all-in-one helper for the TazUO client's Legion scripting (Python), made for the In Mani Ylem shard.
 
-The main script (`VirtueAssistantV<x-y-z>.py`) holds the Virtue Assistant window (Modules and Settings tabs), window snapping, zones, profiles and the main loop. Each module is a file in the VirtueAssistantModules folder beside it and can't run on its own.
+The main script (`VirtueAssistantV<x-y-z>.py`) holds the Virtue Assistant window (Modules and Settings tabs), window snapping, zones, profiles and the main loop. Each module is a file in the VirtueAssistantModules folder beside it; it runs inside the main script, or on its own (see "A module on its own").
 
 ```
    ActionBarModule.py       Action Bar       cells for items, spells, skills and
@@ -14,6 +14,8 @@ The main script (`VirtueAssistantV<x-y-z>.py`) holds the Virtue Assistant window
                                              supplies (Bags, Paperdoll, Storage,
                                              Restock, Supplies, Bag Sections)
    GrimoireModule.py        Grimoire         spellbook, runebooks and reagents
+   InterfaceModule.py       Interface        zones, layouts and the one-panel look
+                                             (Settings > Interface)
    WorldMapModule.py        World Map        pings, corpse, dig and dry spots, traps,
                                              on TazUO's World Map too (Map Pings,
                                              Corpse, Treasure Maps, Ore Tracker,
@@ -24,6 +26,8 @@ The main script (`VirtueAssistantV<x-y-z>.py`) holds the Virtue Assistant window
    SkillsModule.py          Skills           skills, training and AFK alarms
                                              (Skills Window, Training Alarm,
                                              Skill Bags)
+   ReagentPricesModule.py   Reagent Prices   reagent prices from every buy list you
+                                             open, cheapest shops, a price book
    PropertyButlerModule.py  Property Butler  house sweeps, visitors, eject and ban
    MetersModule.py          Meters           damage, healing, loot and gold meters
    MongotchiModule.py       Mongotchi        a pet mongbat to raise and dress up
@@ -63,9 +67,9 @@ Any module also runs alone: pick its file (in the VirtueAssistantModules group) 
 - **Look** (Settings > Interface, LOOK): the Look button cycles Classic, Dark (charcoal frames), Parchment (brown frames and sections) and High contrast. Open windows redraw at once and keep their place. Saved per character; Classic by default.
 - **Text size** (the same section): 100, 115, 130 or 150% for text in lists and bars; TazUO's own UI scale still sizes every window.
 - **Compact rows:** tighter rows in lists and settings, and smaller frames.
-- **Fade windows when idle:** a window fades (Faded: 20-90%, default 40) once the mouse has been off it and nothing in it changed for a while (After: 2-30 s, default 6), and comes back when the mouse is over it or it changes. The Action Bar and unit frames stay solid unless "Fade the Action Bar and unit frames too" is ticked; the Virtue Assistant window and alerts never fade.
+- **Fade windows when idle:** a window fades (Faded: 20-90%, default 40) once the mouse has been off it and nothing in it changed for a while (After: 2-30 s, default 6), and comes back when the mouse is over it or it changes. The Action Bar and unit frames stay solid unless "Fade the Action Bar and Character HUD > Frames too" is ticked; the Virtue Assistant window and alerts never fade.
 - **Colour-blind marks** (ACCESSIBILITY): a colour-blind palette for notoriety and HP colours, plus letters: R murderer, C criminal or grey, O enemy, A ally, I invulnerable before a name, and P poisoned, Z paralysed, M mortal wound after it.
-- **Streamer mode:** other players show as "Player <id>", you as "You", and guild names, places and coordinates as "(hidden)", so a stream or screenshot gives nothing away. Journal lines keep the real names.
+- **Streamer mode:** other players show as "Player <id>", you as "You", and guild names, places and coordinates as "(hidden)", so a stream or screenshot gives nothing away. Alert lines and Ultima Tracker's journal lines hide names too.
 - Window places, minimised or folded state, which modules are on and each module's view are remembered per character as soon as you change them.
 
 ## Zones
@@ -109,6 +113,6 @@ The bar under the title, on both tabs. A profile is one character's whole setup,
 - **Load:** puts the picked profile on this character (every module restarts with its settings).
 - **Star:** makes the picked profile the favourite (click again to clear). Characters that haven't loaded another profile get it at start, new ones included. It also becomes TazUO's default profile, so a new character starts with its client settings.
 
-A profile holds every module's settings and window places, which modules are on, the Bags layout, TazUO's Options settings (profile.json, cooldown bars, grid highlights, name plates, info bar and more) and Legion Assistant settings (agents, auto loot, organizer, journal filter, buy / sell lists, macros, hotkeys). Data tied to one character's items stays with it: runebook and spellbook data, Bags slots, Dress Agent outfits, the grab bag, mount and weapon serials. Settings TazUO already shares across characters need no profile.
+A profile holds every module's settings and window places, which modules are on, the Bags layout, TazUO's Options settings (profile.json, cooldown bars, grid highlights, name plates, info bar and more) and Legion Assistant settings (agents, auto loot, organizer, journal filter, buy / sell lists, macros, hotkeys). Data tied to one character stays with it: runebook and spellbook data, Bags slots, Restock settings, Skill Bags rules and progress, Treasure Maps and Corpse data, tracked unit frames, Social names and guild roster, Property Butler visits, log and houses, running spell timers, the Reagent Prices book, your Mongotchi, and anything saved under the character's serial (mount and weapon serials, the grab bag). TazUO's Dress Agent outfits are not copied either. Settings TazUO already shares across characters need no profile.
 
 Profiles are folders in VirtueAssistantSettings/VirtueAssistantProfiles; delete a folder to delete that profile.
